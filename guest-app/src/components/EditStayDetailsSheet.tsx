@@ -43,9 +43,18 @@
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Minus, Plus, Users, X } from "lucide-react";
 import type { ReactNode } from "react";
+import { useRef } from "react";
 import config from "@config";
 import { DateRangePicker } from "./DateRangePicker";
 import { slideInBottom } from "@spark-inn/shared";
+// Per OCT-H11 (2026-10-20, decision #287): the sheet declares
+// `role="dialog" aria-modal="true"`, so it owes the AT tree a
+// focus trap, an Escape dismiss and a scroll lock. The guest app
+// shipped neither — the backdrop comment below used to point at a
+// document keydown listener that did not exist in the file. These
+// are the guest-app port of the admin app's `useFocusTrap`
+// primitive (decision #107).
+import { useBodyScrollLock, useFocusTrap } from "../utils/useFocusTrap";
 
 interface EditStayDetailsSheetProps {
   open: boolean;
@@ -80,6 +89,18 @@ export function EditStayDetailsSheet({
 }: EditStayDetailsSheetProps): ReactNode {
   const shouldReduceMotion = useReducedMotion();
 
+  // Per OCT-H11 (2026-10-20, decision #287): the focus trap +
+  // Escape dismiss + focus restore + body scroll lock.
+  //
+  // `onClose` is wrapped in a ref-backed callback so the hook's
+  // effect does not re-run on every render (re-running it would
+  // re-capture the focused element and steal focus back to the top
+  // of the sheet mid-edit).
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  const trapRef = useFocusTrap<HTMLDivElement>(open, () => closeRef.current());
+  useBodyScrollLock(open);
+
   return (
     <AnimatePresence>
       {open ? (
@@ -91,12 +112,13 @@ export function EditStayDetailsSheet({
           // Per FRONTEND.md §Modals: backdrop fades in separately.
           onClick={onClose}
           // Per FRONTEND.md §Modals: focus management is the
-          // parent's responsibility; the guest can hit Escape
-          // via the document keydown listener below.
+          // parent's responsibility — the focus trap + Escape
+          // listener below own it (per OCT-H11).
           aria-hidden="true"
           data-testid="edit-stay-details-backdrop"
         >
           <motion.div
+            ref={trapRef}
             animate="visible"
             className="fixed inset-x-0 bottom-0 max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain rounded-t-card bg-white p-5 shadow-xl"
             exit="exit"

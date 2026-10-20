@@ -123,6 +123,27 @@ export const WalkinBookingSchema = z.object({
   // 5 — Step 1 carries no breakfast data).
   breakfastSelections: z.record(z.string(), z.unknown()).optional(),
   breakfastTotal: z.coerce.number().finite().min(0).optional(),
+  // Per OCT-C5 (2026-10-20, audit
+  // `plan/project/AUDIT-OCTOBER-2026.md`): the BR-12 other
+  // add-ons the desk selected in the walk-in modal
+  // (`WalkinOtherAddOnGrid`).
+  //
+  // The admin modal has been sending `otherAddOnSelections` +
+  // `otherAddOnTotal` + `hasAnyOtherAddOns` since BR-12.1
+  // (2026-10-15), but the walk-in schema had no field for them —
+  // and a Zod `z.object()` STRIPS unknown keys, so the payload
+  // was dropped silently. The walk-in transaction then wrote no
+  // add-on data at all (`otherAddOn` appeared zero times in
+  // `bookings.ts`), so the desk sold an airport transfer, the
+  // modal showed the total, the booking carried nothing, the
+  // guest never got the transfer, and the hotel earned ₱0.
+  //
+  // The values are ADVISORY: the server rebuilds every entry from
+  // the live `addOns` catalog (catalog price + name + unit), so a
+  // client-supplied price is never persisted.
+  otherAddOnSelections: z.record(z.string(), z.array(z.unknown())).optional(),
+  otherAddOnTotal: z.coerce.number().finite().min(0).optional(),
+  hasAnyOtherAddOns: z.boolean().optional(),
   // Per CHD-01 (2026-08-01, per decision #144): adults/children
   // split. Both optional — when absent, the server derives
   // `numAdults = guests`, `numChildren = 0` (the historical

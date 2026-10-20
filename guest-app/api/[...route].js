@@ -47,7 +47,7 @@ var require_extend = __commonJS({
       }
       return toStr.call(arr) === "[object Array]";
     };
-    var isPlainObject = function isPlainObject2(obj) {
+    var isPlainObject2 = function isPlainObject3(obj) {
       if (!obj || toStr.call(obj) !== "[object Object]") {
         return false;
       }
@@ -104,12 +104,12 @@ var require_extend = __commonJS({
             src = getProperty(target, name2);
             copy = getProperty(options, name2);
             if (target !== copy) {
-              if (deep && copy && (isPlainObject(copy) || (copyIsArray = isArray(copy)))) {
+              if (deep && copy && (isPlainObject2(copy) || (copyIsArray = isArray(copy)))) {
                 if (copyIsArray) {
                   copyIsArray = false;
                   clone3 = src && isArray(src) ? src : [];
                 } else {
-                  clone3 = src && isPlainObject(src) ? src : {};
+                  clone3 = src && isPlainObject2(src) ? src : {};
                 }
                 setProperty(target, { name: name2, newValue: extend(deep, clone3, copy) });
               } else if (typeof copy !== "undefined") {
@@ -59682,7 +59682,7 @@ var require_util9 = __commonJS({
     exports2.autoId = autoId;
     exports2.requestTag = requestTag;
     exports2.isObject = isObject;
-    exports2.isPlainObject = isPlainObject;
+    exports2.isPlainObject = isPlainObject2;
     exports2.isEmpty = isEmpty;
     exports2.isFunction = isFunction;
     exports2.isPermanentRpcError = isPermanentRpcError;
@@ -59730,7 +59730,7 @@ var require_util9 = __commonJS({
     function isObject(value) {
       return Object.prototype.toString.call(value) === "[object Object]";
     }
-    function isPlainObject(input) {
+    function isPlainObject2(input) {
       return isObject(input) && (Object.getPrototypeOf(input) === Object.prototype || Object.getPrototypeOf(input) === null || input.constructor.name === "Object");
     }
     function isEmpty(value) {
@@ -111315,7 +111315,7 @@ var require_lodash6 = __commonJS({
     function isObjectLike(value) {
       return !!value && typeof value == "object";
     }
-    function isPlainObject(value) {
+    function isPlainObject2(value) {
       if (!isObjectLike(value) || objectToString.call(value) != objectTag || isHostObject(value)) {
         return false;
       }
@@ -111326,7 +111326,7 @@ var require_lodash6 = __commonJS({
       var Ctor = hasOwnProperty.call(proto, "constructor") && proto.constructor;
       return typeof Ctor == "function" && Ctor instanceof Ctor && funcToString.call(Ctor) == objectCtorString;
     }
-    module2.exports = isPlainObject;
+    module2.exports = isPlainObject2;
   }
 });
 
@@ -111439,7 +111439,7 @@ var require_sign = __commonJS({
     var isBoolean = require_lodash3();
     var isInteger = require_lodash4();
     var isNumber3 = require_lodash5();
-    var isPlainObject = require_lodash6();
+    var isPlainObject2 = require_lodash6();
     var isString = require_lodash7();
     var once = require_lodash8();
     var { KeyObject, createSecretKey, createPrivateKey } = require("crypto");
@@ -111458,7 +111458,7 @@ var require_sign = __commonJS({
         return isString(value) || Array.isArray(value);
       }, message: '"audience" must be a string or array' },
       algorithm: { isValid: includes.bind(null, SUPPORTED_ALGS), message: '"algorithm" must be a valid string enum value' },
-      header: { isValid: isPlainObject, message: '"header" must be an object' },
+      header: { isValid: isPlainObject2, message: '"header" must be an object' },
       encoding: { isValid: isString, message: '"encoding" must be a string' },
       issuer: { isValid: isString, message: '"issuer" must be a string' },
       subject: { isValid: isString, message: '"subject" must be a string' },
@@ -111475,7 +111475,7 @@ var require_sign = __commonJS({
       nbf: { isValid: isNumber3, message: '"nbf" should be a number of seconds' }
     };
     function validate5(schema, allowUnknown, object, parameterName) {
-      if (!isPlainObject(object)) {
+      if (!isPlainObject2(object)) {
         throw new Error('Expected "' + parameterName + '" to be a plain object.');
       }
       Object.keys(object).forEach(function(key) {
@@ -221220,7 +221220,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.17.0";
+    VERSION2 = "2.18.0";
   }
 });
 
@@ -221567,6 +221567,13 @@ function clampIntegerInRange(raw, min, max) {
   if (floored < min || floored > max) return null;
   return floored;
 }
+function inFlowHoldStayMatches(hold, input) {
+  if (!hold || !input) return false;
+  if (String(hold.roomType ?? "") !== String(input.roomType ?? "")) return false;
+  if (String(hold.checkIn ?? "") !== String(input.checkIn ?? "")) return false;
+  if (String(hold.checkOut ?? "") !== String(input.checkOut ?? "")) return false;
+  return Number(hold.numNights ?? 0) === Number(input.numNights ?? 0);
+}
 function generateHoldId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -221684,6 +221691,27 @@ var init_booking = __esm({
       // 5 — Step 1 carries no breakfast data).
       breakfastSelections: external_exports.record(external_exports.string(), external_exports.unknown()).optional(),
       breakfastTotal: external_exports.coerce.number().finite().min(0).optional(),
+      // Per OCT-C5 (2026-10-20, audit
+      // `plan/project/AUDIT-OCTOBER-2026.md`): the BR-12 other
+      // add-ons the desk selected in the walk-in modal
+      // (`WalkinOtherAddOnGrid`).
+      //
+      // The admin modal has been sending `otherAddOnSelections` +
+      // `otherAddOnTotal` + `hasAnyOtherAddOns` since BR-12.1
+      // (2026-10-15), but the walk-in schema had no field for them —
+      // and a Zod `z.object()` STRIPS unknown keys, so the payload
+      // was dropped silently. The walk-in transaction then wrote no
+      // add-on data at all (`otherAddOn` appeared zero times in
+      // `bookings.ts`), so the desk sold an airport transfer, the
+      // modal showed the total, the booking carried nothing, the
+      // guest never got the transfer, and the hotel earned ₱0.
+      //
+      // The values are ADVISORY: the server rebuilds every entry from
+      // the live `addOns` catalog (catalog price + name + unit), so a
+      // client-supplied price is never persisted.
+      otherAddOnSelections: external_exports.record(external_exports.string(), external_exports.array(external_exports.unknown())).optional(),
+      otherAddOnTotal: external_exports.coerce.number().finite().min(0).optional(),
+      hasAnyOtherAddOns: external_exports.boolean().optional(),
       // Per CHD-01 (2026-08-01, per decision #144): adults/children
       // split. Both optional — when absent, the server derives
       // `numAdults = guests`, `numChildren = 0` (the historical
@@ -222279,6 +222307,18 @@ function toDateOrNull(value) {
   }
   return null;
 }
+function toUtcDateKey(value) {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
+  }
+  const date = toDateOrNull(value);
+  if (!date) return "";
+  const yyyy = date.getUTCFullYear();
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
 function getManilaDateInfo(timezone = "Asia/Manila") {
   const now = /* @__PURE__ */ new Date();
   const localString = now.toLocaleString("en-US", { timeZone: timezone });
@@ -222533,7 +222573,8 @@ function computeBookingFolio(input) {
     0
   );
   const totalPrice = Number(booking.totalPrice) || 0;
-  const grandTotal = totalPrice + storeTotal + chargesTotal;
+  const otherAddOnTotal = Math.max(0, Number(booking.otherAddOnTotal) || 0);
+  const grandTotal = totalPrice + otherAddOnTotal + storeTotal + chargesTotal;
   const balance = grandTotal - paymentsTotal;
   return {
     storeCharges,
@@ -222541,6 +222582,7 @@ function computeBookingFolio(input) {
     charges,
     chargesTotal,
     paymentsTotal,
+    otherAddOnTotal,
     grandTotal,
     balance
   };
@@ -222550,7 +222592,8 @@ function computeServerFolioTotals(input) {
   const incidentalTotal = Number(input.incidentalTotal) || 0;
   const addToBillTotal = Number(input.addToBillTotal) || 0;
   const collectedTotal = Number(input.collectedTotal) || 0;
-  const folioTotal = totalPrice + incidentalTotal + addToBillTotal;
+  const otherAddOnTotal = Math.max(0, Number(input.otherAddOnTotal) || 0);
+  const folioTotal = totalPrice + otherAddOnTotal + incidentalTotal + addToBillTotal;
   const computedBalance = Math.max(folioTotal - collectedTotal, 0);
   return { folioTotal, computedBalance };
 }
@@ -222774,6 +222817,21 @@ var init_bookingFolio = __esm({
 });
 
 // ../shared/utils/breakfastTotal.ts
+function isBreakfastRateLine(label) {
+  const text = String(label ?? "");
+  return text === BREAKFAST_RATE_LINE_LABEL || text.startsWith(BREAKFAST_RATE_LINE_PREFIX);
+}
+function sumBreakfastRateLines(breakdown) {
+  if (!breakdown || !Array.isArray(breakdown.addOns)) return null;
+  let total = 0;
+  for (const line of breakdown.addOns) {
+    if (!line || !isBreakfastRateLine(line.label)) continue;
+    const amount = Number(line.amount);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    total += amount;
+  }
+  return Math.round(total * 100) / 100;
+}
 function recomputeBreakfastTotal(selections) {
   if (!selections) return 0;
   let total = 0;
@@ -222821,14 +222879,17 @@ function buildBreakfastRateBreakdownLines(selections) {
       dateLabel = date;
     }
     return {
-      label: `Breakfast (${dateLabel}, ${count} meal${count === 1 ? "" : "s"})`,
+      label: `${BREAKFAST_RATE_LINE_PREFIX}${dateLabel}, ${count} meal${count === 1 ? "" : "s"})`,
       amount: total
     };
   });
 }
+var BREAKFAST_RATE_LINE_LABEL, BREAKFAST_RATE_LINE_PREFIX;
 var init_breakfastTotal = __esm({
   "../shared/utils/breakfastTotal.ts"() {
     "use strict";
+    BREAKFAST_RATE_LINE_LABEL = "Breakfast add-on";
+    BREAKFAST_RATE_LINE_PREFIX = "Breakfast (";
   }
 });
 
@@ -224653,6 +224714,250 @@ var init_breakfastCutoff = __esm({
   }
 });
 
+// ../shared/utils/otherAddOnTotal.ts
+function recomputeOtherAddOnTotal(selections) {
+  if (!selections) return 0;
+  let total = 0;
+  for (const dateKey2 of Object.keys(selections)) {
+    const items = selections[dateKey2];
+    if (!Array.isArray(items)) continue;
+    for (const entry of items) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+      const price = Math.max(0, Number(entry.priceSnapshot) || 0);
+      const qty = Math.max(0, Math.floor(Number(entry.quantity) || 0));
+      total += price * qty;
+    }
+  }
+  return Math.round(total);
+}
+function otherAddOnBreakdownByDate(selections) {
+  if (!selections) return [];
+  const rows = [];
+  const dates = Object.keys(selections).sort();
+  for (const date of dates) {
+    const items = selections[date];
+    if (!Array.isArray(items) || items.length === 0) continue;
+    let s4 = 0;
+    let n2 = 0;
+    for (const entry of items) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+      const price = Math.max(0, Number(entry.priceSnapshot) || 0);
+      const qty = Math.max(0, Math.floor(Number(entry.quantity) || 0));
+      if (qty > 0) {
+        s4 += price * qty;
+        n2 += 1;
+      }
+    }
+    if (n2 > 0) {
+      rows.push({ date, subtotal: Math.round(s4), itemCount: n2 });
+    }
+  }
+  return rows;
+}
+function hasAnyOtherAddOns(selections) {
+  if (!selections) return false;
+  for (const date of Object.keys(selections)) {
+    const items = selections[date];
+    if (!Array.isArray(items)) continue;
+    for (const entry of items) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+      if (Math.max(0, Math.floor(Number(entry.quantity) || 0)) > 0) return true;
+    }
+  }
+  return false;
+}
+function buildOtherAddOnSelectionKey(date, addOnId) {
+  return `${date}-${String(addOnId).trim()}`;
+}
+function parseOtherAddOnSelectionKey(key) {
+  const trimmed = String(key || "").trim();
+  if (!trimmed) return null;
+  if (trimmed.length < 14) return null;
+  const date = trimmed.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const addOnId = trimmed.slice(11);
+  if (!addOnId) return null;
+  return { date, addOnId };
+}
+var init_otherAddOnTotal = __esm({
+  "../shared/utils/otherAddOnTotal.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/bookingAddOnReschedule.ts
+function enumerateStayServiceDates(window2) {
+  const dates = [];
+  const startMs = Date.parse(`${window2.checkIn}T00:00:00Z`);
+  const endMs = Date.parse(`${window2.checkOut}T00:00:00Z`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return dates;
+  const maxDays = 60;
+  for (let ms2 = startMs, i2 = 0; ms2 < endMs && i2 < maxDays; ms2 += 864e5, i2 += 1) {
+    const d = new Date(ms2);
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    dates.push(`${yyyy}-${mm}-${dd}`);
+  }
+  return dates;
+}
+function isDateInStayWindow(serviceDate, window2) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(serviceDate)) return false;
+  return serviceDate >= window2.checkIn && serviceDate < window2.checkOut;
+}
+function serviceDateFromSlotKey(slotKey) {
+  if (typeof slotKey !== "string") return null;
+  const match = /^(\d{4}-\d{2}-\d{2})-/.exec(slotKey);
+  return match ? match[1] : null;
+}
+function shouldAutoCancelSelection(mode, serviceDate, window2, today) {
+  if (!serviceDate) return false;
+  if (mode === "cancel") {
+    return serviceDate >= today;
+  }
+  return !isDateInStayWindow(serviceDate, window2);
+}
+function redateBreakfastSelections(input) {
+  const { mode, window: window2, today, paidAmount } = input;
+  const source = input.selections || {};
+  const next = {};
+  const removed = [];
+  let remainingPaid = Math.max(0, Number(paidAmount) || 0);
+  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+  for (const key of Object.keys(source)) {
+    const entry = source[key];
+    if (!entry) {
+      next[key] = entry;
+      continue;
+    }
+    if (entry.removedAt !== null && entry.removedAt !== void 0) {
+      next[key] = entry;
+      continue;
+    }
+    const serviceDate = serviceDateFromSlotKey(key);
+    if (!shouldAutoCancelSelection(mode, serviceDate, window2, today)) {
+      next[key] = entry;
+      continue;
+    }
+    const amount = Math.max(0, Number(entry.price) || 0);
+    const wasPaid = amount > 0 && remainingPaid >= amount;
+    if (wasPaid) remainingPaid -= amount;
+    removed.push({
+      key,
+      serviceDate: serviceDate || "",
+      entry,
+      amount,
+      wasPaid
+    });
+    next[key] = {
+      ...entry,
+      removedAt: nowIso,
+      removedBy: "system",
+      lastModifiedAt: nowIso,
+      lastModifiedBy: "system"
+    };
+  }
+  return {
+    selections: next,
+    removed,
+    paidRemoved: removed.filter((r3) => r3.wasPaid),
+    total: recomputeBreakfastTotal(next)
+  };
+}
+function redateOtherAddOnSelections(input) {
+  const { mode, window: window2, today, paidAmount } = input;
+  const source = input.selections || {};
+  const next = {};
+  const removed = [];
+  let remainingPaid = Math.max(0, Number(paidAmount) || 0);
+  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+  for (const date of Object.keys(source)) {
+    const entries = source[date];
+    if (!Array.isArray(entries)) {
+      next[date] = [];
+      continue;
+    }
+    const kept = [];
+    for (const entry of entries) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) {
+        kept.push(entry);
+        continue;
+      }
+      if (!shouldAutoCancelSelection(mode, date, window2, today)) {
+        kept.push(entry);
+        continue;
+      }
+      const quantity = Math.max(0, Math.floor(Number(entry.quantity) || 0));
+      const amount = Math.round(Math.max(0, Number(entry.priceSnapshot) || 0) * quantity);
+      const wasPaid = amount > 0 && remainingPaid >= amount;
+      if (wasPaid) remainingPaid -= amount;
+      removed.push({
+        date,
+        addOnId: String(entry.addOnId || ""),
+        selectionKey: `${date}-${String(entry.addOnId || "")}`,
+        entry,
+        amount,
+        wasPaid
+      });
+      kept.push({
+        ...entry,
+        removedAt: nowIso,
+        removedBy: "system",
+        lastModifiedAt: nowIso,
+        lastModifiedBy: "system"
+      });
+    }
+    next[date] = kept;
+  }
+  return {
+    selections: next,
+    removed,
+    paidRemoved: removed.filter((r3) => r3.wasPaid),
+    total: recomputeOtherAddOnTotal(next)
+  };
+}
+var init_bookingAddOnReschedule = __esm({
+  "../shared/utils/bookingAddOnReschedule.ts"() {
+    "use strict";
+    init_breakfastTotal();
+    init_otherAddOnTotal();
+  }
+});
+
+// ../shared/utils/firestorePayload.ts
+function stripUndefinedValues(value) {
+  return stripValue(value);
+}
+function stripValue(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripValue(item));
+  }
+  if (isPlainObject(value)) {
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (item === void 0) continue;
+      out[key] = stripValue(item);
+    }
+    return out;
+  }
+  return value;
+}
+function isPlainObject(value) {
+  if (value === null || typeof value !== "object") return false;
+  if (Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+var init_firestorePayload = __esm({
+  "../shared/utils/firestorePayload.ts"() {
+    "use strict";
+  }
+});
+
 // ../shared/utils/breakfastConfig.ts
 function nonNegativeFinite(value) {
   const numeric = Number(value);
@@ -224756,76 +225061,68 @@ var init_otherAddOnCutoff = __esm({
   }
 });
 
-// ../shared/utils/otherAddOnTotal.ts
-function recomputeOtherAddOnTotal(selections) {
-  if (!selections) return 0;
-  let total = 0;
-  for (const dateKey2 of Object.keys(selections)) {
-    const items = selections[dateKey2];
-    if (!Array.isArray(items)) continue;
-    for (const entry of items) {
-      if (!entry) continue;
-      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
-      const price = Math.max(0, Number(entry.priceSnapshot) || 0);
-      const qty = Math.max(0, Math.floor(Number(entry.quantity) || 0));
-      total += price * qty;
-    }
-  }
-  return Math.round(total);
-}
-function otherAddOnBreakdownByDate(selections) {
-  if (!selections) return [];
-  const rows = [];
-  const dates = Object.keys(selections).sort();
-  for (const date of dates) {
-    const items = selections[date];
-    if (!Array.isArray(items) || items.length === 0) continue;
-    let s4 = 0;
-    let n2 = 0;
-    for (const entry of items) {
-      if (!entry) continue;
-      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
-      const price = Math.max(0, Number(entry.priceSnapshot) || 0);
-      const qty = Math.max(0, Math.floor(Number(entry.quantity) || 0));
-      if (qty > 0) {
-        s4 += price * qty;
-        n2 += 1;
-      }
-    }
-    if (n2 > 0) {
-      rows.push({ date, subtotal: Math.round(s4), itemCount: n2 });
-    }
-  }
-  return rows;
-}
-function hasAnyOtherAddOns(selections) {
-  if (!selections) return false;
-  for (const date of Object.keys(selections)) {
-    const items = selections[date];
-    if (!Array.isArray(items)) continue;
-    for (const entry of items) {
-      if (!entry) continue;
-      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
-      if (Math.max(0, Math.floor(Number(entry.quantity) || 0)) > 0) return true;
-    }
-  }
-  return false;
-}
-function buildOtherAddOnSelectionKey(date, addOnId) {
+// ../shared/utils/otherAddOnDrafts.ts
+function otherAddOnDraftKey(date, addOnId) {
   return `${date}-${String(addOnId).trim()}`;
 }
-function parseOtherAddOnSelectionKey(key) {
-  const trimmed = String(key || "").trim();
-  if (!trimmed) return null;
-  if (trimmed.length < 14) return null;
-  const date = trimmed.slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-  const addOnId = trimmed.slice(11);
-  if (!addOnId) return null;
-  return { date, addOnId };
+function clampOtherAddOnQuantity(quantity, guestCount) {
+  const max = Math.max(0, Math.floor(Number(guestCount) || 0));
+  const raw = Math.floor(Number(quantity) || 0);
+  if (raw <= 0) return 0;
+  return Math.min(raw, max);
 }
-var init_otherAddOnTotal = __esm({
-  "../shared/utils/otherAddOnTotal.ts"() {
+function buildOtherAddOnDraftSelections(input) {
+  const now = input.now ?? /* @__PURE__ */ new Date();
+  const stamp = now.toISOString();
+  const catalogById = /* @__PURE__ */ new Map();
+  for (const row2 of input.catalog || []) {
+    if (row2 && row2.id) catalogById.set(row2.id, row2);
+  }
+  const out = {};
+  for (const date of input.dates || []) {
+    const rows = [];
+    for (const addOn of catalogById.values()) {
+      const raw = input.quantities?.[otherAddOnDraftKey(date, addOn.id)];
+      const quantity = clampOtherAddOnQuantity(raw, input.guestCount);
+      if (quantity <= 0) continue;
+      rows.push({
+        addOnId: addOn.id,
+        nameSnapshot: addOn.name,
+        priceSnapshot: Math.max(0, Number(addOn.price) || 0),
+        quantity,
+        unitSnapshot: addOn.unit === "per-stay" ? "per-stay" : "per-person",
+        addedAt: stamp,
+        addedBy: "guest",
+        lastModifiedAt: stamp,
+        lastModifiedBy: "guest",
+        removedAt: null,
+        removedBy: null,
+        cutoffHoursBeforeCheckInSnapshot: Math.max(
+          0,
+          Math.min(168, Math.floor(Number(addOn.cutoffHoursBeforeCheckIn) || 24))
+        )
+      });
+    }
+    if (rows.length > 0) out[date] = rows;
+  }
+  return out;
+}
+function countOtherAddOnDraftSelections(selections) {
+  if (!selections) return 0;
+  let count = 0;
+  for (const date of Object.keys(selections)) {
+    const rows = selections[date];
+    if (!Array.isArray(rows)) continue;
+    for (const entry of rows) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+      if (Math.max(0, Math.floor(Number(entry.quantity) || 0)) > 0) count += 1;
+    }
+  }
+  return count;
+}
+var init_otherAddOnDrafts = __esm({
+  "../shared/utils/otherAddOnDrafts.ts"() {
     "use strict";
   }
 });
@@ -224856,8 +225153,19 @@ function normalizeAddOn(raw, fallbackId) {
     updatedBy: String(obj.updatedBy || "")
   };
 }
-function getEnabledAddOnsByHotel(addOns) {
+function normalizeOtherAddOnsEnabled(raw) {
+  if (raw === false) return false;
+  if (raw === true) return true;
+  if (typeof raw === "string") {
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === "false") return false;
+    if (normalized === "true") return true;
+  }
+  return OTHER_ADD_ONS_ENABLED_DEFAULT;
+}
+function getEnabledAddOnsByHotel(addOns, hotelEnabled) {
   if (!Array.isArray(addOns)) return [];
+  if (hotelEnabled === false) return [];
   return addOns.filter((a) => a && a.isEnabled === true).slice().sort((a, b3) => {
     const da3 = Math.floor(Number(a.displayOrder) || 0);
     const db = Math.floor(Number(b3.displayOrder) || 0);
@@ -224874,7 +225182,11 @@ function sortAddOnsByDisplayOrder(addOns) {
     return String(a.name || "").localeCompare(String(b3.name || ""));
   });
 }
-var AIRPORT_TRANSFER_PRESEED;
+function isOtherAddOnBookingMutable(status) {
+  const normalized = String(status ?? "").trim().toLowerCase();
+  return normalized !== "checked-out" && normalized !== "cancelled";
+}
+var AIRPORT_TRANSFER_PRESEED, OTHER_ADD_ONS_ENABLED_DEFAULT, OTHER_ADD_ON_READ_ONLY_ERROR;
 var init_addOns = __esm({
   "../shared/utils/addOns.ts"() {
     "use strict";
@@ -224887,6 +225199,8 @@ var init_addOns = __esm({
       cutoffHoursBeforeCheckIn: 24,
       displayOrder: 10
     };
+    OTHER_ADD_ONS_ENABLED_DEFAULT = true;
+    OTHER_ADD_ON_READ_ONLY_ERROR = "Booking is read-only.";
   }
 });
 
@@ -224976,6 +225290,8 @@ __export(shared_exports, {
   BOOKING_SOURCES: () => BOOKING_SOURCES,
   BOOKING_STATUSES: () => BOOKING_STATUSES,
   BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES: () => BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES,
+  BREAKFAST_RATE_LINE_LABEL: () => BREAKFAST_RATE_LINE_LABEL,
+  BREAKFAST_RATE_LINE_PREFIX: () => BREAKFAST_RATE_LINE_PREFIX,
   BROAD_DISCOUNT_SCOPE: () => BROAD_DISCOUNT_SCOPE,
   BookingDatesSchema: () => BookingDatesSchema,
   BookingRevenueAllocationSchema: () => BookingRevenueAllocationSchema,
@@ -225037,6 +225353,8 @@ __export(shared_exports, {
   MIN_IN_FLOW_HOLD_MINUTES: () => MIN_IN_FLOW_HOLD_MINUTES,
   MIN_MAX_STAY_NIGHTS: () => MIN_MAX_STAY_NIGHTS,
   MIN_PAYMENT_HOLD_WINDOW_HOURS: () => MIN_PAYMENT_HOLD_WINDOW_HOURS,
+  OTHER_ADD_ONS_ENABLED_DEFAULT: () => OTHER_ADD_ONS_ENABLED_DEFAULT,
+  OTHER_ADD_ON_READ_ONLY_ERROR: () => OTHER_ADD_ON_READ_ONLY_ERROR,
   OtherAddOnAuditEntrySchema: () => OtherAddOnAuditEntrySchema,
   OtherAddOnMarkRefundPaidSchema: () => OtherAddOnMarkRefundPaidSchema,
   OtherAddOnMarkServedSchema: () => OtherAddOnMarkServedSchema,
@@ -225086,6 +225404,7 @@ __export(shared_exports, {
   buildCancellationLiabilitySnapshot: () => buildCancellationLiabilitySnapshot,
   buildGoogleCalendarUrl: () => buildGoogleCalendarUrl,
   buildIcsContent: () => buildIcsContent,
+  buildOtherAddOnDraftSelections: () => buildOtherAddOnDraftSelections,
   buildOtherAddOnSelectionKey: () => buildOtherAddOnSelectionKey,
   bustPublicSiteContentCache: () => bustPublicSiteContentCache,
   calculateBookingTotal: () => calculateBookingTotal,
@@ -225103,6 +225422,7 @@ __export(shared_exports, {
   canExtendInFlowHold: () => canExtendInFlowHold,
   checkExtraBedInventory: () => checkExtraBedInventory,
   clampIntegerInRange: () => clampIntegerInRange,
+  clampOtherAddOnQuantity: () => clampOtherAddOnQuantity,
   clearCache: () => clearCache,
   clearSweepHistory: () => clearSweepHistory,
   compressImageFile: () => compressImageFile,
@@ -225119,6 +225439,7 @@ __export(shared_exports, {
   computeReservationAggregatePaymentStatus: () => computeReservationAggregatePaymentStatus,
   computeServerFolioTotals: () => computeServerFolioTotals,
   countExtraBedsInUse: () => countExtraBedsInUse,
+  countOtherAddOnDraftSelections: () => countOtherAddOnDraftSelections,
   createCancellationPolicySnapshot: () => createCancellationPolicySnapshot,
   createFailureBackoffState: () => createFailureBackoffState,
   datesOverlap: () => datesOverlap,
@@ -225128,6 +225449,7 @@ __export(shared_exports, {
   diffNightsBetweenIso: () => diffNightsBetweenIso,
   downloadIcsFile: () => downloadIcsFile,
   eachStayNight: () => eachStayNight,
+  enumerateStayServiceDates: () => enumerateStayServiceDates,
   evaluateCancelPreview: () => evaluateCancelPreview,
   evaluateCancellation: () => evaluateCancellation,
   fadeIn: () => fadeIn,
@@ -225158,9 +225480,13 @@ __export(shared_exports, {
   getSweepHistory: () => getSweepHistory,
   getWeekendNightCount: () => getWeekendNightCount,
   hasAnyOtherAddOns: () => hasAnyOtherAddOns,
+  inFlowHoldStayMatches: () => inFlowHoldStayMatches,
   isBookingOccupyingRoom: () => isBookingOccupyingRoom,
+  isBreakfastRateLine: () => isBreakfastRateLine,
+  isDateInStayWindow: () => isDateInStayWindow,
   isFreeNightVoucher: () => isFreeNightVoucher,
   isInFlowHoldActive: () => isInFlowHoldActive,
+  isOtherAddOnBookingMutable: () => isOtherAddOnBookingMutable,
   isPaymentVerified: () => isPaymentVerified,
   isRewardVoucher: () => isRewardVoucher,
   isUnlimitedStay: () => isUnlimitedStay,
@@ -225179,12 +225505,14 @@ __export(shared_exports, {
   normalizeDiscountScope: () => normalizeDiscountScope,
   normalizeInFlowHoldMinutes: () => normalizeInFlowHoldMinutes,
   normalizeMaxChildren: () => normalizeMaxChildren,
+  normalizeOtherAddOnsEnabled: () => normalizeOtherAddOnsEnabled,
   normalizePaymentHoldWindowHours: () => normalizePaymentHoldWindowHours,
   normalizeSeasonalRateOverride: () => normalizeSeasonalRateOverride,
   normalizeSeasonalRateOverrides: () => normalizeSeasonalRateOverrides,
   normalizeStayRange: () => normalizeStayRange,
   normalizeVatConfig: () => normalizeVatConfig,
   otherAddOnBreakdownByDate: () => otherAddOnBreakdownByDate,
+  otherAddOnDraftKey: () => otherAddOnDraftKey,
   parseCheckInTime: () => parseCheckInTime,
   parseCheckInTimeToPair: () => parseCheckInTimeToPair,
   parseOtherAddOnSelectionKey: () => parseOtherAddOnSelectionKey,
@@ -225194,6 +225522,8 @@ __export(shared_exports, {
   recomputeBreakfastTotal: () => recomputeBreakfastTotal,
   recomputeOtherAddOnTotal: () => recomputeOtherAddOnTotal,
   recordSweepResult: () => recordSweepResult,
+  redateBreakfastSelections: () => redateBreakfastSelections,
+  redateOtherAddOnSelections: () => redateOtherAddOnSelections,
   requiredExtraBedsFor: () => requiredExtraBedsFor,
   resolveCurrentLevel: () => resolveCurrentLevel,
   resolveMaxStayNights: () => resolveMaxStayNights,
@@ -225201,6 +225531,8 @@ __export(shared_exports, {
   resolveRangeSelection: () => resolveRangeSelection,
   runBackfill: () => runBackfill,
   scaleIn: () => scaleIn,
+  serviceDateFromSlotKey: () => serviceDateFromSlotKey,
+  shouldAutoCancelSelection: () => shouldAutoCancelSelection,
   slideInBottom: () => slideInBottom,
   slideInLeft: () => slideInLeft,
   slideInRight: () => slideInRight,
@@ -225208,10 +225540,13 @@ __export(shared_exports, {
   staggerChild: () => staggerChild,
   staggerContainer: () => staggerContainer,
   startOfDayUtc: () => startOfDayUtc,
+  stripUndefinedValues: () => stripUndefinedValues,
   subscribeToPublicSiteContentBust: () => subscribeToPublicSiteContentBust,
+  sumBreakfastRateLines: () => sumBreakfastRateLines,
   sweepBookingsStorage: () => sweepBookingsStorage,
   toDateOrNow: () => toDateOrNow,
   toDateOrNull: () => toDateOrNull,
+  toUtcDateKey: () => toUtcDateKey,
   validateCorporateCode: () => validateCorporateCode,
   validatePointsRedemption: () => validatePointsRedemption,
   validateVoucher: () => validateVoucher,
@@ -225264,9 +225599,12 @@ var init_shared = __esm({
     init_bookingPreferences();
     init_breakfastCutoff();
     init_breakfastTotal();
+    init_bookingAddOnReschedule();
+    init_firestorePayload();
     init_breakfastConfig();
     init_otherAddOnCutoff();
     init_otherAddOnTotal();
+    init_otherAddOnDrafts();
     init_addOns();
     init_rewardsConfig();
   }
@@ -229312,10 +229650,42 @@ async function handleStartInFlowHold(req, res) {
           error: "Hold id is already in use."
         });
       }
+      const stayMatches = inFlowHoldStayMatches(
+        {
+          roomType: data.roomType,
+          checkIn: data.checkIn,
+          checkOut: data.checkOut,
+          numNights: data.numNights
+        },
+        {
+          roomType: input.roomType,
+          checkIn: input.checkIn,
+          checkOut: input.checkOut,
+          numNights: input.numNights
+        }
+      );
+      if (stayMatches) {
+        return res.status(200).json({
+          success: true,
+          data: serializeHold(existing.id, existing.data()),
+          idempotentReplay: true
+        });
+      }
+      await ref.set(
+        {
+          roomType: input.roomType,
+          checkIn: input.checkIn,
+          checkOut: input.checkOut,
+          numNights: input.numNights,
+          updatedAt: Timestamp.fromDate(now)
+        },
+        { merge: true }
+      );
+      const restamped = await ref.get();
       return res.status(200).json({
         success: true,
-        data: serializeHold(existing.id, existing.data()),
-        idempotentReplay: true
+        data: serializeHold(restamped.id, restamped.data()),
+        restamped: true
       });
     }
     await ref.set({
@@ -229920,191 +230290,7 @@ function refundPaidErrorToMessage(code) {
 init_shared();
 init_shared();
 init_shared();
-
-// server/handlers/reservationScopeTransition.ts
-async function preReadSiblingChildren(transaction, adminDb2, bookingReservationId2, map2) {
-  if (bookingReservationId2.length === 0) return [];
-  const childrenForFlip = await transaction.get(
-    adminDb2.collection("bookings").where("reservationId", "==", bookingReservationId2)
-  );
-  return childrenForFlip.docs.map(map2);
-}
-function applyReservationScopePaymentTransition(transaction, adminDb2, bookingReservationId2, targetBookingId, children, rule, updatedAt) {
-  const postUpdateChildStatuses = [];
-  const siblingFlips = [];
-  for (const child of children) {
-    const decision = rule(child);
-    const newStatus = decision ? decision.newStatus : child.status;
-    postUpdateChildStatuses.push(newStatus);
-    if (decision && child.id !== targetBookingId) {
-      siblingFlips.push({ id: child.id, fromStatus: child.status, toStatus: newStatus });
-      transaction.update(adminDb2.collection("bookings").doc(child.id), decision.write);
-    }
-  }
-  if (bookingReservationId2.length > 0 && children.length > 0) {
-    transaction.update(adminDb2.collection("reservations").doc(bookingReservationId2), { updatedAt });
-  }
-  return {
-    siblingFlippedCount: siblingFlips.length,
-    postUpdateChildStatuses
-  };
-}
-
-// server/handlers/bookings.ts
-init_booking();
 init_shared();
-init_shared();
-init_zod();
-init_hotel_config();
-
-// server/lib/rate-breakdown.ts
-init_shared();
-function nonNegativeFinite2(value) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? Math.max(numeric, 0) : 0;
-}
-function composeRateBreakdown(input) {
-  const roomSubtotal = nonNegativeFinite2(input.roomSubtotal);
-  const addOns = input.addOns.map((line) => ({
-    ...line,
-    amount: nonNegativeFinite2(line.amount)
-  }));
-  const subtotal = roomSubtotal + addOns.reduce((sum, line) => sum + line.amount, 0);
-  const discountPct = nonNegativeFinite2(input.discountPct);
-  const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
-  const afterSeniorPwd = calculateVoucherBase(subtotal, seniorPwdDiscount);
-  const voucherDiscount = nonNegativeFinite2(input.voucherDiscount);
-  const afterVoucher = calculateVoucherBase(afterSeniorPwd, voucherDiscount);
-  const memberDiscountPct = nonNegativeFinite2(input.memberDiscountPct);
-  const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, memberDiscountPct));
-  const pointsRedeemedValue = nonNegativeFinite2(input.pointsRedeemedValue);
-  const deductions = [
-    ...seniorPwdDiscount > 0 ? [{
-      label: `${input.discountType === "senior" ? "Senior Citizen" : "PWD"} discount (${discountPct}%)`,
-      amount: seniorPwdDiscount
-    }] : [],
-    ...voucherDiscount > 0 ? [{ label: "Voucher discount", amount: voucherDiscount }] : [],
-    ...memberDiscount > 0 ? [{ label: `Spark Rewards member discount (${memberDiscountPct}%)`, amount: memberDiscount }] : [],
-    ...pointsRedeemedValue > 0 ? [{ label: "Spark Rewards points redeemed", amount: pointsRedeemedValue }] : []
-  ];
-  return {
-    roomSubtotal,
-    roomLines: input.roomLines,
-    addOns,
-    deductions,
-    finalTotal: nonNegativeFinite2(input.finalTotal)
-  };
-}
-function buildRateBreakdown(input) {
-  const breakfastAddOns = input.breakfastLines ? input.breakfastLines.filter((line) => Number(line.amount) > 0) : input.breakfastTotal > 0 ? [{ label: "Breakfast add-on", amount: input.breakfastTotal }] : [];
-  const extraBedAddOn = (input.extraBedTotal ?? 0) > 0 ? {
-    label: (() => {
-      const count = Number(input.extraBedCount) || 0;
-      const rate = Number(input.extraBedRate) || 0;
-      const nights = input.roomLines.reduce(
-        (sum, line) => sum + (Number(line.nights) || 0),
-        0
-      ) || 1;
-      if (count > 1 && rate > 0) {
-        return `Extra bed add-on (${count} beds \xD7 ${nights} ${nights === 1 ? "night" : "nights"})`;
-      }
-      return "Extra bed add-on";
-    })(),
-    amount: input.extraBedTotal ?? 0
-  } : null;
-  return composeRateBreakdown({
-    ...input,
-    addOns: [...breakfastAddOns, extraBedAddOn].filter(
-      (line) => line !== null
-    ),
-    pointsRedeemedValue: input.pointsRedeemedValue || 0
-  });
-}
-function rebuildRateBreakdown(booking, overrides = {}) {
-  const existing = booking.rateBreakdown;
-  if (!existing) return void 0;
-  const pointsRedeemedValue = overrides.pointsRedeemedValue === void 0 ? nonNegativeFinite2(booking.pointsRedeemedValue) : nonNegativeFinite2(overrides.pointsRedeemedValue);
-  const finalTotal = overrides.finalTotal === void 0 ? nonNegativeFinite2(booking.totalPrice) : nonNegativeFinite2(overrides.finalTotal);
-  return composeRateBreakdown({
-    roomLines: existing.roomLines || [],
-    roomSubtotal: existing.roomSubtotal,
-    addOns: existing.addOns || [],
-    discountType: String(booking.discountType || ""),
-    discountPct: nonNegativeFinite2(booking.discountPct),
-    voucherDiscount: nonNegativeFinite2(booking.voucherDiscount),
-    memberDiscountPct: nonNegativeFinite2(booking.memberDiscountPct),
-    pointsRedeemedValue,
-    finalTotal
-  });
-}
-function shiftDateKey(dateKey2, days) {
-  const [year, month, day] = dateKey2.split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
-}
-function dateKeyFromUnknown(value) {
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
-  const date = value instanceof Date ? value : value && typeof value.toDate === "function" ? value.toDate() : new Date(value);
-  return Number.isNaN(date.getTime()) ? "1970-01-01" : date.toISOString().slice(0, 10);
-}
-function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
-  const nights = Math.max(Math.floor(nonNegativeFinite2(newNights)), 1);
-  const originalNights = Math.max(Math.floor(nonNegativeFinite2(booking.numNights)), nights);
-  const finalTotal = nonNegativeFinite2(booking.totalPrice);
-  const existing = booking.rateBreakdown;
-  let remainingNights = nights;
-  const roomLines = (existing?.roomLines || []).flatMap((line) => {
-    if (remainingNights <= 0) return [];
-    const lineNights = Math.max(Math.floor(nonNegativeFinite2(line.nights)), 0);
-    const consumedNights = Math.min(lineNights, remainingNights);
-    if (consumedNights <= 0) return [];
-    remainingNights -= consumedNights;
-    return [{
-      ...line,
-      endDate: shiftDateKey(line.startDate, consumedNights),
-      nights: consumedNights,
-      subtotal: nonNegativeFinite2(line.nightlyRate) * consumedNights
-    }];
-  });
-  if (roomLines.length === 0) {
-    const startDate = dateKeyFromUnknown(booking.checkIn);
-    const nightlyRate = nonNegativeFinite2(booking.ratePerNight);
-    roomLines.push({
-      source: "manual",
-      label: "Locked room rate",
-      startDate,
-      endDate: shiftDateKey(startDate, nights),
-      nights,
-      nightlyRate,
-      subtotal: nightlyRate * nights
-    });
-  }
-  const roomSubtotal = roomLines.reduce((sum, line) => sum + line.subtotal, 0);
-  const addOnRatio = originalNights > 0 ? nights / originalNights : 1;
-  const addOns = existing ? (existing.addOns || []).map((line) => ({ ...line, amount: Math.round(nonNegativeFinite2(line.amount) * addOnRatio * 100) / 100 })) : [];
-  const originalRoomSubtotal = existing?.roomSubtotal ?? nonNegativeFinite2(booking.ratePerNight) * originalNights;
-  const originalAddOns = existing?.addOns ?? [];
-  const originalPricing = composeRateBreakdown({
-    roomLines: existing?.roomLines || roomLines,
-    roomSubtotal: originalRoomSubtotal,
-    addOns: originalAddOns,
-    discountType: String(booking.discountType || ""),
-    discountPct: nonNegativeFinite2(booking.discountPct),
-    voucherDiscount: nonNegativeFinite2(booking.voucherDiscount),
-    memberDiscountPct: nonNegativeFinite2(booking.memberDiscountPct),
-    pointsRedeemedValue: nonNegativeFinite2(booking.pointsRedeemedValue),
-    finalTotal
-  });
-  const deductionTotal = originalPricing.deductions.reduce((sum, line) => sum + line.amount, 0);
-  const consumedGross = roomSubtotal + addOns.reduce((sum, line) => sum + line.amount, 0);
-  const retainedAmount = Math.max(Math.round((finalTotal + deductionTotal - consumedGross) * 100) / 100, 0);
-  return {
-    roomSubtotal,
-    roomLines,
-    addOns: retainedAmount > 0 ? [...addOns, { label: "Early departure \u2014 original total retained", amount: retainedAmount }] : addOns,
-    deductions: originalPricing.deductions,
-    finalTotal
-  };
-}
 
 // server/lib/breakfast-selections.ts
 init_zod();
@@ -230114,8 +230300,13 @@ init_firestore();
 init_firebase_admin();
 var entryShape = external_exports.object({
   mealId: external_exports.string().trim().min(1).max(120),
-  mealName: external_exports.string().trim().min(1).max(200),
-  price: external_exports.number().finite().min(0),
+  // Per OCT-C1 (2026-10-20, audit `plan/project/AUDIT-OCTOBER-2026.md`):
+  // the wire price/name are advisory only. The server snapshots the
+  // LIVE catalog price + name so a tampered request can never set its
+  // own breakfast price. Both are still accepted (and ignored) so an
+  // older guest bundle keeps working.
+  mealName: external_exports.string().trim().min(1).max(200).optional(),
+  price: external_exports.number().finite().min(0).optional(),
   addedBy: external_exports.string().trim().max(120).optional().default(""),
   addedAt: external_exports.string().trim().max(64).optional().default(""),
   lastModifiedAt: external_exports.string().trim().max(64).optional().default(""),
@@ -230146,7 +230337,7 @@ function buildMealLookup(meals) {
   return lookup;
 }
 function validateBreakfastSelections(input) {
-  const { selections, breakfastConfig, now } = input;
+  const { selections, breakfastConfig, now, staffCreated } = input;
   if (selections === null || selections === void 0) return null;
   const parsed2 = breakfastSelectionsSchema.safeParse(selections);
   if (!parsed2.success) {
@@ -230172,7 +230363,7 @@ function validateBreakfastSelections(input) {
       timezone: breakfastConfig.cutoffTimezone,
       cutoffsEnabled: breakfastConfig.cutoffsEnabled
     });
-    if (cutoffState.isLocked) {
+    if (cutoffState.isLocked && !staffCreated) {
       throw new BreakfastSelectionValidationError(
         `Ordering closed for breakfast on ${serviceDate}. Please remove the selection or contact the hotel.`
       );
@@ -230182,7 +230373,8 @@ function validateBreakfastSelections(input) {
         `One of the selected meals is no longer available. Please refresh and try again.`
       );
     }
-    const price = Number(entry.price);
+    const meal = mealLookup.get(entry.mealId);
+    const price = Number(meal.price);
     if (!Number.isFinite(price) || price < 0) {
       throw new BreakfastSelectionValidationError(
         `Invalid breakfast price. Please refresh and try again.`
@@ -230190,7 +230382,7 @@ function validateBreakfastSelections(input) {
     }
     validatedEntries[key] = {
       mealId: entry.mealId,
-      mealName: entry.mealName,
+      mealName: String(meal.name || entry.mealName || entry.mealId),
       price,
       addedBy: entry.addedBy || "guest",
       addedAt: entry.addedAt || (/* @__PURE__ */ new Date()).toISOString(),
@@ -230230,6 +230422,9 @@ function auditBreakfastOp(input) {
     reason = reasonOrCutoff;
   } else if (typeof reasonOrCutoff === "boolean") {
     occurredAfterCutoff = reasonOrCutoff;
+  } else if (reasonOrCutoff && typeof reasonOrCutoff === "object") {
+    reason = reasonOrCutoff.reason ?? null;
+    occurredAfterCutoff = reasonOrCutoff.occurredAfterCutoff === true;
   }
   const auditRef = adminDb.collection("bookings").doc(bookingId).collection("breakfastAudit").doc();
   transaction.set(auditRef, {
@@ -230344,7 +230539,356 @@ function createBreakfastRefundLiability(input) {
   transaction.set(refundLiabilityRef, refundRecord);
 }
 
+// server/lib/otherAddOn-selections.ts
+init_zod();
+init_firestore();
+init_shared();
+init_firebase_admin();
+var OTHER_ADDON_OP_ERROR = {
+  ADDON_NOT_AVAILABLE: "ADDON_NOT_AVAILABLE",
+  LOCKED_DATE_PREFIX: "LOCKED_DATE:",
+  SELECTION_ALREADY_ORDERED: "SELECTION_ALREADY_ORDERED",
+  SELECTION_NOT_ORDERED: "SELECTION_NOT_ORDERED",
+  INVALID_QUANTITY: "INVALID_QUANTITY",
+  SERVE_NOT_FOUND: "SERVE_NOT_FOUND",
+  REFUND_NOT_FOUND: "REFUND_NOT_FOUND"
+};
+var otherAddOnEntryShape = external_exports.object({
+  addOnId: external_exports.string().trim().min(1).max(80),
+  nameSnapshot: external_exports.string().trim().min(1).max(120),
+  priceSnapshot: external_exports.number().finite().min(0),
+  quantity: external_exports.number().int().min(0).max(50),
+  unitSnapshot: external_exports.enum(["per-person", "per-stay"]),
+  addedBy: external_exports.string().trim().max(120).optional().default(""),
+  addedAt: external_exports.string().trim().max(64).optional().default(""),
+  lastModifiedAt: external_exports.string().trim().max(64).optional().default(""),
+  lastModifiedBy: external_exports.string().trim().max(120).optional().default(""),
+  removedAt: external_exports.string().trim().max(64).nullable().optional().default(null),
+  removedBy: external_exports.string().trim().max(120).nullable().optional().default(null),
+  cutoffHoursBeforeCheckInSnapshot: external_exports.number().int().min(0).max(168)
+});
+var otherAddOnSelectionsWireSchema = external_exports.record(
+  external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  external_exports.array(otherAddOnEntryShape)
+);
+function assertAddOnExists(addOnLookup, addOnId) {
+  if (!addOnLookup.has(addOnId)) {
+    throw new Error(OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE);
+  }
+}
+function assertNotLocked2(input) {
+  const { selectionKey, serverNow, addOn, checkInDate } = input;
+  const parsed2 = parseOtherAddOnSelectionKey(selectionKey);
+  if (!parsed2) {
+    throw new Error(`${OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX}${selectionKey}`);
+  }
+  const state = computeOtherAddOnCutoffState({
+    checkInDate,
+    addOn,
+    now: serverNow
+  });
+  if (state.isLocked) {
+    throw new Error(`${OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX}${parsed2.date}`);
+  }
+}
+function assertSelectionForAdd(next, selectionKey) {
+  const parsed2 = parseOtherAddOnSelectionKey(selectionKey);
+  if (!parsed2) return;
+  const prior = next[parsed2.date]?.find((e3) => e3 && e3.addOnId === parsed2.addOnId);
+  if (prior && prior.removedAt === null) {
+    throw new Error(OTHER_ADDON_OP_ERROR.SELECTION_ALREADY_ORDERED);
+  }
+}
+function assertSelectionForChange(next, selectionKey) {
+  const parsed2 = parseOtherAddOnSelectionKey(selectionKey);
+  if (!parsed2) return;
+  const prior = next[parsed2.date]?.find((e3) => e3 && e3.addOnId === parsed2.addOnId);
+  if (!prior || prior.removedAt !== null) {
+    throw new Error(OTHER_ADDON_OP_ERROR.SELECTION_NOT_ORDERED);
+  }
+}
+function auditOtherAddOnOp(input) {
+  const {
+    transaction,
+    bookingId,
+    selectionKey,
+    action,
+    addOnSnapshot,
+    actorUid,
+    actorRole,
+    reasonOrCutoff
+  } = input;
+  let reason = null;
+  let occurredAfterCutoff = false;
+  if (typeof reasonOrCutoff === "string") {
+    reason = reasonOrCutoff;
+  } else if (typeof reasonOrCutoff === "boolean") {
+    occurredAfterCutoff = reasonOrCutoff;
+  } else if (reasonOrCutoff && typeof reasonOrCutoff === "object") {
+    reason = reasonOrCutoff.reason ?? null;
+    occurredAfterCutoff = reasonOrCutoff.occurredAfterCutoff === true;
+  }
+  const auditRef = adminDb.collection("bookings").doc(bookingId).collection("otherAddOnAudit").doc();
+  transaction.set(auditRef, {
+    action,
+    selectionKey,
+    addOnSnapshot,
+    actorUid,
+    actorRole,
+    reason,
+    occurredAt: Timestamp.now(),
+    occurredAfterCutoff
+  });
+}
+function createOtherAddOnRefundLiability(input) {
+  const {
+    transaction,
+    booking,
+    selectionKey,
+    addOnEntry,
+    amount,
+    reason,
+    recordedBy,
+    recordedByUid
+  } = input;
+  const refundId = generateOtherAddOnRefundId();
+  const refundLiabilityRef = adminDb.collection("bookings").doc(booking.id).collection("refunds").doc(refundId);
+  const qty = Math.max(0, Math.floor(Number(addOnEntry.quantity) || 0));
+  const unitPrice = Math.max(0, Number(addOnEntry.priceSnapshot) || 0);
+  const totalAmount = Math.abs(Number(amount || 0)) || unitPrice * qty;
+  const refundRecord = {
+    id: refundId,
+    bookingId: booking.id,
+    bookingRef: booking.bookingRef,
+    type: "refund",
+    category: "otherAddOn",
+    status: "pending",
+    amount: -totalAmount,
+    method: "pending",
+    note: "Pending \u2014 staff processes the payout.",
+    transactionReference: null,
+    reason,
+    approvedBy: null,
+    recordedBy,
+    recordedByUid,
+    recordedAt: Timestamp.now(),
+    otherAddOnRefundContext: {
+      addOnId: addOnEntry.addOnId,
+      selectionKey,
+      addOnName: addOnEntry.nameSnapshot,
+      priceSnapshot: unitPrice,
+      quantitySnapshot: qty
+    }
+  };
+  transaction.set(refundLiabilityRef, refundRecord);
+}
+function generateOtherAddOnRefundId() {
+  const g = globalThis;
+  if (typeof g.crypto?.randomUUID === "function") {
+    const id = String(g.crypto.randomUUID());
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      id
+    )) {
+      return id;
+    }
+  }
+  const part = () => Math.floor(Math.random() * 4294967295).toString(16).padStart(8, "0");
+  const part4 = Math.floor(Math.random() * 65535).toString(16).padStart(4, "0");
+  const part4b = (Math.floor(Math.random() * 4095) | 16384).toString(16).padStart(4, "0");
+  const part4c = (Math.floor(Math.random() * 16383) | 32768).toString(16).padStart(4, "0");
+  return `${part()}-${part4}-${part4b}-${part4c}-${part().slice(0, 8)}${part().slice(0, 4)}`;
+}
+
 // server/handlers/bookings.ts
+init_shared();
+
+// server/handlers/reservationScopeTransition.ts
+async function preReadSiblingChildren(transaction, adminDb2, bookingReservationId2, map2) {
+  if (bookingReservationId2.length === 0) return [];
+  const childrenForFlip = await transaction.get(
+    adminDb2.collection("bookings").where("reservationId", "==", bookingReservationId2)
+  );
+  return childrenForFlip.docs.map(map2);
+}
+function applyReservationScopePaymentTransition(transaction, adminDb2, bookingReservationId2, targetBookingId, children, rule, updatedAt) {
+  const postUpdateChildStatuses = [];
+  const siblingFlips = [];
+  for (const child of children) {
+    const decision = rule(child);
+    const newStatus = decision ? decision.newStatus : child.status;
+    postUpdateChildStatuses.push(newStatus);
+    if (decision && child.id !== targetBookingId) {
+      siblingFlips.push({ id: child.id, fromStatus: child.status, toStatus: newStatus });
+      transaction.update(adminDb2.collection("bookings").doc(child.id), decision.write);
+    }
+  }
+  if (bookingReservationId2.length > 0 && children.length > 0) {
+    transaction.update(adminDb2.collection("reservations").doc(bookingReservationId2), { updatedAt });
+  }
+  return {
+    siblingFlippedCount: siblingFlips.length,
+    postUpdateChildStatuses
+  };
+}
+
+// server/handlers/bookings.ts
+init_booking();
+init_shared();
+init_shared();
+init_zod();
+init_hotel_config();
+
+// server/lib/rate-breakdown.ts
+init_shared();
+function nonNegativeFinite2(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(numeric, 0) : 0;
+}
+function composeRateBreakdown(input) {
+  const roomSubtotal = nonNegativeFinite2(input.roomSubtotal);
+  const addOns = input.addOns.map((line) => ({
+    ...line,
+    amount: nonNegativeFinite2(line.amount)
+  }));
+  const subtotal = roomSubtotal + addOns.reduce((sum, line) => sum + line.amount, 0);
+  const discountPct = nonNegativeFinite2(input.discountPct);
+  const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
+  const afterSeniorPwd = calculateVoucherBase(subtotal, seniorPwdDiscount);
+  const voucherDiscount = nonNegativeFinite2(input.voucherDiscount);
+  const afterVoucher = calculateVoucherBase(afterSeniorPwd, voucherDiscount);
+  const memberDiscountPct = nonNegativeFinite2(input.memberDiscountPct);
+  const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, memberDiscountPct));
+  const pointsRedeemedValue = nonNegativeFinite2(input.pointsRedeemedValue);
+  const deductions = [
+    ...seniorPwdDiscount > 0 ? [{
+      label: `${input.discountType === "senior" ? "Senior Citizen" : "PWD"} discount (${discountPct}%)`,
+      amount: seniorPwdDiscount
+    }] : [],
+    ...voucherDiscount > 0 ? [{ label: "Voucher discount", amount: voucherDiscount }] : [],
+    ...memberDiscount > 0 ? [{ label: `Spark Rewards member discount (${memberDiscountPct}%)`, amount: memberDiscount }] : [],
+    ...pointsRedeemedValue > 0 ? [{ label: "Spark Rewards points redeemed", amount: pointsRedeemedValue }] : []
+  ];
+  return {
+    roomSubtotal,
+    roomLines: input.roomLines,
+    addOns,
+    deductions,
+    finalTotal: nonNegativeFinite2(input.finalTotal)
+  };
+}
+function buildRateBreakdown(input) {
+  const breakfastAddOns = input.breakfastLines ? input.breakfastLines.filter((line) => Number(line.amount) > 0) : input.breakfastTotal > 0 ? [{ label: BREAKFAST_RATE_LINE_LABEL, amount: input.breakfastTotal }] : [];
+  const extraBedAddOn = (input.extraBedTotal ?? 0) > 0 ? {
+    label: (() => {
+      const count = Number(input.extraBedCount) || 0;
+      const rate = Number(input.extraBedRate) || 0;
+      const nights = input.roomLines.reduce(
+        (sum, line) => sum + (Number(line.nights) || 0),
+        0
+      ) || 1;
+      if (count > 1 && rate > 0) {
+        return `Extra bed add-on (${count} beds \xD7 ${nights} ${nights === 1 ? "night" : "nights"})`;
+      }
+      return "Extra bed add-on";
+    })(),
+    amount: input.extraBedTotal ?? 0
+  } : null;
+  return composeRateBreakdown({
+    ...input,
+    addOns: [...breakfastAddOns, extraBedAddOn].filter(
+      (line) => line !== null
+    ),
+    pointsRedeemedValue: input.pointsRedeemedValue || 0
+  });
+}
+function rebuildRateBreakdown(booking, overrides = {}) {
+  const existing = booking.rateBreakdown;
+  if (!existing) return void 0;
+  const pointsRedeemedValue = overrides.pointsRedeemedValue === void 0 ? nonNegativeFinite2(booking.pointsRedeemedValue) : nonNegativeFinite2(overrides.pointsRedeemedValue);
+  const finalTotal = overrides.finalTotal === void 0 ? nonNegativeFinite2(booking.totalPrice) : nonNegativeFinite2(overrides.finalTotal);
+  return composeRateBreakdown({
+    roomLines: existing.roomLines || [],
+    roomSubtotal: existing.roomSubtotal,
+    addOns: existing.addOns || [],
+    discountType: String(booking.discountType || ""),
+    discountPct: nonNegativeFinite2(booking.discountPct),
+    voucherDiscount: nonNegativeFinite2(booking.voucherDiscount),
+    memberDiscountPct: nonNegativeFinite2(booking.memberDiscountPct),
+    pointsRedeemedValue,
+    finalTotal
+  });
+}
+function shiftDateKey(dateKey2, days) {
+  const [year, month, day] = dateKey2.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}
+function dateKeyFromUnknown(value) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
+  const date = value instanceof Date ? value : value && typeof value.toDate === "function" ? value.toDate() : new Date(value);
+  return Number.isNaN(date.getTime()) ? "1970-01-01" : date.toISOString().slice(0, 10);
+}
+function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
+  const nights = Math.max(Math.floor(nonNegativeFinite2(newNights)), 1);
+  const originalNights = Math.max(Math.floor(nonNegativeFinite2(booking.numNights)), nights);
+  const finalTotal = nonNegativeFinite2(booking.totalPrice);
+  const existing = booking.rateBreakdown;
+  let remainingNights = nights;
+  const roomLines = (existing?.roomLines || []).flatMap((line) => {
+    if (remainingNights <= 0) return [];
+    const lineNights = Math.max(Math.floor(nonNegativeFinite2(line.nights)), 0);
+    const consumedNights = Math.min(lineNights, remainingNights);
+    if (consumedNights <= 0) return [];
+    remainingNights -= consumedNights;
+    return [{
+      ...line,
+      endDate: shiftDateKey(line.startDate, consumedNights),
+      nights: consumedNights,
+      subtotal: nonNegativeFinite2(line.nightlyRate) * consumedNights
+    }];
+  });
+  if (roomLines.length === 0) {
+    const startDate = dateKeyFromUnknown(booking.checkIn);
+    const nightlyRate = nonNegativeFinite2(booking.ratePerNight);
+    roomLines.push({
+      source: "manual",
+      label: "Locked room rate",
+      startDate,
+      endDate: shiftDateKey(startDate, nights),
+      nights,
+      nightlyRate,
+      subtotal: nightlyRate * nights
+    });
+  }
+  const roomSubtotal = roomLines.reduce((sum, line) => sum + line.subtotal, 0);
+  const addOnRatio = originalNights > 0 ? nights / originalNights : 1;
+  const addOns = existing ? (existing.addOns || []).map((line) => ({ ...line, amount: Math.round(nonNegativeFinite2(line.amount) * addOnRatio * 100) / 100 })) : [];
+  const originalRoomSubtotal = existing?.roomSubtotal ?? nonNegativeFinite2(booking.ratePerNight) * originalNights;
+  const originalAddOns = existing?.addOns ?? [];
+  const originalPricing = composeRateBreakdown({
+    roomLines: existing?.roomLines || roomLines,
+    roomSubtotal: originalRoomSubtotal,
+    addOns: originalAddOns,
+    discountType: String(booking.discountType || ""),
+    discountPct: nonNegativeFinite2(booking.discountPct),
+    voucherDiscount: nonNegativeFinite2(booking.voucherDiscount),
+    memberDiscountPct: nonNegativeFinite2(booking.memberDiscountPct),
+    pointsRedeemedValue: nonNegativeFinite2(booking.pointsRedeemedValue),
+    finalTotal
+  });
+  const deductionTotal = originalPricing.deductions.reduce((sum, line) => sum + line.amount, 0);
+  const consumedGross = roomSubtotal + addOns.reduce((sum, line) => sum + line.amount, 0);
+  const retainedAmount = Math.max(Math.round((finalTotal + deductionTotal - consumedGross) * 100) / 100, 0);
+  return {
+    roomSubtotal,
+    roomLines,
+    addOns: retainedAmount > 0 ? [...addOns, { label: "Early departure \u2014 original total retained", amount: retainedAmount }] : addOns,
+    deductions: originalPricing.deductions,
+    finalTotal
+  };
+}
+
+// server/handlers/bookings.ts
+var OTHER_ADDON_NOT_AVAILABLE_ERROR = "One of the selected add-ons is no longer available. Please refresh and try again.";
 function buildValidArrivalTimeOptions(checkInTimeStr) {
   const valid = /* @__PURE__ */ new Set();
   for (const option2 of buildArrivalTimeOptions(checkInTimeStr)) {
@@ -230569,15 +231113,21 @@ async function readTransactionalFolioSnapshot(input) {
     const collectedTotal2 = sumLedgerAmounts(paymentsSnapshot);
     const incidentalTotal2 = sumLedgerAmounts(chargesSnapshot);
     const addToBillTotal2 = sumBilledAddToBillOrders(storeOrdersSnapshot);
+    const otherAddOnTotal2 = Math.max(
+      0,
+      Number(bookingData2.otherAddOnTotal) || 0
+    );
     const totals2 = computeServerFolioTotals({
       totalPrice: Number(bookingData2.totalPrice) || 0,
       incidentalTotal: incidentalTotal2,
       addToBillTotal: addToBillTotal2,
-      collectedTotal: collectedTotal2
+      collectedTotal: collectedTotal2,
+      otherAddOnTotal: otherAddOnTotal2
     });
     return {
       reservationId: "",
       totalPrice: Number(bookingData2.totalPrice) || 0,
+      otherAddOnTotal: otherAddOnTotal2,
       collectedTotal: collectedTotal2,
       incidentalTotal: incidentalTotal2,
       addToBillTotal: addToBillTotal2,
@@ -230635,15 +231185,21 @@ async function readTransactionalFolioSnapshot(input) {
   const collectedTotal = sumLedgerAmounts(reservationPaymentsSnapshot) + sumLedgerAmounts(reservationRefundsSnapshot) + transitionalCollectedTotal;
   const incidentalTotal = sumLedgerAmounts(reservationChargesSnapshot) + transitionalIncidentalTotal;
   const totalPrice = Number(reservationDoc.data()?.totalPrice) || 0;
+  const otherAddOnTotal = childBookingsSnapshot.docs.reduce(
+    (sum, docSnap) => sum + Math.max(0, Number(docSnap.data()?.otherAddOnTotal) || 0),
+    0
+  );
   const totals = computeServerFolioTotals({
     totalPrice,
     incidentalTotal,
     addToBillTotal,
-    collectedTotal
+    collectedTotal,
+    otherAddOnTotal
   });
   return {
     reservationId: bookingReservationId2,
     totalPrice,
+    otherAddOnTotal,
     collectedTotal,
     incidentalTotal,
     addToBillTotal,
@@ -231049,6 +231605,23 @@ var createBookingSchema = external_exports.object({
   // applies the meal-catalog + cutoff gates and throws
   // a 400 with a human message on violation.
   breakfastSelections: breakfastSelectionsSchema.optional(),
+  // Per OCT-M4 (2026-10-20, decision #297): the BR-12 other
+  // add-ons the guest selected in the Step 2 grid.
+  //
+  // BR-12 shipped the catalog, the staff walk-in grid and the
+  // post-booking "Manage Other Add-Ons" page — but the GUEST
+  // booking flow had no grid at all (`BookingPage.tsx` contained
+  // ZERO occurrences of "otherAddOn"), so a guest could not order an
+  // airport transfer at booking time. Combined with OCT-C5 (the
+  // create path never persisted `otherAddOnSelections` even if it
+  // did), other add-ons were only purchasable post-booking.
+  //
+  // The values are ADVISORY: the server rebuilds every entry from
+  // the live `addOns` catalog (catalog price + name + unit), so a
+  // client-supplied price is never persisted and an add-on that is
+  // no longer on sale is refused. Same shape + same rule as the
+  // walk-in schema (OCT-C5).
+  otherAddOnSelections: external_exports.record(external_exports.string(), external_exports.array(external_exports.unknown())).optional(),
   _hp: external_exports.string().max(200).optional().default("")
 }).strict();
 async function loadMaxStayNights() {
@@ -231589,6 +232162,72 @@ async function handleCreateBooking(req, res) {
         breakfastConfig,
         now
       });
+      const rawOtherAddOns = body.otherAddOnSelections;
+      let validatedOtherAddOnSelections = null;
+      let validatedOtherAddOnTotal = 0;
+      if (rawOtherAddOns && typeof rawOtherAddOns === "object") {
+        if (!normalizeOtherAddOnsEnabled(hotelConfig.otherAddOnsEnabled)) {
+          throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+        }
+        const addOnsCatalogSnap = await transaction.get(adminDb.collection("addOns"));
+        const addOnsCatalog = /* @__PURE__ */ new Map();
+        for (const d of addOnsCatalogSnap.docs) {
+          const norm = normalizeAddOn({ id: d.id, ...d.data() }, d.id);
+          if (norm) addOnsCatalog.set(norm.id, norm);
+        }
+        if (addOnsCatalog.size === 0) {
+          const pre = normalizeAddOn(
+            { id: "airport-transfer", ...AIRPORT_TRANSFER_PRESEED },
+            "airport-transfer"
+          );
+          if (pre) addOnsCatalog.set(pre.id, pre);
+        }
+        const rebuilt = {};
+        for (const [dateKey2, rawItems] of Object.entries(
+          rawOtherAddOns
+        )) {
+          if (!Array.isArray(rawItems)) continue;
+          const rows = [];
+          for (const rawItem of rawItems) {
+            if (!rawItem || typeof rawItem !== "object") continue;
+            const entry = rawItem;
+            const addOnId = String(entry.addOnId || "").trim();
+            if (!addOnId) continue;
+            const live = addOnsCatalog.get(addOnId);
+            if (!live) {
+              throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+            }
+            if (live.isEnabled === false) {
+              throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+            }
+            const quantity = Math.max(
+              0,
+              Math.min(
+                guests,
+                Math.floor(Number(entry.quantity) || 0)
+              )
+            );
+            if (quantity <= 0) continue;
+            rows.push({
+              ...entry,
+              addOnId: live.id,
+              nameSnapshot: live.name,
+              priceSnapshot: Math.max(0, Number(live.price) || 0),
+              quantity,
+              unitSnapshot: live.unit,
+              cutoffHoursBeforeCheckInSnapshot: Math.max(
+                0,
+                Math.min(168, Math.floor(Number(live.cutoffHoursBeforeCheckIn) || 24))
+              )
+            });
+          }
+          if (rows.length > 0) rebuilt[dateKey2] = rows;
+        }
+        if (Object.keys(rebuilt).length > 0) {
+          validatedOtherAddOnSelections = rebuilt;
+          validatedOtherAddOnTotal = recomputeOtherAddOnTotal(rebuilt);
+        }
+      }
       const validatedRoomStays = assignedRooms.map((assignedRoom, index) => {
         const selection = assignedRoom.selection;
         const selectionType = selection.typeEntry;
@@ -232209,6 +232848,23 @@ async function handleCreateBooking(req, res) {
           // (denormalized); expose the same value the
           // chain saw.
           breakfastTotal: validatedBreakfastSelections.total
+        } : {},
+        // Per OCT-M4 (2026-10-20, decision #297): the BR-12 other
+        // add-ons the guest selected in the Step 2 grid.
+        //
+        // Per `plan/features/OTHER-ADD-ONS.md` decision 2 these are
+        // ADDITIVE `Booking` fields and they are NOT inside
+        // `totalPrice` — they are "added on top of it for the
+        // balance". The same shape the walk-in path writes (OCT-C5,
+        // decision #281) and the post-booking guest path writes.
+        //
+        // The fields are written only when the guest actually
+        // selected something, so a booking with no other add-ons
+        // carries no `otherAddOnSelections` key at all.
+        ...validatedOtherAddOnSelections !== null ? {
+          otherAddOnSelections: validatedOtherAddOnSelections,
+          otherAddOnTotal: validatedOtherAddOnTotal,
+          hasAnyOtherAddOns: hasAnyOtherAddOns(validatedOtherAddOnSelections)
         } : {},
         // Per EXB-01 (2026-07-31): the snapshotted extra-bed
         // count + rate. `extraBedRate` is the room-type rate
@@ -232850,6 +233506,8 @@ async function handleCreateBooking(req, res) {
       status = 409;
     } else if (error.message === "Voucher no longer valid") {
       status = 409;
+    } else if (error.message === OTHER_ADDON_NOT_AVAILABLE_ERROR) {
+      status = 400;
     } else if (
       // Per MRB-02 (2026-08-02, per decision #164): the client
       // preallocated a `reservationId` that already carries a
@@ -232912,6 +233570,13 @@ async function handleCreateWalkin(req, res) {
     checkIn,
     checkOut,
     guests,
+    // Per OCT-C5 (2026-10-20, audit
+    // `plan/project/AUDIT-OCTOBER-2026.md`): the rich per-meal
+    // breakfast selections + the BR-12 other add-ons the desk
+    // selected. Both were previously dropped on the floor by the
+    // walk-in transaction.
+    breakfastSelections: requestedBreakfastSelections,
+    otherAddOnSelections: requestedOtherAddOnSelections,
     // Per BR-08 (decision #238, 2026-10-14 — close-out):
     // the legacy `hasBreakfast: boolean` flat-rate flag is
     // removed from the walk-in create path. Walk-ins that
@@ -233263,6 +233928,67 @@ async function handleCreateWalkin(req, res) {
       const actualBreakfastRate2 = 0;
       const breakfastIncludesChildrenDefault = true;
       const breakfastIncludesChildren = breakfastIncludesChildrenDefault;
+      const validatedWalkinBreakfast = validateBreakfastSelections({
+        selections: requestedBreakfastSelections,
+        breakfastConfig,
+        now,
+        staffCreated: true
+      });
+      const walkinBreakfastTotal = validatedWalkinBreakfast?.total ?? 0;
+      const rawWalkinOtherAddOns = requestedOtherAddOnSelections;
+      let walkinOtherAddOnSelections = null;
+      let walkinOtherAddOnTotal = 0;
+      if (rawWalkinOtherAddOns && typeof rawWalkinOtherAddOns === "object") {
+        const addOnsCatalogSnap = await transaction.get(adminDb.collection("addOns"));
+        const addOnsCatalog = /* @__PURE__ */ new Map();
+        for (const d of addOnsCatalogSnap.docs) {
+          const norm = normalizeAddOn({ id: d.id, ...d.data() }, d.id);
+          if (norm) addOnsCatalog.set(norm.id, norm);
+        }
+        if (addOnsCatalog.size === 0) {
+          const pre = normalizeAddOn(
+            { id: "airport-transfer", ...AIRPORT_TRANSFER_PRESEED },
+            "airport-transfer"
+          );
+          if (pre) addOnsCatalog.set(pre.id, pre);
+        }
+        const rebuilt = {};
+        for (const [dateKey2, rawItems] of Object.entries(
+          rawWalkinOtherAddOns
+        )) {
+          if (!Array.isArray(rawItems)) continue;
+          const rows = [];
+          for (const rawItem of rawItems) {
+            if (!rawItem || typeof rawItem !== "object") continue;
+            const entry = rawItem;
+            const addOnId = String(entry.addOnId || "").trim();
+            if (!addOnId) continue;
+            const live = addOnsCatalog.get(addOnId);
+            if (!live) {
+              throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+            }
+            if (live.isEnabled === false) {
+              throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+            }
+            rows.push({
+              ...entry,
+              addOnId: live.id,
+              nameSnapshot: live.name,
+              priceSnapshot: Math.max(0, Number(live.price) || 0),
+              unitSnapshot: live.unit,
+              cutoffHoursBeforeCheckInSnapshot: Math.max(
+                0,
+                Math.min(168, Math.floor(Number(live.cutoffHoursBeforeCheckIn) || 24))
+              )
+            });
+          }
+          if (rows.length > 0) rebuilt[dateKey2] = rows;
+        }
+        if (Object.keys(rebuilt).length > 0) {
+          walkinOtherAddOnSelections = rebuilt;
+          walkinOtherAddOnTotal = recomputeOtherAddOnTotal(rebuilt);
+        }
+      }
       const walkinPerRoomExtraBeds = walkinAssignedRooms.map((assigned, lineIdx) => {
         const lineTypeEntry = walkinTypeEntries[lineIdx];
         const lineExtraBedCount = assigned.extraBedCount;
@@ -233320,7 +234046,7 @@ async function handleCreateWalkin(req, res) {
           weekendRate: Number(lineTypeEntry.weekendRate) || 0,
           seasonalRateOverrides
         });
-        const lineBreakfastTotal = 0;
+        const lineBreakfastTotal = lineIdx === 0 ? walkinBreakfastTotal : 0;
         const lineExtraBedTotal = calculateExtraBedAddOn({
           extraBedCount: walkinPerRoomExtraBeds[lineIdx].extraBedCount,
           extraBedRate: walkinPerRoomExtraBeds[lineIdx].extraBedRate,
@@ -233580,7 +234306,37 @@ async function handleCreateWalkin(req, res) {
         discountScopeSnapshot: snapshottedDiscountScope,
         guestIdPhotoUrl: null,
         guestRegistration: null,
-        breakfastSelections: {},
+        // Per OCT-C5 (2026-10-20, audit
+        // `plan/project/AUDIT-OCTOBER-2026.md`): the walk-in now
+        // PERSISTS the validated breakfast selections instead of
+        // discarding them. The pre-fix code wrote a hard-coded
+        // `breakfastSelections: {}` here, so the desk's meals
+        // vanished — no breakfast was served, the kitchen list
+        // was empty, and the hotel was never charged.
+        //
+        // `validatedWalkinBreakfast.entries` is the server-
+        // validated map (catalog price + name, NOT the client's),
+        // so the same price-authority rule as the public create
+        // path applies. `null` (the desk picked no meals) writes
+        // an empty map, matching the public path's "explicit
+        // opt-out" shape.
+        breakfastSelections: validatedWalkinBreakfast?.entries ?? {},
+        // Per BR-03 (2026-10-12, decision #232): the denormalized
+        // `breakfastTotal` field — the future-proof snapshot for
+        // the BR-04 Manage Breakfast page + the kitchen list +
+        // reports. The walk-in previously omitted the field
+        // entirely, so a reader could not tell "no breakfast"
+        // from "breakfast that was never recorded".
+        breakfastTotal,
+        // Per BR-12.1 (2026-10-15, decision #247): the other
+        // add-ons the desk selected. See the
+        // `otherAddOnSelections` handling above — these were
+        // dropped on the floor before this fix.
+        ...walkinOtherAddOnSelections ? {
+          otherAddOnSelections: walkinOtherAddOnSelections,
+          otherAddOnTotal: walkinOtherAddOnTotal,
+          hasAnyOtherAddOns: true
+        } : {},
         cancellationReason: "",
         linkedInquiryId: linkedInquiryId || null,
         ...validatedTestRunId ? { isTestData: true, testRunId: validatedTestRunId, testRunName: validatedTestRunName, testRunEnvironment: validatedTestRunEnvironment } : {},
@@ -233858,6 +234614,16 @@ async function handleCreateWalkin(req, res) {
       status2 = 409;
     } else if (errorMessage === "RESERVATION_HEADER_WITHOUT_CHILD") {
       status2 = 500;
+    } else if (
+      // Per OCT-C5 (2026-10-20): the walk-in now validates the
+      // desk's breakfast selections + other add-ons, so its
+      // validation failures must reach the desk as 400s with a
+      // human message — not 500s. Symmetric with the public
+      // create path's `BreakfastSelectionValidationError`
+      // mapping at :4373.
+      error.name === "BreakfastSelectionValidationError" || errorMessage === OTHER_ADDON_NOT_AVAILABLE_ERROR
+    ) {
+      status2 = typeof error.status === "number" && error.status > 0 ? error.status : 400;
     } else {
       status2 = 500;
     }
@@ -234504,12 +235270,106 @@ async function handleRejectPayment(req, res) {
     return res.status(500).json({ success: false, error: message });
   }
 }
+function redateAddOnsForCancel(input) {
+  const { transaction, bookingId, bookingRef: bookingRef2, booking, today, actorUid, actorRole } = input;
+  const paidAmount = Number(booking.paidAmount) || 0;
+  const redatedBreakfast = redateBreakfastSelections({
+    mode: "cancel",
+    window: { checkIn: String(booking.checkIn || ""), checkOut: String(booking.checkOut || "") },
+    today,
+    selections: booking.breakfastSelections,
+    paidAmount
+  });
+  const redatedOtherAddOns = redateOtherAddOnSelections({
+    mode: "cancel",
+    window: { checkIn: String(booking.checkIn || ""), checkOut: String(booking.checkOut || "") },
+    today,
+    selections: booking.otherAddOnSelections,
+    paidAmount
+  });
+  const reason = "Booking cancelled \u2014 the meal date is in the future and will not be served.";
+  for (const removed of redatedBreakfast.removed) {
+    auditBreakfastOp({
+      transaction,
+      bookingId,
+      slotKey: removed.key,
+      action: "remove",
+      mealSnapshot: {
+        mealId: String(removed.entry.mealId || ""),
+        mealName: String(removed.entry.mealName || ""),
+        price: removed.amount
+      },
+      actorUid,
+      actorRole,
+      reasonOrCutoff: { reason, occurredAfterCutoff: false }
+    });
+    if (removed.wasPaid && !input.policyRefunded) {
+      createBreakfastRefundLiability({
+        transaction,
+        booking: { id: bookingId, bookingRef: bookingRef2 },
+        slotKey: removed.key,
+        mealEntry: {
+          mealId: String(removed.entry.mealId || ""),
+          mealName: String(removed.entry.mealName || ""),
+          price: removed.amount
+        },
+        amount: removed.amount,
+        reason,
+        recordedBy: actorRole,
+        recordedByUid: actorUid
+      });
+    }
+  }
+  for (const removed of redatedOtherAddOns.removed) {
+    auditOtherAddOnOp({
+      transaction,
+      bookingId,
+      selectionKey: removed.selectionKey,
+      action: "remove",
+      addOnSnapshot: {
+        addOnId: removed.addOnId,
+        name: String(removed.entry.nameSnapshot || ""),
+        price: Number(removed.entry.priceSnapshot) || 0,
+        quantity: Math.max(0, Math.floor(Number(removed.entry.quantity) || 0))
+      },
+      actorUid,
+      actorRole,
+      reasonOrCutoff: { reason, occurredAfterCutoff: false }
+    });
+    if (removed.wasPaid && !input.policyRefunded) {
+      createOtherAddOnRefundLiability({
+        transaction,
+        booking: { id: bookingId, bookingRef: bookingRef2 },
+        selectionKey: removed.selectionKey,
+        addOnEntry: {
+          addOnId: removed.addOnId,
+          nameSnapshot: String(removed.entry.nameSnapshot || ""),
+          priceSnapshot: Number(removed.entry.priceSnapshot) || 0,
+          quantity: Math.max(0, Math.floor(Number(removed.entry.quantity) || 0))
+        },
+        amount: removed.amount,
+        reason,
+        recordedBy: actorRole,
+        recordedByUid: actorUid
+      });
+    }
+  }
+  return {
+    breakfastSelections: redatedBreakfast.selections,
+    breakfastTotal: redatedBreakfast.total,
+    hasAnyBreakfast: redatedBreakfast.total > 0,
+    otherAddOnSelections: redatedOtherAddOns.selections,
+    otherAddOnTotal: redatedOtherAddOns.total,
+    hasAnyOtherAddOns: redatedOtherAddOns.total > 0
+  };
+}
 async function handleCancelBooking(req, res) {
   const { bookingId, bookingRef: bookingRef2, guestEmail, reason } = req.body;
   let validReason = typeof reason === "string" ? reason.slice(0, 500) : "";
   const isStaffCancellation = Boolean(req.staff?.uid);
   const cancellationSource = isStaffCancellation ? "staff" : "guest";
   const cancelledBy = isStaffCancellation ? String(req.staff.uid) : "guest";
+  const { todayStr: todayKey } = getManilaDateInfo();
   if (isStaffCancellation && !validReason.trim()) {
     return res.status(400).json({
       success: false,
@@ -234721,6 +235581,31 @@ async function handleCancelBooking(req, res) {
             });
           }
         }
+        const cancelPolicyRefunded = Boolean(
+          liabilitySnapshot && Number(liabilitySnapshot.policyResult?.policyRefund) > 0
+        );
+        for (const child of children) {
+          if (!cancellableIds.has(child.id)) continue;
+          const redated = redateAddOnsForCancel({
+            transaction,
+            bookingId: child.id,
+            bookingRef: String(child.data.bookingRef || ""),
+            booking: child.data,
+            today: todayKey,
+            actorUid: cancelledBy,
+            actorRole: isStaffCancellation ? "front-desk" : "guest",
+            policyRefunded: cancelPolicyRefunded
+          });
+          transaction.update(child.ref, {
+            breakfastSelections: redated.breakfastSelections,
+            breakfastTotal: redated.breakfastTotal,
+            hasAnyBreakfast: redated.hasAnyBreakfast,
+            otherAddOnSelections: redated.otherAddOnSelections,
+            otherAddOnTotal: redated.otherAddOnTotal,
+            hasAnyOtherAddOns: redated.hasAnyOtherAddOns,
+            updatedAt: now
+          });
+        }
         const reservationHeaderUpdate = {
           updatedAt: now
         };
@@ -234862,6 +235747,25 @@ async function handleCancelBooking(req, res) {
         if (liabilitySnapshot) {
           bookingUpdate.cancellationLiability = liabilitySnapshot;
         }
+        const perChildCancelPolicyRefunded = Boolean(
+          liabilitySnapshot && Number(liabilitySnapshot.policyResult?.policyRefund) > 0
+        );
+        const perChildRedated = redateAddOnsForCancel({
+          transaction,
+          bookingId: bookingDocumentRef.id,
+          bookingRef: String(freshBooking.bookingRef || ""),
+          booking: freshBooking,
+          today: todayKey,
+          actorUid: cancelledBy,
+          actorRole: isStaffCancellation ? "front-desk" : "guest",
+          policyRefunded: perChildCancelPolicyRefunded
+        });
+        bookingUpdate.breakfastSelections = perChildRedated.breakfastSelections;
+        bookingUpdate.breakfastTotal = perChildRedated.breakfastTotal;
+        bookingUpdate.hasAnyBreakfast = perChildRedated.hasAnyBreakfast;
+        bookingUpdate.otherAddOnSelections = perChildRedated.otherAddOnSelections;
+        bookingUpdate.otherAddOnTotal = perChildRedated.otherAddOnTotal;
+        bookingUpdate.hasAnyOtherAddOns = perChildRedated.hasAnyOtherAddOns;
         transaction.update(bookingDocumentRef, bookingUpdate);
         const bookingReservationId2 = String(freshBooking.reservationId || "").trim();
         if (bookingReservationId2.length > 0) {
@@ -237225,9 +238129,23 @@ async function handleRescheduleBooking(req, res) {
         seasonalRateOverrides
       });
       const roomTotal = roomBreakdown.roomSubtotal;
+      const redatedBreakfast = redateBreakfastSelections({
+        mode: "reschedule",
+        window: { checkIn, checkOut },
+        today: todayKey,
+        selections: booking.breakfastSelections,
+        paidAmount: Number(booking.paidAmount) || 0
+      });
+      const redatedOtherAddOns = redateOtherAddOnSelections({
+        mode: "reschedule",
+        window: { checkIn, checkOut },
+        today: todayKey,
+        selections: booking.otherAddOnSelections,
+        paidAmount: Number(booking.paidAmount) || 0
+      });
       const preservedExtraBedCount = Number(booking.extraBedCount) || 0;
       const preservedExtraBedRate = Number(booking.extraBedRate) || 0;
-      const breakfastTotal = manualNightlyRate === null ? Number(booking.breakfastTotal) || 0 : 0;
+      const breakfastTotal = manualNightlyRate === null ? redatedBreakfast.total : 0;
       const extraBedTotal = manualNightlyRate === null ? calculateExtraBedAddOn({
         extraBedCount: preservedExtraBedCount,
         extraBedRate: preservedExtraBedRate,
@@ -237369,6 +238287,31 @@ async function handleRescheduleBooking(req, res) {
           finalTotalPrice
         ),
         rescheduleHistory: [...Array.isArray(booking.rescheduleHistory) ? booking.rescheduleHistory : [], rescheduleEntry],
+        // Per OCT-H8 (2026-10-20, decision #288): the re-dated
+        // add-on selections + their recomputed totals.
+        //
+        // Without this, the booking kept the OLD selection keys
+        // and the OLD breakfast total after a date change — the
+        // guest was charged for meals on dates they were no longer
+        // staying for, and the kitchen list for the new dates
+        // showed nothing.
+        //
+        // `breakfastTotal` is the recomputed total over the
+        // survivors (the auto-cancelled entries are marked
+        // `removedAt`, and `recomputeBreakfastTotal` skips those),
+        // so the BR-01 invariant
+        // `breakfastTotal === recomputeBreakfastTotal(selections)`
+        // holds.
+        //
+        // The other add-ons are NOT inside `totalPrice` (they are
+        // added on top of it for the balance), so they are written
+        // separately — the same shape the BR-12 write paths use.
+        breakfastSelections: redatedBreakfast.selections,
+        breakfastTotal: redatedBreakfast.total,
+        hasAnyBreakfast: redatedBreakfast.total > 0,
+        otherAddOnSelections: redatedOtherAddOns.selections,
+        otherAddOnTotal: redatedOtherAddOns.total,
+        hasAnyOtherAddOns: redatedOtherAddOns.total > 0,
         updatedAt: /* @__PURE__ */ new Date()
       };
       fullBookingForEmail = {
@@ -237380,6 +238323,84 @@ async function handleRescheduleBooking(req, res) {
         const oldRoomRef = adminDb.collection("rooms").doc(booking.roomId);
         transaction.update(oldRoomRef, { status: "available" });
         transaction.update(roomRef, { status: "occupied" });
+      }
+      for (const removed of redatedBreakfast.removed) {
+        auditBreakfastOp({
+          transaction,
+          bookingId: String(bookingId),
+          slotKey: removed.key,
+          action: "remove",
+          mealSnapshot: {
+            mealId: String(removed.entry.mealId || ""),
+            mealName: String(removed.entry.mealName || ""),
+            price: removed.amount
+          },
+          actorUid: "system",
+          actorRole: "admin",
+          reasonOrCutoff: {
+            reason: `Auto-cancelled \u2014 the stay moved to ${checkIn} \u2192 ${checkOut} and this date is outside the new window.`,
+            occurredAfterCutoff: false
+          }
+        });
+        if (removed.wasPaid) {
+          createBreakfastRefundLiability({
+            transaction,
+            booking: {
+              id: String(bookingId),
+              bookingRef: String(booking.bookingRef || "")
+            },
+            slotKey: removed.key,
+            mealEntry: {
+              mealId: String(removed.entry.mealId || ""),
+              mealName: String(removed.entry.mealName || ""),
+              price: removed.amount
+            },
+            amount: removed.amount,
+            reason: "Booking rescheduled \u2014 the breakfast date is outside the new stay window.",
+            recordedBy: "admin",
+            recordedByUid: "system"
+          });
+        }
+      }
+      for (const removed of redatedOtherAddOns.removed) {
+        auditOtherAddOnOp({
+          transaction,
+          bookingId: String(bookingId),
+          selectionKey: removed.selectionKey,
+          action: "remove",
+          addOnSnapshot: {
+            addOnId: removed.addOnId,
+            name: String(removed.entry.nameSnapshot || ""),
+            price: Number(removed.entry.priceSnapshot) || 0,
+            quantity: Math.max(0, Math.floor(Number(removed.entry.quantity) || 0))
+          },
+          actorUid: "system",
+          actorRole: "admin",
+          reasonOrCutoff: {
+            reason: `Auto-cancelled \u2014 the stay moved to ${checkIn} \u2192 ${checkOut} and this date is outside the new window.`,
+            occurredAfterCutoff: false
+          }
+        });
+        if (removed.wasPaid) {
+          createOtherAddOnRefundLiability({
+            transaction,
+            booking: {
+              id: String(bookingId),
+              bookingRef: String(booking.bookingRef || "")
+            },
+            selectionKey: removed.selectionKey,
+            addOnEntry: {
+              addOnId: removed.addOnId,
+              nameSnapshot: String(removed.entry.nameSnapshot || ""),
+              priceSnapshot: Number(removed.entry.priceSnapshot) || 0,
+              quantity: Math.max(0, Math.floor(Number(removed.entry.quantity) || 0))
+            },
+            amount: removed.amount,
+            reason: "Booking rescheduled \u2014 the add-on date is outside the new stay window.",
+            recordedBy: "admin",
+            recordedByUid: "system"
+          });
+        }
       }
       transaction.update(bookingRef2, updatedBooking);
       if (reservationDocRef && existingReservationData) {
@@ -241722,7 +242743,13 @@ async function handleGetBreakfastManage(req, res) {
   const recomputedTotal = recomputeBreakfastTotal(existingSelections);
   const totalPrice = Number(booking.totalPrice || 0);
   const paidAmount = Number(booking.paidAmount || 0);
-  const balance = Math.max(0, totalPrice + recomputedTotal - paidAmount);
+  const breakfastInTotalPrice = sumBreakfastRateLines(
+    booking.rateBreakdown
+  );
+  const balance = Math.max(
+    0,
+    (breakfastInTotalPrice === null ? totalPrice : totalPrice - breakfastInTotalPrice + recomputedTotal) - paidAmount
+  );
   const served = booking.breakfastServed && typeof booking.breakfastServed === "object" ? booking.breakfastServed : {};
   const refunds = await loadPendingBreakfastRefunds(booking.id);
   return res.status(200).json({
@@ -241997,9 +243024,12 @@ async function handleUpdateBreakfast(req, res) {
         breakfastTotal: newBreakfastTotal,
         updatedAt: Timestamp.now()
       });
+      const breakfastInTotalPrice = sumBreakfastRateLines(
+        booking.rateBreakdown
+      );
       const newBalance = Math.max(
         0,
-        totalPriceNum + newBreakfastTotal - paidAmountNum
+        (breakfastInTotalPrice === null ? totalPriceNum : totalPriceNum - breakfastInTotalPrice + newBreakfastTotal) - paidAmountNum
       );
       resultSummary.newBalance = Number(newBalance.toFixed(2));
       resultSummary.refundLiabilityCreated = refundLiabilityCreated;
@@ -242339,14 +243369,27 @@ async function handleStaffUpdateBreakfast(req, res) {
           },
           actorUid: staff.uid,
           actorRole: staff.role,
-          // Non-override actions stamp `false` so the
-          // audit's `occurredAfterCutoff` stays false
-          // (it mirrors the BR-04 guest path). Override
-          // actions stamp the staff's free-text reason
-          // + flip `occurredAfterCutoff: true` is
-          // already implied (the override was used
-          // because the lock-state was crossed).
-          reasonOrCutoff: isOverride ? reason : false
+          // Per OCT-H7 (2026-10-20, decision #286): the object
+          // form carries BOTH the free-text reason and the
+          // cut-off flag.
+          //
+          // The previous call passed the reason STRING (or
+          // `false`) through the two-way `string | boolean`
+          // overload, so the helper could set EITHER the reason
+          // OR the flag — never both. An override therefore
+          // wrote `reason: "<text>"` with
+          // `occurredAfterCutoff: false`, and the "Late changes"
+          // metric (which filters
+          // `occurredAfterCutoff == true`) was permanently empty
+          // for precisely the case it exists to count: a staff
+          // member overriding a locked date after cut-off.
+          //
+          // Non-override actions still stamp `false` (they mirror
+          // the BR-04 guest path, which is always pre-cutoff).
+          reasonOrCutoff: {
+            reason: isOverride ? reason : null,
+            occurredAfterCutoff: isOverride
+          }
         });
         if (isOverride) overrideCount += 1;
       };
@@ -242414,7 +243457,16 @@ async function handleStaffUpdateBreakfast(req, res) {
           },
           actorUid: staff.uid,
           actorRole: staff.role,
-          reasonOrCutoff: reason
+          // Per OCT-H7 (2026-10-20, decision #286): the object
+          // form carries BOTH the free-text reason and the
+          // cut-off flag. The previous two-way overload could
+          // only carry one of them, so a staff override of a
+          // locked date logged `occurredAfterCutoff: false` and
+          // the "Late changes" metric never counted it.
+          reasonOrCutoff: {
+            reason,
+            occurredAfterCutoff: isOverride
+          }
         });
         if (isOverride) overrideCount += 1;
       };
@@ -242898,6 +243950,26 @@ async function handleMarkRefundPaid(req, res) {
 
 // server/handlers/addons-config.ts
 init_firebase_admin();
+
+// server/lib/otherAddOns-settings.ts
+init_firebase_admin();
+init_shared();
+async function loadOtherAddOnsHotelEnabled() {
+  try {
+    const snap = await adminDb.collection("settings").doc("hotelConfig").get();
+    if (!snap.exists) return true;
+    return normalizeOtherAddOnsEnabled(snap.data()?.otherAddOnsEnabled);
+  } catch (err) {
+    console.error(
+      "Failed to read settings/hotelConfig.otherAddOnsEnabled; treating other add-ons as enabled:",
+      err
+    );
+    return true;
+  }
+}
+var OTHER_ADD_ONS_UNAVAILABLE_ERROR = "Other add-ons are currently unavailable.";
+
+// server/handlers/addons-config.ts
 init_shared();
 async function handleGetAddOnsConfig(req, res) {
   if (req.method !== "GET") {
@@ -242919,7 +243991,8 @@ async function handleGetAddOnsConfig(req, res) {
       };
       rawAddOns.push(pre);
     }
-    const enabled = getEnabledAddOnsByHotel(rawAddOns);
+    const hotelEnabled = await loadOtherAddOnsHotelEnabled();
+    const enabled = getEnabledAddOnsByHotel(rawAddOns, hotelEnabled);
     res.setHeader("Cache-Control", "public, max-age=60");
     return res.status(200).json({
       success: true,
@@ -242932,6 +244005,12 @@ async function handleGetAddOnsConfig(req, res) {
         cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn,
         displayOrder: a.displayOrder
       })),
+      // Per OCT-M1: the master switch is echoed so the guest UI
+      // can tell "the hotel turned other add-ons off" apart from
+      // "the hotel has no other add-ons" — both render an empty
+      // grid, but only one of them is a temporary state the guest
+      // should hear about.
+      otherAddOnsEnabled: hotelEnabled,
       preSeeded: rawAddOns.length === 1 && rawAddOns[0].id === "airport-transfer"
     });
   } catch (err) {
@@ -243008,7 +244087,8 @@ async function handleGetAddOnsManage(req, res) {
     return `${yyyy}-${mm}-${dd}`;
   })() : "";
   const status = String(bookingData2.status || "").trim();
-  const readOnly = status === "checked-out" || status === "cancelled";
+  const readOnly = !isOtherAddOnBookingMutable(status);
+  const hotelEnabled = await loadOtherAddOnsHotelEnabled();
   let enabledAddOns = [];
   try {
     const snap = await adminDb.collection("addOns").get();
@@ -243016,7 +244096,7 @@ async function handleGetAddOnsManage(req, res) {
       const norm = normalizeAddOn({ id: d.id, ...d.data() }, d.id);
       if (norm) enabledAddOns.push(norm);
     }
-    enabledAddOns = getEnabledAddOnsByHotel(enabledAddOns);
+    enabledAddOns = getEnabledAddOnsByHotel(enabledAddOns, hotelEnabled);
   } catch {
   }
   const existingSelections = bookingData2.otherAddOnSelections && typeof bookingData2.otherAddOnSelections === "object" ? bookingData2.otherAddOnSelections : {};
@@ -243028,7 +244108,7 @@ async function handleGetAddOnsManage(req, res) {
   for (const date of dates) {
     for (const a of enabledAddOns) {
       const state = computeOtherAddOnCutoffState({
-        checkInDate: date,
+        checkInDate,
         addOn: { isEnabled: a.isEnabled, cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn },
         now
       });
@@ -243098,166 +244178,6 @@ async function handleGetAddOnsManage(req, res) {
 init_firestore();
 init_firebase_admin();
 init_shared();
-
-// server/lib/otherAddOn-selections.ts
-init_zod();
-init_firestore();
-init_shared();
-init_firebase_admin();
-var OTHER_ADDON_OP_ERROR = {
-  ADDON_NOT_AVAILABLE: "ADDON_NOT_AVAILABLE",
-  LOCKED_DATE_PREFIX: "LOCKED_DATE:",
-  SELECTION_ALREADY_ORDERED: "SELECTION_ALREADY_ORDERED",
-  SELECTION_NOT_ORDERED: "SELECTION_NOT_ORDERED",
-  INVALID_QUANTITY: "INVALID_QUANTITY",
-  SERVE_NOT_FOUND: "SERVE_NOT_FOUND",
-  REFUND_NOT_FOUND: "REFUND_NOT_FOUND"
-};
-var otherAddOnEntryShape = external_exports.object({
-  addOnId: external_exports.string().trim().min(1).max(80),
-  nameSnapshot: external_exports.string().trim().min(1).max(120),
-  priceSnapshot: external_exports.number().finite().min(0),
-  quantity: external_exports.number().int().min(0).max(50),
-  unitSnapshot: external_exports.enum(["per-person", "per-stay"]),
-  addedBy: external_exports.string().trim().max(120).optional().default(""),
-  addedAt: external_exports.string().trim().max(64).optional().default(""),
-  lastModifiedAt: external_exports.string().trim().max(64).optional().default(""),
-  lastModifiedBy: external_exports.string().trim().max(120).optional().default(""),
-  removedAt: external_exports.string().trim().max(64).nullable().optional().default(null),
-  removedBy: external_exports.string().trim().max(120).nullable().optional().default(null),
-  cutoffHoursBeforeCheckInSnapshot: external_exports.number().int().min(0).max(168)
-});
-var otherAddOnSelectionsWireSchema = external_exports.record(
-  external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  external_exports.array(otherAddOnEntryShape)
-);
-function assertAddOnExists(addOnLookup, addOnId) {
-  if (!addOnLookup.has(addOnId)) {
-    throw new Error(OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE);
-  }
-}
-function assertNotLocked2(input) {
-  const { selectionKey, serverNow, addOn, checkInDate } = input;
-  const parsed2 = parseOtherAddOnSelectionKey(selectionKey);
-  if (!parsed2) {
-    throw new Error(`${OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX}${selectionKey}`);
-  }
-  const date = checkInDate || parsed2.date;
-  const state = computeOtherAddOnCutoffState({
-    checkInDate: date,
-    addOn,
-    now: serverNow
-  });
-  if (state.isLocked) {
-    throw new Error(`${OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX}${parsed2.date}`);
-  }
-}
-function assertSelectionForAdd(next, selectionKey) {
-  const parsed2 = parseOtherAddOnSelectionKey(selectionKey);
-  if (!parsed2) return;
-  const prior = next[parsed2.date]?.find((e3) => e3 && e3.addOnId === parsed2.addOnId);
-  if (prior && prior.removedAt === null) {
-    throw new Error(OTHER_ADDON_OP_ERROR.SELECTION_ALREADY_ORDERED);
-  }
-}
-function assertSelectionForChange(next, selectionKey) {
-  const parsed2 = parseOtherAddOnSelectionKey(selectionKey);
-  if (!parsed2) return;
-  const prior = next[parsed2.date]?.find((e3) => e3 && e3.addOnId === parsed2.addOnId);
-  if (!prior || prior.removedAt !== null) {
-    throw new Error(OTHER_ADDON_OP_ERROR.SELECTION_NOT_ORDERED);
-  }
-}
-function auditOtherAddOnOp(input) {
-  const {
-    transaction,
-    bookingId,
-    selectionKey,
-    action,
-    addOnSnapshot,
-    actorUid,
-    actorRole,
-    reasonOrCutoff
-  } = input;
-  let reason = null;
-  let occurredAfterCutoff = false;
-  if (typeof reasonOrCutoff === "string") {
-    reason = reasonOrCutoff;
-  } else if (typeof reasonOrCutoff === "boolean") {
-    occurredAfterCutoff = reasonOrCutoff;
-  }
-  const auditRef = adminDb.collection("bookings").doc(bookingId).collection("otherAddOnAudit").doc();
-  transaction.set(auditRef, {
-    action,
-    selectionKey,
-    addOnSnapshot,
-    actorUid,
-    actorRole,
-    reason,
-    occurredAt: Timestamp.now(),
-    occurredAfterCutoff
-  });
-}
-function createOtherAddOnRefundLiability(input) {
-  const {
-    transaction,
-    booking,
-    selectionKey,
-    addOnEntry,
-    amount,
-    reason,
-    recordedBy,
-    recordedByUid
-  } = input;
-  const refundId = generateOtherAddOnRefundId();
-  const refundLiabilityRef = adminDb.collection("bookings").doc(booking.id).collection("refunds").doc(refundId);
-  const qty = Math.max(0, Math.floor(Number(addOnEntry.quantity) || 0));
-  const unitPrice = Math.max(0, Number(addOnEntry.priceSnapshot) || 0);
-  const totalAmount = Math.abs(Number(amount || 0)) || unitPrice * qty;
-  const refundRecord = {
-    id: refundId,
-    bookingId: booking.id,
-    bookingRef: booking.bookingRef,
-    type: "refund",
-    category: "otherAddOn",
-    status: "pending",
-    amount: -totalAmount,
-    method: "pending",
-    note: "Pending \u2014 staff processes the payout.",
-    transactionReference: null,
-    reason,
-    approvedBy: null,
-    recordedBy,
-    recordedByUid,
-    recordedAt: Timestamp.now(),
-    otherAddOnRefundContext: {
-      addOnId: addOnEntry.addOnId,
-      selectionKey,
-      addOnName: addOnEntry.nameSnapshot,
-      priceSnapshot: unitPrice,
-      quantitySnapshot: qty
-    }
-  };
-  transaction.set(refundLiabilityRef, refundRecord);
-}
-function generateOtherAddOnRefundId() {
-  const g = globalThis;
-  if (typeof g.crypto?.randomUUID === "function") {
-    const id = String(g.crypto.randomUUID());
-    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-      id
-    )) {
-      return id;
-    }
-  }
-  const part = () => Math.floor(Math.random() * 4294967295).toString(16).padStart(8, "0");
-  const part4 = Math.floor(Math.random() * 65535).toString(16).padStart(4, "0");
-  const part4b = (Math.floor(Math.random() * 4095) | 16384).toString(16).padStart(4, "0");
-  const part4c = (Math.floor(Math.random() * 16383) | 32768).toString(16).padStart(4, "0");
-  return `${part()}-${part4}-${part4b}-${part4c}-${part().slice(0, 8)}${part().slice(0, 4)}`;
-}
-
-// server/handlers/addons-manage-save.ts
 init_shared();
 var IDEMPOTENCY_WINDOW_MS = 6e4;
 function readOps(body) {
@@ -243302,6 +244222,9 @@ function opErrorToMessage(code) {
   if (code.startsWith(OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX)) {
     const date = code.slice(OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX.length);
     return `Ordering closed for ${date}.`;
+  }
+  if (code === "BOOKING_CHECK_IN_MISSING") {
+    return "This booking has no check-in date, so the add-on cut-off cannot be applied. Please contact the front desk.";
   }
   return "Could not save the add-on change.";
 }
@@ -243351,8 +244274,12 @@ async function handleUpdateAddOns(req, res) {
   const bookingId = bookingDoc.id;
   const bookingData2 = bookingDoc.data();
   const status = String(bookingData2.status || "").trim();
-  if (status === "checked-out" || status === "cancelled") {
-    return res.status(400).json({ success: false, error: "Booking is read-only." });
+  if (!isOtherAddOnBookingMutable(status)) {
+    return res.status(400).json({ success: false, error: OTHER_ADD_ON_READ_ONLY_ERROR });
+  }
+  const hotelEnabled = await loadOtherAddOnsHotelEnabled();
+  if (!hotelEnabled) {
+    return res.status(400).json({ success: false, error: OTHER_ADD_ONS_UNAVAILABLE_ERROR });
   }
   const addOnSnap = await adminDb.collection("addOns").get();
   const addOnById = /* @__PURE__ */ new Map();
@@ -243376,6 +244303,11 @@ async function handleUpdateAddOns(req, res) {
         return;
       }
       const liveBooking = bookingSnap.data() || {};
+      const liveCheckInDate = toUtcDateKey(liveBooking.checkIn);
+      if (!liveCheckInDate) {
+        opCode = "BOOKING_CHECK_IN_MISSING";
+        return;
+      }
       const liveSelections = liveBooking.otherAddOnSelections && typeof liveBooking.otherAddOnSelections === "object" ? { ...liveBooking.otherAddOnSelections } : {};
       const liveServed = liveBooking.otherAddOnServed && typeof liveBooking.otherAddOnServed === "object" ? liveBooking.otherAddOnServed : {};
       const next = { ...liveSelections };
@@ -243399,7 +244331,12 @@ async function handleUpdateAddOns(req, res) {
           assertNotLocked2({
             selectionKey: op.selectionKey,
             serverNow: now,
-            addOn: liveAddOn
+            addOn: liveAddOn,
+            // Per OCT-M5 (2026-10-20, decision #292): the
+            // cut-off anchor is the BOOKING's check-in, not the
+            // selection's own service date. The parameter is now
+            // required, so the compiler enforces it.
+            checkInDate: liveCheckInDate
           });
         } catch (err) {
           opCode = String(err?.message || OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX);
@@ -243456,7 +244393,12 @@ async function handleUpdateAddOns(req, res) {
           assertNotLocked2({
             selectionKey: op.selectionKey,
             serverNow: now,
-            addOn: liveAddOn
+            addOn: liveAddOn,
+            // Per OCT-M5 (2026-10-20, decision #292): the
+            // cut-off anchor is the BOOKING's check-in, not the
+            // selection's own service date. The parameter is now
+            // required, so the compiler enforces it.
+            checkInDate: liveCheckInDate
           });
         } catch (err) {
           opCode = String(err?.message || OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX);
@@ -243476,10 +244418,10 @@ async function handleUpdateAddOns(req, res) {
         const dateKey2 = parsedKey.date;
         const entry = {
           addOnId: op.addOnId,
-          nameSnapshot: op.nameSnapshot || liveAddOn.name,
-          priceSnapshot: Math.max(0, Number(op.priceSnapshot ?? liveAddOn.price) || 0),
+          nameSnapshot: liveAddOn.name,
+          priceSnapshot: Math.max(0, Number(liveAddOn.price) || 0),
           quantity: Math.max(0, Math.floor(Number(op.quantity ?? 0) || 0)),
-          unitSnapshot: op.unitSnapshot || liveAddOn.unit,
+          unitSnapshot: liveAddOn.unit,
           addedAt: nowIso,
           addedBy: "guest",
           lastModifiedAt: nowIso,
@@ -243488,7 +244430,7 @@ async function handleUpdateAddOns(req, res) {
           removedBy: null,
           cutoffHoursBeforeCheckInSnapshot: Math.max(
             0,
-            Math.min(168, Math.floor(Number(op.cutoffHoursBeforeCheckInSnapshot ?? liveAddOn.cutoffHoursBeforeCheckIn) || 24))
+            Math.min(168, Math.floor(Number(liveAddOn.cutoffHoursBeforeCheckIn) || 24))
           )
         };
         next[dateKey2] = [...next[dateKey2] || [], entry];
@@ -243520,7 +244462,12 @@ async function handleUpdateAddOns(req, res) {
           assertNotLocked2({
             selectionKey: op.selectionKey,
             serverNow: now,
-            addOn: liveAddOn
+            addOn: liveAddOn,
+            // Per OCT-M5 (2026-10-20, decision #292): the
+            // cut-off anchor is the BOOKING's check-in, not the
+            // selection's own service date. The parameter is now
+            // required, so the compiler enforces it.
+            checkInDate: liveCheckInDate
           });
         } catch (err) {
           opCode = String(err?.message || OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX);
@@ -243541,10 +244488,21 @@ async function handleUpdateAddOns(req, res) {
         if (!prior) continue;
         const updated = {
           ...prior,
-          nameSnapshot: op.nameSnapshot || prior.nameSnapshot,
-          priceSnapshot: Math.max(0, Number(op.priceSnapshot ?? prior.priceSnapshot) || 0),
+          // Per OCT-C2 (2026-10-20): a CHANGE may only alter the
+          // QUANTITY. The name / price / unit are the entry's
+          // existing snapshot — the pre-fix code preferred the
+          // client's `op.priceSnapshot` here too, so a guest
+          // could re-price an existing line item on the way in.
+          //
+          // The snapshot is intentionally NOT re-read from the
+          // catalog on a change: per OTHER-ADD-ONS.md the guest
+          // keeps the price they ordered at, even if the admin
+          // changes the catalog price afterwards. A NEW order
+          // takes the current catalog price (see the add op).
+          nameSnapshot: prior.nameSnapshot,
+          priceSnapshot: prior.priceSnapshot,
           quantity: Math.max(0, Math.floor(Number(op.quantity ?? prior.quantity) || 0)),
-          unitSnapshot: op.unitSnapshot || prior.unitSnapshot,
+          unitSnapshot: prior.unitSnapshot,
           lastModifiedAt: nowIso,
           lastModifiedBy: "guest"
         };
@@ -243599,7 +244557,16 @@ async function handleUpdateAddOns(req, res) {
           addOnSnapshot: a.addOnSnapshot,
           actorUid: "guest",
           actorRole: a.actorRole,
-          reasonOrCutoff: a.reason
+          // Per OCT-H7 (2026-10-20, decision #286): the object form
+          // carries BOTH the free-text reason and the cut-off flag.
+          // On the guest surface the flag is always `false` (the
+          // guest is blocked once a date locks), but passing it
+          // explicitly keeps the intent visible instead of
+          // relying on the default.
+          reasonOrCutoff: {
+            reason: a.reason,
+            occurredAfterCutoff: a.occurredAfterCutoff
+          }
         });
       }
     });
@@ -243680,6 +244647,9 @@ function opErrorToMessage2(code) {
   if (code.startsWith(OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX)) {
     return `Ordering closed \u2014 use overrideReason for late changes.`;
   }
+  if (code === "BOOKING_CHECK_IN_MISSING") {
+    return "This booking has no check-in date, so the add-on cut-off cannot be applied.";
+  }
   return "Could not save the staff add-on update.";
 }
 async function handleStaffUpdateAddOns(req, res) {
@@ -243706,6 +244676,9 @@ async function handleStaffUpdateAddOns(req, res) {
   }
   const bookingData2 = bookingSnap.data() || {};
   const bookingRefValue = String(bookingData2.bookingRef || "");
+  if (!isOtherAddOnBookingMutable(bookingData2.status)) {
+    return res.status(400).json({ success: false, error: OTHER_ADD_ON_READ_ONLY_ERROR });
+  }
   const addOnSnap = await adminDb.collection("addOns").get();
   const addOnById = /* @__PURE__ */ new Map();
   for (const d of addOnSnap.docs) {
@@ -243722,6 +244695,11 @@ async function handleStaffUpdateAddOns(req, res) {
     await adminDb.runTransaction(async (transaction) => {
       const live = await transaction.get(bookingRef2);
       const liveBooking = live.data() || {};
+      const liveCheckInDate = toUtcDateKey(liveBooking.checkIn);
+      if (!liveCheckInDate) {
+        opCode = "BOOKING_CHECK_IN_MISSING";
+        return false;
+      }
       const liveSelections = liveBooking.otherAddOnSelections && typeof liveBooking.otherAddOnSelections === "object" ? { ...liveBooking.otherAddOnSelections } : {};
       const liveServed = liveBooking.otherAddOnServed && typeof liveBooking.otherAddOnServed === "object" ? liveBooking.otherAddOnServed : {};
       const next = { ...liveSelections };
@@ -243746,7 +244724,12 @@ async function handleStaffUpdateAddOns(req, res) {
           assertNotLocked2({
             selectionKey: op.selectionKey,
             serverNow: now,
-            addOn: liveAddOn
+            addOn: liveAddOn,
+            // Per OCT-M5 (2026-10-20, decision #292): the
+            // cut-off anchor is the BOOKING's check-in, not the
+            // selection's own service date. The parameter is now
+            // required, so the compiler enforces it.
+            checkInDate: liveCheckInDate
           });
         } catch (err) {
           if (!overrideReason || overrideReason.length < 8) {
@@ -243803,10 +244786,21 @@ async function handleStaffUpdateAddOns(req, res) {
           }
           const entry = {
             addOnId: op.addOnId,
-            nameSnapshot: op.nameSnapshot || liveAddOn.name,
-            priceSnapshot: Math.max(0, Number(op.priceSnapshot ?? liveAddOn.price) || 0),
+            // Per OCT-C2 (2026-10-20, audit
+            // `plan/project/AUDIT-OCTOBER-2026.md`): the snapshot
+            // fields come from the LIVE CATALOG, never from the
+            // request body. The pre-fix code preferred the
+            // client's `op.priceSnapshot` (`op.priceSnapshot ??
+            // liveAddOn.price` — the client always sends it, so
+            // the catalog fallback could never fire). That
+            // defeated the `priceSnapshot` audit trail on the
+            // staff path too: the `addOnSnapshot.price` written
+            // to `otherAddOnAudit` recorded the REQUEST's price,
+            // not the catalog's.
+            nameSnapshot: liveAddOn.name,
+            priceSnapshot: Math.max(0, Number(liveAddOn.price) || 0),
             quantity: Math.max(0, Math.floor(Number(op.quantity ?? 0) || 0)),
-            unitSnapshot: op.unitSnapshot || liveAddOn.unit,
+            unitSnapshot: liveAddOn.unit,
             addedAt: nowIso,
             addedBy: actorUid,
             lastModifiedAt: nowIso,
@@ -243815,7 +244809,7 @@ async function handleStaffUpdateAddOns(req, res) {
             removedBy: null,
             cutoffHoursBeforeCheckInSnapshot: Math.max(
               0,
-              Math.min(168, Math.floor(Number(op.cutoffHoursBeforeCheckInSnapshot ?? liveAddOn.cutoffHoursBeforeCheckIn) || 24))
+              Math.min(168, Math.floor(Number(liveAddOn.cutoffHoursBeforeCheckIn) || 24))
             )
           };
           next[dateKey2] = [...next[dateKey2] || [], entry];
@@ -243842,10 +244836,14 @@ async function handleStaffUpdateAddOns(req, res) {
         if (!prior) return true;
         const updated = {
           ...prior,
-          nameSnapshot: op.nameSnapshot || prior.nameSnapshot,
-          priceSnapshot: Math.max(0, Number(op.priceSnapshot ?? prior.priceSnapshot) || 0),
+          // Per OCT-C2 (2026-10-20): a CHANGE may only alter the
+          // QUANTITY. Name / price / unit stay the entry's
+          // existing snapshot — the pre-fix code preferred the
+          // client's `op.priceSnapshot` here too.
+          nameSnapshot: prior.nameSnapshot,
+          priceSnapshot: prior.priceSnapshot,
           quantity: Math.max(0, Math.floor(Number(op.quantity ?? prior.quantity) || 0)),
-          unitSnapshot: op.unitSnapshot || prior.unitSnapshot,
+          unitSnapshot: prior.unitSnapshot,
           lastModifiedAt: nowIso,
           lastModifiedBy: actorUid
         };
@@ -243910,7 +244908,17 @@ async function handleStaffUpdateAddOns(req, res) {
           addOnSnapshot: a.addOnSnapshot,
           actorUid,
           actorRole,
-          reasonOrCutoff: a.reason
+          // Per OCT-H7 (2026-10-20, decision #286): the object form
+          // carries BOTH the free-text reason and the cut-off flag.
+          // The previous two-way `string | boolean` overload could
+          // only carry one, so an override (which the action name
+          // already flagged as `override-*`) still wrote
+          // `occurredAfterCutoff: false` and the late-change
+          // counter stayed at zero.
+          reasonOrCutoff: {
+            reason: a.reason,
+            occurredAfterCutoff: a.occurredAfterCutoff
+          }
         });
       }
     });
@@ -243960,6 +244968,10 @@ async function handleMarkServedAddOns(req, res) {
         return;
       }
       const liveBooking = live.data() || {};
+      if (!isOtherAddOnBookingMutable(liveBooking.status)) {
+        opCode = "BOOKING_READ_ONLY";
+        return;
+      }
       const liveSelections = liveBooking.otherAddOnSelections && typeof liveBooking.otherAddOnSelections === "object" ? { ...liveBooking.otherAddOnSelections } : {};
       const liveServed = liveBooking.otherAddOnServed && typeof liveBooking.otherAddOnServed === "object" ? { ...liveBooking.otherAddOnServed } : {};
       const servedSnapshot = { ...liveServed };
@@ -244010,6 +245022,9 @@ async function handleMarkServedAddOns(req, res) {
     }
     if (opCode === "BOOKING_NOT_FOUND") {
       return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    if (opCode === "BOOKING_READ_ONLY") {
+      return res.status(400).json({ success: false, error: OTHER_ADD_ON_READ_ONLY_ERROR });
     }
     return res.status(400).json({ success: false, error: "Could not mark add-on served." });
   }

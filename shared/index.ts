@@ -55,6 +55,21 @@ export * from "./utils/bookingPreferences";
 export * from "./utils/breakfastCutoff";
 export * from "./utils/breakfastTotal";
 
+// Per OCT-H8 (2026-10-20, decision #288): the pure re-dating /
+// auto-cancel logic for a booking whose stay window moved (or was
+// cancelled). The reschedule + cancel handlers use it to drop the
+// add-on selections that fell outside the stay and to open the
+// refund liabilities the spec requires.
+export * from "./utils/bookingAddOnReschedule";
+
+// Per OCT-H5 (2026-10-20, decision #283): the deep strip of
+// `undefined`-valued keys applied to every admin settings write.
+// The Firestore SDK rejects `undefined` outright
+// (`Unsupported field value: undefined`) and the admin app does not
+// set `ignoreUndefinedProperties`, so one stray undefined-valued key
+// inside a settings payload made every save of that section fail.
+export * from "./utils/firestorePayload";
+
 // Per BR-03 (Phase 13 — Breakfast Redesign, decision
 // #232, 2026-10-12): the public breakfast-config
 // normalizer (`normalizeBreakfastConfig`) used by
@@ -78,6 +93,7 @@ export * from "./utils/breakfastConfig";
 // here.
 export * from "./utils/otherAddOnCutoff";
 export * from "./utils/otherAddOnTotal";
+export * from "./utils/otherAddOnDrafts";
 export * from "./utils/addOns";
 
 // Per Phase 2 of the Spark Rewards tier system (2026-10-12,

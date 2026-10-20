@@ -102,7 +102,32 @@ export interface AssertNotLockedInput {
   selectionKey: string;
   serverNow: Date;
   addOn: Pick<AddOn, "isEnabled" | "cutoffHoursBeforeCheckIn">;
-  checkInDate?: string;
+  /**
+   * The BOOKING's check-in date (`yyyy-mm-dd`) — the cut-off
+   * anchor.
+   *
+   * Per OCT-M5 (2026-10-20, decision #292) this parameter is
+   * REQUIRED. It used to be optional and fell back to the
+   * selection's own service date:
+   *
+   *   const date = checkInDate || parsed.date;
+   *
+   * but **no caller ever passed it**, so the lock slid forward
+   * one day per service date — for an Oct 20 check-in with
+   * `cutoffHoursBeforeCheckIn: 24` the policy lock was Oct 19
+   * 00:00Z, yet the Oct 21 selection locked at Oct 20 00:00Z and
+   * the Oct 22 selection at Oct 21 00:00Z. The guest could add
+   * transfers a full day past the hotel's stated cut-off.
+   *
+   * Per `plan/features/OTHER-ADD-ONS.md` §Cutoff Model the rule is
+   * "`cutoffHoursBeforeCheckIn` hours before each **`checkIn`**
+   * date" — and the field is literally named
+   * `cutoffHoursBeforeCheckIn`. Making the parameter required
+   * means the compiler forces every call site to pass the
+   * booking's real check-in, so the per-service-date fallback
+   * cannot be reintroduced.
+   */
+  checkInDate: string;
 }
 
 export function assertNotLocked(input: AssertNotLockedInput): void {
@@ -111,9 +136,8 @@ export function assertNotLocked(input: AssertNotLockedInput): void {
   if (!parsed) {
     throw new Error(`${OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX}${selectionKey}`);
   }
-  const date = checkInDate || parsed.date;
   const state = computeOtherAddOnCutoffState({
-    checkInDate: date,
+    checkInDate,
     addOn,
     now: serverNow
   });
@@ -163,7 +187,22 @@ export interface AuditOtherAddOnOpInput {
   addOnSnapshot: { addOnId: string; name: string; price: number; quantity: number } | null;
   actorUid: string;
   actorRole: "guest" | "front-desk" | "admin";
-  reasonOrCutoff?: string | boolean;
+  reasonOrCutoff?: string | boolean | AuditOtherAddOnReasonAndCutoff;
+}
+
+/**
+ * Per OCT-H7 (2026-10-20, decision #286): the object form carries
+ * BOTH the free-text reason and the cut-off flag. The previous
+ * two-way overload (`string | boolean`) could not express "a staff
+ * override with a reason", so every add-on override wrote
+ * `occurredAfterCutoff: false` and the late-change counter was
+ * permanently zero.
+ */
+export interface AuditOtherAddOnReasonAndCutoff {
+  /** The free-text reason for the change (staff override reason, etc.). */
+  reason?: string | null;
+  /** `true` when the change happened after the date's cut-off. */
+  occurredAfterCutoff?: boolean;
 }
 
 export function auditOtherAddOnOp(input: AuditOtherAddOnOpInput): void {
@@ -184,6 +223,12 @@ export function auditOtherAddOnOp(input: AuditOtherAddOnOpInput): void {
     reason = reasonOrCutoff;
   } else if (typeof reasonOrCutoff === "boolean") {
     occurredAfterCutoff = reasonOrCutoff;
+  } else if (reasonOrCutoff && typeof reasonOrCutoff === "object") {
+    // Per OCT-H7: the object form carries BOTH the reason and the
+    // cut-off flag (the two-way overload could not express the
+    // combination, so every override logged `false`).
+    reason = reasonOrCutoff.reason ?? null;
+    occurredAfterCutoff = reasonOrCutoff.occurredAfterCutoff === true;
   }
 
   const auditRef = adminDb

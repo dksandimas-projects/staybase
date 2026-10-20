@@ -33,6 +33,14 @@ import {
   calculateSeasonalAwareRoomBreakdown,
   calculateSeasonalAwareRoomTotal,
   calculateVatBreakdown,
+  // Per OCT-H9 (2026-10-20, decision #283): the guest-side
+  // VAT surfaces must be gated on the admin's Tax (VAT)
+  // toggle. `PriceBreakdown.tsx` already consults
+  // `isVatEnabled`; the pre-submission live preview in
+  // `BookingReviewAside` did not, so a VAT-exempt hotel
+  // still saw the 12% VAT reconciliation on the booking
+  // page. Same helper, same default.
+  isVatEnabled,
   calculateBreakfastMealsTotal,
   getDateKeyInTimezone,
   getNumNights,
@@ -63,6 +71,17 @@ import {
 // (which requires `calculateExtraBedAddOn` + `requiredExtraBedsFor`
 // to be adjacent in the same import) intact.
 import { deriveRoomTypeCapacityFit, computeBreakfastCutoffState, recomputeBreakfastTotal, buildBreakfastRateBreakdownLines, type BreakfastSelectionEntry } from "@spark-inn/shared";
+// Per OCT-M4 (2026-10-20, decision #297): the guest Step 2
+// "Other Add-Ons" grid + its draft helpers. BR-12 shipped the
+// catalog, the staff walk-in grid and the post-booking Manage page
+// — but the GUEST booking flow had none of it, so a guest could not
+// order an airport transfer at booking time at all.
+import {
+  buildOtherAddOnDraftSelections,
+  countOtherAddOnDraftSelections,
+  otherAddOnDraftKey,
+  recomputeOtherAddOnTotal
+} from "@spark-inn/shared";
 // Per MRB-02 (2026-08-02, per decision #164): the
 // reservation-level idempotency key, imported separately to
 // keep the CHD-05 import-ordering guard (which requires
@@ -93,6 +112,10 @@ import { DateRangePicker } from "../components/DateRangePicker";
 import { Modal } from "../components/Modal";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { PriceBreakdown } from "../components/PriceBreakdown";
+// Per OCT-M4 (2026-10-20, decision #297): the guest Step 2
+// other-add-ons section + the catalog hook.
+import { OtherAddOnsStep2Section } from "../components/OtherAddOnsStep2Section";
+import { useOtherAddOnsCatalog } from "../hooks/useOtherAddOnsCatalog";
 import { StepIndicator } from "../components/StepIndicator";
 import { BookingStickyFooter } from "../components/BookingStickyFooter";
 import { RoomCartLines } from "../components/RoomCartLines";
@@ -100,7 +123,13 @@ import { RoomCartTray } from "../components/RoomCartTray";
 import { StaySummaryStrip } from "../components/StaySummaryStrip";
 import { EditStayDetailsSheet } from "../components/EditStayDetailsSheet";
 import { BreakfastMenuStrip } from "../components/BreakfastMenuStrip";
-import { copyBreakfastDateToRemaining } from "../utils/breakfastCopy";
+import {
+  BREAKFAST_COPY_NOTICE_TIMEOUT_MS,
+  buildBreakfastCopyNotice,
+  copyBreakfastDateToRemaining,
+  shouldShowBreakfastCopyNotice,
+  type BreakfastCopyNotice
+} from "../utils/breakfastCopy";
 import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { useTurnstileToken } from "../hooks/useTurnstileToken";
@@ -250,12 +279,28 @@ function formatStayDate(value: string) {
 // dates). Defensive: returns an empty array when the
 // input is malformed (e.g. checkout <= checkin) so
 // the Step 2 section renders nothing rather than a
-// crash. The `+ 'T00:00:00'` keeps the parse
-// timezone-stable for the hotel-local date string.
+// crash.
+//
+// Per OCT-H2 (2026-10-20, audit
+// `plan/project/AUDIT-OCTOBER-2026.md`): the `+ 'T00:00:00Z'`
+// UTC anchor is REQUIRED, not cosmetic. The previous
+// `+ 'T00:00:00'` parsed in the BROWSER's timezone and the
+// loop then formatted with `toISOString()` (UTC), so in any
+// UTC+ zone the list was shifted back one day. Reproduced:
+//
+//   TZ=Asia/Manila -> ["2026-10-13","2026-10-14","2026-10-15"]
+//
+// for a 2026-10-14 -> 2026-10-17 stay — the LAST breakfast
+// morning (Oct 16) was never offered, so it was never charged,
+// and the server's cut-off check ran against the wrong date.
+//
+// The two sibling implementations already use the Z anchor
+// (`ManageBreakfastPage.tsx:148` and
+// `WalkinBreakfastGrid.tsx:119`); this one was the outlier.
 function enumerateBreakfastDates(checkIn: string, checkOut: string): string[] {
   if (!checkIn || !checkOut) return [];
-  const start = new Date(`${checkIn}T00:00:00`);
-  const end = new Date(`${checkOut}T00:00:00`);
+  const start = new Date(`${checkIn}T00:00:00Z`);
+  const end = new Date(`${checkOut}T00:00:00Z`);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
   if (end <= start) return [];
   const dates: string[] = [];
@@ -339,7 +384,12 @@ export function BookingPage() {
   // for `hotelCheckInTime` (the arrival-time dropdown).
   // Per MSL-01 (2026-10-15): `maxStayNights` is the admin's
   // stay-length cap (raw; `null` = no field = 30-night default).
-  const { hotelCheckInTime, maxStayNights } = usePublicSiteContent();
+  const { hotelCheckInTime, maxStayNights, vatConfig } = usePublicSiteContent();
+  // Per OCT-H9 (2026-10-20, decision #283): the admin's Tax
+  // (VAT) toggle decides whether the guest-facing surfaces
+  // render the 12% VAT reconciliation at all. Default is
+  // `true` (BIR-compliant) when the snapshot is missing.
+  const vatEnabled = isVatEnabled(vatConfig);
   const currentStepKey = normalizeStepKey(searchParams.get("step"));
   const isAddOnsStep = currentStepKey === STEP_KEYS.addOns;
   const isGuestDetailsStep = currentStepKey === STEP_KEYS.guestDetails;
@@ -720,6 +770,21 @@ export function BookingPage() {
   // The create payload sends the map verbatim (the
   // `BreakfastSelectionsEntry` shape is locked per BR-01).
   const [breakfastSelections, setBreakfastSelections] = useState<Record<string, BreakfastSelectionEntry>>({});
+  // Per OCT-M4 (2026-10-20, decision #297): the guest's OTHER
+  // ADD-ONS draft for Step 2.
+  //
+  // The state is the QUANTITY per (service date × add-on) cell, keyed
+  // `yyyy-mm-dd-{addOnId}`. The full selection map
+  // (`OtherAddOnSelectionEntry[]` per date) is DERIVED from it by the
+  // shared `buildOtherAddOnDraftSelections` helper, so the price /
+  // name / unit snapshots always come from the catalog rather than
+  // from a second copy of the truth.
+  //
+  // The server REBUILDS every entry from the live catalog on create
+  // (the OCT-C2 price-authority rule), so these snapshots are
+  // advisory — they exist so the grid can quote a total that matches
+  // the bill.
+  const [otherAddOnQuantities, setOtherAddOnQuantities] = useState<Record<string, number>>({});
   // Per BI-03 (booking-intercom audit 2026-07-06): the widget is
   // rendered through the shared `useTurnstileToken` hook, gated on
   // the review step (the only step whose JSX contains the
@@ -1957,6 +2022,16 @@ export function BookingPage() {
           // and recomputes `breakfastTotal` from
           // `recomputeBreakfastTotal(breakfastSelections)`.
           breakfastSelections,
+          // Per OCT-M4 (2026-10-20, decision #297): the guest's
+          // other-add-ons draft (per service date × per add-on).
+          //
+          // The values are ADVISORY: the server rebuilds every entry
+          // from the live `addOns` catalog (catalog price + name +
+          // unit), so a client-supplied price is never persisted and
+          // an add-on that is no longer on sale is refused. The
+          // client snapshots exist so the Step 2 grid can quote a
+          // total that matches the bill.
+          otherAddOnSelections: otherAddOnDraft,
           // Per CHD-10: the adult/child split. `numAdults` is
           // derived from `guests - numChildren` in the client.
           // The server uses these to compute the breakfast total
@@ -2257,17 +2332,92 @@ export function BookingPage() {
 // `isScreenLoading` is true and that early return fires, so any hook
 // declared AFTER it would only be called on the second render — which
 // is exactly the "Rendered more hooks than during the previous render"
-// (#310) crash. The `useEffect` that clears this notice on copy
-// lives further down but is gated on a render-path that only exists
-// past the early return, so it is also declared above.
-const [breakfastCopyNotice, setBreakfastCopyNotice] = useState<string>("");
+// (#310) crash.
+//
+// Per OCT-M8 (2026-10-20, decision #294): the notice used to be a
+// bare string that was NEVER cleared (the comment above claimed a
+// clearing effect existed "further down" — it did not) and it was
+// rendered INSIDE the per-date map, so on a 3-night stay the guest
+// saw "Applied these choices to 2 remaining days." THREE times, in
+// three different date cards, and it stayed for the rest of the
+// session — including after the guest edited a meal, where it falsely
+// implied the copy was still in effect.
+//
+// The notice now carries the DATE it belongs to, so it renders
+// exactly ONCE (in the card the guest acted on) and it is cleared
+// after a short delay or as soon as the guest changes a meal.
+const [breakfastCopyNotice, setBreakfastCopyNotice] = useState<
+  BreakfastCopyNotice | null
+>(null);
+
+// Per OCT-M8 (2026-10-20, decision #294): auto-clear the copy
+// confirmation. Declared ABOVE the loading early return (per the
+// REACT HOOKS RULE above) so the hook order never changes between
+// renders.
+useEffect(() => {
+  if (!breakfastCopyNotice) return;
+  const timer = window.setTimeout(
+    () => setBreakfastCopyNotice(null),
+    BREAKFAST_COPY_NOTICE_TIMEOUT_MS
+  );
+  return () => window.clearTimeout(timer);
+}, [breakfastCopyNotice]);
+
+// Per OCT-M4 (2026-10-20, decision #297): the guest's other-add-ons
+// catalog + draft.
+//
+// The catalog comes from the PUBLIC endpoint
+// `GET /api/bookings/addons/config` (the Admin-SDK read path — the
+// guest app never reads the `addOns` collection directly, per the
+// Firestore rules). That endpoint honours the hotel-wide
+// "Add-ons enabled" master switch (OCT-M1, decision #295): when the
+// hotel has taken other add-ons off sale it returns an EMPTY catalog,
+// so the Step 2 grid disappears entirely rather than offering
+// something the guest cannot buy.
+const otherAddOnsCatalog = useOtherAddOnsCatalog();
+
+// The stay's service dates — one per night. The same helper the
+// breakfast section uses, so both grids cover exactly the same days.
+const otherAddOnDates = useMemo(
+  () => enumerateBreakfastDates(checkIn, checkOut),
+  [checkIn, checkOut]
+);
+
+// The draft selection map derived from the quantities.
+const otherAddOnDraft = useMemo(
+  () =>
+    buildOtherAddOnDraftSelections({
+      catalog: otherAddOnsCatalog.addOns,
+      dates: otherAddOnDates,
+      quantities: otherAddOnQuantities,
+      guestCount: guests
+    }),
+  [otherAddOnsCatalog.addOns, otherAddOnDates, otherAddOnQuantities, guests]
+);
+
+// The other-add-ons total + how many (date × add-on) rows carry a
+// quantity. Both feed the union CTA.
+const otherAddOnTotal = useMemo(
+  () => recomputeOtherAddOnTotal(otherAddOnDraft),
+  [otherAddOnDraft]
+);
+const otherAddOnCount = useMemo(
+  () => countOtherAddOnDraftSelections(otherAddOnDraft),
+  [otherAddOnDraft]
+);
 
 // Per MBUX-05 (decision #257): the number of breakfast SLOTS chosen.
-// Step 2 currently has breakfast only — the "other add-ons" the spec
-// describes are not implemented in the guest flow yet, so this is
-// deliberately derived from breakfast selections alone rather than
-// hardcoded to a wider formula that does not exist yet.
-const addOnCount = Object.keys(breakfastSelections).length;
+//
+// Per OCT-M4 (decision #297) the Step 2 CTA now covers the UNION of
+// breakfast AND other add-ons — the BR-10 dual-button pattern was
+// never scoped to breakfast alone, and the "without add-ons" branch
+// of the CTA has to mean "without add-ons of ANY kind".
+const breakfastAddOnCount = Object.keys(breakfastSelections).length;
+const addOnCount = breakfastAddOnCount + otherAddOnCount;
+// The quoted figure is the ADD-ONS total (breakfast + other
+// add-ons) — the same convention the CTA used before other add-ons
+// existed. It is NOT the room bill; the review step shows that.
+const addOnsTotal = breakfastTotal + otherAddOnTotal;
 
   const isScreenLoading = roomsLoading || settingsLoading;
 
@@ -2559,9 +2709,7 @@ const addOnCount = Object.keys(breakfastSelections).length;
                           // number of dates that ACTUALLY changed, so it
                           // can never overstate what the tap did.
                           setBreakfastCopyNotice(
-                            result.updatedDates === 0
-                              ? "Those choices are already set on every remaining day."
-                              : `Applied these choices to ${result.updatedDates} remaining day${result.updatedDates === 1 ? "" : "s"}.`
+                            buildBreakfastCopyNotice(date, result.updatedDates)
                           );
                         }}
                       >
@@ -2569,14 +2717,14 @@ const addOnCount = Object.keys(breakfastSelections).length;
                       </button>
                     );
                   })()}
-                  {breakfastCopyNotice ? (
+                  {shouldShowBreakfastCopyNotice(breakfastCopyNotice, date) ? (
                     <p
                       role="status"
                       aria-live="polite"
                       data-testid={`breakfast-copy-notice-${date}`}
                       className="mt-2 text-xs font-medium text-gray-700"
                     >
-                      {breakfastCopyNotice}
+                      {breakfastCopyNotice.message}
                     </p>
                   ) : null}
                   <div className="mt-3 space-y-2">
@@ -2603,6 +2751,11 @@ const addOnCount = Object.keys(breakfastSelections).length;
                             disabled={cutoff.isLocked}
                             onChange={(event) => {
                               const mealId = event.target.value;
+                              // Per OCT-M8 (decision #294): editing a
+                              // meal invalidates the copy confirmation
+                              // — it would otherwise imply the copy is
+                              // still in effect for the other days.
+                              setBreakfastCopyNotice(null);
                               setBreakfastSelections((prev) => {
                                 const next = { ...prev };
                                 if (!mealId) {
@@ -2749,6 +2902,46 @@ const addOnCount = Object.keys(breakfastSelections).length;
                 </p>
               </motion.div>
             )}
+            {/* Per OCT-M4 (2026-10-20, decision #297): the guest
+                Step 2 "Other Add-Ons" grid.
+
+                BR-12 shipped the catalog, the staff walk-in grid and
+                the post-booking "Manage Other Add-Ons" page — but
+                the GUEST booking flow never had one. `BookingPage`
+                contained ZERO occurrences of "otherAddOn", so a
+                guest could not order an airport transfer at booking
+                time at all and the spec's headline BR-12 flow was
+                unreachable.
+
+                Per `OTHER-ADD-ONS.md` the grid renders BELOW the
+                breakfast section, and the BR-10 dual-button pattern
+                covers both kinds of add-on — the "without add-ons"
+                branch means the union, not breakfast alone.
+
+                The section renders NOTHING when the catalog is empty
+                or the hotel has taken other add-ons off sale
+                (OCT-M1) — an empty grid under a heading reads as a
+                broken page. */}
+            <OtherAddOnsStep2Section
+              addOns={otherAddOnsCatalog.addOns}
+              dates={otherAddOnDates}
+              checkIn={checkIn}
+              guestCount={guests}
+              quantities={otherAddOnQuantities}
+              onQuantityChange={(date, addOnId, quantity) => {
+                const key = otherAddOnDraftKey(date, addOnId);
+                setOtherAddOnQuantities((prev) => {
+                  const next = { ...prev };
+                  if (quantity <= 0) delete next[key];
+                  else next[key] = quantity;
+                  return next;
+                });
+              }}
+              formatPrice={formatPrice}
+              formatDateLabel={formatBreakfastDateLabel}
+              isLoading={otherAddOnsCatalog.isLoading}
+              error={otherAddOnsCatalog.error}
+            />
           </motion.form>
 
           <BookingReviewAside
@@ -2812,6 +3005,9 @@ const addOnCount = Object.keys(breakfastSelections).length;
             // cart state, so the per-date breakdown
             // is identical.
             breakfastSelections={breakfastSelections}
+            // Per OCT-H9 (2026-10-20, decision #283): gate the
+            // guest-side VAT lines on the admin's Tax toggle.
+            vatEnabled={vatEnabled}
           />
         </section>
 
@@ -2825,7 +3021,7 @@ const addOnCount = Object.keys(breakfastSelections).length;
               <p className="text-lg font-semibold text-gray-950">
                 {addOnCount === 0
                   ? "No add-ons selected"
-                  : `${addOnCount} breakfast selection${addOnCount === 1 ? "" : "s"} · ${formatPrice(breakfastTotal)}`}
+                  : `${addOnCount} add-on${addOnCount === 1 ? "" : "s"} selected · ${formatPrice(addOnsTotal)}`}
               </p>
             </>
           }
@@ -2843,10 +3039,22 @@ const addOnCount = Object.keys(breakfastSelections).length;
                   - no selections  -> "Continue without add-ons"
                   - any selections -> "Continue with N add-ons · total"
 
-                The count is the number of BREAKFAST SLOTS chosen and the
-                figure is `breakfastTotal` — the SAME value the review
-                step and the create payload use, so the CTA can never
+                The count and the figure cover the UNION of breakfast
+                AND other add-ons.
+
+                Per OCT-M4 (2026-10-20, decision #297) the count is
+                the breakfast SLOTS chosen plus the other-add-on
+                (date × add-on) rows, and the figure is
+                `breakfastTotal + otherAddOnTotal` — the SAME values
+                the create payload carries, so the CTA can never
                 quote a total that differs from the bill.
+
+                Per BR-12 the other add-ons are NOT inside the room
+                bill: they are added on top of it for the balance
+                (`plan/features/OTHER-ADD-ONS.md` decision 2), so the
+                figure quoted here is the ADD-ONS total, not the
+                whole stay — the same convention the CTA used before
+                other add-ons existed.
 
                 SCOPE: this is the public `/book` flow only. The
                 corporate flow keeps its BR-10 pair until MBUX-09 does
@@ -2862,7 +3070,7 @@ const addOnCount = Object.keys(breakfastSelections).length;
               ) : (
                 <>
                   Continue with {addOnCount} add-on{addOnCount === 1 ? "" : "s"} ·{" "}
-                  {formatPrice(breakfastTotal)}
+                  {formatPrice(addOnsTotal)}
                 </>
               )}
             </PrimaryButton>
@@ -3136,6 +3344,9 @@ const addOnCount = Object.keys(breakfastSelections).length;
             // cart state (separate call site below),
             // so both sidebars render the same shape.
             breakfastSelections={breakfastSelections}
+            // Per OCT-H9 (2026-10-20, decision #283): gate the
+            // guest-side VAT lines on the admin's Tax toggle.
+            vatEnabled={vatEnabled}
           />
         </section>
 
@@ -3992,6 +4203,9 @@ const addOnCount = Object.keys(breakfastSelections).length;
             // cart state, so the per-date breakdown
             // is identical.
             breakfastSelections={breakfastSelections}
+            // Per OCT-H9 (2026-10-20, decision #283): gate the
+            // guest-side VAT lines on the admin's Tax toggle.
+            vatEnabled={vatEnabled}
           />
         </section>
 
@@ -5323,6 +5537,13 @@ interface BookingReviewAsideProps {
   // entry's `price` snapshot at capture time.
   // plan).
   breakfastSelections?: Record<string, BreakfastSelectionEntry> | null;
+  // Per OCT-H9 (2026-10-20, decision #283): whether the
+  // admin's Tax (VAT) toggle is ON. Threaded down from
+  // `BookingPage` (which owns the `usePublicSiteContent`
+  // subscription) so the aside does not open a second
+  // one. Defaults to `true` — the BIR-compliant default
+  // when the snapshot is missing.
+  vatEnabled?: boolean;
 }
 
 function BookingReviewAside({
@@ -5356,7 +5577,9 @@ function BookingReviewAside({
   // boolean` + `breakfastRate: number` +
   // `breakfastIncludesChildren: boolean` props are deleted;
   // the sidebar reads the new shape only.
-  breakfastSelections = null
+  breakfastSelections = null,
+  // Per OCT-H9 (2026-10-20, decision #283).
+  vatEnabled = true
 }: BookingReviewAsideProps) {
   const roomTotal = useMemo(() => {
     if (!typeRates || !typeValue) return 0;
@@ -5551,11 +5774,27 @@ function BookingReviewAside({
                     (RA 9994) is the VAT-exempt portion when
                     the booking carried one. Mirrors the same
                     three lines on the receipt PDF + XLSX
-                    export + admin booking drawer. */}
-                {(() => {
+                    export + admin booking drawer.
+
+                    Per OCT-H9 (2026-10-20, decision #283): this
+                    block was NOT gated on the admin's Tax (VAT)
+                    toggle, so a hotel that had switched VAT off
+                    still saw "VATable Sales / VAT-Exempt Sales /
+                    VAT Amount (12% × VATable)" on the guest's
+                    booking page — the ONE surface VAT-01's
+                    "must not display on any bill surface"
+                    requirement missed. The sibling
+                    `<PriceBreakdown>` component was already
+                    gated (`PriceBreakdown.tsx:102`); this
+                    fallback branch is the PRE-SUBMISSION live
+                    preview, so it was the one the guest actually
+                    sees before booking. Both are now gated on
+                    `isVatEnabled(vatConfig)`. */}
+                {vatEnabled ? (() => {
                   const vat = calculateVatBreakdown({
                     totalPrice: total,
-                    seniorDiscountAmount: discountPct > 0 ? discountAmount : 0
+                    seniorDiscountAmount: discountPct > 0 ? discountAmount : 0,
+                    vatRate: vatEnabled ? 0.12 : 0
                   });
                   return (
                     <div className="mt-2 space-y-1 border-t border-dashed border-gray-200 pt-2 text-[11px] text-gray-500">
@@ -5573,7 +5812,7 @@ function BookingReviewAside({
                       </div>
                     </div>
                   );
-                })()}
+                })() : null}
               </>
             )}
           </div>

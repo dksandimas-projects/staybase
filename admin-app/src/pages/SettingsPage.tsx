@@ -68,6 +68,12 @@ import {
   // pre-seed constant seeds the first "Airport transfer" row
   // on a brand-new install.
   AIRPORT_TRANSFER_PRESEED,
+  // Per OCT-M1 (2026-10-20, decision #295): the normalizer for the
+  // hotel-wide "Add-ons enabled" master switch
+  // (`settings/hotelConfig.otherAddOnsEnabled`). Shared with the
+  // server so the admin's stored value and the value the public
+  // catalog endpoint reads can never disagree on what "off" means.
+  normalizeOtherAddOnsEnabled,
   type AddOn,
   // Per Phase 2 of the Spark Rewards tier system (2026-10-12):
   // Zod schema + inferred types for the settings/rewardsConfig
@@ -84,7 +90,7 @@ import {
   // "Airport transfer" row on a brand-new install.
   AddOnSchema
 } from "@spark-inn/shared/schemas/booking";
-import { BreakfastConfigSchema } from "@spark-inn/shared/schemas/booking";
+import { BreakfastConfigSchema, BreakfastMealSchema } from "@spark-inn/shared/schemas/booking";
 import {
   Settings, Globe, Gift, Coffee, ShoppingBag,
   Save, Landmark, Sparkles, Check, CheckSquare, Square,
@@ -2567,6 +2573,64 @@ export function SettingsPage() {
       : "0"
   );
 
+  // Per OCT-H3 (2026-10-20, decision #282): the three Booking &
+  // Holds inputs above were initialized from `hotelConfig` with
+  // `useState`'s lazy initializer, which only runs on the FIRST
+  // render — BEFORE the Firestore snapshot lands. On a direct
+  // load of `/settings` (F5 / bookmark / shared URL) the fields
+  // were therefore stuck at the pre-snapshot defaults, and the
+  // next save of an UNRELATED field silently rewrote the stored
+  // policy: a hotel that had set the stay cap to "no limit"
+  // (`0`) had it replaced with `30`, with the field still
+  // displaying "30" so there was no signal that anything
+  // changed. The guest site then started refusing 31+ night
+  // stays it previously accepted.
+  //
+  // The fix re-syncs each input from the snapshot, but ONLY when
+  // that field's SOURCE value actually changed since the last
+  // sync. A snapshot that arrives while the admin is mid-typing
+  // therefore cannot clobber the in-progress edit, while the
+  // initial hydration (and any genuine external change) does
+  // land.
+  const holdsFormSyncRef = useRef<{
+    paymentHoldWindowHours: string;
+    inFlowHoldMinutes: string;
+    maxStayNights: string;
+  } | null>(null);
+
+  useEffect(() => {
+    const next = {
+      paymentHoldWindowHours: String(hotelConfig.paymentHoldWindowHours),
+      inFlowHoldMinutes: String(hotelConfig.inFlowHoldMinutes),
+      // `resolveMaxStayNights` maps the stored `0` ("no limit")
+      // to `Infinity`; render it back as the literal `0` the
+      // admin saved so the field round-trips.
+      maxStayNights: Number.isFinite(hotelConfig.maxStayNights)
+        ? String(hotelConfig.maxStayNights)
+        : "0"
+    };
+    const prev = holdsFormSyncRef.current;
+    holdsFormSyncRef.current = next;
+    // First run: the snapshot has not landed yet, so these are
+    // the pre-snapshot defaults the `useState` initializers
+    // already used. Record them WITHOUT touching the inputs so
+    // the real snapshot is treated as a genuine change.
+    if (!prev) return;
+    if (prev.paymentHoldWindowHours !== next.paymentHoldWindowHours) {
+      setPaymentHoldWindowHoursInput(next.paymentHoldWindowHours);
+    }
+    if (prev.inFlowHoldMinutes !== next.inFlowHoldMinutes) {
+      setInFlowHoldMinutesInput(next.inFlowHoldMinutes);
+    }
+    if (prev.maxStayNights !== next.maxStayNights) {
+      setMaxStayNightsInput(next.maxStayNights);
+    }
+  }, [
+    hotelConfig.paymentHoldWindowHours,
+    hotelConfig.inFlowHoldMinutes,
+    hotelConfig.maxStayNights
+  ]);
+
   // `0` = no limit is a LEGAL value here, so this cannot use
   // `clampIntegerInRange` (whose `min` is >= 1 for every other field).
   // Rejects: blank, non-numeric, fractional, negative, and anything
@@ -2833,12 +2897,59 @@ export function SettingsPage() {
   //     it for instant render after a write.
   const [addOnsCatalog, setAddOnsCatalog] = useState<AddOn[]>([]);
   const [addOnsCatalogLoading, setAddOnsCatalogLoading] = useState(true);
+  // Per OCT-C3 (2026-10-20, audit `plan/project/AUDIT-OCTOBER-2026.md`):
+  // the `onSnapshot` error handler used to swallow the failure and
+  // just clear the loading flag, so a PERMISSION_DENIED read
+  // rendered the SAME "No add-ons yet" empty state as a genuinely
+  // empty catalog — telling the admin to create a row that already
+  // existed and that they could not read. Surface the failure.
+  const [addOnsCatalogError, setAddOnsCatalogError] = useState<string | null>(null);
   const [editingAddOnId, setEditingAddOnId] = useState<string | null>(null);
   const [editingAddOnDraft, setEditingAddOnDraft] = useState<AddOn | null>(null);
-  const [addOnsEnabled, setAddOnsEnabled] = useState(true);
+  // Per OCT-M1 (2026-10-20, decision #295): the hotel-wide
+  // "Add-ons enabled" master switch.
+  //
+  // This used to be a bare `useState(true)` — no Firestore read, no
+  // write, no localStorage mirror — while the copy under it claimed
+  // that turning it off would empty every `getEnabledAddOnsByHotel`
+  // call. An admin who flipped it believed other add-ons were off
+  // sale while guests kept buying the airport transfer.
+  //
+  // It is now REAL: the value persists to
+  // `settings/hotelConfig.otherAddOnsEnabled` and the public
+  // `/api/bookings/addons/config` endpoint reads it, so "off" means
+  // the guest-facing catalog is genuinely empty.
+  const [addOnsEnabled, setAddOnsEnabled] = useState(
+    normalizeOtherAddOnsEnabled(hotelConfig.otherAddOnsEnabled)
+  );
+  // Per OCT-M1: the sync guard for the switch above. Mirrors the
+  // OCT-H3 (decision #282) pattern used by the Booking & Holds
+  // inputs — `useState`'s lazy initializer only runs on the FIRST
+  // render, which is BEFORE the Firestore snapshot lands, so a
+  // direct load of `/settings` would show the pre-snapshot default
+  // instead of the stored value. The ref records the last SEEN
+  // snapshot value so a snapshot that arrives while the admin is
+  // mid-toggle cannot clobber the in-progress change.
+  const addOnsEnabledSyncRef = useRef<boolean | null>(null);
   const [confirmDeleteAddOn, setConfirmDeleteAddOn] = useState<AddOn | null>(null);
   const [addOnSaveStatus, setAddOnSaveStatus] = useState<SettingsSaveStatus>("idle");
   const [addOnSaveError, setAddOnSaveError] = useState<string | null>(null);
+
+  // Per OCT-M1 (decision #295): re-sync the master switch from the
+  // live `settings/hotelConfig` snapshot. Only a GENUINE change in
+  // the SOURCE value lands, so a snapshot that arrives while the
+  // admin is mid-toggle cannot clobber the in-progress change.
+  useEffect(() => {
+    const next = normalizeOtherAddOnsEnabled(hotelConfig.otherAddOnsEnabled);
+    const prev = addOnsEnabledSyncRef.current;
+    addOnsEnabledSyncRef.current = next;
+    // First run: the snapshot has not landed yet, so this is the
+    // pre-snapshot default the `useState` initializer already used.
+    // Record it WITHOUT touching the state so the real snapshot is
+    // treated as a genuine change.
+    if (prev === null) return;
+    if (prev !== next) setAddOnsEnabled(next);
+  }, [hotelConfig.otherAddOnsEnabled]);
 
   // Live snapshot of the `addOns` collection — the
   // source of truth. The tab mutates this directly via
@@ -2888,9 +2999,15 @@ export function SettingsPage() {
         });
         setAddOnsCatalog(rows);
         setAddOnsCatalogLoading(false);
+        setAddOnsCatalogError(null);
       },
-      () => {
+      (err) => {
         setAddOnsCatalogLoading(false);
+        setAddOnsCatalogError(
+          err?.message
+            ? `Could not load the other add-ons catalog: ${err.message}`
+            : "Could not load the other add-ons catalog."
+        );
       }
     );
     return () => unsub();
@@ -4468,6 +4585,35 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
   // object is deleted LAST, after the row no longer references it.
   // Reversing either step can leave the guest menu strip pointing at a
   // deleted file — a broken image in front of a paying guest.
+  // Per OCT-H10 (2026-10-20, decision #284): a meal-photo change is
+  // PERSISTED immediately, so the guest-facing catalog never lags
+  // the admin's screen. Before this, the upload only mutated local
+  // state and toasted "Meal image uploaded" — the guest still saw
+  // no photo until the admin separately pressed Save, and
+  // navigating away orphaned the Storage object so the upload
+  // appeared lost.
+  //
+  // Only the `meals` array is written (`updateSettings` merges at
+  // the top level of the doc), so the rest of the Dining form keeps
+  // its own Save semantics — an unsaved cut-off-time edit is never
+  // committed as a side effect of a photo action.
+  const persistBreakfastMeals = async (meals: BreakfastMeal[]) => {
+    const parsed = BreakfastMealSchema.array().safeParse(meals);
+    if (!parsed.success) {
+      const firstIssue = parsed.error.issues[0];
+      toast.error(
+        "Could not save the meal photo",
+        firstIssue?.message ?? "The meal row is invalid — fix it and try again."
+      );
+      return false;
+    }
+    return updateSettings("breakfastConfig", {
+      meals: parsed.data,
+      updatedBy: currentUser?.uid || currentUser?.email || "staff",
+      updatedAt: new Date().toISOString()
+    });
+  };
+
   const handleUploadBreakfastMealImage = async (mealId: string, file: File | undefined) => {
     if (!file) return;
     const previousUrl = breakfastMeals.find((meal) => meal.id === mealId)?.imageUrl;
@@ -4475,9 +4621,18 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
     try {
       const result = await uploadBreakfastMealImage(mealId, file);
       if (result.success && result.url) {
+        // Per OCT-H10: build the next array explicitly (the
+        // `setBreakfastMeals` state update is async, so reading
+        // `breakfastMeals` inside the same tick would still see the
+        // OLD array) and persist it right away.
+        const nextMeals = applyBreakfastMealPatch(breakfastMeals, mealId, { imageUrl: result.url });
         handleUpdateBreakfastMeal(mealId, { imageUrl: result.url });
-        if (previousUrl) {
-          void removeBreakfastMealImage(mealId, previousUrl);
+        const saved = await persistBreakfastMeals(nextMeals);
+        if (saved) {
+          if (previousUrl) {
+            void removeBreakfastMealImage(mealId, previousUrl);
+          }
+          toast.success("Meal image uploaded");
         }
       }
     } finally {
@@ -4495,22 +4650,65 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
   const handleRemoveBreakfastMealImage = async (mealId: string) => {
     const previousUrl = breakfastMeals.find((meal) => meal.id === mealId)?.imageUrl;
     if (!previousUrl) return;
+    // Per OCT-H10: persist the removal immediately, for the same
+    // reason as the upload. The Storage object is deleted only
+    // AFTER the row no longer references it, so the guest menu can
+    // never point at a deleted file.
+    const nextMeals = applyBreakfastMealPatch(breakfastMeals, mealId, { imageUrl: undefined });
     handleUpdateBreakfastMeal(mealId, { imageUrl: undefined });
+    const saved = await persistBreakfastMeals(nextMeals);
+    if (!saved) return;
     await removeBreakfastMealImage(mealId, previousUrl);
     toast.success("Meal image removed");
   };
+
+  // Per OCT-H5 (2026-10-20, decision #283) + OCT-H10 (decision
+  // #284): the ONE place a meal-row patch is applied. The inline
+  // editors, the photo upload and the photo removal all route
+  // through it, so the `undefined`-key rule is enforced identically
+  // on every path.
+  //
+  // WHY THE RULE EXISTS: object spread copies own enumerable keys
+  // INCLUDING undefined-valued ones, so a `{ imageUrl: undefined }`
+  // patch left the meal object OWNING an `imageUrl` key with the
+  // value `undefined`. Zod's `.optional()` validates the VALUE, not
+  // the key's presence, so the bad payload passed schema validation
+  // and then threw `Unsupported field value: undefined` at the
+  // Firestore SDK boundary — which made EVERY Dining settings save
+  // fail, not just the image removal.
+  //
+  // The fix drops undefined-valued keys from the patch so the key is
+  // simply ABSENT, and — when the patch explicitly cleared a
+  // previously-set optional field — removes the key from the merged
+  // meal so neither the stale value nor an unwritable `undefined`
+  // can survive.
+  const applyBreakfastMealPatch = (
+    meals: BreakfastMeal[],
+    id: string,
+    patch: Partial<Omit<BreakfastMeal, "id" | "createdAt">>
+  ): BreakfastMeal[] =>
+    meals.map((meal) => {
+      if (meal.id !== id) return meal;
+      const patchKeys = Object.keys(patch);
+      const cleanPatch = Object.fromEntries(
+        Object.entries(patch).filter(([, value]) => value !== undefined)
+      ) as Partial<Omit<BreakfastMeal, "id" | "createdAt">>;
+      const next = { ...meal, ...cleanPatch, updatedAt: new Date().toISOString() };
+      if (patchKeys.includes("imageUrl") && cleanPatch.imageUrl === undefined) {
+        // The photo was removed: the key must be GONE (so the
+        // rewritten `meals` array element has no `imageUrl`), not
+        // left as `undefined` (unwritable) and not left holding the
+        // old URL (which would point at a deleted Storage object).
+        delete (next as { imageUrl?: string }).imageUrl;
+      }
+      return next;
+    });
 
   const handleUpdateBreakfastMeal = (
     id: string,
     patch: Partial<Omit<BreakfastMeal, "id" | "createdAt">>
   ) => {
-    setBreakfastMeals((prev) =>
-      prev.map((meal) =>
-        meal.id === id
-          ? { ...meal, ...patch, updatedAt: new Date().toISOString() }
-          : meal
-      )
-    );
+    setBreakfastMeals((prev) => applyBreakfastMealPatch(prev, id, patch));
   };
 
   const handleDeleteBreakfastMeal = (id: string) => {
@@ -6834,22 +7032,49 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                 </p>
               </div>
 
-              {/* Hotel-wide setting: add-ons enabled. Per BR-12.1
-                  the toggle is a UI affordance that hides the
-                  Step 2 block + the drawer section + the Manage
-                  page when off. The booking flow's
-                  `getEnabledAddOnsByHotel` already returns `[]`
-                  when the catalog is empty; this is the explicit
-                  hotel-wide off switch. Persisted as part of the
-                  hotelConfig in a follow-up ticket — for v1 the
-                  toggle is a client-side local state with a
-                  localStorage mirror so the test pins its
-                  behavior. */}
+              {/* Hotel-wide setting: add-ons enabled. Per OCT-M1
+                  (2026-10-20, decision #295) this switch is now
+                  REAL. It used to be a bare `useState` with no
+                  persistence at all — no Firestore read, no write,
+                  no localStorage mirror — while the copy under it
+                  claimed that turning it off would empty every
+                  `getEnabledAddOnsByHotel` call. An admin who
+                  flipped it believed other add-ons were off sale
+                  while guests kept buying the airport transfer.
+
+                  It now persists to
+                  `settings/hotelConfig.otherAddOnsEnabled` and
+                  `GET /api/bookings/addons/config` reads it, so
+                  "off" genuinely empties the guest-facing catalog.
+                  The per-row Status toggle in the catalog table
+                  below stays the finer-grained control: it takes
+                  ONE add-on off sale while this switch takes the
+                  whole category off. */}
               <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-4">
                 <label className="flex items-center gap-3 cursor-pointer text-xs font-bold text-gray-800">
                   <button
                     type="button"
-                    onClick={() => setAddOnsEnabled(!addOnsEnabled)}
+                    onClick={() => {
+                      const next = !addOnsEnabled;
+                      setAddOnsEnabled(next);
+                      setAddOnSaveError(null);
+                      // Persist through the same `settings/hotelConfig`
+                      // channel every other hotel-wide setting uses.
+                      // `updateSettings` surfaces its own failure
+                      // toast; the local state is reverted so the
+                      // switch never shows a value that is not
+                      // stored.
+                      void updateSettings("hotelConfig", {
+                        otherAddOnsEnabled: next
+                      }).then((ok) => {
+                        if (!ok) {
+                          setAddOnsEnabled(!next);
+                          setAddOnSaveError(
+                            "Failed to save the add-ons switch. The previous setting is still in effect."
+                          );
+                        }
+                      });
+                    }}
                     data-testid="addons-enabled-toggle"
                     className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
                       addOnsEnabled ? "bg-primary" : "bg-gray-200"
@@ -6864,10 +7089,37 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                   Add-ons enabled
                 </label>
                 <p className="text-[10px] text-gray-500 leading-relaxed">
-                  When off, every <code>getEnabledAddOnsByHotel</code> call returns an empty list
-                  and the booking flow's Add-ons section shows the "Add-ons are currently disabled"
-                  placeholder. Existing bookings with snapshotted add-ons keep their entries.
+                  {/* Per OCT-M1 (2026-10-20, decision #295): the copy
+                      now matches the behaviour. The switch persists
+                      to `settings/hotelConfig.otherAddOnsEnabled` and
+                      the public `/api/bookings/addons/config` endpoint
+                      reads it, so turning it off genuinely empties
+                      the guest-facing catalog — the booking flow's
+                      add-ons grid and the guest Manage page both show
+                      the "Add-ons are currently disabled" state.
+
+                      The previous copy claimed this effect while the
+                      switch was a dead `useState` (audit OCT-M1), and
+                      an earlier revision admitted it was NOT wired up
+                      at all. Neither matched reality; this one does. */}
+                  When off, other add-ons are hidden from guests across
+                  the whole site — the booking flow, the guest{" "}
+                  <strong>Manage</strong> page, and the staff booking
+                  drawer — and the add-ons grid shows the{" "}
+                  <strong>Add-ons are currently disabled</strong> state.
+                  This saves immediately. To take a single add-on off
+                  sale instead, switch its <strong>Status</strong> to{" "}
+                  <strong>Off</strong> in the catalog table below.
                 </p>
+                {addOnSaveError ? (
+                  <p
+                    role="alert"
+                    data-testid="addons-enabled-error"
+                    className="text-[10px] font-semibold text-red-600"
+                  >
+                    {addOnSaveError}
+                  </p>
+                ) : null}
               </div>
 
               {/* Catalog sub-section: table of all addOns/{id} docs
@@ -6907,6 +7159,25 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
 
                 {addOnsCatalogLoading ? (
                   <p className="text-[10px] text-gray-500">Loading catalog…</p>
+                ) : addOnsCatalogError ? (
+                  // Per OCT-C3 (2026-10-20): a failed read must NOT
+                  // masquerade as an empty catalog. Before this, a
+                  // PERMISSION_DENIED read rendered the "No add-ons
+                  // yet" panel below, which told the admin to create
+                  // a row that may already have existed.
+                  <div
+                    data-testid="addons-catalog-error"
+                    role="alert"
+                    className="rounded-lg border border-red-200 bg-red-50 p-4 text-[11px] text-red-700"
+                  >
+                    <p className="font-bold">Could not load the other add-ons catalog.</p>
+                    <p className="mt-1">{addOnsCatalogError}</p>
+                    <p className="mt-2 text-red-600">
+                      The catalog is stored in the <code>addOns</code> collection. If this says
+                      &ldquo;Missing or insufficient permissions&rdquo;, the Firestore rules may
+                      not have been deployed yet.
+                    </p>
+                  </div>
                 ) : addOnsCatalog.length === 0 ? (
                   <div
                     data-testid="addons-catalog-empty"

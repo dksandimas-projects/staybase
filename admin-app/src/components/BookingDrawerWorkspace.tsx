@@ -113,6 +113,22 @@ interface BookingDrawerWorkspaceHeaderProps {
   onSectionChange: (section: BookingDrawerSection) => void;
   totalPaid: number;
   balance: number;
+  /**
+   * Per OCT-FOL-01 (2026-10-20, decision #298): the folio's grand
+   * total for this booking — the base the `balance` is derived from
+   * (room + breakfast + extra bed + other add-ons + store charges +
+   * incidental charges).
+   *
+   * The strip's "Total" metric used to read `booking.totalPrice`,
+   * which is NOT the balance's base: the folio also carries the
+   * other add-ons and the extras, and for a multi-room reservation
+   * `totalPrice` is the CHILD's while the balance is the
+   * RESERVATION's. So the three strip metrics (Total / Paid /
+   * Balance) did not reconcile. The parent passes the folio's grand
+   * total; this component falls back to `booking.totalPrice` when
+   * it is not supplied.
+   */
+  folioTotal?: number | null;
   missingCheckInItems: string[];
   // Per WPM-06 (2026-07-31): the header used to render the raw
   // `booking.paymentMethod` key (e.g. "gcash" instead of "GCash"). The
@@ -167,6 +183,7 @@ export function BookingDrawerWorkspaceHeader({
   onSectionChange,
   totalPaid,
   balance,
+  folioTotal,
   missingCheckInItems,
   paymentMethodLabel,
   latestPaymentReference
@@ -256,7 +273,7 @@ export function BookingDrawerWorkspaceHeader({
           </div>
 
           <div className="grid grid-cols-3 gap-2 lg:min-w-[320px]">
-            <SummaryMetric label="Total" value={formatPrice(booking.totalPrice)} />
+            <SummaryMetric label="Total" value={formatPrice(folioTotal ?? booking.totalPrice)} />
             <SummaryMetric label="Paid" value={formatPrice(totalPaid)} />
             <SummaryMetric
               label={balance > 0 ? "Balance" : balance < 0 ? "Overpaid" : "Settled"}
@@ -2055,21 +2072,44 @@ export function BookingDrawerOtherAddOnsTab({
   // Per (date, addOnId) lock state. The lock is per-add-on
   // (not per-hotel) so we walk every row + every catalog
   // row to compute the union of locked keys.
+  //
+  // Per OCT-M5 (2026-10-20, decision #292): the cut-off anchor
+  // is the BOOKING's check-in date, NOT the row's own service
+  // date. The rule (per OTHER-ADD-ONS.md §Cutoff Model) is
+  // "`cutoffHoursBeforeCheckIn` hours before each `checkIn`
+  // date", and the field is literally named
+  // `cutoffHoursBeforeCheckIn`. The per-service-date anchor slid
+  // the lock forward one day per row, so the guest could add a
+  // transfer a full day past the hotel's stated cut-off — and
+  // this drawer showed the SAME wrong lock state to the desk.
   const perSelectionLocked = useMemo(() => {
     const out: Record<string, boolean> = {};
     if (!catalog) return out;
+    // The admin mapper stores `checkIn` as a `YYYY-MM-DD` key.
+    const bookingCheckIn = String(booking.checkIn || "").trim();
+    if (!bookingCheckIn) {
+      // No check-in date → the server refuses the write outright
+      // (`BOOKING_CHECK_IN_MISSING`), so the drawer must not offer
+      // an editable row either.
+      for (const date of dates) {
+        for (const cat of catalog) {
+          out[`${date}-${cat.id}`] = true;
+        }
+      }
+      return out;
+    }
     for (const date of dates) {
       for (const cat of catalog) {
         const key = `${date}-${cat.id}`;
         const c = computeOtherAddOnCutoffState({
-          checkInDate: date,
+          checkInDate: bookingCheckIn,
           addOn: cat
         });
         out[key] = Boolean(c.isLocked);
       }
     }
     return out;
-  }, [catalog, dates]);
+  }, [catalog, dates, booking.checkIn]);
 
   // Refund-due calc: any row the desk is removing AND
   // its entry had a non-zero `priceSnapshot * quantity`

@@ -149,16 +149,55 @@ describe("MRB-15-06 — `computeHoldExpiresAt` is the single stamping helper (ev
     // hold clock on every reschedule (the desk
     // can do that explicitly via "reject payment"
     // if the guest needs more time).
-    const updatedBookingBlock = bookingsHandlerSrc.match(
-      /updatedBooking = \{[\s\S]{0,3000}?transaction\.update\(bookingRef, updatedBooking\)/
+    //
+    // Per OCT-H8 (2026-10-20, decision #288): the
+    // assertion is now scoped to the `updatedBooking`
+    // OBJECT LITERAL, located by a brace scan rather
+    // than by a character window between
+    // `updatedBooking = {` and the write. The old
+    // 3000-character window was a proxy for "the
+    // block the reschedule writes", and the add-on
+    // re-dating (the audit entries + refund
+    // liabilities, all written in the same
+    // transaction) legitimately widened the gap past
+    // that bound. The brace scan pins the check to
+    // the exact object the write sends — a STRONGER
+    // guard, and it no longer breaks when the
+    // surrounding code grows.
+    const rescheduleHandler = bookingsHandlerSrc.slice(
+      bookingsHandlerSrc.indexOf("export async function handleRescheduleBooking"),
+      bookingsHandlerSrc.indexOf("export async function handleExtendStay")
     );
     expect(
-      updatedBookingBlock,
-      "expected the reschedule's updatedBooking block to be non-empty"
-    ).toBeTruthy();
-    if (updatedBookingBlock) {
-      expect(updatedBookingBlock[0]).not.toMatch(/holdExpiresAt:/);
+      rescheduleHandler.length,
+      "expected the reschedule handler slice to be non-empty"
+    ).toBeGreaterThan(0);
+
+    const blockStart = rescheduleHandler.indexOf("updatedBooking = {");
+    expect(blockStart, "expected the reschedule to build an updatedBooking").toBeGreaterThan(-1);
+    let depth = 0;
+    let blockEnd = -1;
+    for (let i = rescheduleHandler.indexOf("{", blockStart); i < rescheduleHandler.length; i += 1) {
+      const ch = rescheduleHandler[i];
+      if (ch === "{") depth += 1;
+      else if (ch === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          blockEnd = i;
+          break;
+        }
+      }
     }
+    expect(blockEnd, "expected the updatedBooking object literal to close").toBeGreaterThan(blockStart);
+
+    const updatedBookingBlock = rescheduleHandler.slice(blockStart, blockEnd + 1);
+    expect(updatedBookingBlock).not.toMatch(/holdExpiresAt:/);
+
+    // The write itself must still be the single
+    // `transaction.update(bookingRef, updatedBooking)` call.
+    expect(rescheduleHandler).toMatch(
+      /transaction\.update\(bookingRef, updatedBooking\)/
+    );
   });
 
   it("`handleRejectPayment` stamps a fresh `holdExpiresAt` from the shared helper (re-uploads reset the clock)", () => {

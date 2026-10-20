@@ -61,22 +61,22 @@ See `plan/docs/API-ROUTES.md` for API layer.
 
 ### `bookingHolds/{holdId}` *(in-flow hold)*
 
-Ephemeral hold stamp that powers the public booking flow's Steps 2 + 3 countdown banner. The client preallocates `holdId` (UUIDv4) on Step 1 mount and threads it through the URL (`?hold=<id>`); the `useInFlowHold` hook stamps the server-side doc on first read. The booking transaction's post-commit `handleConsumeInFlowHold` marks it `"consumed"`. A future Janitor sweep will retire stale `"active"` holds past their `expiresAt`. **The hold is a soft UX signal, not a hard inventory lock** — the public availability endpoint does not consult this collection, and the booking transaction does not read it for conflict checks. See `plan/features/BOOKING-FLOW.md §In-flow Hold` for the UX contract and `plan/features/AVAILABILITY-LOCKING.md §In-flow Hold` for the interaction with the existing locking guarantee.
+Ephemeral hold stamp that powers the public booking flow's Steps 2 + 3 countdown banner. The client preallocates `holdId` (UUIDv4) on Step 1 mount and threads it through the URL (`?hold=<id>`); the `useInFlowHold` hook stamps the server-side doc on first read, and re-stamps its stay details per OCT-M7 (decision #296). The booking transaction's post-commit `handleConsumeInFlowHold` marks it `"consumed"`. A future Janitor sweep will retire stale `"active"` holds past their `expiresAt`. **The hold is a soft UX signal, not a hard inventory lock** — the public availability endpoint does not consult this collection, and the booking transaction does not read it for conflict checks. See `plan/features/BOOKING-FLOW.md §In-flow Hold` for the UX contract and `plan/features/AVAILABILITY-LOCKING.md §In-flow Hold` for the interaction with the locking guarantee.
 
 | Field | Type | Notes |
 |---|---|---|
 | `reservationId` | string | Mirrors the booking flow's preallocated reservation id. The consume path uses it as a sanity check — a hold with a stale `reservationId` (e.g. the guest restarted the flow) is rejected as `stale-reservation`. |
-| `roomType` | string | Room type the guest picked on Step 1. Informational; the authoritative room assignment is still the transaction's type→physical-room pick. |
-| `checkIn` / `checkOut` | string | YYYY-MM-DD. Same shape Step 1 stamps. |
-| `numNights` | number | Snapshotted from the Step 1 picker. |
-| `expiresAt` | timestamp | The hold deadline. Server-stamped from `IN_FLOW_HOLD_MINUTES` (15 by default; range 5–30) at start time; never refreshed. |
+| `roomType` | string | Room type the guest picked on Step 1. Informational; the authoritative room assignment is still the transaction's type→physical-room pick. **Per OCT-M7 (decision #296) it is RE-STAMPED** when the guest changes their dates or room type on Step 2 — the hold follows the stay the guest is actually booking. |
+| `checkIn` / `checkOut` | string | YYYY-MM-DD. Same shape Step 1 stamps. Re-stamped with the booking's check-in per OCT-M7 (decision #296) — the hold's stay is the booking's stay. |
+| `numNights` | number | Snapshotted from the Step 1 picker; re-stamped per OCT-M7 (decision #296). |
+| `expiresAt` | timestamp | The hold deadline. Server-stamped from `IN_FLOW_HOLD_MINUTES` (15 by default; range 5–30) at start time; **never refreshed** — not by an extension, and not by the OCT-M7 re-stamp. A date change must not become a way to reset the window the extension cap exists to bound. |
 | `status` | string | `"active"` (banner ticks), `"consumed"` (booking succeeded), `"expired"` (past `expiresAt`). Set by the consume path on Confirm; the Janitor sweep will eventually mark stale `"active"` holds as `"expired"`. |
 | `holdMinutes` | number | Snapshot of `settings/hotelConfig.inFlowHoldMinutes` (per IFH-01.2) at start time. Falls back to `IN_FLOW_HOLD_MINUTES = 15` for legacy settings (no field) + hand-edited Firestore docs outside the 5..30 range. Future reports can attribute expired holds to a specific window even if the per-hotel setting changes. |
 | `extensionCount` | number | Per IMT-02 (2026-10-14): how many times `/api/holds/extend` has fired. Absent on pre-IMT docs, which read as `0`. Gates `MAX_IN_FLOW_HOLD_EXTENSIONS = 3`. **Functionally required, not analytics** — the server enforces the cap from it and the guest banner reads it to hide the CTA, so the guest never clicks a button the server would reject. Per the CVQ-04 answer (staff do not see extensions) there is deliberately **no** staff-facing surface and no dedicated extension timestamp; `updatedAt` already records the last change. |
 | `createdAt` / `updatedAt` | timestamp | Audit timestamps. `createdAt` is the ORIGINAL stamp — an extension extends the window, it does not restart the attempt's history. |
 
-> **Lifecycle:** Append-only from the start endpoint. The read endpoint never mutates the on-disk `status` (it just reports the read-time evaluation via `isInFlowHoldActive`). The consume endpoint transitions `"active" → "consumed"`. **Per IMT-02, the extend endpoint (`/api/holds/extend`) may push `"expired" → "active"`** — revival is the literal "I need more time" moment, and it is safe precisely because the hold is soft (nothing consults this collection for availability). It is additive from `max(now, expiresAt)`: an active hold keeps its remaining time and gains a window on top; an expired hold restarts from now. `"consumed"` is **never** extendable, and a status outside `"active" | "expired"` is refused fail-closed. The daily Janitor sweep (`/api/holds/sweep`, registered in `vercel.json §crons` as `0 2 * * *`) transitions stale guest and staff holds from `"active" → "expired"` using a per-doc Firestore transaction with a recheck. Idempotent — a re-fire of the same cron tick finds zero matches. It tombstones rather than deletes (`in-flow-hold.ts:313-315`), so `extensionCount` stays queryable indefinitely.
-> **Firestore rules:** `bookingHolds/{id}` has **no `match` block at all** — the collection is default-deny for every client, including staff and admins. The guest client never touches it directly (the `useInFlowHold` hook uses the `/api/holds/read` + `/api/holds/start` + `/api/holds/extend` Vercel routes), and every write goes through the Admin SDK, which bypasses rules. Any debugging view of this collection goes through the Admin SDK / console, not a client SDK. **Correction (2026-10-14):** this line previously claimed "Admin reads are open for debugging", which was never true in the deployed rules. A source-text pin in `guest-app/tests/api/in-flow-hold.test.ts` now asserts `match /bookingHolds` is absent, so adding a rules block forces a re-review of the client trust model.
+> **Lifecycle:** Append-only from the start endpoint. The read endpoint never mutates the on-disk `status` (it just reports the read-time evaluation via `isInFlowHoldActive`). The consume endpoint transitions `"active" → "consumed"`. **Per IMT-02, the extend endpoint (`/api/holds/extend`) may push `"expired" → "active"`** — revival is the literal "I need more time" moment, and it is safe precisely because the hold is soft (nothing consults this collection for availability). It is additive from `max(now, expiresAt)`: an active hold keeps its remaining time and gains a window on top; an expired hold restarts from now. `"consumed"` is **never** extendable, and a status outside `"active" | "expired"` is refused fail-closed. The daily Janitor sweep (`/api/holds/sweep`, `vercel.json §crons` → `0 2 * * *`) transitions stale guest + staff holds from `"active" → "expired"` via a per-doc transaction with a recheck — idempotent, and it tombstones rather than deletes (`in-flow-hold.ts:313-315`), so `extensionCount` stays queryable.
+> **Firestore rules:** `bookingHolds/{id}` has **no `match` block at all** — default-deny for every client, staff and admins included. The guest client never touches it directly (the `useInFlowHold` hook uses the `/api/holds/read` + `/start` + `/extend` Vercel routes) and every write goes through the Admin SDK (which bypasses rules). Debugging views use the Admin SDK / console, not a client SDK. A source-text pin in `guest-app/tests/api/in-flow-hold.test.ts` asserts `match /bookingHolds` is absent, so adding a rules block forces a re-review of the client trust model.
 
 ---
 
@@ -99,6 +99,72 @@ Clients may read this collection only when authenticated as staff. All writes go
 
 ---
 
+### `addOns/{addOnId}` *(BR-12 other add-on catalog)*
+
+The admin-managed catalog of other add-ons the guest can buy (v1 ships the airport transfer). See `plan/features/OTHER-ADD-ONS.md` for the full field table.
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | string | Display name; snapshotted onto the booking at order time |
+| `description` | string | Marketing copy |
+| `price` | number | PHP; `>= 0`. **Server-authoritative** — the price is never read from the request body (decision #278) |
+| `unit` | string | `"per-person"` \| `"per-stay"` |
+| `isEnabled` | boolean | Per-add-on master switch; the guest catalog filters on it |
+| `cutoffHoursBeforeCheckIn` | number | `0..168`; the lock window, also server-authoritative |
+| `displayOrder` | number | Ascending sort in the guest catalog |
+| `updatedAt` / `updatedBy` | timestamp / string | Audit fields |
+
+**The admin Settings tab reads and writes this collection DIRECTLY from the browser** through the Firestore client SDK, so it is subject to the security rules:
+
+```
+match /addOns/{addOnId} {
+  allow read: if isStaff();
+  allow create, update, delete: if isAdmin();
+}
+```
+
+The guest app never reads it directly — the public catalog goes through `GET /api/bookings/addons/config` (Admin SDK, rules not applied) — so **no public read** is granted. The collection shipped in BR-12 (2026-10-15) **without** a rule block, so every admin read + write was `PERMISSION_DENIED` and the tab silently rendered its empty state (decision #279). **Any collection the admin app writes from the browser needs a rule block** — Firestore denies unmatched paths by default.
+
+---
+
+### `auditLogs/{auditId}` *(BR-12.1 settings audit trail)*
+
+Append-only top-level trail of admin settings changes. Each row records one action (e.g. `addons.create` / `addons.update` / `addons.delete`) with the before/after payload and the acting staff member.
+
+```
+match /auditLogs/{auditId} {
+  allow read: if isAdmin();
+  allow create: if isStaff();
+  allow update, delete: if false;
+}
+```
+
+Staff may record a row; nobody may rewrite or delete one. Like `addOns`, this collection shipped without a rule block (decision #279), so every audit row was rejected and the `addons.*` actions were permanently lost.
+
+---
+
+### Audit subcollection groups: `breakfastAudit` + `otherAddOnAudit` *(BR-01 / BR-12)*
+
+Per-booking audit trails for the breakfast and other-add-on selections, written by the server (Admin SDK) and read by the admin Reports "Late changes" metric via `collectionGroup(db, "breakfastAudit")` / `collectionGroup(db, "otherAddOnAudit")`.
+
+Firestore requires an **explicit collectionGroup rule** for a cross-document group query — the per-document rule under `bookings/{id}/…` only covers direct path reads. Without it the client listener fails with "Missing or insufficient permissions" the moment the Reports tab mounts:
+
+```
+match /{path=**}/breakfastAudit/{auditId} {
+  allow read: if isStaff();
+  allow update, delete: if false;
+}
+
+match /{path=**}/otherAddOnAudit/{auditId} {
+  allow read: if isStaff();
+  allow update, delete: if false;
+}
+```
+
+The same trap already applies to `refunds` (see the `match /{path=**}/refunds/{refundId}` block in `firebase/firestore.rules`). Added by decision #279.
+
+---
+
 ### `reservations/{reservationId}` *(MRB-01..06)*
 
 | Field | Type | Notes |
@@ -118,8 +184,8 @@ Clients may read this collection only when authenticated as staff. All writes go
 | `holdExpiresAt` | timestamp \| null | Unified payment hold deadline (PEX-01) |
 | `requestFingerprint` | string | Canonical SHA-256 create request fingerprint for idempotency |
 | `cancellationLiability` | object \| null | **CRL-07 (2026-08-03, per decision #173):** durable refund-liability snapshot stamped by reservation-scope cancels (MRB-13) + new-path N=1. Same shape as the booking-doc field — `{ policyResult: { refundPct, policyRefund, netCollected, retainedAmount, cutoffHours, source, snapshottedAt }, approvedAmount, exception: { approvedAmount, reason, approvedBy, approvedAt } \| null }`. `policyResult` is the aggregate of the reservation-scope preview (MIN per-room `refundPct` + pro-rated `netCollected`); the per-room detail is recoverable from the cancelled children's own snapshots when N>1. Surviving children in a partial reservation-scope cancel carry NO liability field (their status is unchanged). The header is the source of truth for the aggregate — Reports (CRL-08) read this field for the pending liability queue. |
-| `aggregateRevenueAllocation` | object \| null | **MRB-11 (2026-08-03, per decision #177):** aggregate of every child booking's `revenueAllocation` (sum of children), recomputed transactionally in the same `runTransaction` as the price write. The shape is `{ roomNet, breakfastNet, addOnNet, deductionNet, totalNet }` with the invariant `roomNet + breakfastNet + addOnNet - deductionNet === totalNet` (= `reservation.totalPrice` by construction). Reports reads this for fast reservation-level revenue stream totals — `getReservationRevenueStreams` returns the stored aggregate when present, sums children otherwise. Absence means "no stored children yet" (the brief window between header mint + first child commit); pre-MRB-11 reservations have no field at all. |
-| `actualDateRange` | object \| null | **MRB-14 (2026-08-03, per decision #180):** denormalised actual range across the reservation's children, `{ earliestCheckIn: timestamp, latestCheckOut: timestamp, isDivergent: boolean }` — derived from MIN(children.checkIn) / MAX(children.checkOut) and stamped transactionally by every add-room + every reschedule (the `actualCheckIn` divergence on check-in is a future follow-up). The contract: `isDivergent === true` ⇔ ∃ a child whose `checkIn` or `checkOut` differs from the header's. Pre-MRB-14 reservations have no field at all (`undefined`); the admin + email + receipt surfaces fall through to the legacy per-child read, byte-equivalent to pre-MRB-14. The header's own `checkIn` / `checkOut` / `numNights` are **immutable shared-dates snapshots from create time** (the only previous mutator, `handleRescheduleBooking`, was refactored to query children + recompute `actualDateRange` only — the per-MRB-14-03 spec). The legacy `checkIn` / `checkOut` remain the public-facing "shared dates" the email subject + receipt PDF + checkin reminder cron use when every child agrees; the actual range is shown when they don't. |
+| `aggregateRevenueAllocation` | object \| null | **MRB-11 (2026-08-03, per decision #177):** aggregate of every child booking's `revenueAllocation` (sum of children), recomputed transactionally in the same `runTransaction` as the price write. Same shape + invariant as the booking-doc `revenueAllocation` field (see `bookings/{bookingId}` below), with `totalNet` = `reservation.totalPrice`. Reports reads this for fast reservation-level revenue stream totals — `getReservationRevenueStreams` returns the stored aggregate when present, sums children otherwise. Absence means "no stored children yet" (the brief window between header mint + first child commit); pre-MRB-11 reservations have no field at all. |
+| `actualDateRange` | object \| null | **MRB-14 (2026-08-03, per decision #180):** denormalised actual range across the reservation's children, `{ earliestCheckIn: timestamp, latestCheckOut: timestamp, isDivergent: boolean }` — derived from MIN(children.checkIn) / MAX(children.checkOut) and stamped transactionally by every add-room + reschedule. The contract: `isDivergent === true` ⇔ ∃ a child whose `checkIn` or `checkOut` differs from the header's. Pre-MRB-14 reservations have no field at all; the admin + email + receipt surfaces fall through to the legacy per-child read. The header's own `checkIn` / `checkOut` / `numNights` are **immutable shared-dates snapshots from create time** (`handleRescheduleBooking` now queries children + recomputes `actualDateRange` only). The legacy dates remain the public-facing "shared dates" the email subject + receipt PDF + checkin reminder cron use when every child agrees; the actual range is shown when they don't. |
 | `createdAt` / `updatedAt` / `createdBy` | timestamp / string | Audit |
 
 **Subcollections:**
@@ -127,7 +193,7 @@ Clients may read this collection only when authenticated as staff. All writes go
 - `reservations/{id}/refunds/{refundId}` — Server-only create, staff read, no client edit/delete.
 - `reservations/{id}/charges/{chargeId}` — Staff create with void semantics.
 
-**Client-side read pattern (MRB-12, per decision #179):** the `AdminContext` (in `admin-app/src/context/AdminContext.tsx`) hydrates two read paths from this collection so the Bookings table reservation row + the drawer's reservation strip can render the group-level state without summing the filtered in-memory children. **(1) `subscribeToReservations`** — a full-collection `onSnapshot(collection(db, "reservations"))` listener (no `orderBy`; the row builder is a hash lookup keyed by `reservationId`) that hydrates `Reservation[]` into the context. The listener is small at this scale (~14 active reservations; the cap is bounded by room inventory, not bookings volume). **(2) `collectionGroup("payments")` aggregate** — a single `onSnapshot(collectionGroup(db, "payments"))` listener filters in JS to `reservations/{id}/payments/{paymentId}` paths (the regex `^reservations\/([^/]+)\/payments\/` is anchored to the reservation subcollection; legacy `bookings/{id}/payments/{paymentId}` entries are excluded by the anchor) and sums positive-amount entries + negative refund entries into a `Record<reservationId, paidAmount>` aggregate. The sign-aware sum matches the `paymentsTotal` semantics `getReservationFolioSummary` exposes. **The header-as-source-of-truth invariant:** the Bookings table reservation row's Total reads `reservation.totalPrice`; the Balance reads `Math.max(0, reservation.totalPrice − paidAmount)`. The row never sums N filtered children to render a summary — a desk officer filtering by `brt=` or `bs=` or `bq=` on a multi-room reservation sees the GROUP-level total + balance + status, not a filtered partial. N=1 + legacy null-`reservationId` paths stay byte-equivalent to pre-MRB-12 (the row never synthesises a reservation row for those, so the legacy code paths render). The cold-start race is preserved: when the listener hasn't fired yet, the row falls back to the child sum so the first paint never reads zero.
+**Client-side read pattern (MRB-12, per decision #179):** the `AdminContext` hydrates two read paths so the Bookings table reservation row + the drawer's reservation strip render the group-level state without summing the filtered in-memory children. **(1) `subscribeToReservations`** — a full-collection `onSnapshot(collection(db, "reservations"))` listener that hydrates `Reservation[]` (the row builder is a hash lookup keyed by `reservationId`). It is small at this scale (~14 active reservations). **(2) `collectionGroup("payments")` aggregate** — one listener filters in JS to `reservations/{id}/payments/{paymentId}` paths (the regex is anchored to the reservation subcollection, so legacy `bookings/{id}/payments/…` entries are excluded) and sums positive + negative (refund) entries into a `Record<reservationId, paidAmount>` aggregate — the sign-aware sum matches `getReservationFolioSummary`'s `paymentsTotal` semantics. **The header-as-source-of-truth invariant:** the reservation row's Total reads `reservation.totalPrice`; the Balance reads `Math.max(0, reservation.totalPrice − paidAmount)`. The row never sums N filtered children — a desk officer filtering by `brt=` / `bs=` / `bq=` sees the GROUP-level total + balance + status. N=1 + legacy null-`reservationId` paths stay byte-equivalent to pre-MRB-12. The cold-start race is preserved: before the listener fires, the row falls back to the child sum.
 
 *Detailed MRB implementation narratives archived in [`plan/project/archive/BACKEND-ARCHIVE-2026-08-02.md`](plan/project/archive/BACKEND-ARCHIVE-2026-08-02.md).*
 
@@ -164,8 +230,20 @@ MRB-06 public creates may contain an explicit room selection for each requested 
 | `earlyCheckIn` | object \| null | Optional early-arrival workflow record. `source` is `guest-request` or `staff-granted` (absent legacy value means guest request); includes status, requested/confirmed time, guest/staff notes, and created/resolved audit fields. Admin grant writes are server-authorized and transactional. |
 | `cancellationReason` / `cancelledAt` / `cancelledBy` / `cancellationSource` | string / timestamp \| null | Permanent cancellation record |
 | `cancellationLiability` | object \| null | **CRL-07 (2026-08-03, per decision #173):** durable refund-liability snapshot stamped by per-child + legacy null-`reservationId` cancels. `{ policyResult: { refundPct, policyRefund, netCollected, retainedAmount, cutoffHours, source, snapshottedAt }, approvedAmount, exception: { approvedAmount, reason, approvedBy, approvedAt } \| null }`. `policyResult` is immutable post-cancel. `approvedAmount` defaults to `policyResult.policyRefund` and is reduced only via `POST /api/bookings/cancellation-exception`. Absent on no-refund cancels (the absence is the "no liability work to do" signal) and on bookings cancelled before CRL-07 shipped. See the `computeCancellationLiabilityState` helper for the derived state. |
-| `revenueAllocation` | object \| null | **MRB-11 (2026-08-03, per decision #177):** the per-stream revenue allocation snapshotted at create time (and recomputed on reschedule). `{ roomNet, breakfastNet, addOnNet, deductionNet, totalNet }` with the invariant `roomNet + breakfastNet + addOnNet - deductionNet === totalNet` (= `booking.totalPrice` by construction, asserted at the write boundary via `assertBookingRevenueAllocationInvariant`). Per-stream values are GROSS (pre-deduction); `deductionNet` is the total deductions as a single line. Reports reads this via `getBookingRevenueStreams` — the per-stream values are exact, not the historical proportional split. Absence means "pre-MRB-11 booking"; the helper falls back to the legacy `splitBookingRevenue` math (tagged `"allocation: legacy-heuristic"` so the export row can surface the heuristic to the accountant). |
+| `revenueAllocation` | object \| null | **MRB-11 (2026-08-03, per decision #177):** the per-stream revenue allocation snapshotted at create time (and recomputed on reschedule). `{ roomNet, breakfastNet, addOnNet, deductionNet, totalNet }` with the invariant `roomNet + breakfastNet + addOnNet - deductionNet === totalNet` (= `booking.totalPrice` by construction, asserted at the write boundary via `assertBookingRevenueAllocationInvariant`). Per-stream values are GROSS (pre-deduction); `deductionNet` is the total deductions as a single line. Reports reads this via `getBookingRevenueStreams`. Absence means "pre-MRB-11 booking"; the helper falls back to the legacy `splitBookingRevenue` math (tagged `"allocation: legacy-heuristic"`). |
+| `otherAddOnSelections` / `otherAddOnTotal` / `hasAnyOtherAddOns` | map / number / bool | **BR-12 (decision #247; extended by OCT-M4, decision #297):** the per-date × per-add-on selection map, its denormalised total, and the O(1) "has any" flag. The total is NOT inside `booking.totalPrice` — it sits on top of it for the BALANCE (see §The folio balance model below). |
 | `createdAt` / `updatedAt` | timestamp | Audit timestamps |
+
+#### The folio balance model (OCT-FOL-01, 2026-10-20, decision #298)
+
+`booking.totalPrice` is the ROOM BILL (breakfast + extra beds included). It does **NOT** contain the BR-12 other add-ons — per `plan/features/OTHER-ADD-ONS.md` decision 2 they are "added on top of it for the balance":
+
+```
+folio grand total = booking.totalPrice + otherAddOnTotal + storeTotal + chargesTotal
+folio balance     = grand total − paymentsTotal
+```
+
+`otherAddOnTotal` is optional (a pre-BR-12 booking contributes 0) and is the SUM of the children's for a multi-room reservation. The math lives in `computeBookingFolio` + `computeServerFolioTotals` (`shared/utils/bookingFolio.ts`). Full rule + the surfaces that still show the room bill: `plan/features/OTHER-ADD-ONS.md §The other add-ons are part of the BALANCE`.
 
 ---
 
@@ -241,17 +319,17 @@ Transient per-room WebRTC signaling state for the intercom voice call feature (`
 
 > **Retention:** Transient — the doc is GC'd by future retention rules after `endedAt + 7 days`. The chat-thread audit trail (the `intercoms/{roomNumber}/messages` `call-answered` / `call-missed` / `call-declined` system messages, see `intercoms` schema above) is the durable record; `calls` is the live signaling state.
 
-> **Why the claim is a `runTransaction` and not a plain `updateDoc`:** the pre-#214 surface was a best-effort last-write-wins race that let two front-desk staff both build a peer connection to the same guest. The `runTransaction` is the only primitive that gives "first commit wins" atomically — the body reads `tx.get(callRef)`, checks `data.status === "ringing"`, and writes `status: "active" + endedAt: null + acceptedBy: { … }` in one commit. Every subsequent staff that tries the same room hits `data.status !== "ringing"` and the transaction aborts. See decision #214 for the full implementation record + the reads-before-writes contract (FOL-03 pattern).
+> **Why the claim is a `runTransaction` and not a plain `updateDoc`:** the pre-#214 surface was a last-write-wins race that let two front-desk staff both build a peer connection to the same guest. The transaction gives "first commit wins" atomically — the body reads `tx.get(callRef)`, checks `data.status === "ringing"`, and writes `status: "active" + endedAt: null + acceptedBy: { … }` in one commit. Every subsequent staff that tries the same room hits `data.status !== "ringing"` and the transaction aborts. See decision #214 + the reads-before-writes contract (FOL-03 pattern).
 
 ---
 
 ### `settings/{settingId}`
 
 Single-document collections holding dynamic configuration:
-- `settings/hotelConfig`: `brandName`, `colors`, `logos`, `roomTypes[]` (Maximum 10 photos per type), `paymentMethods[]`, `bookingSources[]`, `discountScope`, `paymentHoldWindowHours`, `inFlowHoldMinutes` (per IFH-01.2, 5..30 min default 15), `unpaidCheckoutApprovalThreshold`, `frontDeskPhone`, `supportEmail`, `dpoEmail`, `facebookUrl`, `instagramUrl`.
+- `settings/hotelConfig`: `brandName`, `colors`, `logos`, `roomTypes[]` (Maximum 10 photos per type), `paymentMethods[]`, `bookingSources[]`, `discountScope`, `paymentHoldWindowHours`, `inFlowHoldMinutes` (per IFH-01.2, 5..30 min default 15), `unpaidCheckoutApprovalThreshold`, `frontDeskPhone`, `supportEmail`, `dpoEmail`, `facebookUrl`, `instagramUrl`, `otherAddOnsEnabled` (per OCT-M1, decision #295 — the hotel-wide "Add-ons enabled" master switch; **only an explicit `false` disables it**, a doc without the field hydrates to `true`).
 - `settings/websiteContent`: Editable homepage, about, corporate, and legal page copy.
 - `settings/breakfastConfig`: Silog menu items & daily prep settings.
-- `settings/rewardsConfig`: Earning rate, redemption rate, member discount percentage, **Phase 2 (2026-10-12)**: `welcomePoints`, `minPointsToRedeem`, `pointsCanPayUpToBillPct`, `freeNightEvery`, `levels[]` (tier program — name, fromStays, discountPct, pointsMultiplier, perks), **PR #9 (2026-10-13)**: `allowMemberPointsRedemption` (admin opt-in toggle for member self-service points redemption at booking Step 3 — default `false` so existing deployments preserve the front-desk-mediated model; when `true`, the booking flow exposes an "Apply Your Points" input alongside the voucher code, and the member-authenticated `POST /api/members/redeem-points-self` endpoint is enabled). See `shared/schemas/rewardsConfig.ts` for the validation contract and `plan/features/SPARK-REWARDS.md §Phase 2 PR #9` for the rollout detail.
+- `settings/rewardsConfig`: Earning rate, redemption rate, member discount percentage, **Phase 2 (2026-10-12)**: `welcomePoints`, `minPointsToRedeem`, `pointsCanPayUpToBillPct`, `freeNightEvery`, `levels[]` (name, fromStays, discountPct, pointsMultiplier, perks), **PR #9 (2026-10-13)**: `allowMemberPointsRedemption` (admin opt-in toggle for member self-service points redemption at booking Step 3 — default `false` so existing deployments keep the front-desk-mediated model; when `true`, Step 3 exposes an "Apply Your Points" input alongside the voucher code and the member-authenticated `POST /api/members/redeem-points-self` endpoint is enabled). See `shared/schemas/rewardsConfig.ts` for the validation contract and `plan/features/SPARK-REWARDS.md §Phase 2 PR #9` for the rollout detail.
 
 ---
 
@@ -288,7 +366,7 @@ Public submissions land here via `POST /api/corporate/inquiry` (rate-limited + T
 | `usageCount` | number | Server-maintained counter, incremented in-transaction on create + add-room, decremented on cancel. See `plan/features/CORPORATE-BOOKING.md §Corporate Code usageCount Counter Ownership` |
 | `createdAt` / `updatedAt` | timestamp | Audit |
 
-The doc ID is the code string by convention. The validate + create handlers both honour a `code`-field fallback for codes whose Firestore doc ID differs from the public `code` field (defense in depth). Public reads go through `POST /api/validate/corporate-code` (rate-limited 10/IP/min + Turnstile-gated) which returns only `{ code, companyName, ratePerRoomType }` — never `usageCount`, `usageCap`, or `expiresAt`. Firestore rules: read/write staff-only (BI-08) — see `plan/docs/SECURITY.md §corporateCodes`.
+The doc ID is the code string by convention, and the validate + create handlers honour a `code`-field fallback when the doc ID differs from the public `code` field (defense in depth). Public reads go through `POST /api/validate/corporate-code` (rate-limited 10/IP/min + Turnstile-gated) which returns only `{ code, companyName, ratePerRoomType }` — never `usageCount`, `usageCap`, or `expiresAt`. Firestore rules: read/write staff-only (BI-08) — see `plan/docs/SECURITY.md §corporateCodes`.
 
 ---
 
@@ -305,7 +383,7 @@ The doc ID is the code string by convention. The validate + create handlers both
 | `applicableRoomTypes` | string[] | Empty array = applies to all room types. The create handler rejects the booking if any selected room type is not in this list |
 | `isActive` | boolean | Default `true`; staff flips to `false` to deactivate. Validator rejects inactive codes |
 | `isEnabled` | boolean \| undefined | Legacy alias for `isActive`. New reads should prefer `isActive` |
-| `guestEmail` | string \| null | Optional "single-guest" voucher — the validator rejects if the booking email doesn't match. **Per MED-3 / LOW-3**: deferred (see `plan/project/AUDIT-SPARK-REWARDS-REPORT.md §MED-3`) |
+| `guestEmail` | string \| null | Optional "single-guest" voucher — the validator rejects if the booking email doesn't match. **Per MED-3 / LOW-3**: deferred (see `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md §MED-3`) |
 | `createdBy` | string | Audit — staff UID |
 | `createdAt` / `updatedAt` | timestamp | Audit |
 | `kind` | `"promo"` \| `"reward"` | **Phase 5 (2026-10-12)**: voucher discriminator. `"promo"` is the legacy default (admin-created discount). `"reward"` is system-issued from the tier program (currently `"free-night-tier"`; `"welcome"` reserved for Phase 6). Absent = treat as `"promo"`. |
@@ -314,7 +392,7 @@ The doc ID is the code string by convention. The validate + create handlers both
 | `memberNumber` | string \| null | **Phase 5 (2026-10-12)**: denormalized `SR-XXXXX` for display. Null for promo vouchers. |
 | `rewardSource` | `"free-night-tier"` \| `"welcome"` \| null | **Phase 5 (2026-10-12)**: which Phase 2 feature created the voucher. `"free-night-tier"` is wired by `handleCheckoutBooking` when `completedStays % freeNightEvery === 0` (canonical Phase 5 voucher shape). `"welcome"` reserved for Phase 6 (not yet wired). |
 
-The doc ID is the code string by convention. The validate + create handlers both honour a `code`-field fallback for codes whose Firestore doc ID differs from the public `code` field (BI-10). Public reads go through `POST /api/validate/voucher` (rate-limited 10/IP/min + Turnstile-gated) which returns only `{ code, discountType, discountValue }` — never `usageCount`, `usageCap`, `expiresAt`, or `applicableRoomTypes`. The validator at `shared/utils/vouchers.ts:11` enforces the `isActive` / `expiresAt` / `usageCap` / `applicableRoomTypes` checks. Firestore rules: read/write staff-only — see `plan/docs/SECURITY.md §vouchers`.
+The doc ID is the code string by convention, and the validate + create handlers honour a `code`-field fallback when the doc ID differs from the public `code` field (BI-10). Public reads go through `POST /api/validate/voucher` (rate-limited 10/IP/min + Turnstile-gated) which returns only `{ code, discountType, discountValue }` — never `usageCount`, `usageCap`, `expiresAt`, or `applicableRoomTypes`. The validator at `shared/utils/vouchers.ts:11` enforces the `isActive` / `expiresAt` / `usageCap` / `applicableRoomTypes` checks. Firestore rules: read/write staff-only — see `plan/docs/SECURITY.md §vouchers`.
 
 **Counter ownership — per VOU-01 (canonical contract, never violate without spec update):**
 - `handleCreateBooking` increments by `resolvedRoomSelections.length` (the single top-level `voucherCode` field applies to ALL rooms in the body; the increment is `childrenWithVoucherCount`).

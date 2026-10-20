@@ -134,7 +134,7 @@ The summary includes:
 - Adults and children.
 - An `Edit` action.
 
-`Edit` opens the existing range calendar and occupancy controls in a mobile-appropriate expandable area or sheet. Per MBUX-18 (decision #275, 2026-10-16), the sheet is a mobile bottom sheet (`EditStayDetailsSheet` at `guest-app/src/components/EditStayDetailsSheet.tsx`) anchored to the bottom edge with `fixed inset-x-0 bottom-0 max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain rounded-t-card`, animating in via the shared `slideInBottom` variant (FRONTEND.md §Modals + BOOKING-FLOW.md:74 / DR-03). It carries the same `<DateRangePicker>` + Adults/Children steppers the sidebar renders inline (so the normalization, horizon, stay-length cap, and selection rules in DR-03 + MSL-01 stay in force without a second implementation), plus a labelled X close + a full-width brand-orange `Done` button in the thumb zone + a `role="dialog"` + `aria-modal="true"` + `aria-labelledby="edit-stay-details-title"` surface. The sheet is `lg:hidden`-guarded so it cannot open on desktop (the strip itself is `lg:hidden`, so the Edit pencil never mounts there); on desktop the right-hand sidebar remains the edit surface. The sheet writes URL params live through the same `updateDateParams` + `updateAdults` + `updateChildren` writers the sidebar uses, so no separate save step is required. The BookingPage `<aside id="booking-stay-details-aside">` keeps its id as a defensive fallback for deep links that jump straight to the aside (the BookingStickyFooter's URL-driven scroll, accessibility tools); the Edit pencil does NOT scroll to it.
+`Edit` opens the existing range calendar and occupancy controls in a mobile-appropriate expandable area or sheet. Per MBUX-18 (decision #275, 2026-10-16), the sheet is a mobile bottom sheet (`EditStayDetailsSheet` at `guest-app/src/components/EditStayDetailsSheet.tsx`) anchored to the bottom edge with `fixed inset-x-0 bottom-0 max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain rounded-t-card`, animating in via the shared `slideInBottom` variant (FRONTEND.md §Modals + BOOKING-FLOW.md:74 / DR-03). It carries the same `<DateRangePicker>` + Adults/Children steppers the sidebar renders inline (so the normalization, horizon, stay-length cap, and selection rules in DR-03 + MSL-01 stay in force without a second implementation), plus a labelled X close + a full-width brand-orange `Done` button in the thumb zone + a `role="dialog"` + `aria-modal="true"` + `aria-labelledby="edit-stay-details-title"` surface. **Per OCT-H11 (2026-10-20, decision #289) the sheet now OWNS the focus + scroll contract the `aria-modal` declaration implies:** it traps Tab focus inside the sheet, closes on `Escape`, restores focus to the element that had it when the sheet opened, and locks the body scroll while it is open (dragging the dimmed backdrop no longer scrolls the page behind the sheet — the sheet's own `overscroll-contain` only contains the scroll WITHIN the sheet). The primitive is `guest-app/src/utils/useFocusTrap.ts` (the guest-app port of the admin app's `admin-app/src/utils/useFocusTrap.ts` from decision #107); it is deliberately NOT in `@spark-inn/shared`, because that package is imported by the server bundle (which has no React and no DOM). The sheet is `lg:hidden`-guarded so it cannot open on desktop (the strip itself is `lg:hidden`, so the Edit pencil never mounts there); on desktop the right-hand sidebar remains the edit surface. The sheet writes URL params live through the same `updateDateParams` + `updateAdults` + `updateChildren` writers the sidebar uses, so no separate save step is required. The BookingPage `<aside id="booking-stay-details-aside">` keeps its id as a defensive fallback for deep links that jump straight to the aside (the BookingStickyFooter's URL-driven scroll, accessibility tools); the Edit pencil does NOT scroll to it.
 
 The page does not repeat the same stay summary in both a header card and sidebar card. Per MBUX-19 (decision #276, 2026-10-16), the BookingPage aside's three editable blocks (`<DateRangePicker>` + Adults/Children steppers) are wrapped in `<div className="hidden lg:contents">` so on mobile the aside renders only the cart + info card + the "Stay details" heading; on `lg:` the wrapper dissolves (`lg:contents` removes the wrapper from the layout, NOT `lg:block` which would add an extra anonymous box and double the gap between the picker and the stepper below) and the three controls slot back into the parent's `space-y-6` stacking context. The MBUX-18 sheet is the only edit surface on mobile; the MBUX-07 aside is the only edit surface on `lg:`. The cart + info card stay visible on both surfaces because they are read-only and do not duplicate the sheet.
 
@@ -286,19 +286,29 @@ The action:
 - Allows every copied date to be edited afterward.
 - Confirms how many dates were updated.
 
+**The confirmation (OCT-M8, 2026-10-20, decision #294).** The confirmation is an inline `role="status"` / `aria-live="polite"` line that:
+
+- **Renders exactly ONCE.** It carries the DATE it belongs to, so it renders inside the card the guest acted on — not once per date. Before this, the notice was a bare string rendered inside the per-date map, so a 3-night stay printed "Applied these choices to 2 remaining days." three times, in three different cards.
+- **Clears itself after 8 seconds** (`BREAKFAST_COPY_NOTICE_TIMEOUT_MS`). It was never cleared before — its own source comment claimed a clearing effect existed "further down", and it did not.
+- **Clears the moment the guest edits a meal.** Leaving it up after an edit falsely implied the copy was still in effect for the other days.
+- **Reports only real changes.** "Those choices are already set on every remaining day." when nothing changed, instead of claiming a copy that did not happen.
+
 ### Other add-ons
 
-Existing other add-ons render as compact expandable cards below breakfast.
+**Superseded by OCT-M4 (2026-10-20, decision #297).** This section originally described compact expandable cards with a single "Add / toggle" control, and the configuration (quantity, service date) appearing only after selection. The shipped grid follows `plan/features/OTHER-ADD-ONS.md` instead — the **per-day quantity input** shape — because the BR-12 data model is per day × per add-on (`otherAddOnSelections[date][].quantity`, 0..guest count), and a single toggle per card has no way to express "2 guests on Nov 2, 1 guest on Nov 3".
 
-Each card shows:
+The grid renders below the breakfast section, one card per enabled add-on:
 
 - Name.
 - Short description.
 - Price and unit.
-- Optional thumbnail when the catalog later supports one.
-- A 44px Add or toggle control.
+- One row per service date of the stay, each with a **44px-tall number input** (0..guest count) and the row's line total.
+- A cut-off pill ("Ordering closed") when the add-on's cut-off has passed — anchored on the BOOKING's check-in (OCT-M5, decision #292), so the lock is per add-on, not per date.
+- The whole section renders NOTHING when the catalog is empty or the hotel has taken other add-ons off sale (OCT-M1, decision #295) — an empty grid under a heading reads as a broken page.
 
-Quantity, service date, pickup information, or other configuration appears only after selection. Breakfast remains a specialized per-date/per-guest interface and is not forced into the generic quantity model.
+Breakfast remains a specialized per-date/per-guest interface and is not forced into the generic quantity model. The two grids sit side by side but keep their own shapes.
+
+One line under the section heading tells the guest that other add-ons are charged separately from the room rate and settled at the hotel — they are NOT inside `totalPrice` (they are added on top of it for the balance; see `plan/features/OTHER-ADD-ONS.md` decision 2), so the guest should not expect to see them on the online room bill.
 
 ### Live summary and action
 
@@ -308,6 +318,8 @@ There is one context-aware primary action:
 
 - No selection: `Continue without add-ons`.
 - Any selection: `Continue with N add-ons · total`.
+
+**Per OCT-M4 (decision #297) the count and the total cover the UNION** of breakfast AND other add-ons — the count is the breakfast slots + the other-add-on rows, the figure is `breakfastTotal + otherAddOnTotal`. The BR-10 pattern was never scoped to breakfast alone, so the "without add-ons" branch means "without add-ons of ANY kind".
 
 The BR-10 pair of parallel actions is retired. A skip label never silently preserves selections while implying that it cleared them.
 
@@ -333,6 +345,13 @@ Each meal editor in Settings supports:
 - Friendly validation and failure states.
 
 Accepted formats are JPEG, PNG, and WebP. Images are compressed before upload and displayed with a consistent 4:3 crop.
+
+**Per OCT-H5 + OCT-H10 (2026-10-20, decision #288) the image controls are a working round-trip, and the removal is safe:**
+
+- **Upload / replace / remove PERSIST immediately.** The pre-fix behaviour only mutated local state and toasted "Meal image uploaded" — the guest-facing catalog still had no photo until the admin separately pressed Save, and navigating away orphaned the Storage object so the upload appeared lost. The photo action now persists the `meals` array through the same `BreakfastMealSchema` validation the Save button uses, and the success toast fires only AFTER the row is safely in Firestore.
+- **Removing an image cannot break the rest of the Dining tab.** The pre-fix removal wrote `imageUrl: undefined` into the meal object, and the Firestore SDK rejects an `undefined` field value outright (`Unsupported field value: undefined` — the admin app never sets `ignoreUndefinedProperties`). Because the offending key sat inside one element of the `meals` array, EVERY subsequent write of that section failed: the admin could not save the cut-off time, the breakfast toggle, a meal name or a price until they reloaded the page. A cleared optional field is now REMOVED from the object (the key is absent, not `undefined`), and every settings write strips `undefined`-valued keys as a safety net.
+- **The Storage object is deleted only AFTER the row no longer references it**, so the guest menu can never point at a deleted file.
+- Only the `meals` array is written by a photo action; the rest of the Dining form keeps its own Save semantics, so an unsaved cut-off-time edit is never committed as a side effect of a photo action.
 
 ### Storage and access
 

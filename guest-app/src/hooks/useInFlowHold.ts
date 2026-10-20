@@ -35,7 +35,7 @@
 // existing /api/bookings/lookup pattern.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { canExtendInFlowHold } from "@spark-inn/shared";
+import { canExtendInFlowHold, inFlowHoldStayMatches } from "@spark-inn/shared";
 
 export interface InFlowHoldView {
   id: string;
@@ -127,6 +127,42 @@ export function useInFlowHold(
       return;
     }
     let cancelled = false;
+
+    /**
+     * POST /api/holds/start.
+     *
+     * Per OCT-M7 (2026-10-20, decision #296) this is also the
+     * RE-STAMP call: the server refreshes the hold's stay details
+     * when they no longer match the stay the guest is booking, while
+     * keeping the original deadline.
+     */
+    async function startHold(): Promise<void> {
+      await fetch("/api/holds/start", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
+        body: JSON.stringify({
+          holdId,
+          reservationId: startInput?.reservationId,
+          roomType: startInput?.roomType,
+          checkIn: startInput?.checkIn,
+          checkOut: startInput?.checkOut,
+          numNights: startInput?.numNights
+        })
+      });
+    }
+
+    async function readHold(): Promise<any> {
+      const response = await fetch(
+        `/api/holds/read?holdId=${encodeURIComponent(holdId as string)}`,
+        { method: "GET", headers: { Accept: "application/json" } }
+      );
+      if (!response.ok) return null;
+      return await response.json();
+    }
+
     async function load() {
       let json: any = null;
       try {
@@ -148,21 +184,7 @@ export function useInFlowHold(
           // gate is the booking transaction's
           // /api/bookings/create). See
           // fix/holds-start-turnstile.
-          await fetch("/api/holds/start", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Accept: "application/json"
-            },
-            body: JSON.stringify({
-              holdId,
-              reservationId: startInput.reservationId,
-              roomType: startInput.roomType,
-              checkIn: startInput.checkIn,
-              checkOut: startInput.checkOut,
-              numNights: startInput.numNights
-            })
-          });
+          await startHold();
           if (cancelled) return;
           const retry = await fetch(
             `/api/holds/read?holdId=${encodeURIComponent(holdId as string)}`,
@@ -183,6 +205,40 @@ export function useInFlowHold(
           return;
         } else {
           json = await readResponse.json();
+
+          // Per OCT-M7 (2026-10-20, decision #296): the hold EXISTS,
+          // but it may describe a stay the guest has since
+          // abandoned — they changed their dates (MBUX-18's edit
+          // sheet) or their room type on Step 2. The hold's stamped
+          // `checkIn` / `checkOut` / `roomType` are then for the
+          // ORIGINAL stay, and the banner would promise a room
+          // the guest is no longer booking.
+          //
+          // The fix re-stamps the hold against the current stay.
+          // The deadline is NOT reset (the server keeps
+          // `expiresAt`), so this cannot be used to extend the
+          // window — it only makes the hold describe what the guest
+          // is actually booking.
+          if (
+            startInput &&
+            json?.data &&
+            !inFlowHoldStayMatches(json.data, {
+              roomType: startInput.roomType,
+              checkIn: startInput.checkIn,
+              checkOut: startInput.checkOut,
+              numNights: startInput.numNights
+            })
+          ) {
+            await startHold();
+            if (cancelled) return;
+            const refreshed = await readHold();
+            if (cancelled) return;
+            // If the re-read fails we keep the ORIGINAL payload:
+            // a slightly stale hold beats no banner at all, and the
+            // error copy already tells the guest the booking still
+            // goes through.
+            if (refreshed) json = refreshed;
+          }
         }
       } catch (err) {
         if (cancelled) return;

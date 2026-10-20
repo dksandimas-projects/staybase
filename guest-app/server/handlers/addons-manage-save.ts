@@ -12,6 +12,17 @@
 //   • change:   [{ selectionKey, addOnId, quantity, priceSnapshot, nameSnapshot, unitSnapshot }]
 //   • remove:   [{ selectionKey }]
 //
+// Per OCT-C2 (2026-10-20): the `priceSnapshot` / `nameSnapshot` /
+// `unitSnapshot` / `cutoffHoursBeforeCheckInSnapshot` fields on
+// the wire are ADVISORY ONLY — the server sources every snapshot
+// field from the LIVE `addOns` catalog (an `add`) or keeps the
+// entry's existing snapshot (a `change`, where only `quantity` is
+// guest-editable). They are still accepted so a cached guest
+// bundle keeps working. DO NOT reintroduce `op.priceSnapshot ??
+// liveAddOn.price` — the client always sends the field, so the
+// catalog fallback could never fire and a guest could set their
+// own price.
+//
 // All ops are validated against the live `addOns` catalog
 // + the per-add-on cut-off + the per-selection
 // `otherAddOnServed` lock inside one Firestore transaction.
@@ -32,6 +43,12 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "../lib/firebase-admin";
+// Per OCT-M1 (2026-10-20, decision #295): the hotel-wide
+// "Add-ons enabled" master switch + the message the guest sees.
+import {
+  loadOtherAddOnsHotelEnabled,
+  OTHER_ADD_ONS_UNAVAILABLE_ERROR
+} from "../lib/otherAddOns-settings";
 import {
   OtherAddOnUpdateSchema,
   computeOtherAddOnCutoffState,
@@ -40,6 +57,13 @@ import {
   normalizeAddOn,
   parseOtherAddOnSelectionKey,
   buildOtherAddOnSelectionKey,
+  // Per OCT-M3 (2026-10-20, decision #291): the shared
+  // read-only-booking rule.
+  isOtherAddOnBookingMutable,
+  OTHER_ADD_ON_READ_ONLY_ERROR,
+  // Per OCT-M5 (2026-10-20, decision #292): the shared UTC
+  // calendar-date key helper (the cut-off anchor).
+  toUtcDateKey,
   type AddOn,
   type OtherAddOnSelectionEntry
 } from "@spark-inn/shared";
@@ -106,6 +130,13 @@ function opErrorToMessage(code: string): string {
     const date = code.slice(OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX.length);
     return `Ordering closed for ${date}.`;
   }
+  // Per OCT-M5 (2026-10-20, decision #292): the booking has no
+  // usable check-in date, so the cut-off anchor cannot be
+  // computed. Refuse rather than fall back to the per-service-date
+  // anchor (which is the bug this fix removes).
+  if (code === "BOOKING_CHECK_IN_MISSING") {
+    return "This booking has no check-in date, so the add-on cut-off cannot be applied. Please contact the front desk.";
+  }
   return "Could not save the add-on change.";
 }
 
@@ -167,8 +198,34 @@ export async function handleUpdateAddOns(req: VercelRequest, res: VercelResponse
   const bookingId = bookingDoc.id;
   const bookingData = bookingDoc.data();
   const status = String(bookingData.status || "").trim();
-  if (status === "checked-out" || status === "cancelled") {
-    return res.status(400).json({ success: false, error: "Booking is read-only." });
+  // Per OCT-M3 (2026-10-20, decision #291): the read-only rule
+  // now lives in ONE shared helper (`isOtherAddOnBookingMutable`)
+  // so the guest path, the staff update path and the staff
+  // mark-served path can never drift apart.
+  if (!isOtherAddOnBookingMutable(status)) {
+    return res.status(400).json({ success: false, error: OTHER_ADD_ON_READ_ONLY_ERROR });
+  }
+
+  // Per OCT-M1 (2026-10-20, decision #295): the hotel-wide
+  // "Add-ons enabled" master switch gates the GUEST purchase path.
+  //
+  // The catalog endpoint already returns an empty catalog when the
+  // hotel has taken other add-ons off sale, so the guest UI cannot
+  // offer one — but the guest app is not the only way to reach this
+  // endpoint. Without this gate a guest could still POST an order
+  // for an enabled add-on while the hotel's switch was off, which
+  // is exactly the "admin believes add-ons are off, guests keep
+  // buying" gap OCT-M1 describes.
+  //
+  // The STAFF path (`addons-staff-update.ts`) is deliberately NOT
+  // gated: the front desk recording an add-on a guest asked for at
+  // the desk is an operational override, and the staff drawer gets
+  // an empty catalog from the config endpoint anyway.
+  const hotelEnabled = await loadOtherAddOnsHotelEnabled();
+  if (!hotelEnabled) {
+    return res
+      .status(400)
+      .json({ success: false, error: OTHER_ADD_ONS_UNAVAILABLE_ERROR });
   }
 
   // Load the add-on catalog inside the transaction's
@@ -199,6 +256,16 @@ export async function handleUpdateAddOns(req: VercelRequest, res: VercelResponse
         return;
       }
       const liveBooking = bookingSnap.data() || {};
+      // Per OCT-M5 (2026-10-20, decision #292): the booking's
+      // check-in date — the cut-off anchor for every op in this
+      // transaction. Derived with the shared helper so the write
+      // path, the Manage page and the admin drawer all use the
+      // same UTC calendar key.
+      const liveCheckInDate = toUtcDateKey(liveBooking.checkIn as any);
+      if (!liveCheckInDate) {
+        opCode = "BOOKING_CHECK_IN_MISSING";
+        return;
+      }
       const liveSelections: Record<string, OtherAddOnSelectionEntry[]> =
         liveBooking.otherAddOnSelections && typeof liveBooking.otherAddOnSelections === "object"
           ? { ...liveBooking.otherAddOnSelections }
@@ -244,7 +311,12 @@ export async function handleUpdateAddOns(req: VercelRequest, res: VercelResponse
           assertNotLocked({
             selectionKey: op.selectionKey,
             serverNow: now,
-            addOn: liveAddOn
+            addOn: liveAddOn,
+            // Per OCT-M5 (2026-10-20, decision #292): the
+            // cut-off anchor is the BOOKING's check-in, not the
+            // selection's own service date. The parameter is now
+            // required, so the compiler enforces it.
+            checkInDate: liveCheckInDate
           });
         } catch (err: any) {
           opCode = String(err?.message || OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX);
@@ -303,7 +375,12 @@ export async function handleUpdateAddOns(req: VercelRequest, res: VercelResponse
           assertNotLocked({
             selectionKey: op.selectionKey,
             serverNow: now,
-            addOn: liveAddOn
+            addOn: liveAddOn,
+            // Per OCT-M5 (2026-10-20, decision #292): the
+            // cut-off anchor is the BOOKING's check-in, not the
+            // selection's own service date. The parameter is now
+            // required, so the compiler enforces it.
+            checkInDate: liveCheckInDate
           });
         } catch (err: any) {
           opCode = String(err?.message || OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX);
@@ -321,12 +398,26 @@ export async function handleUpdateAddOns(req: VercelRequest, res: VercelResponse
           return;
         }
         const dateKey = parsedKey.date;
+        // Per OCT-C2 (2026-10-20, audit
+        // `plan/project/AUDIT-OCTOBER-2026.md`): the snapshot
+        // fields come from the LIVE CATALOG, never from the
+        // request. The pre-fix code preferred the client's
+        // `op.priceSnapshot` (`op.priceSnapshot ?? liveAddOn.price`
+        // — the client always sends it, so the catalog fallback
+        // could never fire), which let a guest buy a ₱500
+        // airport transfer for ₱1 and permanently snapshot that
+        // price onto the booking.
+        //
+        // The client still sends `priceSnapshot` / `nameSnapshot` /
+        // `unitSnapshot` / `cutoffHoursBeforeCheckInSnapshot` (an
+        // older guest bundle may be cached) — they are accepted
+        // and IGNORED. The catalog price is the only price.
         const entry: OtherAddOnSelectionEntry = {
           addOnId: op.addOnId,
-          nameSnapshot: op.nameSnapshot || liveAddOn.name,
-          priceSnapshot: Math.max(0, Number(op.priceSnapshot ?? liveAddOn.price) || 0),
+          nameSnapshot: liveAddOn.name,
+          priceSnapshot: Math.max(0, Number(liveAddOn.price) || 0),
           quantity: Math.max(0, Math.floor(Number(op.quantity ?? 0) || 0)),
-          unitSnapshot: op.unitSnapshot || liveAddOn.unit,
+          unitSnapshot: liveAddOn.unit,
           addedAt: nowIso,
           addedBy: "guest",
           lastModifiedAt: nowIso,
@@ -335,7 +426,7 @@ export async function handleUpdateAddOns(req: VercelRequest, res: VercelResponse
           removedBy: null,
           cutoffHoursBeforeCheckInSnapshot: Math.max(
             0,
-            Math.min(168, Math.floor(Number(op.cutoffHoursBeforeCheckInSnapshot ?? liveAddOn.cutoffHoursBeforeCheckIn) || 24))
+            Math.min(168, Math.floor(Number(liveAddOn.cutoffHoursBeforeCheckIn) || 24))
           )
         };
         next[dateKey] = [...(next[dateKey] || []), entry];
@@ -369,7 +460,12 @@ export async function handleUpdateAddOns(req: VercelRequest, res: VercelResponse
           assertNotLocked({
             selectionKey: op.selectionKey,
             serverNow: now,
-            addOn: liveAddOn
+            addOn: liveAddOn,
+            // Per OCT-M5 (2026-10-20, decision #292): the
+            // cut-off anchor is the BOOKING's check-in, not the
+            // selection's own service date. The parameter is now
+            // required, so the compiler enforces it.
+            checkInDate: liveCheckInDate
           });
         } catch (err: any) {
           opCode = String(err?.message || OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX);
@@ -390,10 +486,21 @@ export async function handleUpdateAddOns(req: VercelRequest, res: VercelResponse
         if (!prior) continue;
         const updated: OtherAddOnSelectionEntry = {
           ...prior,
-          nameSnapshot: op.nameSnapshot || prior.nameSnapshot,
-          priceSnapshot: Math.max(0, Number(op.priceSnapshot ?? prior.priceSnapshot) || 0),
+          // Per OCT-C2 (2026-10-20): a CHANGE may only alter the
+          // QUANTITY. The name / price / unit are the entry's
+          // existing snapshot — the pre-fix code preferred the
+          // client's `op.priceSnapshot` here too, so a guest
+          // could re-price an existing line item on the way in.
+          //
+          // The snapshot is intentionally NOT re-read from the
+          // catalog on a change: per OTHER-ADD-ONS.md the guest
+          // keeps the price they ordered at, even if the admin
+          // changes the catalog price afterwards. A NEW order
+          // takes the current catalog price (see the add op).
+          nameSnapshot: prior.nameSnapshot,
+          priceSnapshot: prior.priceSnapshot,
           quantity: Math.max(0, Math.floor(Number(op.quantity ?? prior.quantity) || 0)),
-          unitSnapshot: op.unitSnapshot || prior.unitSnapshot,
+          unitSnapshot: prior.unitSnapshot,
           lastModifiedAt: nowIso,
           lastModifiedBy: "guest"
         };
@@ -460,7 +567,16 @@ export async function handleUpdateAddOns(req: VercelRequest, res: VercelResponse
           addOnSnapshot: a.addOnSnapshot,
           actorUid: "guest",
           actorRole: a.actorRole,
-          reasonOrCutoff: a.reason
+          // Per OCT-H7 (2026-10-20, decision #286): the object form
+          // carries BOTH the free-text reason and the cut-off flag.
+          // On the guest surface the flag is always `false` (the
+          // guest is blocked once a date locks), but passing it
+          // explicitly keeps the intent visible instead of
+          // relying on the default.
+          reasonOrCutoff: {
+            reason: a.reason,
+            occurredAfterCutoff: a.occurredAfterCutoff
+          }
         });
       }
     });

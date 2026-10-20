@@ -18,6 +18,7 @@
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { adminDb } from "../lib/firebase-admin";
+import { loadOtherAddOnsHotelEnabled } from "../lib/otherAddOns-settings";
 import {
   AIRPORT_TRANSFER_PRESEED,
   normalizeAddOn,
@@ -58,7 +59,16 @@ export async function handleGetAddOnsConfig(
       rawAddOns.push(pre);
     }
 
-    const enabled = getEnabledAddOnsByHotel(rawAddOns);
+    // Per OCT-M1 (2026-10-20, decision #295): the hotel-wide
+    // "Add-ons enabled" master switch. It lives on
+    // `settings/hotelConfig.otherAddOnsEnabled` and is the switch
+    // the admin's Settings tab actually toggles. When it is off, the
+    // catalog is empty for EVERY guest-facing surface — this
+    // endpoint is the single read path they all share, so one read
+    // is enough.
+    const hotelEnabled = await loadOtherAddOnsHotelEnabled();
+
+    const enabled = getEnabledAddOnsByHotel(rawAddOns, hotelEnabled);
 
     res.setHeader("Cache-Control", "public, max-age=60");
     return res.status(200).json({
@@ -72,6 +82,12 @@ export async function handleGetAddOnsConfig(
         cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn,
         displayOrder: a.displayOrder
       })),
+      // Per OCT-M1: the master switch is echoed so the guest UI
+      // can tell "the hotel turned other add-ons off" apart from
+      // "the hotel has no other add-ons" — both render an empty
+      // grid, but only one of them is a temporary state the guest
+      // should hear about.
+      otherAddOnsEnabled: hotelEnabled,
       preSeeded: rawAddOns.length === 1 && rawAddOns[0].id === "airport-transfer"
     });
   } catch (err: any) {

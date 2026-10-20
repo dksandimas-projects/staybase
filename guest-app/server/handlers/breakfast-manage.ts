@@ -45,6 +45,11 @@ import {
   isValidLookupToken,
   normalizeBreakfastConfig,
   recomputeBreakfastTotal,
+  // Per OCT-H1 (2026-10-20, decision #282): reads the
+  // breakfast portion back out of the stored rate breakdown so
+  // the balance can subtract the breakfast that is already
+  // inside `totalPrice` before adding the current one.
+  sumBreakfastRateLines,
   type BreakfastSelectionEntry,
   type CutoffState,
   type PublicBreakfastConfig
@@ -391,6 +396,31 @@ export async function handleGetBreakfastManage(req: VercelRequest, res: VercelRe
   // `breakfastTotal` is the server-recomputed sum (BR-01
   // helper). `paidAmount` is the booking's cumulative net
   // collected (positive payments − refunds).
+  //
+  // Per OCT-H1 (2026-10-20, decision #282): the pre-fix formula
+  // was `totalPrice + recomputedTotal - paidAmount`, which
+  // DOUBLE-COUNTED the breakfast. Per BR-01 / BR-03 the
+  // booking's `totalPrice` is
+  // `roomTotal + breakfastTotal + extraBedTotal` (minus
+  // discounts) — the breakfast is a COMPONENT of the total, not
+  // an addition to it. Adding the CURRENT breakfast total on top
+  // of a total that already contained the ORIGINAL breakfast
+  // charged the guest for breakfast twice, on every booking
+  // that had any.
+  //
+  // The correct bill is
+  //   `totalPrice − (breakfast already inside totalPrice) + currentBreakfastTotal`
+  // and the anchor for "breakfast already inside totalPrice" is
+  // the booking's `rateBreakdown.addOns[]` — snapshotted at
+  // create time and preserved verbatim by `rebuildRateBreakdown`,
+  // so it still holds the ORIGINAL amount after the guest edits
+  // their selections. (`booking.breakfastTotal` cannot be used:
+  // the manage path OVERWRITES it on every write.)
+  //
+  // A booking with no rate breakdown at all (pre-refactor) has an
+  // unknown breakfast component; we then fall back to NOT adding
+  // the breakfast on top, which is the conservative direction —
+  // it never over-charges the guest.
   const existingSelections: Record<string, BreakfastSelectionEntry> =
     (booking.breakfastSelections && typeof booking.breakfastSelections === "object")
       ? booking.breakfastSelections
@@ -398,7 +428,15 @@ export async function handleGetBreakfastManage(req: VercelRequest, res: VercelRe
   const recomputedTotal = recomputeBreakfastTotal(existingSelections);
   const totalPrice = Number(booking.totalPrice || 0);
   const paidAmount = Number((booking as any).paidAmount || 0);
-  const balance = Math.max(0, totalPrice + recomputedTotal - paidAmount);
+  const breakfastInTotalPrice = sumBreakfastRateLines(
+    (booking as any).rateBreakdown as any
+  );
+  const balance = Math.max(
+    0,
+    (breakfastInTotalPrice === null
+      ? totalPrice
+      : totalPrice - breakfastInTotalPrice + recomputedTotal) - paidAmount
+  );
 
   const served: Record<string, any> =
     (booking.breakfastServed && typeof booking.breakfastServed === "object")
@@ -837,9 +875,24 @@ export async function handleUpdateBreakfast(req: VercelRequest, res: VercelRespo
       // `paidAmount` denormalised field is updated
       // transactionally by every payment / refund write
       // path, so it's the authoritative snapshot here.
+      //
+      // Per OCT-H1 (2026-10-20, decision #282): the breakfast
+      // inside `totalPrice` must be SUBTRACTED before the new
+      // breakfast total is added — `totalPrice` already contains
+      // the original breakfast (per BR-01 / BR-03), so the
+      // pre-fix `totalPrice + newBreakfastTotal - paidAmount`
+      // charged the guest for breakfast twice. The anchor is the
+      // booking's `rateBreakdown.addOns[]`, which still holds the
+      // ORIGINAL breakfast amount (it is snapshotted at create
+      // time and preserved by `rebuildRateBreakdown`).
+      const breakfastInTotalPrice = sumBreakfastRateLines(
+        (booking as any).rateBreakdown as any
+      );
       const newBalance = Math.max(
         0,
-        totalPriceNum + newBreakfastTotal - paidAmountNum
+        (breakfastInTotalPrice === null
+          ? totalPriceNum
+          : totalPriceNum - breakfastInTotalPrice + newBreakfastTotal) - paidAmountNum
       );
 
       resultSummary.newBalance = Number(newBalance.toFixed(2));

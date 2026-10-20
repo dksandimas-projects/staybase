@@ -1475,6 +1475,29 @@ export function BookingsPage() {
     return childTotal || selectedBooking.totalPrice;
   }, [bookings, selectedBooking, selectedReservationTotal]);
 
+  // Per OCT-FOL-01 (2026-10-20, decision #298): the reservation's
+  // other-add-ons total is the SUM of its child bookings' — the same
+  // shape as `selectedFolioBaseTotal` above (the reservation header's
+  // `totalPrice` IS the sum of the children's `totalPrice`).
+  //
+  // The other add-ons are NOT inside `totalPrice` (BR-12 decision 2:
+  // "added on top of it for the balance"), so the folio needs the
+  // term separately. Without it a reservation with an unpaid airport
+  // transfer showed a ₱0 balance in the drawer.
+  const selectedFolioOtherAddOnTotal = useMemo(() => {
+    if (!selectedBooking) return 0;
+    if (!selectedBooking.reservationId) {
+      return Math.max(0, Number(selectedBooking.otherAddOnTotal) || 0);
+    }
+    const childTotal = bookings
+      .filter((booking) => booking.reservationId === selectedBooking.reservationId)
+      .reduce((sum, booking) => sum + Math.max(0, Number(booking.otherAddOnTotal) || 0), 0);
+    // Fall back to the selected booking's own value when the child
+    // list is empty (e.g. the children have not hydrated yet) so the
+    // number never disappears mid-load.
+    return childTotal || Math.max(0, Number(selectedBooking.otherAddOnTotal) || 0);
+  }, [bookings, selectedBooking]);
+
   useEffect(() => {
     if (!selectedBooking?.reservationId) {
       setSelectedReservationTotal(null);
@@ -2061,7 +2084,14 @@ export function BookingsPage() {
     const folioBookingIds = isSelected ? selectedFolioBookingIds : [booking.id];
     return computeBookingFolio({
       booking: isSelected
-        ? { ...booking, totalPrice: selectedFolioBaseTotal }
+        ? {
+            ...booking,
+            totalPrice: selectedFolioBaseTotal,
+            // Per OCT-FOL-01 (decision #298): the reservation's
+            // other-add-ons total replaces the child's, exactly like
+            // `totalPrice` above.
+            otherAddOnTotal: selectedFolioOtherAddOnTotal
+          }
         : booking,
       // Prefer the live (selected) payments when this is the
       // selected booking (optimistic-update path). Otherwise
@@ -2080,10 +2110,21 @@ export function BookingsPage() {
     // Payment state
     if (bPayState) {
       const totalPayments = folio.paymentsTotal;
+      // Per OCT-FOL-01 (2026-10-20, decision #298): the
+      // denominator is the FOLIO's grand total, not
+      // `booking.totalPrice`. The two disagreed even before this
+      // change (the folio includes store charges + incidental
+      // charges, `totalPrice` does not), and the other add-ons
+      // widened the gap: a booking with a ₱5,000 room + a ₱2,000
+      // airport transfer that the guest had not paid for was
+      // classified "paid" here while the drawer showed a ₱2,000
+      // balance. The filter must describe the same money state the
+      // drawer shows.
+      const folioBase = folio.grandTotal;
       if (bPayState === "unpaid" && totalPayments > 0) return false;
-      if (bPayState === "partial" && (totalPayments <= 0 || totalPayments >= booking.totalPrice)) return false;
-      if (bPayState === "paid" && totalPayments < booking.totalPrice) return false;
-      if (bPayState === "overpaid" && totalPayments <= booking.totalPrice) return false;
+      if (bPayState === "partial" && (totalPayments <= 0 || totalPayments >= folioBase)) return false;
+      if (bPayState === "paid" && totalPayments < folioBase) return false;
+      if (bPayState === "overpaid" && totalPayments <= folioBase) return false;
     }
     // Payment method
     if (bPaymentMethod && booking.paymentMethod !== bPaymentMethod) return false;
@@ -3848,7 +3889,19 @@ export function BookingsPage() {
       }
       y += 1;
 
-      if (receiptFolio.storeCharges.length > 0 || receiptFolio.charges.length > 0) {
+      // Per OCT-FOL-01 (2026-10-20, decision #298): the BR-12 other
+      // add-ons are NOT inside `totalPrice` (BR-12 decision 2), so
+      // they get their own line here — otherwise the receipt's
+      // "Folio total" would be higher than the sum of the itemised
+      // lines. The section also PRINTS when the booking has other
+      // add-ons but no store / incidental charges, so the transfer
+      // is itemised rather than silently folded into the total.
+      const receiptOtherAddOnTotal = receiptFolio.otherAddOnTotal ?? 0;
+      if (
+        receiptFolio.storeCharges.length > 0 ||
+        receiptFolio.charges.length > 0 ||
+        receiptOtherAddOnTotal > 0
+      ) {
         checkNewPage(12 + (receiptFolio.storeCharges.length + receiptFolio.charges.length) * 5);
         drawPdfSectionTitle(pdf, "Folio Charges", marginL, y, brandRgb);
         y += 4.5;
@@ -3866,6 +3919,9 @@ export function BookingsPage() {
             { muted: amount < 0 }
           );
         });
+        if (receiptOtherAddOnTotal > 0) {
+          drawAmountRow("Other add-ons", formatAmount(receiptOtherAddOnTotal));
+        }
         drawAmountRow("Folio total", formatAmount(receiptFolio.grandTotal), { bold: true });
         y += 2;
       }
@@ -5556,6 +5612,16 @@ export function BookingsPage() {
               onSectionChange={setActiveBookingSection}
               totalPaid={selectedBookingFolio?.paymentsTotal ?? 0}
               balance={selectedBookingFolio?.balance ?? selectedBooking.totalPrice}
+              // Per OCT-FOL-01 (2026-10-20, decision #298): the
+              // strip's "Total" metric is the folio's grand total —
+              // the base the balance is derived from. It used to
+              // read `booking.totalPrice`, which is not that base
+              // (the folio also carries the other add-ons + the
+              // extras, and for a multi-room reservation
+              // `totalPrice` is the child's while the balance is
+              // the reservation's), so Total / Paid / Balance did
+              // not reconcile.
+              folioTotal={selectedBookingFolio?.grandTotal ?? selectedFolioBaseTotal}
               missingCheckInItems={selectedBookingCheckInReadiness?.missingItems ?? []}
               paymentMethodLabel={selectedBooking.paymentMethod ? getOnsitePaymentMethodLabel(selectedBooking.paymentMethod) : ""}
               // Per FOL-02 (2026-08-06, decision #198): the
@@ -5967,6 +6033,22 @@ export function BookingsPage() {
                     <span>Room and booked add-ons</span>
                     <span className="font-semibold text-gray-900">{formatPrice(selectedFolioBaseTotal)}</span>
                   </div>
+                  {/* Per OCT-FOL-01 (2026-10-20, decision #298): the
+                      BR-12 other add-ons are NOT inside
+                      `totalPrice` (BR-12 decision 2 — "added on top
+                      of it for the balance"), so they need their own
+                      line for the breakdown to add up to the folio
+                      total. Without it the desk saw a folio total
+                      that was ₱2,000 higher than the sum of the
+                      lines above it. */}
+                  {(selectedBookingFolio?.otherAddOnTotal ?? 0) > 0 ? (
+                    <div className="flex items-center justify-between gap-4">
+                      <span>Other add-ons</span>
+                      <span className="font-semibold text-gray-900">
+                        {formatPrice(selectedBookingFolio?.otherAddOnTotal ?? 0)}
+                      </span>
+                    </div>
+                  ) : null}
                   <div className="flex items-center justify-between gap-4">
                     <span>Store charges billed to room</span>
                     <span className="font-semibold text-gray-900">{formatPrice(selectedBookingFolio?.storeTotal ?? 0)}</span>

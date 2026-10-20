@@ -73,13 +73,68 @@ export function normalizeAddOn(raw: unknown, fallbackId?: string): AddOn | null 
 }
 
 /**
+ * Per OCT-M1 (2026-10-20, decision #295): the hotel-wide
+ * "Add-ons enabled" master switch.
+ *
+ * The Settings → Other Add-Ons tab has shown a hotel-wide toggle
+ * since BR-12.1 (2026-10-15), but it was a bare `useState(true)` —
+ * no Firestore read, no write, no localStorage mirror. The copy
+ * under it claimed that turning it off would empty every
+ * `getEnabledAddOnsByHotel` call, so an admin who flipped it
+ * believed other add-ons were off sale while guests kept buying
+ * the airport transfer.
+ *
+ * The switch is now real. It persists to
+ * `settings/hotelConfig.otherAddOnsEnabled` and the public
+ * `/api/bookings/addons/config` endpoint reads it, so turning it
+ * off genuinely empties the catalog the guest app renders.
+ *
+ * The default is `true` — the pre-OCT-M1 behaviour was "add-ons are
+ * on", and a legacy settings doc with no field must not silently
+ * switch a hotel's revenue stream off.
+ */
+export const OTHER_ADD_ONS_ENABLED_DEFAULT = true;
+
+/**
+ * Normalize the raw `settings/hotelConfig.otherAddOnsEnabled` value.
+ *
+ * Defensive on purpose: the field is absent on every settings doc
+ * written before OCT-M1, and a hand-edited doc could carry a
+ * string. Only an explicit `false` disables the catalog.
+ */
+export function normalizeOtherAddOnsEnabled(raw: unknown): boolean {
+  if (raw === false) return false;
+  if (raw === true) return true;
+  // A string "false" is the shape a hand-edited Firestore doc or a
+  // legacy form field tends to land on. Treat it as the boolean it
+  // spells rather than falling back to the default.
+  if (typeof raw === "string") {
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === "false") return false;
+    if (normalized === "true") return true;
+  }
+  return OTHER_ADD_ONS_ENABLED_DEFAULT;
+}
+
+/**
  * Filter + sort the catalog for the public
  * `/api/bookings/addons/config` response. Returns ONLY the
  * `isEnabled === true` rows, sorted by `displayOrder` asc
  * then `name` asc as a stable tiebreaker.
+ *
+ * Per OCT-M1 (decision #295) the second argument is the hotel-wide
+ * master switch. When it is explicitly `false` the catalog is empty
+ * regardless of the per-row `isEnabled` flags — that is the whole
+ * point of the switch. `undefined` (the pre-OCT-M1 call shape) means
+ * "no master switch" and keeps the old per-row-only behaviour, so
+ * every existing caller keeps working.
  */
-export function getEnabledAddOnsByHotel(addOns: AddOn[] | null | undefined): AddOn[] {
+export function getEnabledAddOnsByHotel(
+  addOns: AddOn[] | null | undefined,
+  hotelEnabled?: boolean
+): AddOn[] {
   if (!Array.isArray(addOns)) return [];
+  if (hotelEnabled === false) return [];
   return addOns
     .filter((a) => a && a.isEnabled === true)
     .slice()
@@ -107,3 +162,45 @@ export function sortAddOnsByDisplayOrder(addOns: AddOn[] | null | undefined): Ad
       return String(a.name || "").localeCompare(String(b.name || ""));
     });
 }
+
+/**
+ * Per OCT-M3 (2026-10-20, decision #291): may the other-add-on
+ * selections on a booking in this status still be EDITED?
+ *
+ * Per `plan/features/OTHER-ADD-ONS.md` §Edge cases: "Booking
+ * checked-out / cancelled | **Both guest and staff update endpoints
+ * reject with 400 "Booking is read-only."**"
+ *
+ * The guest endpoint (`addons-manage-save.ts`) enforced the rule
+ * from day one, but the STAFF endpoint
+ * (`addons-staff-update.ts`) never inspected `status` at all —
+ * so the front desk could add an airport transfer to a checked-out
+ * booking, and (when `paidAmount > 0`) write a
+ * `category: "otherAddOn"` PENDING REFUND LIABILITY against a
+ * closed booking, inflating the Liability tab with a refund for
+ * something that was already served. `addons-mark-served.ts` had
+ * the same gap (it never read the booking's status).
+ *
+ * This helper is the ONE rule, so the guest path, the staff
+ * update path and the staff mark-served path can never drift
+ * apart again.
+ *
+ * A `checked-in` booking is still mutable — a guest can arrive
+ * and still buy an airport transfer for the next day.
+ */
+export function isOtherAddOnBookingMutable(status: unknown): boolean {
+  // Case-insensitive on purpose: the rule exists to REFUSE edits on
+  // a closed booking, so a status that differs only in case ("Cancelled",
+  // "Checked-Out") must still be refused. Failing closed is the only
+  // safe direction — the alternative lets a hand-edited doc reopen a
+  // closed booking.
+  const normalized = String(status ?? "").trim().toLowerCase();
+  return normalized !== "checked-out" && normalized !== "cancelled";
+}
+
+/**
+ * The canonical error message + HTTP status for a read-only
+ * booking. The guest path's copy is preserved verbatim (it is the
+ * one the guest already sees).
+ */
+export const OTHER_ADD_ON_READ_ONLY_ERROR = "Booking is read-only.";

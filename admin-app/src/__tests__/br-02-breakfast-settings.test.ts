@@ -390,8 +390,14 @@ describe("BR-02 — Admin Settings: Breakfast & Dining tab", () => {
     });
 
     test("imports `BreakfastConfigSchema` from `@spark-inn/shared/schemas/booking`", () => {
+      // Per OCT-H10 (2026-10-20, decision #284): the same import
+      // statement now also carries `BreakfastMealSchema` (the
+      // photo-upload path validates the meals array before it is
+      // persisted), so the assertion matches the import block
+      // rather than requiring `BreakfastConfigSchema` to be the
+      // only member.
       expect(settingsPage).toMatch(
-        /import\s*\{\s*BreakfastConfigSchema\s*\}\s*from\s+["']@spark-inn\/shared\/schemas\/booking["']/
+        /import\s*\{[^}]*BreakfastConfigSchema[^}]*\}\s*from\s+["']@spark-inn\/shared\/schemas\/booking["']/
       );
     });
   });

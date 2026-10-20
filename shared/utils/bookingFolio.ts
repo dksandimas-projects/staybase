@@ -29,6 +29,21 @@ import { calculateDiscountChain, type DiscountScope } from "./bookingDiscounts";
 export interface FolioBooking {
   id: string;
   totalPrice: number;
+  /**
+   * Per OCT-FOL-01 (2026-10-20, decision #298): the BR-12
+   * "other add-ons" total for this booking.
+   *
+   * The other add-ons are NOT inside `totalPrice` — per
+   * `plan/features/OTHER-ADD-ONS.md` decision 2 they are "added on
+   * top of it for the balance". So a booking with a ₱2,000 airport
+   * transfer and a ₱5,000 room had a folio balance of ₱0: the hotel
+   * was owed ₱2,000 and every balance surface said the guest was
+   * settled.
+   *
+   * Optional + defaulted to 0: a pre-BR-12 booking (or a caller that
+   * does not read the field) behaves exactly as before.
+   */
+  otherAddOnTotal?: number | null;
 }
 
 /**
@@ -129,6 +144,12 @@ export interface BookingFolio {
   charges: FolioCharge[];
   chargesTotal: number;
   paymentsTotal: number;
+  /**
+   * Per OCT-FOL-01 (decision #298): the other-add-ons line, kept
+   * separate so the UI can SHOW it rather than only fold it into the
+   * grand total. `0` for a booking with no other add-ons.
+   */
+  otherAddOnTotal: number;
   grandTotal: number;
   balance: number;
 }
@@ -189,7 +210,18 @@ export function computeBookingFolio(input: BookingFolioInput): BookingFolio {
   );
 
   const totalPrice = Number(booking.totalPrice) || 0;
-  const grandTotal = totalPrice + storeTotal + chargesTotal;
+  // Per OCT-FOL-01 (2026-10-20, decision #298): the other add-ons
+  // join the grand total. They are NOT inside `totalPrice` (BR-12
+  // decision 2: "added on top of it for the balance"), so without
+  // this term a booking with an unpaid ₱2,000 airport transfer
+  // showed a ₱0 balance — the hotel was owed the money and every
+  // balance surface said the guest was settled.
+  //
+  // This mirrors the guest's post-booking Manage page, which has
+  // always computed `totalPrice + otherAddOnTotal - paidAmount`
+  // (`guest-app/server/handlers/addons-manage.ts`).
+  const otherAddOnTotal = Math.max(0, Number(booking.otherAddOnTotal) || 0);
+  const grandTotal = totalPrice + otherAddOnTotal + storeTotal + chargesTotal;
   const balance = grandTotal - paymentsTotal;
 
   return {
@@ -198,6 +230,7 @@ export function computeBookingFolio(input: BookingFolioInput): BookingFolio {
     charges,
     chargesTotal,
     paymentsTotal,
+    otherAddOnTotal,
     grandTotal,
     balance
   };
@@ -216,6 +249,14 @@ export interface ServerFolioTotals {
   incidentalTotal: number;
   addToBillTotal: number;
   collectedTotal: number;
+  /**
+   * Per OCT-FOL-01 (2026-10-20, decision #298): the BR-12
+   * "other add-ons" total. NOT inside `totalPrice` (BR-12 decision
+   * 2), but part of the balance — the same term
+   * `computeBookingFolio` adds. Optional + defaulted to 0 so every
+   * existing caller keeps its current value.
+   */
+  otherAddOnTotal?: number | null;
 }
 
 export interface ServerFolioTotalsResult {
@@ -230,7 +271,13 @@ export function computeServerFolioTotals(
   const incidentalTotal = Number(input.incidentalTotal) || 0;
   const addToBillTotal = Number(input.addToBillTotal) || 0;
   const collectedTotal = Number(input.collectedTotal) || 0;
-  const folioTotal = totalPrice + incidentalTotal + addToBillTotal;
+  // Per OCT-FOL-01 (decision #298): the other add-ons are added on
+  // top of `totalPrice` — they are not inside it. Without this the
+  // confirm-with-balance threshold gate and the checkout balance
+  // both ignored an unpaid other add-on.
+  const otherAddOnTotal = Math.max(0, Number(input.otherAddOnTotal) || 0);
+  const folioTotal =
+    totalPrice + otherAddOnTotal + incidentalTotal + addToBillTotal;
   const computedBalance = Math.max(folioTotal - collectedTotal, 0);
   return { folioTotal, computedBalance };
 }

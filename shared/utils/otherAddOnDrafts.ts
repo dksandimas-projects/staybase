@@ -1,0 +1,154 @@
+// Per OCT-M4 (2026-10-20, decision #297): the guest's OTHER ADD-ONS
+// draft, built in the browser before the booking is submitted.
+//
+// BR-12 shipped the other-add-ons catalog, the staff walk-in grid and
+// the post-booking "Manage Other Add-Ons" page — but the GUEST
+// booking flow never had one. `BookingPage.tsx` contained ZERO
+// occurrences of "otherAddOn", so a guest could not order an airport
+// transfer at booking time at all, and the spec's headline BR-12 flow
+// was unreachable.
+//
+// These helpers build the draft selection map the Step 2 grid edits
+// and the create payload carries. They are PURE and live in `shared/`
+// so they can be asserted behaviourally — the grid's correctness
+// (per-day × per-add-on rows, quantity clamped to the guest count,
+// zero-quantity rows dropped) is invisible in a regex.
+//
+// The server REBUILDS every entry from the live catalog on create
+// (the OCT-C2 price-authority rule), so the price/name/unit this
+// module snapshots are advisory only — they exist so the client can
+// render a total that matches the bill.
+
+import type { OtherAddOnSelectionEntry } from "../types";
+
+/** The catalog shape the guest grid reads from `GET /api/bookings/addons/config`. */
+export interface OtherAddOnDraftCatalogRow {
+  id: string;
+  name: string;
+  description?: string;
+  price: number;
+  unit: "per-person" | "per-stay";
+  isEnabled?: boolean;
+  cutoffHoursBeforeCheckIn?: number;
+  displayOrder?: number;
+}
+
+/**
+ * The composite key for one (service date × add-on) cell — the same
+ * shape the audit + refund records use
+ * (`yyyy-mm-dd-{addOnId}`, per `buildOtherAddOnSelectionKey`).
+ */
+export function otherAddOnDraftKey(date: string, addOnId: string): string {
+  return `${date}-${String(addOnId).trim()}`;
+}
+
+/**
+ * Clamp a quantity to the legal range for an other add-on.
+ *
+ * Per BR-12 decision 3 the quantity is the number of guests using the
+ * add-on that day — editable `0..guestCount`. A value above the guest
+ * count is a client bug or a hostile payload; clamping keeps the grid
+ * honest and keeps the server's own bounds check as the last line of
+ * defence.
+ */
+export function clampOtherAddOnQuantity(quantity: unknown, guestCount: number): number {
+  const max = Math.max(0, Math.floor(Number(guestCount) || 0));
+  const raw = Math.floor(Number(quantity) || 0);
+  if (raw <= 0) return 0;
+  return Math.min(raw, max);
+}
+
+export interface BuildOtherAddOnDraftSelectionsInput {
+  /** The enabled catalog rows. */
+  catalog: OtherAddOnDraftCatalogRow[];
+  /** The stay's service dates (one per night). */
+  dates: string[];
+  /**
+   * The guest's quantities, keyed by `otherAddOnDraftKey(date, addOnId)`.
+   * A missing key means "not selected" (quantity 0).
+   */
+  quantities: Record<string, number>;
+  /** The booking's total guest count — the per-day quantity ceiling. */
+  guestCount: number;
+  /** Defaults to `new Date()`. */
+  now?: Date;
+}
+
+/**
+ * Build the guest's other-add-on draft selections.
+ *
+ * The result is `Record<serviceDate, OtherAddOnSelectionEntry[]>`
+ * — the exact shape the booking doc stores and the create payload
+ * carries.
+ *
+ * Rules:
+ *   - A row is emitted only when its quantity is > 0 (a guest who
+ *     set a date back to 0 has removed it; the shape keeps no
+ *     zero-quantity rows).
+ *   - A date with no rows at all is omitted from the map entirely.
+ *   - The quantity is clamped to `0..guestCount`.
+ *   - The price / name / unit are snapshotted from the catalog. The
+ *     server re-snapshots them on create.
+ */
+export function buildOtherAddOnDraftSelections(
+  input: BuildOtherAddOnDraftSelectionsInput
+): Record<string, OtherAddOnSelectionEntry[]> {
+  const now = input.now ?? new Date();
+  const stamp = now.toISOString();
+  const catalogById = new Map<string, OtherAddOnDraftCatalogRow>();
+  for (const row of input.catalog || []) {
+    if (row && row.id) catalogById.set(row.id, row);
+  }
+
+  const out: Record<string, OtherAddOnSelectionEntry[]> = {};
+  for (const date of input.dates || []) {
+    const rows: OtherAddOnSelectionEntry[] = [];
+    for (const addOn of catalogById.values()) {
+      const raw = input.quantities?.[otherAddOnDraftKey(date, addOn.id)];
+      const quantity = clampOtherAddOnQuantity(raw, input.guestCount);
+      if (quantity <= 0) continue;
+      rows.push({
+        addOnId: addOn.id,
+        nameSnapshot: addOn.name,
+        priceSnapshot: Math.max(0, Number(addOn.price) || 0),
+        quantity,
+        unitSnapshot: addOn.unit === "per-stay" ? "per-stay" : "per-person",
+        addedAt: stamp,
+        addedBy: "guest",
+        lastModifiedAt: stamp,
+        lastModifiedBy: "guest",
+        removedAt: null,
+        removedBy: null,
+        cutoffHoursBeforeCheckInSnapshot: Math.max(
+          0,
+          Math.min(168, Math.floor(Number(addOn.cutoffHoursBeforeCheckIn) || 24))
+        )
+      });
+    }
+    if (rows.length > 0) out[date] = rows;
+  }
+  return out;
+}
+
+/**
+ * How many (date × add-on) rows carry a quantity > 0 — the number
+ * the Step 2 CTA quotes as "N add-ons".
+ *
+ * Zero-quantity rows and removed rows do not count.
+ */
+export function countOtherAddOnDraftSelections(
+  selections: Record<string, OtherAddOnSelectionEntry[]> | null | undefined
+): number {
+  if (!selections) return 0;
+  let count = 0;
+  for (const date of Object.keys(selections)) {
+    const rows = selections[date];
+    if (!Array.isArray(rows)) continue;
+    for (const entry of rows) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== undefined) continue;
+      if (Math.max(0, Math.floor(Number(entry.quantity) || 0)) > 0) count += 1;
+    }
+  }
+  return count;
+}

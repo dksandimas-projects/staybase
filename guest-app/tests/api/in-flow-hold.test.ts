@@ -771,7 +771,12 @@ describe("IMT-03 — `extendHold()` in useInFlowHold", () => {
   });
 
   it("delegates the cap gate to the shared helper instead of reimplementing it", () => {
-    expect(hookSrc).toMatch(/import \{ canExtendInFlowHold \} from "@spark-inn\/shared"/);
+    // Per OCT-M7 (2026-10-20, decision #296) the import gained a
+    // second shared helper (`inFlowHoldStayMatches`), so assert the
+    // BINDING rather than the exact brace layout.
+    expect(hookSrc).toMatch(
+      /import \{[^}]*canExtendInFlowHold[^}]*\} from "@spark-inn\/shared"/
+    );
     expect(hookSrc).toMatch(/canExtendInFlowHold\(\{/);
   });
 });

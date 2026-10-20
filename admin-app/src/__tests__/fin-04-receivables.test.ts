@@ -7,7 +7,13 @@ const rules = readFileSync(resolve(__dirname, "../../../firebase/firestore.rules
 
 describe("FIN-04 receivables", () => {
   it("computes each unpaid balance from the complete folio", () => {
-    expect(reports).toMatch(/Number\(booking\.totalPrice \|\| 0\) \+ bookingCharges \+ addToBillTotal/);
+    // Per OCT-FOL-01 (2026-10-20, decision #298): the BR-12 other
+    // add-ons join the folio. They are NOT inside `booking.totalPrice`
+    // (BR-12 decision 2 — "added on top of it for the balance"), so
+    // without the term the receivables report under-stated what the
+    // hotel was owed: a guest with an unpaid ₱2,000 airport transfer
+    // did not appear as owing anything.
+    expect(reports).toMatch(/Number\(booking\.totalPrice \|\| 0\) \+ Number\(booking\.otherAddOnTotal \|\| 0\) \+ bookingCharges \+ addToBillTotal/);
     expect(reports).toMatch(/Math\.max\(billed - collected, 0\)/);
     expect(reports).toMatch(/\.filter\(\(row\) => row\.outstanding > 0\)/);
   });

@@ -209,8 +209,12 @@ describe("MBUX-10 — the Phase 15 close-out pins stay in place", () => {
   });
 
   it("the breakfastCopyNotice useState sits above the loading early return", () => {
+    // Per OCT-M8 (decision #294) the notice became a
+    // `{ date, message } | null` object so it renders exactly once —
+    // the anchor is the declaration itself, not the type argument, so
+    // a future shape change does not silently unpin this net.
     const noticeIdx = bookingPage.indexOf(
-      'const [breakfastCopyNotice, setBreakfastCopyNotice] = useState<string>("");'
+      "const [breakfastCopyNotice, setBreakfastCopyNotice] = useState<"
     );
     const earlyReturnIdx = bookingPage.indexOf("if (isScreenLoading) {");
     expect(noticeIdx).toBeGreaterThan(-1);

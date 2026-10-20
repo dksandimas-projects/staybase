@@ -43,14 +43,22 @@ import {
 // `overrideCutoff`, `overrideReason`, etc.) — the
 // server's gate is "is this entry well-formed enough to
 // be a valid breakfast line", not "is every metadata
-// field populated". The `mealId` + `mealName` + `price`
-// triple is the minimum snapshot; the rest is either
+// field populated". The `mealId` is the only field the
+// server treats as authoritative input; `mealName` + `price`
+// are OPTIONAL on the wire because the server now sources
+// BOTH from the live catalog (see the price-authority note
+// in `validateBreakfastSelections`). The rest is either
 // client-supplied metadata or pre-stamped audit data the
 // server overwrites.
 const entryShape = z.object({
   mealId: z.string().trim().min(1).max(120),
-  mealName: z.string().trim().min(1).max(200),
-  price: z.number().finite().min(0),
+  // Per OCT-C1 (2026-10-20, audit `plan/project/AUDIT-OCTOBER-2026.md`):
+  // the wire price/name are advisory only. The server snapshots the
+  // LIVE catalog price + name so a tampered request can never set its
+  // own breakfast price. Both are still accepted (and ignored) so an
+  // older guest bundle keeps working.
+  mealName: z.string().trim().min(1).max(200).optional(),
+  price: z.number().finite().min(0).optional(),
   addedBy: z.string().trim().max(120).optional().default(""),
   addedAt: z.string().trim().max(64).optional().default(""),
   lastModifiedAt: z.string().trim().max(64).optional().default(""),
@@ -100,6 +108,19 @@ export interface ValidateBreakfastSelectionsInput {
   selections: unknown;
   breakfastConfig: BreakfastConfig;
   now: Date;
+  /**
+   * Per OCT-C5 (2026-10-20, audit
+   * `plan/project/AUDIT-OCTOBER-2026.md`): set for the
+   * staff-created WALK-IN path.
+   *
+   * The per-date cut-off exists to stop a GUEST from changing a
+   * selection whose ordering window has closed. A walk-in creates
+   * a brand-new booking — there is no prior selection to lock —
+   * so the desk must not be blocked from recording meals for an
+   * arrival that is inside the cut-off. The walk-in path passes
+   * `true`; the public create path does not.
+   */
+  staffCreated?: boolean;
 }
 
 // `validateBreakfastSelections` is the single read-side
@@ -120,7 +141,7 @@ export interface ValidateBreakfastSelectionsInput {
 export function validateBreakfastSelections(
   input: ValidateBreakfastSelectionsInput
 ): ValidatedBreakfastSelections | null {
-  const { selections, breakfastConfig, now } = input;
+  const { selections, breakfastConfig, now, staffCreated } = input;
   if (selections === null || selections === undefined) return null;
 
   // Zod parse — the strict schema is the single source of
@@ -175,7 +196,7 @@ export function validateBreakfastSelections(
       timezone: breakfastConfig.cutoffTimezone,
       cutoffsEnabled: breakfastConfig.cutoffsEnabled
     });
-    if (cutoffState.isLocked) {
+    if (cutoffState.isLocked && !staffCreated) {
       throw new BreakfastSelectionValidationError(
         `Ordering closed for breakfast on ${serviceDate}. Please remove the selection or contact the hotel.`
       );
@@ -196,13 +217,23 @@ export function validateBreakfastSelections(
       );
     }
 
-    // Defensive price floor: the helper rejects a negative
-    // price (the Zod schema already enforces `min(0)`, this
-    // is a belt-and-suspenders check for a future schema
-    // relaxation). The recompute helper also enforces the
-    // same rule, so the persisted `breakfastTotal` matches
-    // the validated sum by construction.
-    const price = Number(entry.price);
+    // Per OCT-C1 (2026-10-20, audit
+    // `plan/project/AUDIT-OCTOBER-2026.md`): the SNAPSHOT price +
+    // name come from the LIVE catalog, never from the request.
+    // The pre-fix code persisted `entry.price` (the client's wire
+    // value) while only checking `mealLookup.has(entry.mealId)` —
+    // so a guest could POST `price: 0` and book free breakfasts,
+    // and the tampered value flowed into `breakfastTotal` →
+    // `totalPrice` → VAT → folio → receipt → email.
+    //
+    // The manage path already re-read `serverPrice` from the
+    // catalog (`breakfast-manage.ts:712`) and wrote a
+    // price-mismatch audit entry; the create path now matches it.
+    // The booking keeps the snapshot forever (per BREAKFAST.md
+    // §Snapshotting rule) — the catalog is re-read only at the
+    // moment the order is placed.
+    const meal = mealLookup.get(entry.mealId) as BreakfastMeal;
+    const price = Number(meal.price);
     if (!Number.isFinite(price) || price < 0) {
       throw new BreakfastSelectionValidationError(
         `Invalid breakfast price. Please refresh and try again.`
@@ -211,7 +242,7 @@ export function validateBreakfastSelections(
 
     validatedEntries[key] = {
       mealId: entry.mealId,
-      mealName: entry.mealName,
+      mealName: String(meal.name || entry.mealName || entry.mealId),
       price,
       addedBy: entry.addedBy || "guest",
       addedAt: entry.addedAt || new Date().toISOString(),
@@ -273,11 +304,22 @@ export const BREAKFAST_OP_ERROR = {
 
 // `auditBreakfastOp` writes one `breakfastAudit/{autoId}`
 // doc inside the caller's transaction. Mirrors the schema in
-// `shared/types/index.ts §BreakfastAuditEntry`. The
-// `reasonOrCutoff` argument is overloaded to accept either
-// a boolean (the cutoff-overrun flag — `true` means
-// `occurredAfterCutoff` is set) or a string (a free-text
-// reason — `occurredAfterCutoff` stays `false`).
+// `shared/types/index.ts §BreakfastAuditEntry`.
+//
+// Per OCT-H7 (2026-10-20, decision #286): the `reasonOrCutoff`
+// argument accepts EITHER a boolean (the cutoff-overrun flag —
+// `true` means `occurredAfterCutoff` is set) OR a string (a
+// free-text reason — `occurredAfterCutoff` stays `false`) OR an
+// object carrying BOTH.
+//
+// The object form exists because the previous two-way overload
+// could never express "a staff override with a reason". The
+// staff override paths passed the REASON STRING, so the helper
+// set `reason` and left `occurredAfterCutoff` at its `false`
+// default — the flag was `false` on EVERY override path, which
+// is exactly the case the "Late changes" metric exists to
+// count. The comment on those call sites asserted the flag was
+// "already implied"; it was explicitly `false`.
 //
 // The action enum covers both the guest Manage Breakfast
 // surface (BR-04) and the staff booking-drawer surface
@@ -306,7 +348,14 @@ export interface AuditBreakfastOpInput {
   // staff paths. The schema discriminator lets the
   // kitchen list filter on role later.
   actorRole: "guest" | "front-desk" | "admin";
-  reasonOrCutoff?: string | boolean;
+  reasonOrCutoff?: string | boolean | AuditReasonAndCutoff;
+}
+
+export interface AuditReasonAndCutoff {
+  /** The free-text reason for the change (staff override reason, etc.). */
+  reason?: string | null;
+  /** `true` when the change happened after the date's cut-off. */
+  occurredAfterCutoff?: boolean;
 }
 
 export function auditBreakfastOp(input: AuditBreakfastOpInput): void {
@@ -327,6 +376,14 @@ export function auditBreakfastOp(input: AuditBreakfastOpInput): void {
     reason = reasonOrCutoff;
   } else if (typeof reasonOrCutoff === "boolean") {
     occurredAfterCutoff = reasonOrCutoff;
+  } else if (reasonOrCutoff && typeof reasonOrCutoff === "object") {
+    // Per OCT-H7: the object form carries BOTH the reason and the
+    // cut-off flag. The previous two-way overload made the
+    // combination inexpressible, so every staff override wrote
+    // `occurredAfterCutoff: false` and the "Late changes" metric
+    // was permanently zero.
+    reason = reasonOrCutoff.reason ?? null;
+    occurredAfterCutoff = reasonOrCutoff.occurredAfterCutoff === true;
   }
 
   const auditRef = adminDb

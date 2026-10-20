@@ -67,7 +67,13 @@ describe("fix(booking): no hook may be called after the loading-skeleton early r
   it("the breakfastCopyNotice useState is now declared BEFORE the loading early return", () => {
     // The bug was that this useState was 16 lines BELOW the early
     // return. It must now sit above it.
-    const noticeIdx = code.indexOf("useState<string>(\"\");");
+    //
+    // Per OCT-M8 (decision #294) the notice's type argument changed
+    // from `string` to `{ date, message } | null`. The anchor is the
+    // declaration, so this net survives that shape change.
+    const noticeIdx = code.indexOf(
+      "const [breakfastCopyNotice, setBreakfastCopyNotice] = useState<"
+    );
     const earlyReturnIdx = code.indexOf("if (isScreenLoading) {");
     expect(noticeIdx, "breakfastCopyNotice useState must exist").toBeGreaterThan(-1);
     expect(earlyReturnIdx, "loading early return must exist").toBeGreaterThan(-1);

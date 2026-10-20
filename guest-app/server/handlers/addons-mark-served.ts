@@ -19,6 +19,10 @@ import { adminDb } from "../lib/firebase-admin";
 import {
   OtherAddOnMarkServedSchema,
   parseOtherAddOnSelectionKey,
+  // Per OCT-M3 (2026-10-20, decision #291): the shared
+  // read-only-booking rule.
+  isOtherAddOnBookingMutable,
+  OTHER_ADD_ON_READ_ONLY_ERROR,
   type OtherAddOnSelectionEntry
 } from "@spark-inn/shared";
 import { auditOtherAddOnOp } from "../lib/otherAddOn-selections";
@@ -49,6 +53,18 @@ export async function handleMarkServedAddOns(req: VercelRequest, res: VercelResp
         return;
       }
       const liveBooking = live.data() || {};
+      // Per OCT-M3 (2026-10-20, decision #291): a closed
+      // booking's add-on selections are READ-ONLY. The
+      // mark-served endpoint never inspected the booking's
+      // status at all, so the front desk could stamp "served"
+      // on a checked-out or cancelled booking. The check sits
+      // right after the booking read — before any write in this
+      // transaction (per GOTCHAS §Firebase "all reads before any
+      // writes").
+      if (!isOtherAddOnBookingMutable(liveBooking.status)) {
+        opCode = "BOOKING_READ_ONLY";
+        return;
+      }
       const liveSelections: Record<string, OtherAddOnSelectionEntry[]> =
         liveBooking.otherAddOnSelections && typeof liveBooking.otherAddOnSelections === "object"
           ? { ...liveBooking.otherAddOnSelections }
@@ -108,6 +124,12 @@ export async function handleMarkServedAddOns(req: VercelRequest, res: VercelResp
     }
     if (opCode === "BOOKING_NOT_FOUND") {
       return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    // Per OCT-M3 (2026-10-20, decision #291): the read-only
+    // booking case gets the same 400 + message the guest path
+    // uses (per OTHER-ADD-ONS.md §Edge cases).
+    if (opCode === "BOOKING_READ_ONLY") {
+      return res.status(400).json({ success: false, error: OTHER_ADD_ON_READ_ONLY_ERROR });
     }
     return res.status(400).json({ success: false, error: "Could not mark add-on served." });
   }

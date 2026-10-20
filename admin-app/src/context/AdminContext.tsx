@@ -82,6 +82,11 @@ import {
   getEffectiveVatRate,
   normalizeVatConfig,
   type VatConfig,
+  // Per OCT-M1 (2026-10-20, decision #295): the hotel-wide
+  // "Add-ons enabled" master switch. Shared with the server so the
+  // stored value and the value the public catalog endpoint reads can
+  // never disagree on what "off" means.
+  normalizeOtherAddOnsEnabled,
   // Per MSL-01 (2026-10-15): the stay-length cap. Stored RESOLVED
   // (`Infinity` when the admin chose "no limit"), so every admin
   // read gets a safe number. The Settings editor maps `Infinity` back
@@ -114,7 +119,28 @@ import {
   // bookings with the old string-id map).
   type BreakfastSelectionEntry,
   type BreakfastServedEntry,
-  type OtherAddOnSelectionEntry
+  type OtherAddOnSelectionEntry,
+  // Per OCT-H4 (2026-10-20, decision #285): the MRB-11 revenue
+  // allocation snapshot shape, so the admin mapper can hydrate the
+  // stored allocation instead of letting the folio fall back to
+  // the legacy proportional heuristic.
+  type BookingRevenueAllocation,
+  // Per OCT-H4 (2026-10-20, decision #285): the SERVER-side
+  // recompute helpers, so the admin mapper derives the same
+  // breakfast / add-on totals and mirrors the server writes
+  // rather than inventing a second set of rules.
+  recomputeBreakfastTotal,
+  recomputeOtherAddOnTotal,
+  hasAnyOtherAddOns,
+  // Per OCT-H5 (2026-10-20, decision #283): the deep strip of
+  // `undefined`-valued keys applied to every settings write. The
+  // Firestore SDK rejects `undefined` outright
+  // (`Unsupported field value: undefined`) and the admin app does
+  // not set `ignoreUndefinedProperties`, so one stray
+  // `undefined`-valued key inside a settings payload made EVERY
+  // save of that section fail. See
+  // `shared/utils/firestorePayload.ts`.
+  stripUndefinedValues
 } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
@@ -501,6 +527,21 @@ export interface Booking {
   hasAnyOtherAddOns?: boolean;
   /** Per BR-12: the served map keyed by `yyyy-mm-dd-{addOnId}`. */
   otherAddOnServed?: Record<string, { servedAt: any; servedBy: string }>;
+  // Per OCT-H4 (2026-10-20, decision #285): the O(1) read mirror
+  // of "does this booking carry any breakfast". Declared on the
+  // shared `Booking` type and written server-side alongside
+  // `breakfastTotal`, but the admin mapper never read it, so the
+  // Reports breakfast sub-tab and the drawer's "has breakfast"
+  // read saw `false` for every booking.
+  hasAnyBreakfast?: boolean;
+  // Per OCT-H4 (2026-10-20, decision #285): the MRB-11 revenue
+  // allocation snapshot (roomNet / breakfastNet / addOnNet /
+  // deductionNet / totalNet). Without it the folio's revenue-stream
+  // split falls back to the legacy proportional heuristic with
+  // `breakfastGross = 0`, so the room KPI silently absorbs the
+  // breakfast revenue. `null` for pre-MRB-11 bookings — which is
+  // exactly what the shared helper's legacy path expects.
+  revenueAllocation?: BookingRevenueAllocation | null;
   // Per BR-05: the timestamp + uid of the last meal /
   // served update so the header can display "Last edit".
   updatedBy?: string | null;
@@ -1761,6 +1802,52 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             return "";
           };
 
+          // Per OCT-H4 (2026-10-20, decision #285): the BR-01
+          // breakfast money fields + the BR-12 Other Add-Ons map,
+          // its denormalized total and the O(1) mirrors — computed
+          // ONCE so the mapper can use them in the object literal
+          // below.
+          //
+          // The mirrors are DERIVED when the doc does not carry the
+          // explicit flag (a booking written before the field
+          // existed, or a hand-edited doc), so a read site never
+          // reports "no breakfast" / "no add-ons" for a booking that
+          // has them. The derivation reuses the SERVER's own
+          // helpers (`recomputeBreakfastTotal`,
+          // `recomputeOtherAddOnTotal`, `hasAnyOtherAddOns`) so
+          // the admin read and the server write can never disagree.
+          const breakfastSelectionsHydrated: Record<string, BreakfastSelectionEntry> =
+            (data.breakfastSelections as Record<string, BreakfastSelectionEntry>) || {};
+          const breakfastTotalHydrated = Number(
+            data.breakfastTotal ?? recomputeBreakfastTotal(breakfastSelectionsHydrated)
+          );
+          const hasAnyBreakfastHydrated =
+            data.hasAnyBreakfast === true ||
+            (data.hasAnyBreakfast === undefined &&
+              Object.values(breakfastSelectionsHydrated).some(
+                (entry) => entry && (entry.removedAt === null || entry.removedAt === undefined)
+              ));
+
+          const otherAddOnSelectionsHydrated: Record<string, OtherAddOnSelectionEntry[]> =
+            data.otherAddOnSelections
+              ? Object.fromEntries(
+                  Object.entries(data.otherAddOnSelections as Record<string, unknown>).map(
+                    ([date, entries]) => [
+                      date,
+                      (Array.isArray(entries) ? entries : []) as OtherAddOnSelectionEntry[]
+                    ]
+                  )
+                )
+              : {};
+          const otherAddOnTotalHydrated = Number(
+            data.otherAddOnTotal ?? recomputeOtherAddOnTotal(otherAddOnSelectionsHydrated)
+          );
+          const hasAnyOtherAddOnsHydrated =
+            data.hasAnyOtherAddOns === true ||
+            (data.hasAnyOtherAddOns === undefined &&
+              (otherAddOnTotalHydrated > 0 ||
+                hasAnyOtherAddOns(otherAddOnSelectionsHydrated)));
+
           bookingsData.push({
             id: docSnap.id,
             bookingRef: data.bookingRef || "",
@@ -2009,7 +2096,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
               : [],
             createdAt: parseDateTimeString(data.createdAt),
             guestRegistration: data.guestRegistration || null,
-            breakfastSelections: data.breakfastSelections || {},
+            breakfastSelections: breakfastSelectionsHydrated,
             // Per BSP-01 (fix/breakfast-served-persistence, 2026-07-25):
             // hydrate `breakfastServed` from the snapshot so the dashboard's
             // "Mark Served" toggle survives real-time refresh and is visible
@@ -2018,7 +2105,87 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             // successfully to Firestore (and the security rule allows it)
             // but read back as `undefined`, so the dashboard re-rendered the
             // row as unserved after every snapshot update.
+            //
+            // Per OCT-H4 (2026-10-20, decision #285): the two
+            // breakfast maps are now ADJACENT — the BSP-01 parity
+            // guard asserts that the mapper reads both, and
+            // keeping them side by side is what makes that
+            // invariant legible (and testable) at a glance.
             breakfastServed: data.breakfastServed || {},
+            // Per OCT-H4 (2026-10-20, decision #285): the BR-01 /
+            // BR-05 breakfast money fields. The admin `Booking` type
+            // declared `breakfastTotal` but the mapper never read it
+            // from the snapshot — the exact bug class the mapper's
+            // own `reservationId` comment (FOL-02, MRB-01) documents
+            // for those four fields, reintroduced for the October
+            // add-on fields.
+            //
+            // Consequences of the gap (all read-side misreporting —
+            // the write path is field-scoped, so nothing was
+            // destroyed):
+            //   1. `ReportsPage.tsx:1528` / `:1914` / `:2258` read
+            //      `booking.breakfastTotal` → `0`, so "total
+            //      breakfast revenue" showed ₱0 (and the CSV export
+            //      carried ₱0) while "Top meals" — computed from the
+            //      per-entry `price` — showed real money. The report
+            //      contradicted itself.
+            //   2. `bookingFolio.ts:814-821` could not see the
+            //      stored `revenueAllocation`, so the revenue-stream
+            //      split fell back to the legacy proportional
+            //      heuristic with `breakfastGross = 0` and the room
+            //      KPI silently absorbed the breakfast revenue.
+            //
+            // `breakfastTotal` is the server-recomputed BR-01 sum
+            // (the source of truth is the helper, not a client
+            // recomputation), and `hasAnyBreakfast` is its O(1)
+            // mirror. `0` / `false` for legacy bookings that never
+            // had breakfast.
+            breakfastTotal: breakfastTotalHydrated,
+            hasAnyBreakfast: hasAnyBreakfastHydrated,
+            // Per OCT-H4 (2026-10-20, decision #285): the MRB-11
+            // revenue allocation snapshot. `null` for pre-MRB-11
+            // bookings — which is exactly what
+            // `getBookingRevenueStreams` expects to trigger its
+            // legacy-heuristic fallback (and tag the export row
+            // `allocation: "legacy-heuristic"`). The four nets are
+            // coerced with `Number()` so a hand-edited doc cannot
+            // poison the folio math with a string.
+            revenueAllocation: data.revenueAllocation
+              ? {
+                  roomNet: Number(data.revenueAllocation.roomNet || 0),
+                  breakfastNet: Number(data.revenueAllocation.breakfastNet || 0),
+                  addOnNet: Number(data.revenueAllocation.addOnNet || 0),
+                  deductionNet: Number(data.revenueAllocation.deductionNet || 0),
+                  totalNet: Number(data.revenueAllocation.totalNet || 0)
+                }
+              : null,
+            // Per OCT-H4 (2026-10-20, decision #285): the BR-12
+            // Other Add-Ons map + its denormalized total + the O(1)
+            // `hasAnyOtherAddOns` mirror.
+            //
+            // Consequences of the gap: `ReportsPage.tsx:843`
+            // filtered `b.hasAnyOtherAddOns === true` to build the
+            // whole BR-12.1 Add-Ons sub-tab (selections, revenue,
+            // top add-ons, booking count, bar chart) — with the
+            // field always `false`, the sub-tab showed ZERO for
+            // every booking. And
+            // `BookingDrawerWorkspace.tsx:2051` read
+            // `booking.otherAddOnSelections || {}` → the drawer's
+            // Other Add-Ons tab showed "no add-ons" (and "Total: ₱0"
+            // at `:2303`) for a booking that had them.
+            //
+            // The entries are the BR-12 per-date × per-add-on
+            // arrays. They are hydrated verbatim (the entries carry
+            // their own snapshot fields); only the map's presence is
+            // normalized to `{}` so a legacy booking reads as "no
+            // add-ons" instead of `undefined`.
+            otherAddOnSelections: otherAddOnSelectionsHydrated,
+            otherAddOnTotal: otherAddOnTotalHydrated,
+            hasAnyOtherAddOns: hasAnyOtherAddOnsHydrated,
+            // Per BR-12: the per-add-on served map, keyed by
+            // `yyyy-mm-dd-{addOnId}`. Hydrated so the drawer's
+            // served state survives a snapshot echo.
+            otherAddOnServed: data.otherAddOnServed || {},
             // Per EC-01 (2026-08-21, fix shipped 2026-08-21):
             // hydrate `earlyCheckIn` from the snapshot. Same shape
             // of bug as FOL-02 (decision #198) — the admin
@@ -5974,7 +6141,17 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
     // UI exposes a numeric input (deferred to a future
     // PR — out of EXB-10's scope, which is the server
     // invariant).
-    extraBedInventory: 0
+    extraBedInventory: 0,
+    // Per OCT-M1 (2026-10-20, decision #295): the hotel-wide
+    // "Add-ons enabled" master switch. `true` (the default) = other
+    // add-ons are on sale across the guest site. `false` = the
+    // public `/api/bookings/addons/config` endpoint returns an empty
+    // catalog and every guest-facing add-ons surface shows the
+    // "Add-ons are currently disabled" state.
+    //
+    // The default is `true` so a legacy settings doc without the
+    // field never silently switches a hotel's revenue stream off.
+    otherAddOnsEnabled: true
   });
 
   // Tracks whether the first `settings/websiteContent` snapshot
@@ -6342,7 +6519,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
           const docId = docSnap.id;
           switch (docId) {
             case "hotelConfig":
-              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope), paymentHoldWindowHours: normalizePaymentHoldWindowHours((data as Partial<typeof hotelConfig>)?.paymentHoldWindowHours), inFlowHoldMinutes: normalizeInFlowHoldMinutes((data as Partial<typeof hotelConfig>)?.inFlowHoldMinutes), vatConfig: normalizeVatConfig((data as Partial<typeof hotelConfig>)?.vatConfig), maxStayNights: resolveMaxStayNights((data as Partial<typeof hotelConfig>)?.maxStayNights) })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`. // Per PEX-01 (2026-08-01): always normalize the incoming window so legacy settings (or values outside the admin-allowed 1..72h range) hydrate to the 24h default. The per-booking `holdExpiresAt` is the only field the rest of the system reads; the Settings window is just the input. // Per VAT-01 (2026-10-12): always normalize the incoming `vatConfig` so legacy settings without the field hydrate to the BIR-compliant default (`enabled: true`); the 12% breakdown keeps showing everywhere until the admin opts out via the Settings → Discounts tab Tax card.
+              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope), paymentHoldWindowHours: normalizePaymentHoldWindowHours((data as Partial<typeof hotelConfig>)?.paymentHoldWindowHours), inFlowHoldMinutes: normalizeInFlowHoldMinutes((data as Partial<typeof hotelConfig>)?.inFlowHoldMinutes), vatConfig: normalizeVatConfig((data as Partial<typeof hotelConfig>)?.vatConfig), maxStayNights: resolveMaxStayNights((data as Partial<typeof hotelConfig>)?.maxStayNights), otherAddOnsEnabled: normalizeOtherAddOnsEnabled((data as Partial<typeof hotelConfig>)?.otherAddOnsEnabled) })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`. // Per PEX-01 (2026-08-01): always normalize the incoming window so legacy settings (or values outside the admin-allowed 1..72h range) hydrate to the 24h default. The per-booking `holdExpiresAt` is the only field the rest of the system reads; the Settings window is just the input. // Per VAT-01 (2026-10-12): always normalize the incoming `vatConfig` so legacy settings without the field hydrate to the BIR-compliant default (`enabled: true`); the 12% breakdown keeps showing everywhere until the admin opts out via the Settings → Discounts tab Tax card. // Per OCT-M1 (2026-10-20, decision #295): always normalize the incoming `otherAddOnsEnabled` so a legacy doc without the field hydrates to `true` and a hand-edited `"false"` string is read as the boolean it spells.
               break;
             case "websiteContent":
               setWebsiteContent(mergeWebsiteContent(data as Record<string, unknown>));
@@ -6378,7 +6555,14 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
   const updateSettings = async (section: string, data: any) => {
     try {
       const docRef = doc(db, "settings", section);
-      await setDoc(docRef, data, { merge: true });
+      // Per OCT-H5 (2026-10-20, decision #283): strip
+      // `undefined`-valued keys before the write. The Firestore SDK
+      // throws `Unsupported field value: undefined` on them (the app
+      // never sets `ignoreUndefinedProperties`), and because the
+      // offending key sits inside a larger payload, ONE bad key made
+      // EVERY save of that section fail. `null` is preserved — it is
+      // a legal Firestore value.
+      await setDoc(docRef, stripUndefinedValues(data), { merge: true });
       // The public site caches `settings/websiteContent` +
       // `settings/hotelConfig` for 5 minutes per returning visitor.
       // Bump the cross-tab invalidation key so a parallel guest tab
@@ -6932,7 +7116,14 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
       const fileRef = storageRef(storage, `breakfast-meals/${mealId}/${Date.now()}-${safeName}`);
       await uploadBytes(fileRef, compressed.file);
       const url = await getDownloadURL(fileRef);
-      notify.success("Meal image uploaded");
+      // Per OCT-H10 (2026-10-20, decision #284): the success toast
+      // moved to the CALLER. The upload alone is not the outcome the
+      // admin cares about — the catalog row must also be repointed
+      // and PERSISTED. Toasting here announced "Meal image uploaded"
+      // before the write even happened, which is exactly the
+      // "looks saved but the guest still sees no photo" failure the
+      // audit flagged. The caller toasts only after the row is
+      // safely in Firestore.
       return { success: true, url };
     } catch (uploadErr) {
       const err = uploadErr instanceof Error ? uploadErr.message : "Unable to upload the image.";
