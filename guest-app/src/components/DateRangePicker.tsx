@@ -83,8 +83,43 @@ const BOOKING_HORIZON_DAYS = DEFAULT_BOOKING_HORIZON_DAYS;
  * `getFullYear` / `getMonth` / `getDate` on a `TZDate` read the
  * tz-local parts, which is what makes the round-trip exact.
  */
+/**
+ * Per OCT-C4 (2026-10-20, audit `plan/project/AUDIT-OCTOBER-2026.md`):
+ * build the calendar's date value from its Y / M / D components, pinned
+ * to the HOTEL's timezone.
+ *
+ * The previous implementation was `new TZDate(`${iso}T00:00:00`,
+ * config.timezone)`. `@date-fns/tz`'s TZDate constructor pops the
+ * timezone string and, when the REMAINING argument is a single date
+ * STRING, parses it with the native `Date` constructor — i.e. in the
+ * BROWSER's timezone — and only then re-projects the instant into
+ * `config.timezone`. For any browser whose clock is ahead of
+ * Asia/Manila (UTC+8) the re-projection lands on the PREVIOUS day.
+ * Verified against the installed package:
+ *
+ *   browser TZ: Asia/Manila      isoToTzDate(Oct 25) -> 2026-10-25  OK
+ *   browser TZ: Asia/Tokyo        isoToTzDate(Oct 25) -> 2026-10-24  WRONG
+ *   browser TZ: Australia/Sydney  isoToTzDate(Oct 25) -> 2026-10-24  WRONG
+ *
+ * `react-day-picker` re-exports the SAME `TZDate` class, and its
+ * `DateLib.newDate(year, monthIndex, date)` builds its day cells as
+ * `new TZDate(year, monthIndex, date, timeZone)` — the 3-number
+ * (components) form, which constructs the wall-clock in the TARGET
+ * zone. So the library's cells were correctly Manila-anchored while
+ * every value WE built was not, and the two disagreed — the exact
+ * invariant `BOOKING-FLOW.md §Date picker` requires never to happen.
+ *
+ * The components form below is byte-for-byte the construction rdp
+ * uses, so our values and the library's cells now agree in every
+ * browser timezone.
+ */
 function isoToTzDate(iso: string): TZDate {
-  return new TZDate(`${iso}T00:00:00`, config.timezone);
+  const [year, month, day] = iso.split("-").map((part) => Number(part));
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return new TZDate(NaN);
+  }
+  // `TZDate` takes a zero-based month index, like `Date`.
+  return new TZDate(year, month - 1, day, config.timezone);
 }
 
 function tzDateToIso(date: Date): string {

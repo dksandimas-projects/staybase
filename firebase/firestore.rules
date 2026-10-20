@@ -44,6 +44,48 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Per OCT-C3 (2026-10-20, audit
+    // `plan/project/AUDIT-OCTOBER-2026.md`): the BR-12 other
+    // add-on CATALOG. The admin Settings tab (Other Add-Ons)
+    // reads + writes this collection DIRECTLY from the browser
+    // via the Firestore client SDK (`admin-app/src/pages/
+    // SettingsPage.tsx` — `query(collection(db, "addOns"))`,
+    // `setDoc`, `deleteDoc`), so it is subject to these rules.
+    //
+    // The collection shipped in BR-12 (2026-10-15) WITHOUT a
+    // rule block, and Firestore denies unmatched paths by
+    // default. Every admin read + write therefore failed with
+    // PERMISSION_DENIED, and because each error was swallowed
+    // the tab rendered its "No add-ons yet" empty state — the
+    // admin could not see, price, enable/disable, create or
+    // delete any other add-on, while the guest path (server
+    // side, Admin SDK) kept selling the read-only pre-seed.
+    //
+    // The guest app never reads this collection directly: the
+    // public catalog goes through `GET /api/bookings/addons/
+    // config` (Admin SDK, rules not applied), so no public
+    // read is granted here.
+    match /addOns/{addOnId} {
+      allow read: if isStaff();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Per OCT-C3 (2026-10-20): the top-level settings-change
+    // audit trail written by the admin app (`addDoc(collection
+    // (db, "auditLogs"), ...)`). It shipped in BR-12.1 without a
+    // rule block, so every audit row was rejected — the
+    // `addons.create` / `addons.update` / `addons.delete`
+    // actions were permanently lost.
+    //
+    // Append-only: staff may record a row, nobody may rewrite
+    // or delete one. Reads are admin-only (the trail is a
+    // settings-level audit surface, not a front-desk one).
+    match /auditLogs/{auditId} {
+      allow read: if isAdmin();
+      allow create: if isStaff();
+      allow update, delete: if false;
+    }
+
     match /bookings/{bookingId} {
       allow read: if isStaff();
       allow create: if false;
@@ -548,6 +590,30 @@ service cloud.firestore {
     // queries. Without this, staff got "Missing or insufficient
     // permissions" the moment the Liability tab mounted.
     match /{path=**}/refunds/{refundId} {
+      allow read: if isStaff();
+      allow update, delete: if false;
+    }
+
+    // Per OCT-H6 (2026-10-20, audit
+    // `plan/project/AUDIT-OCTOBER-2026.md`): the BR-01 breakfast
+    // + BR-12 other-add-on audit trails, read via
+    // `collectionGroup(db, "breakfastAudit")` +
+    // `collectionGroup(db, "otherAddOnAudit")` in the admin
+    // Reports page (the "Late changes" metric).
+    //
+    // Same failure mode as the `refunds` group rule above:
+    // the nested per-doc rule only covers direct path reads, and
+    // Firestore requires an EXPLICIT collectionGroup rule for
+    // cross-document group queries. These collections shipped in
+    // October without one, so both listeners failed with
+    // PERMISSION_DENIED and the late-change counters were
+    // permanently 0.
+    match /{path=**}/breakfastAudit/{auditId} {
+      allow read: if isStaff();
+      allow update, delete: if false;
+    }
+
+    match /{path=**}/otherAddOnAudit/{auditId} {
       allow read: if isStaff();
       allow update, delete: if false;
     }

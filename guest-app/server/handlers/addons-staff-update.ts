@@ -45,6 +45,12 @@ interface SaveOp {
   selectionKey: string;
   addOnId: string;
   quantity?: number;
+  // Per OCT-C2 (2026-10-20): the snapshot fields below are
+  // ADVISORY ONLY. The server sources them from the LIVE
+  // `addOns` catalog (an `add`) or keeps the entry's existing
+  // snapshot (a `change`, where only `quantity` is editable).
+  // They are still parsed so a cached client bundle keeps
+  // working — but they must never be persisted as-is.
   priceSnapshot?: number;
   nameSnapshot?: string;
   unitSnapshot?: "per-person" | "per-stay";
@@ -239,10 +245,21 @@ export async function handleStaffUpdateAddOns(req: VercelRequest, res: VercelRes
           }
           const entry: OtherAddOnSelectionEntry = {
             addOnId: op.addOnId,
-            nameSnapshot: op.nameSnapshot || liveAddOn.name,
-            priceSnapshot: Math.max(0, Number(op.priceSnapshot ?? liveAddOn.price) || 0),
+            // Per OCT-C2 (2026-10-20, audit
+            // `plan/project/AUDIT-OCTOBER-2026.md`): the snapshot
+            // fields come from the LIVE CATALOG, never from the
+            // request body. The pre-fix code preferred the
+            // client's `op.priceSnapshot` (`op.priceSnapshot ??
+            // liveAddOn.price` — the client always sends it, so
+            // the catalog fallback could never fire). That
+            // defeated the `priceSnapshot` audit trail on the
+            // staff path too: the `addOnSnapshot.price` written
+            // to `otherAddOnAudit` recorded the REQUEST's price,
+            // not the catalog's.
+            nameSnapshot: liveAddOn.name,
+            priceSnapshot: Math.max(0, Number(liveAddOn.price) || 0),
             quantity: Math.max(0, Math.floor(Number(op.quantity ?? 0) || 0)),
-            unitSnapshot: op.unitSnapshot || liveAddOn.unit,
+            unitSnapshot: liveAddOn.unit,
             addedAt: nowIso,
             addedBy: actorUid,
             lastModifiedAt: nowIso,
@@ -251,7 +268,7 @@ export async function handleStaffUpdateAddOns(req: VercelRequest, res: VercelRes
             removedBy: null,
             cutoffHoursBeforeCheckInSnapshot: Math.max(
               0,
-              Math.min(168, Math.floor(Number(op.cutoffHoursBeforeCheckInSnapshot ?? liveAddOn.cutoffHoursBeforeCheckIn) || 24))
+              Math.min(168, Math.floor(Number(liveAddOn.cutoffHoursBeforeCheckIn) || 24))
             )
           };
           next[dateKey] = [...(next[dateKey] || []), entry];
@@ -280,10 +297,14 @@ export async function handleStaffUpdateAddOns(req: VercelRequest, res: VercelRes
         if (!prior) return true;
         const updated: OtherAddOnSelectionEntry = {
           ...prior,
-          nameSnapshot: op.nameSnapshot || prior.nameSnapshot,
-          priceSnapshot: Math.max(0, Number(op.priceSnapshot ?? prior.priceSnapshot) || 0),
+          // Per OCT-C2 (2026-10-20): a CHANGE may only alter the
+          // QUANTITY. Name / price / unit stay the entry's
+          // existing snapshot — the pre-fix code preferred the
+          // client's `op.priceSnapshot` here too.
+          nameSnapshot: prior.nameSnapshot,
+          priceSnapshot: prior.priceSnapshot,
           quantity: Math.max(0, Math.floor(Number(op.quantity ?? prior.quantity) || 0)),
-          unitSnapshot: op.unitSnapshot || prior.unitSnapshot,
+          unitSnapshot: prior.unitSnapshot,
           lastModifiedAt: nowIso,
           lastModifiedBy: actorUid
         };

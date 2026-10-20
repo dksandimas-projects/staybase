@@ -12,6 +12,17 @@
 //   • change:   [{ selectionKey, addOnId, quantity, priceSnapshot, nameSnapshot, unitSnapshot }]
 //   • remove:   [{ selectionKey }]
 //
+// Per OCT-C2 (2026-10-20): the `priceSnapshot` / `nameSnapshot` /
+// `unitSnapshot` / `cutoffHoursBeforeCheckInSnapshot` fields on
+// the wire are ADVISORY ONLY — the server sources every snapshot
+// field from the LIVE `addOns` catalog (an `add`) or keeps the
+// entry's existing snapshot (a `change`, where only `quantity` is
+// guest-editable). They are still accepted so a cached guest
+// bundle keeps working. DO NOT reintroduce `op.priceSnapshot ??
+// liveAddOn.price` — the client always sends the field, so the
+// catalog fallback could never fire and a guest could set their
+// own price.
+//
 // All ops are validated against the live `addOns` catalog
 // + the per-add-on cut-off + the per-selection
 // `otherAddOnServed` lock inside one Firestore transaction.
@@ -321,12 +332,26 @@ export async function handleUpdateAddOns(req: VercelRequest, res: VercelResponse
           return;
         }
         const dateKey = parsedKey.date;
+        // Per OCT-C2 (2026-10-20, audit
+        // `plan/project/AUDIT-OCTOBER-2026.md`): the snapshot
+        // fields come from the LIVE CATALOG, never from the
+        // request. The pre-fix code preferred the client's
+        // `op.priceSnapshot` (`op.priceSnapshot ?? liveAddOn.price`
+        // — the client always sends it, so the catalog fallback
+        // could never fire), which let a guest buy a ₱500
+        // airport transfer for ₱1 and permanently snapshot that
+        // price onto the booking.
+        //
+        // The client still sends `priceSnapshot` / `nameSnapshot` /
+        // `unitSnapshot` / `cutoffHoursBeforeCheckInSnapshot` (an
+        // older guest bundle may be cached) — they are accepted
+        // and IGNORED. The catalog price is the only price.
         const entry: OtherAddOnSelectionEntry = {
           addOnId: op.addOnId,
-          nameSnapshot: op.nameSnapshot || liveAddOn.name,
-          priceSnapshot: Math.max(0, Number(op.priceSnapshot ?? liveAddOn.price) || 0),
+          nameSnapshot: liveAddOn.name,
+          priceSnapshot: Math.max(0, Number(liveAddOn.price) || 0),
           quantity: Math.max(0, Math.floor(Number(op.quantity ?? 0) || 0)),
-          unitSnapshot: op.unitSnapshot || liveAddOn.unit,
+          unitSnapshot: liveAddOn.unit,
           addedAt: nowIso,
           addedBy: "guest",
           lastModifiedAt: nowIso,
@@ -335,7 +360,7 @@ export async function handleUpdateAddOns(req: VercelRequest, res: VercelResponse
           removedBy: null,
           cutoffHoursBeforeCheckInSnapshot: Math.max(
             0,
-            Math.min(168, Math.floor(Number(op.cutoffHoursBeforeCheckInSnapshot ?? liveAddOn.cutoffHoursBeforeCheckIn) || 24))
+            Math.min(168, Math.floor(Number(liveAddOn.cutoffHoursBeforeCheckIn) || 24))
           )
         };
         next[dateKey] = [...(next[dateKey] || []), entry];
@@ -390,10 +415,21 @@ export async function handleUpdateAddOns(req: VercelRequest, res: VercelResponse
         if (!prior) continue;
         const updated: OtherAddOnSelectionEntry = {
           ...prior,
-          nameSnapshot: op.nameSnapshot || prior.nameSnapshot,
-          priceSnapshot: Math.max(0, Number(op.priceSnapshot ?? prior.priceSnapshot) || 0),
+          // Per OCT-C2 (2026-10-20): a CHANGE may only alter the
+          // QUANTITY. The name / price / unit are the entry's
+          // existing snapshot — the pre-fix code preferred the
+          // client's `op.priceSnapshot` here too, so a guest
+          // could re-price an existing line item on the way in.
+          //
+          // The snapshot is intentionally NOT re-read from the
+          // catalog on a change: per OTHER-ADD-ONS.md the guest
+          // keeps the price they ordered at, even if the admin
+          // changes the catalog price afterwards. A NEW order
+          // takes the current catalog price (see the add op).
+          nameSnapshot: prior.nameSnapshot,
+          priceSnapshot: prior.priceSnapshot,
           quantity: Math.max(0, Math.floor(Number(op.quantity ?? prior.quantity) || 0)),
-          unitSnapshot: op.unitSnapshot || prior.unitSnapshot,
+          unitSnapshot: prior.unitSnapshot,
           lastModifiedAt: nowIso,
           lastModifiedBy: "guest"
         };

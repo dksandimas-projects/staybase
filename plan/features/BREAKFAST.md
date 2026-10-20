@@ -122,6 +122,15 @@ Stored at `breakfast-meals/{mealId}/{fileName}` in Firebase Storage — public r
 
 The current breakfast fields are **replaced** with a richer shape. The `breakfastSelections` key format is preserved (`yyyy-mm-dd-guest-n`) so existing views keep rendering until they migrate.
 
+**Price authority (OCT-C1, 2026-10-20; decision #277) — the SERVER owns the price + name.**
+The `price` and `mealName` on a `BreakfastSelectionEntry` are a snapshot of the **live `breakfastConfig.meals` catalog** taken at the moment the order is placed. They are **never** read from the request body. The wire payload may still carry a `price` + `mealName` (a cached guest bundle sends them) but the server accepts and ignores them, and both fields are optional on the wire. A request that omits them is filled in from the catalog.
+
+Rationale: the October 2026 audit found the create path persisted the CLIENT's `price` while only checking that the `mealId` existed in the catalog — so a guest could POST `price: 0` and book free breakfasts, and the tampered value flowed into `breakfastTotal` → `totalPrice` → VAT → the folio → the receipt PDF → the confirmation email. `mealName` was equally client-controlled, so the receipt could be made to name a meal the hotel never offered.
+
+This matches the BR-04 manage path, which has always re-read `serverPrice` from the catalog and written a price-mismatch audit entry. **The catalog price is the only price on every path.** The snapshot is still immutable once written (per the "Snapshotting rule" below) — the catalog is re-read only at the moment the order is placed.
+
+**Walk-in parity (OCT-C5, 2026-10-20; decision #281).** A walk-in booking validates and PERSISTS the same rich `breakfastSelections` shape the desk sends. The validated total is attributed to the FIRST room line (the selections are keyed by date × guest slot, not by room), so the per-line subtotals and the reservation-level `breakfastTotal` agree. A walk-in SKIPS the per-date cut-off: the cut-off exists to stop a guest from changing a selection whose window has closed, and a walk-in creates a new booking with no prior selection to lock.
+
 **Removed fields:**
 - `Booking.hasBreakfast: boolean` — gone. Selection is per-guest per-date, not a boolean.
 - `Booking.breakfastRate: number` — gone. No flat rate. The meal-level price is in the snapshot.

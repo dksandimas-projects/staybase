@@ -221220,7 +221220,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.17.0";
+    VERSION2 = "2.17.1";
   }
 });
 
@@ -221684,6 +221684,27 @@ var init_booking = __esm({
       // 5 — Step 1 carries no breakfast data).
       breakfastSelections: external_exports.record(external_exports.string(), external_exports.unknown()).optional(),
       breakfastTotal: external_exports.coerce.number().finite().min(0).optional(),
+      // Per OCT-C5 (2026-10-20, audit
+      // `plan/project/AUDIT-OCTOBER-2026.md`): the BR-12 other
+      // add-ons the desk selected in the walk-in modal
+      // (`WalkinOtherAddOnGrid`).
+      //
+      // The admin modal has been sending `otherAddOnSelections` +
+      // `otherAddOnTotal` + `hasAnyOtherAddOns` since BR-12.1
+      // (2026-10-15), but the walk-in schema had no field for them —
+      // and a Zod `z.object()` STRIPS unknown keys, so the payload
+      // was dropped silently. The walk-in transaction then wrote no
+      // add-on data at all (`otherAddOn` appeared zero times in
+      // `bookings.ts`), so the desk sold an airport transfer, the
+      // modal showed the total, the booking carried nothing, the
+      // guest never got the transfer, and the hotel earned ₱0.
+      //
+      // The values are ADVISORY: the server rebuilds every entry from
+      // the live `addOns` catalog (catalog price + name + unit), so a
+      // client-supplied price is never persisted.
+      otherAddOnSelections: external_exports.record(external_exports.string(), external_exports.array(external_exports.unknown())).optional(),
+      otherAddOnTotal: external_exports.coerce.number().finite().min(0).optional(),
+      hasAnyOtherAddOns: external_exports.boolean().optional(),
       // Per CHD-01 (2026-08-01, per decision #144): adults/children
       // split. Both optional — when absent, the server derives
       // `numAdults = guests`, `numChildren = 0` (the historical
@@ -229920,6 +229941,7 @@ function refundPaidErrorToMessage(code) {
 init_shared();
 init_shared();
 init_shared();
+init_shared();
 
 // server/handlers/reservationScopeTransition.ts
 async function preReadSiblingChildren(transaction, adminDb2, bookingReservationId2, map2) {
@@ -230114,8 +230136,13 @@ init_firestore();
 init_firebase_admin();
 var entryShape = external_exports.object({
   mealId: external_exports.string().trim().min(1).max(120),
-  mealName: external_exports.string().trim().min(1).max(200),
-  price: external_exports.number().finite().min(0),
+  // Per OCT-C1 (2026-10-20, audit `plan/project/AUDIT-OCTOBER-2026.md`):
+  // the wire price/name are advisory only. The server snapshots the
+  // LIVE catalog price + name so a tampered request can never set its
+  // own breakfast price. Both are still accepted (and ignored) so an
+  // older guest bundle keeps working.
+  mealName: external_exports.string().trim().min(1).max(200).optional(),
+  price: external_exports.number().finite().min(0).optional(),
   addedBy: external_exports.string().trim().max(120).optional().default(""),
   addedAt: external_exports.string().trim().max(64).optional().default(""),
   lastModifiedAt: external_exports.string().trim().max(64).optional().default(""),
@@ -230146,7 +230173,7 @@ function buildMealLookup(meals) {
   return lookup;
 }
 function validateBreakfastSelections(input) {
-  const { selections, breakfastConfig, now } = input;
+  const { selections, breakfastConfig, now, staffCreated } = input;
   if (selections === null || selections === void 0) return null;
   const parsed2 = breakfastSelectionsSchema.safeParse(selections);
   if (!parsed2.success) {
@@ -230172,7 +230199,7 @@ function validateBreakfastSelections(input) {
       timezone: breakfastConfig.cutoffTimezone,
       cutoffsEnabled: breakfastConfig.cutoffsEnabled
     });
-    if (cutoffState.isLocked) {
+    if (cutoffState.isLocked && !staffCreated) {
       throw new BreakfastSelectionValidationError(
         `Ordering closed for breakfast on ${serviceDate}. Please remove the selection or contact the hotel.`
       );
@@ -230182,7 +230209,8 @@ function validateBreakfastSelections(input) {
         `One of the selected meals is no longer available. Please refresh and try again.`
       );
     }
-    const price = Number(entry.price);
+    const meal = mealLookup.get(entry.mealId);
+    const price = Number(meal.price);
     if (!Number.isFinite(price) || price < 0) {
       throw new BreakfastSelectionValidationError(
         `Invalid breakfast price. Please refresh and try again.`
@@ -230190,7 +230218,7 @@ function validateBreakfastSelections(input) {
     }
     validatedEntries[key] = {
       mealId: entry.mealId,
-      mealName: entry.mealName,
+      mealName: String(meal.name || entry.mealName || entry.mealId),
       price,
       addedBy: entry.addedBy || "guest",
       addedAt: entry.addedAt || (/* @__PURE__ */ new Date()).toISOString(),
@@ -230345,6 +230373,7 @@ function createBreakfastRefundLiability(input) {
 }
 
 // server/handlers/bookings.ts
+var OTHER_ADDON_NOT_AVAILABLE_ERROR = "One of the selected add-ons is no longer available. Please refresh and try again.";
 function buildValidArrivalTimeOptions(checkInTimeStr) {
   const valid = /* @__PURE__ */ new Set();
   for (const option2 of buildArrivalTimeOptions(checkInTimeStr)) {
@@ -232912,6 +232941,13 @@ async function handleCreateWalkin(req, res) {
     checkIn,
     checkOut,
     guests,
+    // Per OCT-C5 (2026-10-20, audit
+    // `plan/project/AUDIT-OCTOBER-2026.md`): the rich per-meal
+    // breakfast selections + the BR-12 other add-ons the desk
+    // selected. Both were previously dropped on the floor by the
+    // walk-in transaction.
+    breakfastSelections: requestedBreakfastSelections,
+    otherAddOnSelections: requestedOtherAddOnSelections,
     // Per BR-08 (decision #238, 2026-10-14 — close-out):
     // the legacy `hasBreakfast: boolean` flat-rate flag is
     // removed from the walk-in create path. Walk-ins that
@@ -233263,6 +233299,67 @@ async function handleCreateWalkin(req, res) {
       const actualBreakfastRate2 = 0;
       const breakfastIncludesChildrenDefault = true;
       const breakfastIncludesChildren = breakfastIncludesChildrenDefault;
+      const validatedWalkinBreakfast = validateBreakfastSelections({
+        selections: requestedBreakfastSelections,
+        breakfastConfig,
+        now,
+        staffCreated: true
+      });
+      const walkinBreakfastTotal = validatedWalkinBreakfast?.total ?? 0;
+      const rawWalkinOtherAddOns = requestedOtherAddOnSelections;
+      let walkinOtherAddOnSelections = null;
+      let walkinOtherAddOnTotal = 0;
+      if (rawWalkinOtherAddOns && typeof rawWalkinOtherAddOns === "object") {
+        const addOnsCatalogSnap = await transaction.get(adminDb.collection("addOns"));
+        const addOnsCatalog = /* @__PURE__ */ new Map();
+        for (const d of addOnsCatalogSnap.docs) {
+          const norm = normalizeAddOn({ id: d.id, ...d.data() }, d.id);
+          if (norm) addOnsCatalog.set(norm.id, norm);
+        }
+        if (addOnsCatalog.size === 0) {
+          const pre = normalizeAddOn(
+            { id: "airport-transfer", ...AIRPORT_TRANSFER_PRESEED },
+            "airport-transfer"
+          );
+          if (pre) addOnsCatalog.set(pre.id, pre);
+        }
+        const rebuilt = {};
+        for (const [dateKey2, rawItems] of Object.entries(
+          rawWalkinOtherAddOns
+        )) {
+          if (!Array.isArray(rawItems)) continue;
+          const rows = [];
+          for (const rawItem of rawItems) {
+            if (!rawItem || typeof rawItem !== "object") continue;
+            const entry = rawItem;
+            const addOnId = String(entry.addOnId || "").trim();
+            if (!addOnId) continue;
+            const live = addOnsCatalog.get(addOnId);
+            if (!live) {
+              throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+            }
+            if (live.isEnabled === false) {
+              throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+            }
+            rows.push({
+              ...entry,
+              addOnId: live.id,
+              nameSnapshot: live.name,
+              priceSnapshot: Math.max(0, Number(live.price) || 0),
+              unitSnapshot: live.unit,
+              cutoffHoursBeforeCheckInSnapshot: Math.max(
+                0,
+                Math.min(168, Math.floor(Number(live.cutoffHoursBeforeCheckIn) || 24))
+              )
+            });
+          }
+          if (rows.length > 0) rebuilt[dateKey2] = rows;
+        }
+        if (Object.keys(rebuilt).length > 0) {
+          walkinOtherAddOnSelections = rebuilt;
+          walkinOtherAddOnTotal = recomputeOtherAddOnTotal(rebuilt);
+        }
+      }
       const walkinPerRoomExtraBeds = walkinAssignedRooms.map((assigned, lineIdx) => {
         const lineTypeEntry = walkinTypeEntries[lineIdx];
         const lineExtraBedCount = assigned.extraBedCount;
@@ -233320,7 +233417,7 @@ async function handleCreateWalkin(req, res) {
           weekendRate: Number(lineTypeEntry.weekendRate) || 0,
           seasonalRateOverrides
         });
-        const lineBreakfastTotal = 0;
+        const lineBreakfastTotal = lineIdx === 0 ? walkinBreakfastTotal : 0;
         const lineExtraBedTotal = calculateExtraBedAddOn({
           extraBedCount: walkinPerRoomExtraBeds[lineIdx].extraBedCount,
           extraBedRate: walkinPerRoomExtraBeds[lineIdx].extraBedRate,
@@ -233580,7 +233677,37 @@ async function handleCreateWalkin(req, res) {
         discountScopeSnapshot: snapshottedDiscountScope,
         guestIdPhotoUrl: null,
         guestRegistration: null,
-        breakfastSelections: {},
+        // Per OCT-C5 (2026-10-20, audit
+        // `plan/project/AUDIT-OCTOBER-2026.md`): the walk-in now
+        // PERSISTS the validated breakfast selections instead of
+        // discarding them. The pre-fix code wrote a hard-coded
+        // `breakfastSelections: {}` here, so the desk's meals
+        // vanished — no breakfast was served, the kitchen list
+        // was empty, and the hotel was never charged.
+        //
+        // `validatedWalkinBreakfast.entries` is the server-
+        // validated map (catalog price + name, NOT the client's),
+        // so the same price-authority rule as the public create
+        // path applies. `null` (the desk picked no meals) writes
+        // an empty map, matching the public path's "explicit
+        // opt-out" shape.
+        breakfastSelections: validatedWalkinBreakfast?.entries ?? {},
+        // Per BR-03 (2026-10-12, decision #232): the denormalized
+        // `breakfastTotal` field — the future-proof snapshot for
+        // the BR-04 Manage Breakfast page + the kitchen list +
+        // reports. The walk-in previously omitted the field
+        // entirely, so a reader could not tell "no breakfast"
+        // from "breakfast that was never recorded".
+        breakfastTotal,
+        // Per BR-12.1 (2026-10-15, decision #247): the other
+        // add-ons the desk selected. See the
+        // `otherAddOnSelections` handling above — these were
+        // dropped on the floor before this fix.
+        ...walkinOtherAddOnSelections ? {
+          otherAddOnSelections: walkinOtherAddOnSelections,
+          otherAddOnTotal: walkinOtherAddOnTotal,
+          hasAnyOtherAddOns: true
+        } : {},
         cancellationReason: "",
         linkedInquiryId: linkedInquiryId || null,
         ...validatedTestRunId ? { isTestData: true, testRunId: validatedTestRunId, testRunName: validatedTestRunName, testRunEnvironment: validatedTestRunEnvironment } : {},
@@ -233858,6 +233985,16 @@ async function handleCreateWalkin(req, res) {
       status2 = 409;
     } else if (errorMessage === "RESERVATION_HEADER_WITHOUT_CHILD") {
       status2 = 500;
+    } else if (
+      // Per OCT-C5 (2026-10-20): the walk-in now validates the
+      // desk's breakfast selections + other add-ons, so its
+      // validation failures must reach the desk as 400s with a
+      // human message — not 500s. Symmetric with the public
+      // create path's `BreakfastSelectionValidationError`
+      // mapping at :4373.
+      error.name === "BreakfastSelectionValidationError" || errorMessage === OTHER_ADDON_NOT_AVAILABLE_ERROR
+    ) {
+      status2 = typeof error.status === "number" && error.status > 0 ? error.status : 400;
     } else {
       status2 = 500;
     }
@@ -243476,10 +243613,10 @@ async function handleUpdateAddOns(req, res) {
         const dateKey2 = parsedKey.date;
         const entry = {
           addOnId: op.addOnId,
-          nameSnapshot: op.nameSnapshot || liveAddOn.name,
-          priceSnapshot: Math.max(0, Number(op.priceSnapshot ?? liveAddOn.price) || 0),
+          nameSnapshot: liveAddOn.name,
+          priceSnapshot: Math.max(0, Number(liveAddOn.price) || 0),
           quantity: Math.max(0, Math.floor(Number(op.quantity ?? 0) || 0)),
-          unitSnapshot: op.unitSnapshot || liveAddOn.unit,
+          unitSnapshot: liveAddOn.unit,
           addedAt: nowIso,
           addedBy: "guest",
           lastModifiedAt: nowIso,
@@ -243488,7 +243625,7 @@ async function handleUpdateAddOns(req, res) {
           removedBy: null,
           cutoffHoursBeforeCheckInSnapshot: Math.max(
             0,
-            Math.min(168, Math.floor(Number(op.cutoffHoursBeforeCheckInSnapshot ?? liveAddOn.cutoffHoursBeforeCheckIn) || 24))
+            Math.min(168, Math.floor(Number(liveAddOn.cutoffHoursBeforeCheckIn) || 24))
           )
         };
         next[dateKey2] = [...next[dateKey2] || [], entry];
@@ -243541,10 +243678,21 @@ async function handleUpdateAddOns(req, res) {
         if (!prior) continue;
         const updated = {
           ...prior,
-          nameSnapshot: op.nameSnapshot || prior.nameSnapshot,
-          priceSnapshot: Math.max(0, Number(op.priceSnapshot ?? prior.priceSnapshot) || 0),
+          // Per OCT-C2 (2026-10-20): a CHANGE may only alter the
+          // QUANTITY. The name / price / unit are the entry's
+          // existing snapshot — the pre-fix code preferred the
+          // client's `op.priceSnapshot` here too, so a guest
+          // could re-price an existing line item on the way in.
+          //
+          // The snapshot is intentionally NOT re-read from the
+          // catalog on a change: per OTHER-ADD-ONS.md the guest
+          // keeps the price they ordered at, even if the admin
+          // changes the catalog price afterwards. A NEW order
+          // takes the current catalog price (see the add op).
+          nameSnapshot: prior.nameSnapshot,
+          priceSnapshot: prior.priceSnapshot,
           quantity: Math.max(0, Math.floor(Number(op.quantity ?? prior.quantity) || 0)),
-          unitSnapshot: op.unitSnapshot || prior.unitSnapshot,
+          unitSnapshot: prior.unitSnapshot,
           lastModifiedAt: nowIso,
           lastModifiedBy: "guest"
         };
@@ -243803,10 +243951,21 @@ async function handleStaffUpdateAddOns(req, res) {
           }
           const entry = {
             addOnId: op.addOnId,
-            nameSnapshot: op.nameSnapshot || liveAddOn.name,
-            priceSnapshot: Math.max(0, Number(op.priceSnapshot ?? liveAddOn.price) || 0),
+            // Per OCT-C2 (2026-10-20, audit
+            // `plan/project/AUDIT-OCTOBER-2026.md`): the snapshot
+            // fields come from the LIVE CATALOG, never from the
+            // request body. The pre-fix code preferred the
+            // client's `op.priceSnapshot` (`op.priceSnapshot ??
+            // liveAddOn.price` — the client always sends it, so
+            // the catalog fallback could never fire). That
+            // defeated the `priceSnapshot` audit trail on the
+            // staff path too: the `addOnSnapshot.price` written
+            // to `otherAddOnAudit` recorded the REQUEST's price,
+            // not the catalog's.
+            nameSnapshot: liveAddOn.name,
+            priceSnapshot: Math.max(0, Number(liveAddOn.price) || 0),
             quantity: Math.max(0, Math.floor(Number(op.quantity ?? 0) || 0)),
-            unitSnapshot: op.unitSnapshot || liveAddOn.unit,
+            unitSnapshot: liveAddOn.unit,
             addedAt: nowIso,
             addedBy: actorUid,
             lastModifiedAt: nowIso,
@@ -243815,7 +243974,7 @@ async function handleStaffUpdateAddOns(req, res) {
             removedBy: null,
             cutoffHoursBeforeCheckInSnapshot: Math.max(
               0,
-              Math.min(168, Math.floor(Number(op.cutoffHoursBeforeCheckInSnapshot ?? liveAddOn.cutoffHoursBeforeCheckIn) || 24))
+              Math.min(168, Math.floor(Number(liveAddOn.cutoffHoursBeforeCheckIn) || 24))
             )
           };
           next[dateKey2] = [...next[dateKey2] || [], entry];
@@ -243842,10 +244001,14 @@ async function handleStaffUpdateAddOns(req, res) {
         if (!prior) return true;
         const updated = {
           ...prior,
-          nameSnapshot: op.nameSnapshot || prior.nameSnapshot,
-          priceSnapshot: Math.max(0, Number(op.priceSnapshot ?? prior.priceSnapshot) || 0),
+          // Per OCT-C2 (2026-10-20): a CHANGE may only alter the
+          // QUANTITY. Name / price / unit stay the entry's
+          // existing snapshot — the pre-fix code preferred the
+          // client's `op.priceSnapshot` here too.
+          nameSnapshot: prior.nameSnapshot,
+          priceSnapshot: prior.priceSnapshot,
           quantity: Math.max(0, Math.floor(Number(op.quantity ?? prior.quantity) || 0)),
-          unitSnapshot: op.unitSnapshot || prior.unitSnapshot,
+          unitSnapshot: prior.unitSnapshot,
           lastModifiedAt: nowIso,
           lastModifiedBy: actorUid
         };

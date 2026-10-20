@@ -99,6 +99,72 @@ Clients may read this collection only when authenticated as staff. All writes go
 
 ---
 
+### `addOns/{addOnId}` *(BR-12 other add-on catalog)*
+
+The admin-managed catalog of other add-ons the guest can buy (v1 ships the airport transfer). See `plan/features/OTHER-ADD-ONS.md` for the full field table.
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | string | Display name; snapshotted onto the booking at order time |
+| `description` | string | Marketing copy |
+| `price` | number | PHP; `>= 0`. **Server-authoritative** — the price is never read from the request body (decision #278) |
+| `unit` | string | `"per-person"` \| `"per-stay"` |
+| `isEnabled` | boolean | Per-add-on master switch; the guest catalog filters on it |
+| `cutoffHoursBeforeCheckIn` | number | `0..168`; the lock window, also server-authoritative |
+| `displayOrder` | number | Ascending sort in the guest catalog |
+| `updatedAt` / `updatedBy` | timestamp / string | Audit fields |
+
+**The admin Settings tab reads and writes this collection DIRECTLY from the browser** through the Firestore client SDK, so it is subject to the security rules:
+
+```
+match /addOns/{addOnId} {
+  allow read: if isStaff();
+  allow create, update, delete: if isAdmin();
+}
+```
+
+The guest app never reads it directly — the public catalog goes through `GET /api/bookings/addons/config` (Admin SDK, rules not applied) — so **no public read** is granted. The collection shipped in BR-12 (2026-10-15) **without** a rule block, so every admin read + write was `PERMISSION_DENIED` and the tab silently rendered its empty state (decision #279). **Any collection the admin app writes from the browser needs a rule block** — Firestore denies unmatched paths by default.
+
+---
+
+### `auditLogs/{auditId}` *(BR-12.1 settings audit trail)*
+
+Append-only top-level trail of admin settings changes. Each row records one action (e.g. `addons.create` / `addons.update` / `addons.delete`) with the before/after payload and the acting staff member.
+
+```
+match /auditLogs/{auditId} {
+  allow read: if isAdmin();
+  allow create: if isStaff();
+  allow update, delete: if false;
+}
+```
+
+Staff may record a row; nobody may rewrite or delete one. Like `addOns`, this collection shipped without a rule block (decision #279), so every audit row was rejected and the `addons.*` actions were permanently lost.
+
+---
+
+### Audit subcollection groups: `breakfastAudit` + `otherAddOnAudit` *(BR-01 / BR-12)*
+
+Per-booking audit trails for the breakfast and other-add-on selections, written by the server (Admin SDK) and read by the admin Reports "Late changes" metric via `collectionGroup(db, "breakfastAudit")` / `collectionGroup(db, "otherAddOnAudit")`.
+
+Firestore requires an **explicit collectionGroup rule** for a cross-document group query — the per-document rule under `bookings/{id}/…` only covers direct path reads. Without it the client listener fails with "Missing or insufficient permissions" the moment the Reports tab mounts:
+
+```
+match /{path=**}/breakfastAudit/{auditId} {
+  allow read: if isStaff();
+  allow update, delete: if false;
+}
+
+match /{path=**}/otherAddOnAudit/{auditId} {
+  allow read: if isStaff();
+  allow update, delete: if false;
+}
+```
+
+The same trap already applies to `refunds` (see the `match /{path=**}/refunds/{refundId}` block in `firebase/firestore.rules`). Added by decision #279.
+
+---
+
 ### `reservations/{reservationId}` *(MRB-01..06)*
 
 | Field | Type | Notes |
@@ -305,7 +371,7 @@ The doc ID is the code string by convention. The validate + create handlers both
 | `applicableRoomTypes` | string[] | Empty array = applies to all room types. The create handler rejects the booking if any selected room type is not in this list |
 | `isActive` | boolean | Default `true`; staff flips to `false` to deactivate. Validator rejects inactive codes |
 | `isEnabled` | boolean \| undefined | Legacy alias for `isActive`. New reads should prefer `isActive` |
-| `guestEmail` | string \| null | Optional "single-guest" voucher — the validator rejects if the booking email doesn't match. **Per MED-3 / LOW-3**: deferred (see `plan/project/AUDIT-SPARK-REWARDS-REPORT.md §MED-3`) |
+| `guestEmail` | string \| null | Optional "single-guest" voucher — the validator rejects if the booking email doesn't match. **Per MED-3 / LOW-3**: deferred (see `plan/docs/AUDIT-SPARK-REWARDS-REPORT.md §MED-3`) |
 | `createdBy` | string | Audit — staff UID |
 | `createdAt` / `updatedAt` | timestamp | Audit |
 | `kind` | `"promo"` \| `"reward"` | **Phase 5 (2026-10-12)**: voucher discriminator. `"promo"` is the legacy default (admin-created discount). `"reward"` is system-issued from the tier program (currently `"free-night-tier"`; `"welcome"` reserved for Phase 6). Absent = treat as `"promo"`. |

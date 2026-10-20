@@ -2833,6 +2833,13 @@ export function SettingsPage() {
   //     it for instant render after a write.
   const [addOnsCatalog, setAddOnsCatalog] = useState<AddOn[]>([]);
   const [addOnsCatalogLoading, setAddOnsCatalogLoading] = useState(true);
+  // Per OCT-C3 (2026-10-20, audit `plan/project/AUDIT-OCTOBER-2026.md`):
+  // the `onSnapshot` error handler used to swallow the failure and
+  // just clear the loading flag, so a PERMISSION_DENIED read
+  // rendered the SAME "No add-ons yet" empty state as a genuinely
+  // empty catalog — telling the admin to create a row that already
+  // existed and that they could not read. Surface the failure.
+  const [addOnsCatalogError, setAddOnsCatalogError] = useState<string | null>(null);
   const [editingAddOnId, setEditingAddOnId] = useState<string | null>(null);
   const [editingAddOnDraft, setEditingAddOnDraft] = useState<AddOn | null>(null);
   const [addOnsEnabled, setAddOnsEnabled] = useState(true);
@@ -2888,9 +2895,15 @@ export function SettingsPage() {
         });
         setAddOnsCatalog(rows);
         setAddOnsCatalogLoading(false);
+        setAddOnsCatalogError(null);
       },
-      () => {
+      (err) => {
         setAddOnsCatalogLoading(false);
+        setAddOnsCatalogError(
+          err?.message
+            ? `Could not load the other add-ons catalog: ${err.message}`
+            : "Could not load the other add-ons catalog."
+        );
       }
     );
     return () => unsub();
@@ -6835,16 +6848,19 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
               </div>
 
               {/* Hotel-wide setting: add-ons enabled. Per BR-12.1
-                  the toggle is a UI affordance that hides the
-                  Step 2 block + the drawer section + the Manage
-                  page when off. The booking flow's
-                  `getEnabledAddOnsByHotel` already returns `[]`
-                  when the catalog is empty; this is the explicit
-                  hotel-wide off switch. Persisted as part of the
-                  hotelConfig in a follow-up ticket — for v1 the
-                  toggle is a client-side local state with a
-                  localStorage mirror so the test pins its
-                  behavior. */}
+                  the toggle was meant to be a hotel-wide off
+                  switch, but it was never persisted: it is a
+                  plain `useState` with NO localStorage mirror and
+                  no hotelConfig write, so it has no effect on the
+                  guest catalog at all. Per OCT-M1 (2026-10-20,
+                  audit `plan/project/AUDIT-OCTOBER-2026.md`) the
+                  copy now says so, and the working control is the
+                  per-row Status toggle in the catalog table below
+                  (which writes `addOns/{id}.isEnabled` immediately).
+                  Persisting this switch properly (a
+                  `hotelConfig.otherAddOnsEnabled` flag read by
+                  `GET /api/bookings/addons/config`) is still
+                  open. */}
               <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-4">
                 <label className="flex items-center gap-3 cursor-pointer text-xs font-bold text-gray-800">
                   <button
@@ -6864,9 +6880,19 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                   Add-ons enabled
                 </label>
                 <p className="text-[10px] text-gray-500 leading-relaxed">
-                  When off, every <code>getEnabledAddOnsByHotel</code> call returns an empty list
-                  and the booking flow's Add-ons section shows the "Add-ons are currently disabled"
-                  placeholder. Existing bookings with snapshotted add-ons keep their entries.
+                  {/* Per OCT-M1 (2026-10-20, audit
+                      `plan/project/AUDIT-OCTOBER-2026.md`): this switch is
+                      still a client-side local state — it is NOT persisted
+                      and does NOT affect the guest catalog. The previous
+                      copy claimed the opposite ("every
+                      getEnabledAddOnsByHotel call returns an empty list"),
+                      which made an admin believe add-ons were switched off
+                      while guests kept buying them. Say what is true. */}
+                  Not yet wired up — this switch is not saved and does not
+                  affect the guest booking flow. To take an add-on off sale
+                  now, switch its <strong>Status</strong> to <strong>Off</strong>{" "}
+                  in the catalog table below (that toggle is saved
+                  immediately).
                 </p>
               </div>
 
@@ -6907,6 +6933,25 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
 
                 {addOnsCatalogLoading ? (
                   <p className="text-[10px] text-gray-500">Loading catalog…</p>
+                ) : addOnsCatalogError ? (
+                  // Per OCT-C3 (2026-10-20): a failed read must NOT
+                  // masquerade as an empty catalog. Before this, a
+                  // PERMISSION_DENIED read rendered the "No add-ons
+                  // yet" panel below, which told the admin to create
+                  // a row that may already have existed.
+                  <div
+                    data-testid="addons-catalog-error"
+                    role="alert"
+                    className="rounded-lg border border-red-200 bg-red-50 p-4 text-[11px] text-red-700"
+                  >
+                    <p className="font-bold">Could not load the other add-ons catalog.</p>
+                    <p className="mt-1">{addOnsCatalogError}</p>
+                    <p className="mt-2 text-red-600">
+                      The catalog is stored in the <code>addOns</code> collection. If this says
+                      &ldquo;Missing or insufficient permissions&rdquo;, the Firestore rules may
+                      not have been deployed yet.
+                    </p>
+                  </div>
                 ) : addOnsCatalog.length === 0 ? (
                   <div
                     data-testid="addons-catalog-empty"

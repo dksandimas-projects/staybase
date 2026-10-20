@@ -4,7 +4,7 @@
 
 **Owner-requested.** Shipped on `feature/br-12-other-add-ons`, v2.2.0 → v2.3.0 (`feat:` MINOR via Husky Conventional-Commits hook).
 
-> **Requires:** `plan/docs/BACKEND.md` (Firestore schema for `bookings/{id}/otherAddOnSelections`, `bookings/{id}/otherAddOnServed`, `bookings/{id}/otherAddOnAudit`, `addOns/{addOnId}`); `plan/docs/TYPES.md` (`AddOn`, `OtherAddOnSelectionEntry`, `OtherAddOnAuditEntry`, `OtherAddOnRefundContext`, additive `Booking` extensions); `plan/docs/API-ROUTES.md` (catch-all dispatcher pattern for the 5 new routes — no new Vercel function); `plan/docs/SECURITY.md` (Turnstile + rate-limit + STAFF-Token gates); `plan/docs/VERCEL-FUNCTION-LIMIT.md` (Hobby-plan 12-function cap — all 5 new routes stay in the catch-all dispatcher); `plan/features/BREAKFAST.md` (the blueprint — every BR-12 helper + schema mirrors the BR-01/BR-04/BR-05 shape).
+> Requires: `plan/docs/BACKEND.md` (Firestore schema for `bookings/{id}/otherAddOnSelections`, `bookings/{id}/otherAddOnServed`, `bookings/{id}/otherAddOnAudit`, `addOns/{addOnId}`); `plan/docs/TYPES.md` (`AddOn`, `OtherAddOnSelectionEntry`, `OtherAddOnAuditEntry`, `OtherAddOnRefundContext`, additive `Booking` extensions); `plan/docs/API-ROUTES.md` (catch-all dispatcher pattern for the 6 new routes — no new Vercel function); `plan/docs/SECURITY.md` (Turnstile + rate-limit + STAFF-Token gates); `plan/docs/VERCEL-FUNCTION-LIMIT.md` (Hobby-plan 12-function cap — all 6 new routes stay in the catch-all dispatcher); `plan/features/BREAKFAST.md` (the blueprint — every BR-12 helper + schema mirrors the BR-01/BR-04/BR-05 shape).
 
 ---
 
@@ -22,7 +22,7 @@
 
 6. **No generic-add-on abstract base class** — premature abstraction is rejected per design. The BR-13 refactor will pull common patterns from the two add-on paths (breakfast + other add-on) when the second **type** lands, without forcing a v1 schema migration.
 
-7. **Zero new Vercel functions** — the 5 new routes register in the existing catch-all `apiRouter.ts` (the Hobby-plan 12-function cap stays).
+7. **Zero new Vercel functions** — the 6 new routes register in the existing catch-all `apiRouter.ts` (the Hobby-plan 12-function cap stays).
 
 8. **No kitchen list for other add-ons** — add-ons are "served at check-in / by-arrival". The `mark-served` action stamps `otherAddOnServed` + `otherAddOnAudit` for the booking-drawer "Served at HH:MM" badge + receipt, but no printable list view ships in v1.
 
@@ -46,6 +46,29 @@ interface AddOn {
   updatedBy: string;                      // staff UID
 }
 ```
+
+**Firestore rules (OCT-C3, 2026-10-20; decision #279) — REQUIRED.**
+The admin Settings tab reads and writes this collection **directly from the browser** through the Firestore client SDK, so the collection is subject to the security rules. It MUST have a rule block:
+
+```
+match /addOns/{addOnId} {
+  allow read: if isStaff();
+  allow create, update, delete: if isAdmin();
+}
+```
+
+The guest app never reads this collection directly — the public catalog goes through `GET /api/bookings/addons/config` (Admin SDK, rules not applied) — so **no public read** is granted.
+
+The collection shipped in BR-12 (2026-10-15) **without** a rule block. Firestore denies unmatched paths by default, so every admin read + write failed with `PERMISSION_DENIED`, and because each error was swallowed the tab rendered its "No add-ons yet" empty state: the hotel could not see, price, enable/disable, create or delete any other add-on, while the guest path kept selling the read-only pre-seed. The same commit also introduced the top-level `auditLogs` collection, which likewise needed a rule block (admin read, staff create, append-only).
+
+**Price authority (OCT-C2, 2026-10-20; decision #278) — the SERVER owns the snapshot.**
+`nameSnapshot`, `priceSnapshot`, `unitSnapshot` and `cutoffHoursBeforeCheckInSnapshot` on a selection entry are a snapshot of the **live `addOns` catalog** taken when the order is placed. They are **never** read from the request body. The wire fields are accepted-and-ignored (so a cached guest bundle keeps working) and are documented as ADVISORY ONLY.
+
+Rationale: the add op read `op.priceSnapshot ?? liveAddOn.price` — the `??` fallback was DEAD CODE because the client always sends the field, so a guest could buy a ₱500 airport transfer for ₱1, and the tampered price was snapshotted permanently. The same op preferred the client's `cutoffHoursBeforeCheckInSnapshot`, which is the lock window — a client could widen its own cut-off to 168 hours.
+
+A **CHANGE** op may only alter the `quantity`. The name / price / unit stay the entry's EXISTING snapshot: the guest keeps the price they ordered at even if the admin changes the catalog price afterwards. A **NEW** order takes the current catalog price.
+
+**Walk-in parity (OCT-C5, 2026-10-20; decision #281).** A walk-in booking rebuilds the desk's selected add-ons from the live catalog (read inside the transaction, before any write) and persists them + `otherAddOnTotal` + `hasAnyOtherAddOns` on the booking doc. The catalog falls back to the read-only `AIRPORT_TRANSFER_PRESEED` when the collection is empty, so the walk-in grid (which renders from the public config endpoint) and the server validation always agree. A disabled add-on is refused with a 400.
 
 ### Booking extensions (additive — BR-08 breakfast fields FROZEN)
 
@@ -136,7 +159,7 @@ The helper computes `cutoffAt` even when locked (so the UI can render a "would-b
 
 ## Server Contract (catch-all dispatcher, zero new Vercel functions)
 
-5 new route handlers — all registered in `guest-app/server/apiRouter.ts`:
+6 new route handlers — all registered in `guest-app/server/apiRouter.ts`:
 
 1. **`GET /api/bookings/addons/config`** — public; returns the hotel's enabled add-ons catalog (read through `addOns` where `isEnabled === true`). Falls back to the pre-seed row if the collection is empty. Cached 60s. Rate-limited 60/min/IP.
 
@@ -305,4 +328,4 @@ The BR-13 refactor (when a second add-on **type** — seaport — lands) will ex
 
 **(F)** Generic add-on admin Settings tab with both breakfast + other add-ons — the two collections have different shapes (`breakfastConfig` is a single doc with a meals sub-array; `addOns` is a collection of independent docs). A unified tab would force a schema migration that BR-08 just closed out.
 
-**(G)** New Vercel function per route — Hobby-plan 12-function cap (see `plan/docs/VERCEL-FUNCTION-LIMIT.md`). All 5 new routes register in the existing catch-all dispatcher.
+**(G)** New Vercel function per route — Hobby-plan 12-function cap (see `plan/docs/VERCEL-FUNCTION-LIMIT.md`). All 6 new routes register in the existing catch-all dispatcher.

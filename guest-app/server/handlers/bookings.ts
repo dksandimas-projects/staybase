@@ -212,6 +212,30 @@ import {
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
 
+// Per OCT-C5 (2026-10-20, audit
+// `plan/project/AUDIT-OCTOBER-2026.md`): the BR-12 other add-on
+// helpers, needed by the walk-in path so the desk's selected
+// add-ons are VALIDATED against the live catalog and PERSISTED
+// (they were previously dropped on the floor by the walk-in
+// transaction). Kept in a separate import block so the
+// `mrb-05-aggregate-and-handler-mirror.test.ts` source-text
+// pattern — which asserts the last entry of the block above —
+// still matches.
+import {
+  normalizeAddOn,
+  recomputeOtherAddOnTotal,
+  AIRPORT_TRANSFER_PRESEED,
+  type AddOn,
+  type OtherAddOnSelectionEntry
+} from "@spark-inn/shared";
+
+// Per OCT-C5 (2026-10-20): the error the walk-in path raises when
+// the desk selected an add-on that is not in the live catalog (or
+// has been disabled). Mapped to a 400 in the walk-in catch block
+// so the desk sees a form-level message instead of a 500.
+const OTHER_ADDON_NOT_AVAILABLE_ERROR =
+  "One of the selected add-ons is no longer available. Please refresh and try again.";
+
 // Per SR-01..05 (2026-10-12): build the Set of
 // HH:MM strings the booking-create handler accepts
 // for `expectedArrivalTime`. Returns `null` when
@@ -4447,6 +4471,13 @@ export async function handleCreateWalkin(req: any, res: any) {
     checkIn,
     checkOut,
     guests,
+    // Per OCT-C5 (2026-10-20, audit
+    // `plan/project/AUDIT-OCTOBER-2026.md`): the rich per-meal
+    // breakfast selections + the BR-12 other add-ons the desk
+    // selected. Both were previously dropped on the floor by the
+    // walk-in transaction.
+    breakfastSelections: requestedBreakfastSelections,
+    otherAddOnSelections: requestedOtherAddOnSelections,
     // Per BR-08 (decision #238, 2026-10-14 — close-out):
     // the legacy `hasBreakfast: boolean` flat-rate flag is
     // removed from the walk-in create path. Walk-ins that
@@ -5042,6 +5073,122 @@ export async function handleCreateWalkin(req: any, res: any) {
       const breakfastIncludesChildrenDefault = true;
       const breakfastIncludesChildren = breakfastIncludesChildrenDefault;
 
+      // Per OCT-C5 (2026-10-20, audit
+      // `plan/project/AUDIT-OCTOBER-2026.md`): the walk-in path
+      // now VALIDATES + PERSISTS the rich `breakfastSelections`
+      // shape the desk already sends
+      // (`admin-app/src/pages/BookingsPage.tsx:4654-4660` — the
+      // `WalkinBreakfastGrid` output).
+      //
+      // Before this, the walk-in transaction read the breakfast
+      // config and then threw the payload away: it hard-coded
+      // `lineBreakfastTotal = 0` and wrote `breakfastSelections:
+      // {}` + `breakfastTotal: 0` onto the booking. The desk
+      // picked meals, the modal showed a total, the booking was
+      // created — and the guest received NO breakfast, the
+      // kitchen never saw the meals, and the hotel was NEVER
+      // CHARGED for them. The comment above (and BR-08's own
+      // note that "the create transaction reads it below and
+      // stamps `breakfastTotal`") described behavior the code
+      // did not implement.
+      //
+      // The validation runs inside the same transaction as the
+      // booking write (the catalog is read once, the result is
+      // atomic with the snapshot) — same as the public create
+      // path at :2479. `staffCreated: true` skips the per-date
+      // cut-off: a walk-in creates a NEW booking, so there is no
+      // prior selection for the cut-off to lock.
+      const validatedWalkinBreakfast: ValidatedBreakfastSelections | null =
+        validateBreakfastSelections({
+          selections: requestedBreakfastSelections,
+          breakfastConfig: breakfastConfig as any,
+          now,
+          staffCreated: true
+        });
+      // The walk-in selections are keyed by DATE × GUEST SLOT, not
+      // by room, so the whole total is attributed to the FIRST
+      // room line (mirroring the public create path's
+      // "first stay absorbs the full selections total"
+      // attribution at :2820-2831). The reservation-level
+      // `breakfastTotal` is the sum of the per-line totals, so
+      // the two agree by construction.
+      const walkinBreakfastTotal = validatedWalkinBreakfast?.total ?? 0;
+
+      // Per OCT-C5 (2026-10-20): the BR-12 other add-ons the
+      // desk selected (`admin-app/src/pages/BookingsPage.tsx:4669`
+      // — the `WalkinOtherAddOnGrid` output). The walk-in
+      // transaction previously ignored them entirely: the string
+      // `otherAddOn` appeared ZERO times in this file, the walk-in
+      // schema had no field for them (Zod stripped them silently),
+      // and the grid's selections were discarded. The desk sold an
+      // airport transfer, the modal showed the total, and the
+      // booking carried nothing — the guest never got the
+      // transfer and the hotel earned ₱0 on every one.
+      //
+      // The selections are REBUILT from the live catalog here, so
+      // the walk-in cannot persist a client-supplied price (the
+      // same price-authority rule as OCT-C1 / OCT-C2), and a
+      // disabled add-on is refused.
+      const rawWalkinOtherAddOns = requestedOtherAddOnSelections;
+      let walkinOtherAddOnSelections: Record<string, OtherAddOnSelectionEntry[]> | null = null;
+      let walkinOtherAddOnTotal = 0;
+      if (rawWalkinOtherAddOns && typeof rawWalkinOtherAddOns === "object") {
+        const addOnsCatalogSnap = await transaction.get(adminDb.collection("addOns"));
+        const addOnsCatalog = new Map<string, AddOn>();
+        for (const d of addOnsCatalogSnap.docs) {
+          const norm = normalizeAddOn({ id: d.id, ...d.data() }, d.id);
+          if (norm) addOnsCatalog.set(norm.id, norm);
+        }
+        // Same read-only pre-seed fallback the public catalog
+        // endpoint uses (`addons-config.ts`): an empty collection
+        // still offers the airport transfer, so the walk-in grid
+        // (which renders from that endpoint) and this validation
+        // must agree.
+        if (addOnsCatalog.size === 0) {
+          const pre = normalizeAddOn(
+            { id: "airport-transfer", ...AIRPORT_TRANSFER_PRESEED },
+            "airport-transfer"
+          );
+          if (pre) addOnsCatalog.set(pre.id, pre);
+        }
+        const rebuilt: Record<string, OtherAddOnSelectionEntry[]> = {};
+        for (const [dateKey, rawItems] of Object.entries(
+          rawWalkinOtherAddOns as Record<string, unknown>
+        )) {
+          if (!Array.isArray(rawItems)) continue;
+          const rows: OtherAddOnSelectionEntry[] = [];
+          for (const rawItem of rawItems) {
+            if (!rawItem || typeof rawItem !== "object") continue;
+            const entry = rawItem as Record<string, unknown>;
+            const addOnId = String(entry.addOnId || "").trim();
+            if (!addOnId) continue;
+            const live = addOnsCatalog.get(addOnId);
+            if (!live) {
+              throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+            }
+            if (live.isEnabled === false) {
+              throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+            }
+            rows.push({
+              ...(entry as unknown as OtherAddOnSelectionEntry),
+              addOnId: live.id,
+              nameSnapshot: live.name,
+              priceSnapshot: Math.max(0, Number(live.price) || 0),
+              unitSnapshot: live.unit,
+              cutoffHoursBeforeCheckInSnapshot: Math.max(
+                0,
+                Math.min(168, Math.floor(Number(live.cutoffHoursBeforeCheckIn) || 24))
+              )
+            });
+          }
+          if (rows.length > 0) rebuilt[dateKey] = rows;
+        }
+        if (Object.keys(rebuilt).length > 0) {
+          walkinOtherAddOnSelections = rebuilt;
+          walkinOtherAddOnTotal = recomputeOtherAddOnTotal(rebuilt);
+        }
+      }
+
       // Per EXB-01 (2026-07-31): extra-bed count + rate for the
       // walk-in (which also covers the corporate inquiry
       // conversion — same staff surface). Staff-created, so the
@@ -5166,12 +5313,19 @@ export async function handleCreateWalkin(req: any, res: any) {
         // derivation is gone. The walk-in / corporate flow must
         // now send the rich `breakfastSelections` shape to opt
         // in to breakfast — the create transaction reads it
-        // below and stamps `breakfastTotal` onto the booking
+        // above and stamps `breakfastTotal` onto the booking
         // doc. The per-stay breakfast line is 0 when no
         // selections are provided (the breakfast math runs
         // elsewhere in the per-meal `breakfastSelections`
         // snapshotted sum).
-        const lineBreakfastTotal = 0;
+        //
+        // Per OCT-C5 (2026-10-20): the line total is now the
+        // VALIDATED selections total, attributed to the FIRST
+        // room line (the selections are keyed by date × guest
+        // slot, not by room — same attribution as the public
+        // create path). The reservation-level `breakfastTotal`
+        // below sums these per-line totals, so the two agree.
+        const lineBreakfastTotal = lineIdx === 0 ? walkinBreakfastTotal : 0;
         // Per EXB-01 (2026-07-31): the extra-bed add-on term.
         // Same shape as the online-create path.
         const lineExtraBedTotal = calculateExtraBedAddOn({
@@ -5550,7 +5704,39 @@ export async function handleCreateWalkin(req: any, res: any) {
         discountScopeSnapshot: snapshottedDiscountScope,
         guestIdPhotoUrl: null,
         guestRegistration: null,
-        breakfastSelections: {},
+        // Per OCT-C5 (2026-10-20, audit
+        // `plan/project/AUDIT-OCTOBER-2026.md`): the walk-in now
+        // PERSISTS the validated breakfast selections instead of
+        // discarding them. The pre-fix code wrote a hard-coded
+        // `breakfastSelections: {}` here, so the desk's meals
+        // vanished — no breakfast was served, the kitchen list
+        // was empty, and the hotel was never charged.
+        //
+        // `validatedWalkinBreakfast.entries` is the server-
+        // validated map (catalog price + name, NOT the client's),
+        // so the same price-authority rule as the public create
+        // path applies. `null` (the desk picked no meals) writes
+        // an empty map, matching the public path's "explicit
+        // opt-out" shape.
+        breakfastSelections: validatedWalkinBreakfast?.entries ?? {},
+        // Per BR-03 (2026-10-12, decision #232): the denormalized
+        // `breakfastTotal` field — the future-proof snapshot for
+        // the BR-04 Manage Breakfast page + the kitchen list +
+        // reports. The walk-in previously omitted the field
+        // entirely, so a reader could not tell "no breakfast"
+        // from "breakfast that was never recorded".
+        breakfastTotal: breakfastTotal,
+        // Per BR-12.1 (2026-10-15, decision #247): the other
+        // add-ons the desk selected. See the
+        // `otherAddOnSelections` handling above — these were
+        // dropped on the floor before this fix.
+        ...(walkinOtherAddOnSelections
+          ? {
+              otherAddOnSelections: walkinOtherAddOnSelections,
+              otherAddOnTotal: walkinOtherAddOnTotal,
+              hasAnyOtherAddOns: true
+            }
+          : {}),
         cancellationReason: "",
         linkedInquiryId: linkedInquiryId || null,
         ...(validatedTestRunId
@@ -5916,6 +6102,17 @@ export async function handleCreateWalkin(req: any, res: any) {
       status = 409;
     } else if (errorMessage === "RESERVATION_HEADER_WITHOUT_CHILD") {
       status = 500;
+    } else if (
+      // Per OCT-C5 (2026-10-20): the walk-in now validates the
+      // desk's breakfast selections + other add-ons, so its
+      // validation failures must reach the desk as 400s with a
+      // human message — not 500s. Symmetric with the public
+      // create path's `BreakfastSelectionValidationError`
+      // mapping at :4373.
+      error.name === "BreakfastSelectionValidationError"
+      || errorMessage === OTHER_ADDON_NOT_AVAILABLE_ERROR
+    ) {
+      status = (typeof error.status === "number" && error.status > 0) ? error.status : 400;
     } else {
       status = 500;
     }

@@ -250,12 +250,28 @@ function formatStayDate(value: string) {
 // dates). Defensive: returns an empty array when the
 // input is malformed (e.g. checkout <= checkin) so
 // the Step 2 section renders nothing rather than a
-// crash. The `+ 'T00:00:00'` keeps the parse
-// timezone-stable for the hotel-local date string.
+// crash.
+//
+// Per OCT-H2 (2026-10-20, audit
+// `plan/project/AUDIT-OCTOBER-2026.md`): the `+ 'T00:00:00Z'`
+// UTC anchor is REQUIRED, not cosmetic. The previous
+// `+ 'T00:00:00'` parsed in the BROWSER's timezone and the
+// loop then formatted with `toISOString()` (UTC), so in any
+// UTC+ zone the list was shifted back one day. Reproduced:
+//
+//   TZ=Asia/Manila -> ["2026-10-13","2026-10-14","2026-10-15"]
+//
+// for a 2026-10-14 -> 2026-10-17 stay — the LAST breakfast
+// morning (Oct 16) was never offered, so it was never charged,
+// and the server's cut-off check ran against the wrong date.
+//
+// The two sibling implementations already use the Z anchor
+// (`ManageBreakfastPage.tsx:148` and
+// `WalkinBreakfastGrid.tsx:119`); this one was the outlier.
 function enumerateBreakfastDates(checkIn: string, checkOut: string): string[] {
   if (!checkIn || !checkOut) return [];
-  const start = new Date(`${checkIn}T00:00:00`);
-  const end = new Date(`${checkOut}T00:00:00`);
+  const start = new Date(`${checkIn}T00:00:00Z`);
+  const end = new Date(`${checkOut}T00:00:00Z`);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
   if (end <= start) return [];
   const dates: string[] = [];
