@@ -93,6 +93,7 @@ export * from "./utils/breakfastConfig";
 // here.
 export * from "./utils/otherAddOnCutoff";
 export * from "./utils/otherAddOnTotal";
+export * from "./utils/otherAddOnDrafts";
 export * from "./utils/addOns";
 
 // Per Phase 2 of the Spark Rewards tier system (2026-10-12,

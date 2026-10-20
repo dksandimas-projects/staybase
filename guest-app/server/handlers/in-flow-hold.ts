@@ -43,6 +43,7 @@ import {
   canExtendInFlowHold,
   computeExtendedInFlowHoldExpiresAt,
   computeInFlowHoldExpiresAt,
+  inFlowHoldStayMatches,
   isInFlowHoldActive,
   normalizeInFlowHoldMinutes
 } from "@spark-inn/shared";
@@ -193,10 +194,66 @@ export async function handleStartInFlowHold(req: any, res: any) {
           error: "Hold id is already in use."
         });
       }
+
+      // Per OCT-M7 (2026-10-20, decision #296): the hold's stay
+      // details follow the guest's CURRENT stay.
+      //
+      // The endpoint used to be idempotent by `holdId` — a second
+      // POST returned the existing doc UNCHANGED — so the stamped
+      // `roomType` / `checkIn` / `checkOut` were never refreshed. A
+      // guest who changed their dates on Step 2 (MBUX-18's edit
+      // sheet widened this path) kept a hold describing the stay
+      // they had abandoned, and the banner kept promising it: "Your
+      // room is held for you until 8:45 PM" for a room they were no
+      // longer booking.
+      //
+      // The re-stamp updates the stay details and KEEPS `expiresAt`
+      // and `holdMinutes`. The clock does NOT restart: the hold's
+      // promise ("you have this long to finish") is the thing the
+      // extension cap (`MAX_IN_FLOW_HOLD_EXTENSIONS`) exists to
+      // bound, and a date change must not become a way to reset it.
+      // Only the CONTENT of the hold changes — it now describes the
+      // stay the guest is actually booking.
+      const stayMatches = inFlowHoldStayMatches(
+        {
+          roomType: data.roomType,
+          checkIn: data.checkIn,
+          checkOut: data.checkOut,
+          numNights: data.numNights
+        },
+        {
+          roomType: input.roomType,
+          checkIn: input.checkIn,
+          checkOut: input.checkOut,
+          numNights: input.numNights
+        }
+      );
+
+      if (stayMatches) {
+        return res.status(200).json({
+          success: true,
+          data: serializeHold(existing.id, existing.data()),
+          idempotentReplay: true
+        });
+      }
+
+      // `set` (not `update`) so a doc deleted between the read and
+      // this write is re-created rather than throwing NOT_FOUND.
+      await ref.set(
+        {
+          roomType: input.roomType,
+          checkIn: input.checkIn,
+          checkOut: input.checkOut,
+          numNights: input.numNights,
+          updatedAt: Timestamp.fromDate(now)
+        },
+        { merge: true }
+      );
+      const restamped = await ref.get();
       return res.status(200).json({
         success: true,
-        data: serializeHold(existing.id, existing.data()),
-        idempotentReplay: true
+        data: serializeHold(restamped.id, restamped.data()),
+        restamped: true
       });
     }
 

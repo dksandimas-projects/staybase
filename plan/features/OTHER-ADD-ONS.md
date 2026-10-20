@@ -70,6 +70,32 @@ A **CHANGE** op may only alter the `quantity`. The name / price / unit stay the 
 
 **Walk-in parity (OCT-C5, 2026-10-20; decision #281).** A walk-in booking rebuilds the desk's selected add-ons from the live catalog (read inside the transaction, before any write) and persists them + `otherAddOnTotal` + `hasAnyOtherAddOns` on the booking doc. The catalog falls back to the read-only `AIRPORT_TRANSFER_PRESEED` when the collection is empty, so the walk-in grid (which renders from the public config endpoint) and the server validation always agree. A disabled add-on is refused with a 400.
 
+**Guest booking parity (OCT-M4, 2026-10-20; decision #297).** The GUEST booking flow now has the Step 2 grid the spec always described. Before this, `BookingPage.tsx` contained ZERO occurrences of "otherAddOn" — a guest could not order an airport transfer at booking time at all, so the spec's headline BR-12 flow was unreachable and other add-ons were only purchasable post-booking at `/my-booking/addons`.
+
+- **The grid** renders below `renderBreakfastSection` (per this spec): one card per enabled add-on × one quantity input per service date, clamped to the booking's guest count. The quantity is PER DAY × PER ADD-ON (decision 3 above) — NOT the per-guest × per-date slot shape breakfast uses. The catalog comes from the PUBLIC endpoint `GET /api/bookings/addons/config`; the guest app never reads the `addOns` collection directly. The section renders NOTHING when the catalog is empty or the hotel has taken other add-ons off sale (OCT-M1 below) — an empty grid under a heading reads as a broken page.
+- **The BR-10 dual-button pattern covers the UNION.** The Step 2 CTA's count is the breakfast slots + the other-add-on rows, and the figure is `breakfastTotal + otherAddOnTotal`. The "without add-ons" branch therefore means "without add-ons of ANY kind".
+- **The create path rebuilds from the live catalog** (the OCT-C2 price authority), refuses an add-on that is not on sale with a 400, clamps the quantity to the guest count, and writes `otherAddOnSelections` + `otherAddOnTotal` + `hasAnyOtherAddOns` — the SAME additive fields the walk-in path writes.
+- **The other add-ons are NOT inside `totalPrice`** (decision 2 above). They are added on top of it for the balance, exactly like the walk-in and the post-booking purchase. The Step 2 grid says so in one line so the guest is not surprised that the transfer is not on the online room bill.
+
+**Hotel-wide master switch (OCT-M1, 2026-10-20; decision #295).** The Settings → Other Add-Ons tab's hotel-wide "Add-ons enabled" toggle is now REAL. It persists to `settings/hotelConfig.otherAddOnsEnabled` and is read by `guest-app/server/lib/otherAddOns-settings.ts` — the single reader. When it is off:
+
+- `GET /api/bookings/addons/config` returns an EMPTY catalog plus `otherAddOnsEnabled: false`, so the guest Step 2 grid disappears and the staff drawer has nothing to add from.
+- The guest Manage page shows an empty catalog.
+- The guest save path (`POST /api/bookings/addons/manage/save`) refuses the order with a 400 — without this the catalog would be hidden but a direct POST could still buy one.
+- The STAFF path stays open on purpose: the front desk recording an add-on a guest asked for at the desk is an operational override.
+
+**Only an explicit `false` disables the catalog.** A settings doc written before OCT-M1 has no `otherAddOnsEnabled` field and hydrates to `true`, so a hotel's revenue stream is never silently switched off by a missing field.
+
+### Cut-off anchor (OCT-M5, 2026-10-20; decision #292)
+
+The cut-off is `cutoffHoursBeforeCheckIn` hours before the **BOOKING's check-in date** — for EVERY service date, not the selection's own date. The old code anchored on the selection's service date, so the lock slid forward one day per row and the guest could buy a transfer a full day past the hotel's stated cut-off. The Manage page had the SAME wrong anchor, so it showed the same wrong lock state.
+
+`AssertNotLockedInput.checkInDate` is now **REQUIRED** and the `checkInDate || parsed.date` fallback is deleted, so the compiler forces every caller to pass the booking's check-in. A booking with no usable check-in is refused (`BOOKING_CHECK_IN_MISSING`) rather than silently defaulted.
+
+### Read-only bookings (OCT-M3, 2026-10-20; decision #291)
+
+A `checked-out` or `cancelled` booking is NOT editable — the guest save path, the staff add/remove path and the mark-served path all refuse it through ONE shared rule (`isOtherAddOnBookingMutable`), so the three can never drift apart. `checked-in` stays mutable: a guest can still buy a transfer on arrival.
+
 ### Booking extensions (additive — BR-08 breakfast fields FROZEN)
 
 ```ts
@@ -246,9 +272,11 @@ Mirrors the breakfast tab's read pattern. Shows per-day selections + per-add-on 
 | Case | Behavior |
 |---|---|
 | Catalog empty | Pre-seed falls back to `AIRPORT_TRANSFER_PRESEED` (read-only). The admin's first Settings save promotes it to a real doc. |
-| Booking checked-out / cancelled | Both guest and staff update endpoints reject with 400 "Booking is read-only." |
+| Booking checked-out / cancelled | Both guest and staff update endpoints reject with 400 "Booking is read-only." Per OCT-M3 (2026-10-20, decision #291) the rule lives in ONE shared helper (`isOtherAddOnBookingMutable`) used by the guest save path, the staff add/remove path AND the mark-served path — the guest path previously had NO check at all. The comparison is case-insensitive, so a hand-edited `"Cancelled"` doc still refuses. |
 | Add-on disabled in catalog | `addons-disabled` reason — every date is locked. |
-| Cut-off passed | `cutoff-passed` reason — date-specific lock. |
+| Hotel-wide "Add-ons enabled" switch OFF | Per OCT-M1 (2026-10-20, decision #295): the public catalog endpoint returns an empty catalog + `otherAddOnsEnabled: false`; the guest Manage page shows an empty catalog; the guest save path refuses the order with a 400. The STAFF path stays open (front-desk override). |
+| Guest books with an add-on, then the hotel disables it | Per OCT-M4 (2026-10-20, decision #297): the create path rebuilds from the live catalog and refuses an add-on that is not on sale with a 400 ("One of the selected add-ons is no longer available. Please refresh and try again."). The guest returns to Step 2, drops it and resubmits. |
+| Cut-off passed | `cutoff-passed` reason — the lock is per ADD-ON (anchored on the booking's check-in for every date), not per date. Per OCT-M5 (2026-10-20, decision #292) the anchor is the booking's check-in; the old per-service-date anchor slid forward a day per row. |
 | Past cut-off + staff write | Allowed only with `overrideReason` (≥8 chars). Audit row stamped with `action: "override-*"`. |
 | Quantity > 50 | Zod schema rejects. |
 | `clientBatchId` replay within 60s | Returns prior result without re-applying. |

@@ -224,6 +224,13 @@ import type { BookingRateBreakdown } from "@spark-inn/shared";
 import {
   normalizeAddOn,
   recomputeOtherAddOnTotal,
+  // Per OCT-M4 (2026-10-20, decision #297): the guest create path
+  // reads the hotel-wide "Add-ons enabled" master switch (OCT-M1,
+  // decision #295) from the `settings/hotelConfig` doc the
+  // transaction already loaded, and writes the `hasAnyOtherAddOns`
+  // denormalized flag alongside the selections.
+  normalizeOtherAddOnsEnabled,
+  hasAnyOtherAddOns,
   AIRPORT_TRANSFER_PRESEED,
   type AddOn,
   type OtherAddOnSelectionEntry
@@ -1507,6 +1514,23 @@ export const createBookingSchema = z.object({
   // applies the meal-catalog + cutoff gates and throws
   // a 400 with a human message on violation.
   breakfastSelections: breakfastSelectionsSchema.optional(),
+  // Per OCT-M4 (2026-10-20, decision #297): the BR-12 other
+  // add-ons the guest selected in the Step 2 grid.
+  //
+  // BR-12 shipped the catalog, the staff walk-in grid and the
+  // post-booking "Manage Other Add-Ons" page — but the GUEST
+  // booking flow had no grid at all (`BookingPage.tsx` contained
+  // ZERO occurrences of "otherAddOn"), so a guest could not order an
+  // airport transfer at booking time. Combined with OCT-C5 (the
+  // create path never persisted `otherAddOnSelections` even if it
+  // did), other add-ons were only purchasable post-booking.
+  //
+  // The values are ADVISORY: the server rebuilds every entry from
+  // the live `addOns` catalog (catalog price + name + unit), so a
+  // client-supplied price is never persisted and an add-on that is
+  // no longer on sale is refused. Same shape + same rule as the
+  // walk-in schema (OCT-C5).
+  otherAddOnSelections: z.record(z.string(), z.array(z.unknown())).optional(),
   _hp: z.string().max(200).optional().default("")
 }).strict();
 
@@ -2530,6 +2554,108 @@ export async function handleCreateBooking(req: any, res: any) {
           breakfastConfig: breakfastConfig as any,
           now
         });
+
+      // Per OCT-M4 (2026-10-20, decision #297): rebuild the guest's
+      // BR-12 other add-ons from the LIVE catalog.
+      //
+      // BR-12 shipped the catalog, the staff walk-in grid and the
+      // post-booking "Manage Other Add-Ons" page — but the GUEST
+      // booking flow had no grid at all (`BookingPage.tsx` contained
+      // ZERO occurrences of "otherAddOn"), so a guest could not order
+      // an airport transfer at booking time. Combined with OCT-C5
+      // (the create path never persisted `otherAddOnSelections` even
+      // if it did), other add-ons were only purchasable
+      // post-booking.
+      //
+      // The rebuild is the SAME rule the walk-in path uses (OCT-C5,
+      // decision #281): the catalog is the price authority, a
+      // client-supplied price is never persisted, and an add-on that
+      // is not currently on sale is refused with a 400.
+      //
+      // The hotel-wide master switch (OCT-M1, decision #295) is read
+      // from the `settings/hotelConfig` doc the transaction already
+      // loaded above — no extra read.
+      const rawOtherAddOns = (body as any).otherAddOnSelections;
+      let validatedOtherAddOnSelections: Record<string, OtherAddOnSelectionEntry[]> | null = null;
+      let validatedOtherAddOnTotal = 0;
+      if (rawOtherAddOns && typeof rawOtherAddOns === "object") {
+        if (!normalizeOtherAddOnsEnabled(hotelConfig.otherAddOnsEnabled)) {
+          // The hotel took other add-ons off sale between the guest
+          // loading Step 2 and submitting. The guest must not get
+          // one — and must not be charged for one.
+          throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+        }
+        // The catalog is read INSIDE the transaction (read-before-
+        // write), so the price the guest is quoted is the price the
+        // booking is written with.
+        const addOnsCatalogSnap = await transaction.get(adminDb.collection("addOns"));
+        const addOnsCatalog = new Map<string, AddOn>();
+        for (const d of addOnsCatalogSnap.docs) {
+          const norm = normalizeAddOn({ id: d.id, ...d.data() }, d.id);
+          if (norm) addOnsCatalog.set(norm.id, norm);
+        }
+        // Same read-only pre-seed fallback the public catalog
+        // endpoint uses (`addons-config.ts`): an empty collection
+        // still offers the airport transfer, so the guest grid
+        // (which renders from that endpoint) and this validation
+        // must agree.
+        if (addOnsCatalog.size === 0) {
+          const pre = normalizeAddOn(
+            { id: "airport-transfer", ...AIRPORT_TRANSFER_PRESEED },
+            "airport-transfer"
+          );
+          if (pre) addOnsCatalog.set(pre.id, pre);
+        }
+        const rebuilt: Record<string, OtherAddOnSelectionEntry[]> = {};
+        for (const [dateKey, rawItems] of Object.entries(
+          rawOtherAddOns as Record<string, unknown>
+        )) {
+          if (!Array.isArray(rawItems)) continue;
+          const rows: OtherAddOnSelectionEntry[] = [];
+          for (const rawItem of rawItems) {
+            if (!rawItem || typeof rawItem !== "object") continue;
+            const entry = rawItem as Record<string, unknown>;
+            const addOnId = String(entry.addOnId || "").trim();
+            if (!addOnId) continue;
+            const live = addOnsCatalog.get(addOnId);
+            if (!live) {
+              throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+            }
+            if (live.isEnabled === false) {
+              throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+            }
+            // The quantity is the number of guests using the add-on
+            // that day (BR-12 decision 3) — clamped to the booking's
+            // guest count so a hostile payload cannot order 50
+            // airport transfers for a 2-guest stay.
+            const quantity = Math.max(
+              0,
+              Math.min(
+                guests,
+                Math.floor(Number(entry.quantity) || 0)
+              )
+            );
+            if (quantity <= 0) continue;
+            rows.push({
+              ...(entry as unknown as OtherAddOnSelectionEntry),
+              addOnId: live.id,
+              nameSnapshot: live.name,
+              priceSnapshot: Math.max(0, Number(live.price) || 0),
+              quantity,
+              unitSnapshot: live.unit,
+              cutoffHoursBeforeCheckInSnapshot: Math.max(
+                0,
+                Math.min(168, Math.floor(Number(live.cutoffHoursBeforeCheckIn) || 24))
+              )
+            });
+          }
+          if (rows.length > 0) rebuilt[dateKey] = rows;
+        }
+        if (Object.keys(rebuilt).length > 0) {
+          validatedOtherAddOnSelections = rebuilt;
+          validatedOtherAddOnTotal = recomputeOtherAddOnTotal(rebuilt);
+        }
+      }
 
       // Per CHD-01 + CHD-04 (2026-08-01, per decision #144):
       // validate the adults/children split against the room
@@ -3615,6 +3741,25 @@ export async function handleCreateBooking(req: any, res: any) {
               breakfastTotal: validatedBreakfastSelections.total
             }
           : {}),
+        // Per OCT-M4 (2026-10-20, decision #297): the BR-12 other
+        // add-ons the guest selected in the Step 2 grid.
+        //
+        // Per `plan/features/OTHER-ADD-ONS.md` decision 2 these are
+        // ADDITIVE `Booking` fields and they are NOT inside
+        // `totalPrice` — they are "added on top of it for the
+        // balance". The same shape the walk-in path writes (OCT-C5,
+        // decision #281) and the post-booking guest path writes.
+        //
+        // The fields are written only when the guest actually
+        // selected something, so a booking with no other add-ons
+        // carries no `otherAddOnSelections` key at all.
+        ...(validatedOtherAddOnSelections !== null
+          ? {
+              otherAddOnSelections: validatedOtherAddOnSelections,
+              otherAddOnTotal: validatedOtherAddOnTotal,
+              hasAnyOtherAddOns: hasAnyOtherAddOns(validatedOtherAddOnSelections)
+            }
+          : {}),
         // Per EXB-01 (2026-07-31): the snapshotted extra-bed
         // count + rate. `extraBedRate` is the room-type rate
         // snapshotted at booking time so a later rate change never
@@ -4430,6 +4575,17 @@ export async function handleCreateBooking(req: any, res: any) {
       status = 409;
     } else if (error.message === "Voucher no longer valid") {
       status = 409;
+    } else if (error.message === OTHER_ADDON_NOT_AVAILABLE_ERROR) {
+      // Per OCT-M4 (2026-10-20, decision #297): the guest selected
+      // an other add-on in the Step 2 grid that is no longer on sale
+      // (the admin disabled it, or the hotel took other add-ons off
+      // sale via the OCT-M1 master switch) between loading the grid
+      // and submitting the booking.
+      //
+      // This is a 400 with a human message — the same treatment the
+      // walk-in path gives it (OCT-C5). The guest can go back to
+      // Step 2, drop the unavailable add-on and resubmit.
+      status = 400;
     } else if (
       // Per MRB-02 (2026-08-02, per decision #164): the client
       // preallocated a `reservationId` that already carries a

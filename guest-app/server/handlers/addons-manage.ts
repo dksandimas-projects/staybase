@@ -16,6 +16,7 @@
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { adminDb } from "../lib/firebase-admin";
+import { loadOtherAddOnsHotelEnabled } from "../lib/otherAddOns-settings";
 import {
   computeOtherAddOnCutoffState,
   normalizeAddOn,
@@ -23,6 +24,7 @@ import {
   hasAnyOtherAddOns,
   recomputeOtherAddOnTotal,
   parseOtherAddOnSelectionKey,
+  isOtherAddOnBookingMutable,
   type AddOn,
   type OtherAddOnSelectionEntry
 } from "@spark-inn/shared";
@@ -109,10 +111,21 @@ export async function handleGetAddOnsManage(req: VercelRequest, res: VercelRespo
       : "";
 
   const status = String(bookingData.status || "").trim();
-  const readOnly = status === "checked-out" || status === "cancelled";
+  // Per OCT-M3 (2026-10-20, decision #291): the read-only rule is
+  // the shared `isOtherAddOnBookingMutable` — the SAME helper the
+  // write paths use. A local copy here could disagree with the
+  // server (e.g. on a case difference), which would show the guest
+  // editable controls for a booking the save path refuses.
+  const readOnly = !isOtherAddOnBookingMutable(status);
 
   // Load the add-on catalog (no admin-only fields needed for
   // the public Manage Other Add-Ons page).
+  //
+  // Per OCT-M1 (2026-10-20, decision #295): the hotel-wide master
+  // switch is threaded in here too. When the hotel has taken other
+  // add-ons off sale, the page must show an EMPTY catalog — the
+  // guest must not see an add-on they cannot buy.
+  const hotelEnabled = await loadOtherAddOnsHotelEnabled();
   let enabledAddOns: AddOn[] = [];
   try {
     const snap = await adminDb.collection("addOns").get();
@@ -120,7 +133,7 @@ export async function handleGetAddOnsManage(req: VercelRequest, res: VercelRespo
       const norm = normalizeAddOn({ id: d.id, ...d.data() }, d.id);
       if (norm) enabledAddOns.push(norm);
     }
-    enabledAddOns = getEnabledAddOnsByHotel(enabledAddOns);
+    enabledAddOns = getEnabledAddOnsByHotel(enabledAddOns, hotelEnabled);
   } catch {
     // fall through with empty catalog
   }
@@ -148,8 +161,14 @@ export async function handleGetAddOnsManage(req: VercelRequest, res: VercelRespo
   const dateLockByAddOn: AddOnDateLock[] = [];
   for (const date of dates) {
     for (const a of enabledAddOns) {
+      // Per OCT-M5 (2026-10-20, decision #292): the cut-off
+      // anchor is the BOOKING's check-in date, not this row's
+      // service date. The per-service-date anchor slid the lock
+      // forward one day per row, so the guest could add a transfer
+      // a full day past the hotel's stated cut-off — and the
+      // Manage page showed the SAME wrong lock state.
       const state = computeOtherAddOnCutoffState({
-        checkInDate: date,
+        checkInDate,
         addOn: { isEnabled: a.isEnabled, cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn },
         now
       });

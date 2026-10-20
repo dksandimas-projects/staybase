@@ -27,6 +27,13 @@ import {
   hasAnyOtherAddOns,
   normalizeAddOn,
   parseOtherAddOnSelectionKey,
+  // Per OCT-M3 (2026-10-20, decision #291): the shared
+  // read-only-booking rule.
+  isOtherAddOnBookingMutable,
+  OTHER_ADD_ON_READ_ONLY_ERROR,
+  // Per OCT-M5 (2026-10-20, decision #292): the shared UTC
+  // calendar-date key helper (the cut-off anchor).
+  toUtcDateKey,
   type AddOn,
   type OtherAddOnSelectionEntry
 } from "@spark-inn/shared";
@@ -91,6 +98,13 @@ function opErrorToMessage(code: string): string {
   if (code.startsWith(OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX)) {
     return `Ordering closed — use overrideReason for late changes.`;
   }
+  // Per OCT-M5 (2026-10-20, decision #292): the booking has no
+  // usable check-in date, so the cut-off anchor cannot be
+  // computed. Refuse rather than fall back to the per-service-date
+  // anchor (which is the bug this fix removes).
+  if (code === "BOOKING_CHECK_IN_MISSING") {
+    return "This booking has no check-in date, so the add-on cut-off cannot be applied.";
+  }
   return "Could not save the staff add-on update.";
 }
 
@@ -123,6 +137,21 @@ export async function handleStaffUpdateAddOns(req: VercelRequest, res: VercelRes
   const bookingData = bookingSnap.data() || {};
   const bookingRefValue = String(bookingData.bookingRef || "");
 
+  // Per OCT-M3 (2026-10-20, decision #291): a closed booking's
+  // add-on selections are READ-ONLY for the staff path too, not
+  // just the guest path. Per `plan/features/OTHER-ADD-ONS.md`
+  // §Edge cases: "Both guest and staff update endpoints reject
+  // with 400 'Booking is read-only.'"
+  //
+  // Without this the front desk could add an airport transfer to
+  // a CHECKED-OUT booking, and (when `paidAmount > 0`) write a
+  // `category: "otherAddOn"` pending refund liability against a
+  // closed booking — inflating the Liability tab with a refund for
+  // something that was already served.
+  if (!isOtherAddOnBookingMutable(bookingData.status)) {
+    return res.status(400).json({ success: false, error: OTHER_ADD_ON_READ_ONLY_ERROR });
+  }
+
   // Load the add-on catalog (defensive: missing catalog
   // rejects every op).
   const addOnSnap = await adminDb.collection("addOns").get();
@@ -143,6 +172,14 @@ export async function handleStaffUpdateAddOns(req: VercelRequest, res: VercelRes
     await adminDb.runTransaction(async (transaction) => {
       const live = await transaction.get(bookingRef);
       const liveBooking = live.data() || {};
+      // Per OCT-M5 (2026-10-20, decision #292): the booking's
+      // check-in date — the cut-off anchor for every op in this
+      // transaction.
+      const liveCheckInDate = toUtcDateKey(liveBooking.checkIn as any);
+      if (!liveCheckInDate) {
+        opCode = "BOOKING_CHECK_IN_MISSING";
+        return false;
+      }
       const liveSelections: Record<string, OtherAddOnSelectionEntry[]> =
         liveBooking.otherAddOnSelections && typeof liveBooking.otherAddOnSelections === "object"
           ? { ...liveBooking.otherAddOnSelections }
@@ -186,7 +223,12 @@ export async function handleStaffUpdateAddOns(req: VercelRequest, res: VercelRes
           assertNotLocked({
             selectionKey: op.selectionKey,
             serverNow: now,
-            addOn: liveAddOn
+            addOn: liveAddOn,
+            // Per OCT-M5 (2026-10-20, decision #292): the
+            // cut-off anchor is the BOOKING's check-in, not the
+            // selection's own service date. The parameter is now
+            // required, so the compiler enforces it.
+            checkInDate: liveCheckInDate
           });
         } catch (err: any) {
           if (!overrideReason || overrideReason.length < 8) {

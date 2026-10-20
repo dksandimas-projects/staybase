@@ -286,19 +286,29 @@ The action:
 - Allows every copied date to be edited afterward.
 - Confirms how many dates were updated.
 
+**The confirmation (OCT-M8, 2026-10-20, decision #294).** The confirmation is an inline `role="status"` / `aria-live="polite"` line that:
+
+- **Renders exactly ONCE.** It carries the DATE it belongs to, so it renders inside the card the guest acted on — not once per date. Before this, the notice was a bare string rendered inside the per-date map, so a 3-night stay printed "Applied these choices to 2 remaining days." three times, in three different cards.
+- **Clears itself after 8 seconds** (`BREAKFAST_COPY_NOTICE_TIMEOUT_MS`). It was never cleared before — its own source comment claimed a clearing effect existed "further down", and it did not.
+- **Clears the moment the guest edits a meal.** Leaving it up after an edit falsely implied the copy was still in effect for the other days.
+- **Reports only real changes.** "Those choices are already set on every remaining day." when nothing changed, instead of claiming a copy that did not happen.
+
 ### Other add-ons
 
-Existing other add-ons render as compact expandable cards below breakfast.
+**Superseded by OCT-M4 (2026-10-20, decision #297).** This section originally described compact expandable cards with a single "Add / toggle" control, and the configuration (quantity, service date) appearing only after selection. The shipped grid follows `plan/features/OTHER-ADD-ONS.md` instead — the **per-day quantity input** shape — because the BR-12 data model is per day × per add-on (`otherAddOnSelections[date][].quantity`, 0..guest count), and a single toggle per card has no way to express "2 guests on Nov 2, 1 guest on Nov 3".
 
-Each card shows:
+The grid renders below the breakfast section, one card per enabled add-on:
 
 - Name.
 - Short description.
 - Price and unit.
-- Optional thumbnail when the catalog later supports one.
-- A 44px Add or toggle control.
+- One row per service date of the stay, each with a **44px-tall number input** (0..guest count) and the row's line total.
+- A cut-off pill ("Ordering closed") when the add-on's cut-off has passed — anchored on the BOOKING's check-in (OCT-M5, decision #292), so the lock is per add-on, not per date.
+- The whole section renders NOTHING when the catalog is empty or the hotel has taken other add-ons off sale (OCT-M1, decision #295) — an empty grid under a heading reads as a broken page.
 
-Quantity, service date, pickup information, or other configuration appears only after selection. Breakfast remains a specialized per-date/per-guest interface and is not forced into the generic quantity model.
+Breakfast remains a specialized per-date/per-guest interface and is not forced into the generic quantity model. The two grids sit side by side but keep their own shapes.
+
+One line under the section heading tells the guest that other add-ons are charged separately from the room rate and settled at the hotel — they are NOT inside `totalPrice` (they are added on top of it for the balance; see `plan/features/OTHER-ADD-ONS.md` decision 2), so the guest should not expect to see them on the online room bill.
 
 ### Live summary and action
 
@@ -308,6 +318,8 @@ There is one context-aware primary action:
 
 - No selection: `Continue without add-ons`.
 - Any selection: `Continue with N add-ons · total`.
+
+**Per OCT-M4 (decision #297) the count and the total cover the UNION** of breakfast AND other add-ons — the count is the breakfast slots + the other-add-on rows, the figure is `breakfastTotal + otherAddOnTotal`. The BR-10 pattern was never scoped to breakfast alone, so the "without add-ons" branch means "without add-ons of ANY kind".
 
 The BR-10 pair of parallel actions is retired. A skip label never silently preserves selections while implying that it cleared them.
 

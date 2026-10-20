@@ -7,6 +7,10 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import {
+  isOtherAddOnBookingMutable,
+  OTHER_ADD_ON_READ_ONLY_ERROR
+} from "@spark-inn/shared";
 
 const manageSaveSrc = readFileSync(
   resolve(__dirname, "../../server/handlers/addons-manage-save.ts"),
@@ -81,7 +85,16 @@ describe("BR-12 — handleUpdateAddOns (guest save)", () => {
   });
 
   it("rejects checked-out / cancelled bookings", () => {
-    expect(manageSaveSrc).toMatch(/Booking is read-only/);
+    // Per OCT-M3 (2026-10-20, decision #291) the rule moved into ONE
+    // shared helper (`isOtherAddOnBookingMutable`) so the guest path,
+    // the staff path and the mark-served path can never drift apart.
+    // The handler therefore references the shared constant instead of
+    // repeating the message inline — assert against the constant's
+    // VALUE (the message the guest actually sees) and against the
+    // handler's use of it.
+    expect(OTHER_ADD_ON_READ_ONLY_ERROR).toBe("Booking is read-only.");
+    expect(manageSaveSrc).toMatch(/isOtherAddOnBookingMutable/);
+    expect(manageSaveSrc).toMatch(/OTHER_ADD_ON_READ_ONLY_ERROR/);
   });
 });
 

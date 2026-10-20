@@ -221220,7 +221220,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.17.2";
+    VERSION2 = "2.17.3";
   }
 });
 
@@ -221566,6 +221566,13 @@ function clampIntegerInRange(raw, min, max) {
   const floored = Math.floor(value);
   if (floored < min || floored > max) return null;
   return floored;
+}
+function inFlowHoldStayMatches(hold, input) {
+  if (!hold || !input) return false;
+  if (String(hold.roomType ?? "") !== String(input.roomType ?? "")) return false;
+  if (String(hold.checkIn ?? "") !== String(input.checkIn ?? "")) return false;
+  if (String(hold.checkOut ?? "") !== String(input.checkOut ?? "")) return false;
+  return Number(hold.numNights ?? 0) === Number(input.numNights ?? 0);
 }
 function generateHoldId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -222299,6 +222306,18 @@ function toDateOrNull(value) {
     return Number.isNaN(d.getTime()) ? null : d;
   }
   return null;
+}
+function toUtcDateKey(value) {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
+  }
+  const date = toDateOrNull(value);
+  if (!date) return "";
+  const yyyy = date.getUTCFullYear();
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
 }
 function getManilaDateInfo(timezone = "Asia/Manila") {
   const now = /* @__PURE__ */ new Date();
@@ -225039,6 +225058,72 @@ var init_otherAddOnCutoff = __esm({
   }
 });
 
+// ../shared/utils/otherAddOnDrafts.ts
+function otherAddOnDraftKey(date, addOnId) {
+  return `${date}-${String(addOnId).trim()}`;
+}
+function clampOtherAddOnQuantity(quantity, guestCount) {
+  const max = Math.max(0, Math.floor(Number(guestCount) || 0));
+  const raw = Math.floor(Number(quantity) || 0);
+  if (raw <= 0) return 0;
+  return Math.min(raw, max);
+}
+function buildOtherAddOnDraftSelections(input) {
+  const now = input.now ?? /* @__PURE__ */ new Date();
+  const stamp = now.toISOString();
+  const catalogById = /* @__PURE__ */ new Map();
+  for (const row2 of input.catalog || []) {
+    if (row2 && row2.id) catalogById.set(row2.id, row2);
+  }
+  const out = {};
+  for (const date of input.dates || []) {
+    const rows = [];
+    for (const addOn of catalogById.values()) {
+      const raw = input.quantities?.[otherAddOnDraftKey(date, addOn.id)];
+      const quantity = clampOtherAddOnQuantity(raw, input.guestCount);
+      if (quantity <= 0) continue;
+      rows.push({
+        addOnId: addOn.id,
+        nameSnapshot: addOn.name,
+        priceSnapshot: Math.max(0, Number(addOn.price) || 0),
+        quantity,
+        unitSnapshot: addOn.unit === "per-stay" ? "per-stay" : "per-person",
+        addedAt: stamp,
+        addedBy: "guest",
+        lastModifiedAt: stamp,
+        lastModifiedBy: "guest",
+        removedAt: null,
+        removedBy: null,
+        cutoffHoursBeforeCheckInSnapshot: Math.max(
+          0,
+          Math.min(168, Math.floor(Number(addOn.cutoffHoursBeforeCheckIn) || 24))
+        )
+      });
+    }
+    if (rows.length > 0) out[date] = rows;
+  }
+  return out;
+}
+function countOtherAddOnDraftSelections(selections) {
+  if (!selections) return 0;
+  let count = 0;
+  for (const date of Object.keys(selections)) {
+    const rows = selections[date];
+    if (!Array.isArray(rows)) continue;
+    for (const entry of rows) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+      if (Math.max(0, Math.floor(Number(entry.quantity) || 0)) > 0) count += 1;
+    }
+  }
+  return count;
+}
+var init_otherAddOnDrafts = __esm({
+  "../shared/utils/otherAddOnDrafts.ts"() {
+    "use strict";
+  }
+});
+
 // ../shared/utils/addOns.ts
 function normalizeAddOn(raw, fallbackId) {
   if (!raw || typeof raw !== "object") return null;
@@ -225065,8 +225150,19 @@ function normalizeAddOn(raw, fallbackId) {
     updatedBy: String(obj.updatedBy || "")
   };
 }
-function getEnabledAddOnsByHotel(addOns) {
+function normalizeOtherAddOnsEnabled(raw) {
+  if (raw === false) return false;
+  if (raw === true) return true;
+  if (typeof raw === "string") {
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === "false") return false;
+    if (normalized === "true") return true;
+  }
+  return OTHER_ADD_ONS_ENABLED_DEFAULT;
+}
+function getEnabledAddOnsByHotel(addOns, hotelEnabled) {
   if (!Array.isArray(addOns)) return [];
+  if (hotelEnabled === false) return [];
   return addOns.filter((a) => a && a.isEnabled === true).slice().sort((a, b3) => {
     const da3 = Math.floor(Number(a.displayOrder) || 0);
     const db = Math.floor(Number(b3.displayOrder) || 0);
@@ -225083,7 +225179,11 @@ function sortAddOnsByDisplayOrder(addOns) {
     return String(a.name || "").localeCompare(String(b3.name || ""));
   });
 }
-var AIRPORT_TRANSFER_PRESEED;
+function isOtherAddOnBookingMutable(status) {
+  const normalized = String(status ?? "").trim().toLowerCase();
+  return normalized !== "checked-out" && normalized !== "cancelled";
+}
+var AIRPORT_TRANSFER_PRESEED, OTHER_ADD_ONS_ENABLED_DEFAULT, OTHER_ADD_ON_READ_ONLY_ERROR;
 var init_addOns = __esm({
   "../shared/utils/addOns.ts"() {
     "use strict";
@@ -225096,6 +225196,8 @@ var init_addOns = __esm({
       cutoffHoursBeforeCheckIn: 24,
       displayOrder: 10
     };
+    OTHER_ADD_ONS_ENABLED_DEFAULT = true;
+    OTHER_ADD_ON_READ_ONLY_ERROR = "Booking is read-only.";
   }
 });
 
@@ -225248,6 +225350,8 @@ __export(shared_exports, {
   MIN_IN_FLOW_HOLD_MINUTES: () => MIN_IN_FLOW_HOLD_MINUTES,
   MIN_MAX_STAY_NIGHTS: () => MIN_MAX_STAY_NIGHTS,
   MIN_PAYMENT_HOLD_WINDOW_HOURS: () => MIN_PAYMENT_HOLD_WINDOW_HOURS,
+  OTHER_ADD_ONS_ENABLED_DEFAULT: () => OTHER_ADD_ONS_ENABLED_DEFAULT,
+  OTHER_ADD_ON_READ_ONLY_ERROR: () => OTHER_ADD_ON_READ_ONLY_ERROR,
   OtherAddOnAuditEntrySchema: () => OtherAddOnAuditEntrySchema,
   OtherAddOnMarkRefundPaidSchema: () => OtherAddOnMarkRefundPaidSchema,
   OtherAddOnMarkServedSchema: () => OtherAddOnMarkServedSchema,
@@ -225297,6 +225401,7 @@ __export(shared_exports, {
   buildCancellationLiabilitySnapshot: () => buildCancellationLiabilitySnapshot,
   buildGoogleCalendarUrl: () => buildGoogleCalendarUrl,
   buildIcsContent: () => buildIcsContent,
+  buildOtherAddOnDraftSelections: () => buildOtherAddOnDraftSelections,
   buildOtherAddOnSelectionKey: () => buildOtherAddOnSelectionKey,
   bustPublicSiteContentCache: () => bustPublicSiteContentCache,
   calculateBookingTotal: () => calculateBookingTotal,
@@ -225314,6 +225419,7 @@ __export(shared_exports, {
   canExtendInFlowHold: () => canExtendInFlowHold,
   checkExtraBedInventory: () => checkExtraBedInventory,
   clampIntegerInRange: () => clampIntegerInRange,
+  clampOtherAddOnQuantity: () => clampOtherAddOnQuantity,
   clearCache: () => clearCache,
   clearSweepHistory: () => clearSweepHistory,
   compressImageFile: () => compressImageFile,
@@ -225330,6 +225436,7 @@ __export(shared_exports, {
   computeReservationAggregatePaymentStatus: () => computeReservationAggregatePaymentStatus,
   computeServerFolioTotals: () => computeServerFolioTotals,
   countExtraBedsInUse: () => countExtraBedsInUse,
+  countOtherAddOnDraftSelections: () => countOtherAddOnDraftSelections,
   createCancellationPolicySnapshot: () => createCancellationPolicySnapshot,
   createFailureBackoffState: () => createFailureBackoffState,
   datesOverlap: () => datesOverlap,
@@ -225370,11 +225477,13 @@ __export(shared_exports, {
   getSweepHistory: () => getSweepHistory,
   getWeekendNightCount: () => getWeekendNightCount,
   hasAnyOtherAddOns: () => hasAnyOtherAddOns,
+  inFlowHoldStayMatches: () => inFlowHoldStayMatches,
   isBookingOccupyingRoom: () => isBookingOccupyingRoom,
   isBreakfastRateLine: () => isBreakfastRateLine,
   isDateInStayWindow: () => isDateInStayWindow,
   isFreeNightVoucher: () => isFreeNightVoucher,
   isInFlowHoldActive: () => isInFlowHoldActive,
+  isOtherAddOnBookingMutable: () => isOtherAddOnBookingMutable,
   isPaymentVerified: () => isPaymentVerified,
   isRewardVoucher: () => isRewardVoucher,
   isUnlimitedStay: () => isUnlimitedStay,
@@ -225393,12 +225502,14 @@ __export(shared_exports, {
   normalizeDiscountScope: () => normalizeDiscountScope,
   normalizeInFlowHoldMinutes: () => normalizeInFlowHoldMinutes,
   normalizeMaxChildren: () => normalizeMaxChildren,
+  normalizeOtherAddOnsEnabled: () => normalizeOtherAddOnsEnabled,
   normalizePaymentHoldWindowHours: () => normalizePaymentHoldWindowHours,
   normalizeSeasonalRateOverride: () => normalizeSeasonalRateOverride,
   normalizeSeasonalRateOverrides: () => normalizeSeasonalRateOverrides,
   normalizeStayRange: () => normalizeStayRange,
   normalizeVatConfig: () => normalizeVatConfig,
   otherAddOnBreakdownByDate: () => otherAddOnBreakdownByDate,
+  otherAddOnDraftKey: () => otherAddOnDraftKey,
   parseCheckInTime: () => parseCheckInTime,
   parseCheckInTimeToPair: () => parseCheckInTimeToPair,
   parseOtherAddOnSelectionKey: () => parseOtherAddOnSelectionKey,
@@ -225432,6 +225543,7 @@ __export(shared_exports, {
   sweepBookingsStorage: () => sweepBookingsStorage,
   toDateOrNow: () => toDateOrNow,
   toDateOrNull: () => toDateOrNull,
+  toUtcDateKey: () => toUtcDateKey,
   validateCorporateCode: () => validateCorporateCode,
   validatePointsRedemption: () => validatePointsRedemption,
   validateVoucher: () => validateVoucher,
@@ -225489,6 +225601,7 @@ var init_shared = __esm({
     init_breakfastConfig();
     init_otherAddOnCutoff();
     init_otherAddOnTotal();
+    init_otherAddOnDrafts();
     init_addOns();
     init_rewardsConfig();
   }
@@ -229534,10 +229647,42 @@ async function handleStartInFlowHold(req, res) {
           error: "Hold id is already in use."
         });
       }
+      const stayMatches = inFlowHoldStayMatches(
+        {
+          roomType: data.roomType,
+          checkIn: data.checkIn,
+          checkOut: data.checkOut,
+          numNights: data.numNights
+        },
+        {
+          roomType: input.roomType,
+          checkIn: input.checkIn,
+          checkOut: input.checkOut,
+          numNights: input.numNights
+        }
+      );
+      if (stayMatches) {
+        return res.status(200).json({
+          success: true,
+          data: serializeHold(existing.id, existing.data()),
+          idempotentReplay: true
+        });
+      }
+      await ref.set(
+        {
+          roomType: input.roomType,
+          checkIn: input.checkIn,
+          checkOut: input.checkOut,
+          numNights: input.numNights,
+          updatedAt: Timestamp.fromDate(now)
+        },
+        { merge: true }
+      );
+      const restamped = await ref.get();
       return res.status(200).json({
         success: true,
-        data: serializeHold(existing.id, existing.data()),
-        idempotentReplay: true
+        data: serializeHold(restamped.id, restamped.data()),
+        restamped: true
       });
     }
     await ref.set({
@@ -230434,9 +230579,8 @@ function assertNotLocked2(input) {
   if (!parsed2) {
     throw new Error(`${OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX}${selectionKey}`);
   }
-  const date = checkInDate || parsed2.date;
   const state = computeOtherAddOnCutoffState({
-    checkInDate: date,
+    checkInDate,
     addOn,
     now: serverNow
   });
@@ -231446,6 +231590,23 @@ var createBookingSchema = external_exports.object({
   // applies the meal-catalog + cutoff gates and throws
   // a 400 with a human message on violation.
   breakfastSelections: breakfastSelectionsSchema.optional(),
+  // Per OCT-M4 (2026-10-20, decision #297): the BR-12 other
+  // add-ons the guest selected in the Step 2 grid.
+  //
+  // BR-12 shipped the catalog, the staff walk-in grid and the
+  // post-booking "Manage Other Add-Ons" page — but the GUEST
+  // booking flow had no grid at all (`BookingPage.tsx` contained
+  // ZERO occurrences of "otherAddOn"), so a guest could not order an
+  // airport transfer at booking time. Combined with OCT-C5 (the
+  // create path never persisted `otherAddOnSelections` even if it
+  // did), other add-ons were only purchasable post-booking.
+  //
+  // The values are ADVISORY: the server rebuilds every entry from
+  // the live `addOns` catalog (catalog price + name + unit), so a
+  // client-supplied price is never persisted and an add-on that is
+  // no longer on sale is refused. Same shape + same rule as the
+  // walk-in schema (OCT-C5).
+  otherAddOnSelections: external_exports.record(external_exports.string(), external_exports.array(external_exports.unknown())).optional(),
   _hp: external_exports.string().max(200).optional().default("")
 }).strict();
 async function loadMaxStayNights() {
@@ -231986,6 +232147,72 @@ async function handleCreateBooking(req, res) {
         breakfastConfig,
         now
       });
+      const rawOtherAddOns = body.otherAddOnSelections;
+      let validatedOtherAddOnSelections = null;
+      let validatedOtherAddOnTotal = 0;
+      if (rawOtherAddOns && typeof rawOtherAddOns === "object") {
+        if (!normalizeOtherAddOnsEnabled(hotelConfig.otherAddOnsEnabled)) {
+          throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+        }
+        const addOnsCatalogSnap = await transaction.get(adminDb.collection("addOns"));
+        const addOnsCatalog = /* @__PURE__ */ new Map();
+        for (const d of addOnsCatalogSnap.docs) {
+          const norm = normalizeAddOn({ id: d.id, ...d.data() }, d.id);
+          if (norm) addOnsCatalog.set(norm.id, norm);
+        }
+        if (addOnsCatalog.size === 0) {
+          const pre = normalizeAddOn(
+            { id: "airport-transfer", ...AIRPORT_TRANSFER_PRESEED },
+            "airport-transfer"
+          );
+          if (pre) addOnsCatalog.set(pre.id, pre);
+        }
+        const rebuilt = {};
+        for (const [dateKey2, rawItems] of Object.entries(
+          rawOtherAddOns
+        )) {
+          if (!Array.isArray(rawItems)) continue;
+          const rows = [];
+          for (const rawItem of rawItems) {
+            if (!rawItem || typeof rawItem !== "object") continue;
+            const entry = rawItem;
+            const addOnId = String(entry.addOnId || "").trim();
+            if (!addOnId) continue;
+            const live = addOnsCatalog.get(addOnId);
+            if (!live) {
+              throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+            }
+            if (live.isEnabled === false) {
+              throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+            }
+            const quantity = Math.max(
+              0,
+              Math.min(
+                guests,
+                Math.floor(Number(entry.quantity) || 0)
+              )
+            );
+            if (quantity <= 0) continue;
+            rows.push({
+              ...entry,
+              addOnId: live.id,
+              nameSnapshot: live.name,
+              priceSnapshot: Math.max(0, Number(live.price) || 0),
+              quantity,
+              unitSnapshot: live.unit,
+              cutoffHoursBeforeCheckInSnapshot: Math.max(
+                0,
+                Math.min(168, Math.floor(Number(live.cutoffHoursBeforeCheckIn) || 24))
+              )
+            });
+          }
+          if (rows.length > 0) rebuilt[dateKey2] = rows;
+        }
+        if (Object.keys(rebuilt).length > 0) {
+          validatedOtherAddOnSelections = rebuilt;
+          validatedOtherAddOnTotal = recomputeOtherAddOnTotal(rebuilt);
+        }
+      }
       const validatedRoomStays = assignedRooms.map((assignedRoom, index) => {
         const selection = assignedRoom.selection;
         const selectionType = selection.typeEntry;
@@ -232606,6 +232833,23 @@ async function handleCreateBooking(req, res) {
           // (denormalized); expose the same value the
           // chain saw.
           breakfastTotal: validatedBreakfastSelections.total
+        } : {},
+        // Per OCT-M4 (2026-10-20, decision #297): the BR-12 other
+        // add-ons the guest selected in the Step 2 grid.
+        //
+        // Per `plan/features/OTHER-ADD-ONS.md` decision 2 these are
+        // ADDITIVE `Booking` fields and they are NOT inside
+        // `totalPrice` — they are "added on top of it for the
+        // balance". The same shape the walk-in path writes (OCT-C5,
+        // decision #281) and the post-booking guest path writes.
+        //
+        // The fields are written only when the guest actually
+        // selected something, so a booking with no other add-ons
+        // carries no `otherAddOnSelections` key at all.
+        ...validatedOtherAddOnSelections !== null ? {
+          otherAddOnSelections: validatedOtherAddOnSelections,
+          otherAddOnTotal: validatedOtherAddOnTotal,
+          hasAnyOtherAddOns: hasAnyOtherAddOns(validatedOtherAddOnSelections)
         } : {},
         // Per EXB-01 (2026-07-31): the snapshotted extra-bed
         // count + rate. `extraBedRate` is the room-type rate
@@ -233247,6 +233491,8 @@ async function handleCreateBooking(req, res) {
       status = 409;
     } else if (error.message === "Voucher no longer valid") {
       status = 409;
+    } else if (error.message === OTHER_ADDON_NOT_AVAILABLE_ERROR) {
+      status = 400;
     } else if (
       // Per MRB-02 (2026-08-02, per decision #164): the client
       // preallocated a `reservationId` that already carries a
@@ -243689,6 +243935,26 @@ async function handleMarkRefundPaid(req, res) {
 
 // server/handlers/addons-config.ts
 init_firebase_admin();
+
+// server/lib/otherAddOns-settings.ts
+init_firebase_admin();
+init_shared();
+async function loadOtherAddOnsHotelEnabled() {
+  try {
+    const snap = await adminDb.collection("settings").doc("hotelConfig").get();
+    if (!snap.exists) return true;
+    return normalizeOtherAddOnsEnabled(snap.data()?.otherAddOnsEnabled);
+  } catch (err) {
+    console.error(
+      "Failed to read settings/hotelConfig.otherAddOnsEnabled; treating other add-ons as enabled:",
+      err
+    );
+    return true;
+  }
+}
+var OTHER_ADD_ONS_UNAVAILABLE_ERROR = "Other add-ons are currently unavailable.";
+
+// server/handlers/addons-config.ts
 init_shared();
 async function handleGetAddOnsConfig(req, res) {
   if (req.method !== "GET") {
@@ -243710,7 +243976,8 @@ async function handleGetAddOnsConfig(req, res) {
       };
       rawAddOns.push(pre);
     }
-    const enabled = getEnabledAddOnsByHotel(rawAddOns);
+    const hotelEnabled = await loadOtherAddOnsHotelEnabled();
+    const enabled = getEnabledAddOnsByHotel(rawAddOns, hotelEnabled);
     res.setHeader("Cache-Control", "public, max-age=60");
     return res.status(200).json({
       success: true,
@@ -243723,6 +243990,12 @@ async function handleGetAddOnsConfig(req, res) {
         cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn,
         displayOrder: a.displayOrder
       })),
+      // Per OCT-M1: the master switch is echoed so the guest UI
+      // can tell "the hotel turned other add-ons off" apart from
+      // "the hotel has no other add-ons" — both render an empty
+      // grid, but only one of them is a temporary state the guest
+      // should hear about.
+      otherAddOnsEnabled: hotelEnabled,
       preSeeded: rawAddOns.length === 1 && rawAddOns[0].id === "airport-transfer"
     });
   } catch (err) {
@@ -243799,7 +244072,8 @@ async function handleGetAddOnsManage(req, res) {
     return `${yyyy}-${mm}-${dd}`;
   })() : "";
   const status = String(bookingData2.status || "").trim();
-  const readOnly = status === "checked-out" || status === "cancelled";
+  const readOnly = !isOtherAddOnBookingMutable(status);
+  const hotelEnabled = await loadOtherAddOnsHotelEnabled();
   let enabledAddOns = [];
   try {
     const snap = await adminDb.collection("addOns").get();
@@ -243807,7 +244081,7 @@ async function handleGetAddOnsManage(req, res) {
       const norm = normalizeAddOn({ id: d.id, ...d.data() }, d.id);
       if (norm) enabledAddOns.push(norm);
     }
-    enabledAddOns = getEnabledAddOnsByHotel(enabledAddOns);
+    enabledAddOns = getEnabledAddOnsByHotel(enabledAddOns, hotelEnabled);
   } catch {
   }
   const existingSelections = bookingData2.otherAddOnSelections && typeof bookingData2.otherAddOnSelections === "object" ? bookingData2.otherAddOnSelections : {};
@@ -243819,7 +244093,7 @@ async function handleGetAddOnsManage(req, res) {
   for (const date of dates) {
     for (const a of enabledAddOns) {
       const state = computeOtherAddOnCutoffState({
-        checkInDate: date,
+        checkInDate,
         addOn: { isEnabled: a.isEnabled, cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn },
         now
       });
@@ -243934,6 +244208,9 @@ function opErrorToMessage(code) {
     const date = code.slice(OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX.length);
     return `Ordering closed for ${date}.`;
   }
+  if (code === "BOOKING_CHECK_IN_MISSING") {
+    return "This booking has no check-in date, so the add-on cut-off cannot be applied. Please contact the front desk.";
+  }
   return "Could not save the add-on change.";
 }
 async function handleUpdateAddOns(req, res) {
@@ -243982,8 +244259,12 @@ async function handleUpdateAddOns(req, res) {
   const bookingId = bookingDoc.id;
   const bookingData2 = bookingDoc.data();
   const status = String(bookingData2.status || "").trim();
-  if (status === "checked-out" || status === "cancelled") {
-    return res.status(400).json({ success: false, error: "Booking is read-only." });
+  if (!isOtherAddOnBookingMutable(status)) {
+    return res.status(400).json({ success: false, error: OTHER_ADD_ON_READ_ONLY_ERROR });
+  }
+  const hotelEnabled = await loadOtherAddOnsHotelEnabled();
+  if (!hotelEnabled) {
+    return res.status(400).json({ success: false, error: OTHER_ADD_ONS_UNAVAILABLE_ERROR });
   }
   const addOnSnap = await adminDb.collection("addOns").get();
   const addOnById = /* @__PURE__ */ new Map();
@@ -244007,6 +244288,11 @@ async function handleUpdateAddOns(req, res) {
         return;
       }
       const liveBooking = bookingSnap.data() || {};
+      const liveCheckInDate = toUtcDateKey(liveBooking.checkIn);
+      if (!liveCheckInDate) {
+        opCode = "BOOKING_CHECK_IN_MISSING";
+        return;
+      }
       const liveSelections = liveBooking.otherAddOnSelections && typeof liveBooking.otherAddOnSelections === "object" ? { ...liveBooking.otherAddOnSelections } : {};
       const liveServed = liveBooking.otherAddOnServed && typeof liveBooking.otherAddOnServed === "object" ? liveBooking.otherAddOnServed : {};
       const next = { ...liveSelections };
@@ -244030,7 +244316,12 @@ async function handleUpdateAddOns(req, res) {
           assertNotLocked2({
             selectionKey: op.selectionKey,
             serverNow: now,
-            addOn: liveAddOn
+            addOn: liveAddOn,
+            // Per OCT-M5 (2026-10-20, decision #292): the
+            // cut-off anchor is the BOOKING's check-in, not the
+            // selection's own service date. The parameter is now
+            // required, so the compiler enforces it.
+            checkInDate: liveCheckInDate
           });
         } catch (err) {
           opCode = String(err?.message || OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX);
@@ -244087,7 +244378,12 @@ async function handleUpdateAddOns(req, res) {
           assertNotLocked2({
             selectionKey: op.selectionKey,
             serverNow: now,
-            addOn: liveAddOn
+            addOn: liveAddOn,
+            // Per OCT-M5 (2026-10-20, decision #292): the
+            // cut-off anchor is the BOOKING's check-in, not the
+            // selection's own service date. The parameter is now
+            // required, so the compiler enforces it.
+            checkInDate: liveCheckInDate
           });
         } catch (err) {
           opCode = String(err?.message || OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX);
@@ -244151,7 +244447,12 @@ async function handleUpdateAddOns(req, res) {
           assertNotLocked2({
             selectionKey: op.selectionKey,
             serverNow: now,
-            addOn: liveAddOn
+            addOn: liveAddOn,
+            // Per OCT-M5 (2026-10-20, decision #292): the
+            // cut-off anchor is the BOOKING's check-in, not the
+            // selection's own service date. The parameter is now
+            // required, so the compiler enforces it.
+            checkInDate: liveCheckInDate
           });
         } catch (err) {
           opCode = String(err?.message || OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX);
@@ -244331,6 +244632,9 @@ function opErrorToMessage2(code) {
   if (code.startsWith(OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX)) {
     return `Ordering closed \u2014 use overrideReason for late changes.`;
   }
+  if (code === "BOOKING_CHECK_IN_MISSING") {
+    return "This booking has no check-in date, so the add-on cut-off cannot be applied.";
+  }
   return "Could not save the staff add-on update.";
 }
 async function handleStaffUpdateAddOns(req, res) {
@@ -244357,6 +244661,9 @@ async function handleStaffUpdateAddOns(req, res) {
   }
   const bookingData2 = bookingSnap.data() || {};
   const bookingRefValue = String(bookingData2.bookingRef || "");
+  if (!isOtherAddOnBookingMutable(bookingData2.status)) {
+    return res.status(400).json({ success: false, error: OTHER_ADD_ON_READ_ONLY_ERROR });
+  }
   const addOnSnap = await adminDb.collection("addOns").get();
   const addOnById = /* @__PURE__ */ new Map();
   for (const d of addOnSnap.docs) {
@@ -244373,6 +244680,11 @@ async function handleStaffUpdateAddOns(req, res) {
     await adminDb.runTransaction(async (transaction) => {
       const live = await transaction.get(bookingRef2);
       const liveBooking = live.data() || {};
+      const liveCheckInDate = toUtcDateKey(liveBooking.checkIn);
+      if (!liveCheckInDate) {
+        opCode = "BOOKING_CHECK_IN_MISSING";
+        return false;
+      }
       const liveSelections = liveBooking.otherAddOnSelections && typeof liveBooking.otherAddOnSelections === "object" ? { ...liveBooking.otherAddOnSelections } : {};
       const liveServed = liveBooking.otherAddOnServed && typeof liveBooking.otherAddOnServed === "object" ? liveBooking.otherAddOnServed : {};
       const next = { ...liveSelections };
@@ -244397,7 +244709,12 @@ async function handleStaffUpdateAddOns(req, res) {
           assertNotLocked2({
             selectionKey: op.selectionKey,
             serverNow: now,
-            addOn: liveAddOn
+            addOn: liveAddOn,
+            // Per OCT-M5 (2026-10-20, decision #292): the
+            // cut-off anchor is the BOOKING's check-in, not the
+            // selection's own service date. The parameter is now
+            // required, so the compiler enforces it.
+            checkInDate: liveCheckInDate
           });
         } catch (err) {
           if (!overrideReason || overrideReason.length < 8) {
@@ -244636,6 +244953,10 @@ async function handleMarkServedAddOns(req, res) {
         return;
       }
       const liveBooking = live.data() || {};
+      if (!isOtherAddOnBookingMutable(liveBooking.status)) {
+        opCode = "BOOKING_READ_ONLY";
+        return;
+      }
       const liveSelections = liveBooking.otherAddOnSelections && typeof liveBooking.otherAddOnSelections === "object" ? { ...liveBooking.otherAddOnSelections } : {};
       const liveServed = liveBooking.otherAddOnServed && typeof liveBooking.otherAddOnServed === "object" ? { ...liveBooking.otherAddOnServed } : {};
       const servedSnapshot = { ...liveServed };
@@ -244686,6 +245007,9 @@ async function handleMarkServedAddOns(req, res) {
     }
     if (opCode === "BOOKING_NOT_FOUND") {
       return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    if (opCode === "BOOKING_READ_ONLY") {
+      return res.status(400).json({ success: false, error: OTHER_ADD_ON_READ_ONLY_ERROR });
     }
     return res.status(400).json({ success: false, error: "Could not mark add-on served." });
   }

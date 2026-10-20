@@ -68,6 +68,12 @@ import {
   // pre-seed constant seeds the first "Airport transfer" row
   // on a brand-new install.
   AIRPORT_TRANSFER_PRESEED,
+  // Per OCT-M1 (2026-10-20, decision #295): the normalizer for the
+  // hotel-wide "Add-ons enabled" master switch
+  // (`settings/hotelConfig.otherAddOnsEnabled`). Shared with the
+  // server so the admin's stored value and the value the public
+  // catalog endpoint reads can never disagree on what "off" means.
+  normalizeOtherAddOnsEnabled,
   type AddOn,
   // Per Phase 2 of the Spark Rewards tier system (2026-10-12):
   // Zod schema + inferred types for the settings/rewardsConfig
@@ -2900,10 +2906,50 @@ export function SettingsPage() {
   const [addOnsCatalogError, setAddOnsCatalogError] = useState<string | null>(null);
   const [editingAddOnId, setEditingAddOnId] = useState<string | null>(null);
   const [editingAddOnDraft, setEditingAddOnDraft] = useState<AddOn | null>(null);
-  const [addOnsEnabled, setAddOnsEnabled] = useState(true);
+  // Per OCT-M1 (2026-10-20, decision #295): the hotel-wide
+  // "Add-ons enabled" master switch.
+  //
+  // This used to be a bare `useState(true)` — no Firestore read, no
+  // write, no localStorage mirror — while the copy under it claimed
+  // that turning it off would empty every `getEnabledAddOnsByHotel`
+  // call. An admin who flipped it believed other add-ons were off
+  // sale while guests kept buying the airport transfer.
+  //
+  // It is now REAL: the value persists to
+  // `settings/hotelConfig.otherAddOnsEnabled` and the public
+  // `/api/bookings/addons/config` endpoint reads it, so "off" means
+  // the guest-facing catalog is genuinely empty.
+  const [addOnsEnabled, setAddOnsEnabled] = useState(
+    normalizeOtherAddOnsEnabled(hotelConfig.otherAddOnsEnabled)
+  );
+  // Per OCT-M1: the sync guard for the switch above. Mirrors the
+  // OCT-H3 (decision #282) pattern used by the Booking & Holds
+  // inputs — `useState`'s lazy initializer only runs on the FIRST
+  // render, which is BEFORE the Firestore snapshot lands, so a
+  // direct load of `/settings` would show the pre-snapshot default
+  // instead of the stored value. The ref records the last SEEN
+  // snapshot value so a snapshot that arrives while the admin is
+  // mid-toggle cannot clobber the in-progress change.
+  const addOnsEnabledSyncRef = useRef<boolean | null>(null);
   const [confirmDeleteAddOn, setConfirmDeleteAddOn] = useState<AddOn | null>(null);
   const [addOnSaveStatus, setAddOnSaveStatus] = useState<SettingsSaveStatus>("idle");
   const [addOnSaveError, setAddOnSaveError] = useState<string | null>(null);
+
+  // Per OCT-M1 (decision #295): re-sync the master switch from the
+  // live `settings/hotelConfig` snapshot. Only a GENUINE change in
+  // the SOURCE value lands, so a snapshot that arrives while the
+  // admin is mid-toggle cannot clobber the in-progress change.
+  useEffect(() => {
+    const next = normalizeOtherAddOnsEnabled(hotelConfig.otherAddOnsEnabled);
+    const prev = addOnsEnabledSyncRef.current;
+    addOnsEnabledSyncRef.current = next;
+    // First run: the snapshot has not landed yet, so this is the
+    // pre-snapshot default the `useState` initializer already used.
+    // Record it WITHOUT touching the state so the real snapshot is
+    // treated as a genuine change.
+    if (prev === null) return;
+    if (prev !== next) setAddOnsEnabled(next);
+  }, [hotelConfig.otherAddOnsEnabled]);
 
   // Live snapshot of the `addOns` collection — the
   // source of truth. The tab mutates this directly via
@@ -6986,25 +7032,49 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                 </p>
               </div>
 
-              {/* Hotel-wide setting: add-ons enabled. Per BR-12.1
-                  the toggle was meant to be a hotel-wide off
-                  switch, but it was never persisted: it is a
-                  plain `useState` with NO localStorage mirror and
-                  no hotelConfig write, so it has no effect on the
-                  guest catalog at all. Per OCT-M1 (2026-10-20,
-                  audit `plan/project/AUDIT-OCTOBER-2026.md`) the
-                  copy now says so, and the working control is the
-                  per-row Status toggle in the catalog table below
-                  (which writes `addOns/{id}.isEnabled` immediately).
-                  Persisting this switch properly (a
-                  `hotelConfig.otherAddOnsEnabled` flag read by
-                  `GET /api/bookings/addons/config`) is still
-                  open. */}
+              {/* Hotel-wide setting: add-ons enabled. Per OCT-M1
+                  (2026-10-20, decision #295) this switch is now
+                  REAL. It used to be a bare `useState` with no
+                  persistence at all — no Firestore read, no write,
+                  no localStorage mirror — while the copy under it
+                  claimed that turning it off would empty every
+                  `getEnabledAddOnsByHotel` call. An admin who
+                  flipped it believed other add-ons were off sale
+                  while guests kept buying the airport transfer.
+
+                  It now persists to
+                  `settings/hotelConfig.otherAddOnsEnabled` and
+                  `GET /api/bookings/addons/config` reads it, so
+                  "off" genuinely empties the guest-facing catalog.
+                  The per-row Status toggle in the catalog table
+                  below stays the finer-grained control: it takes
+                  ONE add-on off sale while this switch takes the
+                  whole category off. */}
               <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-4">
                 <label className="flex items-center gap-3 cursor-pointer text-xs font-bold text-gray-800">
                   <button
                     type="button"
-                    onClick={() => setAddOnsEnabled(!addOnsEnabled)}
+                    onClick={() => {
+                      const next = !addOnsEnabled;
+                      setAddOnsEnabled(next);
+                      setAddOnSaveError(null);
+                      // Persist through the same `settings/hotelConfig`
+                      // channel every other hotel-wide setting uses.
+                      // `updateSettings` surfaces its own failure
+                      // toast; the local state is reverted so the
+                      // switch never shows a value that is not
+                      // stored.
+                      void updateSettings("hotelConfig", {
+                        otherAddOnsEnabled: next
+                      }).then((ok) => {
+                        if (!ok) {
+                          setAddOnsEnabled(!next);
+                          setAddOnSaveError(
+                            "Failed to save the add-ons switch. The previous setting is still in effect."
+                          );
+                        }
+                      });
+                    }}
                     data-testid="addons-enabled-toggle"
                     className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
                       addOnsEnabled ? "bg-primary" : "bg-gray-200"
@@ -7019,20 +7089,37 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                   Add-ons enabled
                 </label>
                 <p className="text-[10px] text-gray-500 leading-relaxed">
-                  {/* Per OCT-M1 (2026-10-20, audit
-                      `plan/project/AUDIT-OCTOBER-2026.md`): this switch is
-                      still a client-side local state — it is NOT persisted
-                      and does NOT affect the guest catalog. The previous
-                      copy claimed the opposite ("every
-                      getEnabledAddOnsByHotel call returns an empty list"),
-                      which made an admin believe add-ons were switched off
-                      while guests kept buying them. Say what is true. */}
-                  Not yet wired up — this switch is not saved and does not
-                  affect the guest booking flow. To take an add-on off sale
-                  now, switch its <strong>Status</strong> to <strong>Off</strong>{" "}
-                  in the catalog table below (that toggle is saved
-                  immediately).
+                  {/* Per OCT-M1 (2026-10-20, decision #295): the copy
+                      now matches the behaviour. The switch persists
+                      to `settings/hotelConfig.otherAddOnsEnabled` and
+                      the public `/api/bookings/addons/config` endpoint
+                      reads it, so turning it off genuinely empties
+                      the guest-facing catalog — the booking flow's
+                      add-ons grid and the guest Manage page both show
+                      the "Add-ons are currently disabled" state.
+
+                      The previous copy claimed this effect while the
+                      switch was a dead `useState` (audit OCT-M1), and
+                      an earlier revision admitted it was NOT wired up
+                      at all. Neither matched reality; this one does. */}
+                  When off, other add-ons are hidden from guests across
+                  the whole site — the booking flow, the guest{" "}
+                  <strong>Manage</strong> page, and the staff booking
+                  drawer — and the add-ons grid shows the{" "}
+                  <strong>Add-ons are currently disabled</strong> state.
+                  This saves immediately. To take a single add-on off
+                  sale instead, switch its <strong>Status</strong> to{" "}
+                  <strong>Off</strong> in the catalog table below.
                 </p>
+                {addOnSaveError ? (
+                  <p
+                    role="alert"
+                    data-testid="addons-enabled-error"
+                    className="text-[10px] font-semibold text-red-600"
+                  >
+                    {addOnSaveError}
+                  </p>
+                ) : null}
               </div>
 
               {/* Catalog sub-section: table of all addOns/{id} docs

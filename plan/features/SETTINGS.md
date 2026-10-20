@@ -11,13 +11,13 @@ Admin-only configuration hub at `/settings`. Organized into tabs covering hotel 
 
 ### 0. Sidebar grouping (SET-SBG-01, 2026-10-12)
 
-The settings hub grew to **18 tabs** by v1.9.0 (Hotel Info + Payment Methods + Booking Sources + Discounts + Staff Accounts + Email & Notifications + Intercom + Website Content & Room Types + Loyalty Rewards + Breakfast & Dining + In-Room Store + SEO & Search + Legal Content + Environment Testing + Booking Preferences + Branding + Booking & Holds). The 18 flat tabs exceed the scan-without-thinking threshold, so the desktop sidebar collapses them into **5 stakeholder-oriented groups**:
+The settings hub grew to **19 tabs** by v2.3.0 (Hotel Info + Payment Methods + Booking Sources + Discounts + Staff Accounts + Email & Notifications + Intercom + Website Content & Room Types + Loyalty Rewards + Breakfast & Dining + Other Add-Ons + In-Room Store + SEO & Search + Legal Content + Environment Testing + Booking Preferences + Branding + Booking & Holds). The 19 flat tabs exceed the scan-without-thinking threshold, so the desktop sidebar collapses them into **5 stakeholder-oriented groups**:
 
 | Group | Tabs | Why |
 |---|---|---|
 | **Property** | Hotel Settings, Room Types, Branding | Identity & inventory. "What you are" + "what you sell." Branding sits here because it's tied to the hotel identity, not marketing. |
 | **Bookings & Revenue** | Booking Preferences, Booking Sources, Booking & Holds, Payment Methods, Discounts | The booking engine end-to-end — rules → sources → holds → money in → discounts. The section hotel staff touch daily. |
-| **Guest Experience** | Loyalty Rewards, Breakfast & Dining, In-Room Store, Intercom | What a guest *uses during their stay*. Distinct from "how they got here." |
+| **Guest Experience** | Loyalty Rewards, Breakfast & Dining, Other Add-Ons, In-Room Store, Intercom | What a guest *uses during their stay*. Distinct from "how they got here." |
 | **Marketing & Reach** | Website Content, SEO & Search, Email Config | What brings them in pre-stay — website copy, discoverability, transactional emails. |
 | **Admin** | Staff Accounts, Legal Content, Environment Testing | Back-of-house — who works here, compliance text, the staging/QA tool. |
 
@@ -30,6 +30,23 @@ The settings hub grew to **18 tabs** by v1.9.0 (Hotel Info + Payment Methods + B
 **Environment Testing placement:** kept under `Admin` for now. Long-term, it should move out of `/settings` entirely to a separate `Admin → Tools → Test Runner` path gated behind a "show developer tools" env flag (decision pending).
 
 **Contract enforcement:** `admin-app/src/__tests__/set-sbg-01-settings-sidebar-grouping.test.ts` (source-text guards per `CONTRIBUTING.md §Testing`) pins the group inventory, the union-of-tabs invariant (every `TabId` covered exactly once), the localStorage key, the active-group auto-expand, the `aria-expanded` + `role="group"` desktop wiring, and the mobile pill divider shape.
+
+Per OCT-M6 (2026-10-20, decision #293) the tripwire now PARSES `VALID_TAB_IDS`, `SETTINGS_GROUPS` and the flat `tabs` metadata out of the source instead of comparing a hardcoded copy of the group tabs with itself — so it can actually detect a source-side omission (which is how the `addons` tab shipped invisible in the sidebar once already). The tab count is derived, not pinned.
+
+### Other Add-Ons — the hotel-wide master switch (OCT-M1, 2026-10-20, decision #295)
+
+The Other Add-Ons tab carries two levels of control:
+
+| Control | Scope | Stored where | Effect |
+|---|---|---|---|
+| **"Add-ons enabled"** (top of the tab) | The whole category | `settings/hotelConfig.otherAddOnsEnabled` | OFF → the public catalog endpoint returns an EMPTY catalog, the guest Step 2 grid disappears, the guest Manage page shows no add-ons, and the guest save path refuses an order with a 400. The staff path stays open (front-desk override). |
+| **Status** (per row in the catalog table) | One add-on | `addOns/{addOnId}.isEnabled` | OFF → that one add-on is off sale; its cut-off state becomes `addons-disabled` (every date locked). |
+
+Before OCT-M1 the hotel-wide switch was a bare `useState(true)` — no Firestore read, no write, no localStorage mirror — while the copy under it told the admin it emptied every `getEnabledAddOnsByHotel` call. An admin who flipped it believed other add-ons were off sale while guests kept buying the airport transfer. It now persists, and the copy matches the behaviour.
+
+**Only an explicit `false` disables the category.** A settings doc written before OCT-M1 has no `otherAddOnsEnabled` field and hydrates to `true` — a hotel's revenue stream is never silently switched off by a missing field. The shared normalizer is `normalizeOtherAddOnsEnabled` (`shared/utils/addOns.ts`); the single server-side reader is `guest-app/server/lib/otherAddOns-settings.ts`.
+
+**The switch re-syncs from the snapshot.** `useState`'s lazy initializer only runs on the FIRST render — before the Firestore snapshot lands — so a direct load of `/settings` would show the pre-snapshot default. The switch therefore re-syncs when the SOURCE value changes (the same pattern the Booking & Holds inputs use), so a snapshot arriving mid-toggle cannot clobber an in-progress change. A failed write reverts the switch, so it never shows a value that is not stored.
 
 ### 1. Hotel Info
 - Address, support email, front-desk phone, DPO email, and social media URLs (Facebook, Instagram, X).

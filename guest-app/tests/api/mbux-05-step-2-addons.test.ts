@@ -34,6 +34,7 @@ function read(relativePath: string): string {
 
 const bookingPageSrc = read("guest-app/src/pages/BookingPage.tsx");
 const menuStripSrc = read("guest-app/src/components/BreakfastMenuStrip.tsx");
+const breakfastCopySrc = read("guest-app/src/utils/breakfastCopy.ts");
 
 const NOW = "2026-10-20T09:00:00.000Z";
 
@@ -355,11 +356,25 @@ describe("MBUX-05 — the copy action's placement rules", () => {
     expect(bookingPageSrc).toMatch(/role="status"/);
     expect(bookingPageSrc).toMatch(/aria-live="polite"/);
     expect(bookingPageSrc).toMatch(/data-testid=\{`breakfast-copy-notice-\$\{date\}`\}/);
-    expect(bookingPageSrc).toMatch(/Applied these choices to \$\{result\.updatedDates\} remaining day/);
+    // Per OCT-M8 (2026-10-20, decision #294) the message itself moved
+    // into `buildBreakfastCopyNotice` — the count is interpolated there
+    // so the notice can also carry the date it belongs to. The page
+    // must call the helper, not re-derive the copy inline.
+    expect(bookingPageSrc).toMatch(
+      /buildBreakfastCopyNotice\(date, result\.updatedDates\)/
+    );
+    expect(breakfastCopySrc).toMatch(
+      /Applied these choices to \$\{updatedDates\} remaining day/
+    );
   });
 
   it("uses the helper rather than re-deriving the copy inline", () => {
-    expect(bookingPageSrc).toMatch(/import \{ copyBreakfastDateToRemaining \} from "\.\.\/utils\/breakfastCopy"/);
+    // The import is a named multi-line import — assert the binding, not
+    // the exact brace layout, so adding another helper to the module
+    // does not break this net.
+    expect(bookingPageSrc).toMatch(
+      /import \{[^}]*copyBreakfastDateToRemaining[^}]*\} from "\.\.\/utils\/breakfastCopy"/
+    );
     expect(bookingPageSrc).toMatch(/const result = copyBreakfastDateToRemaining\(\{/);
   });
 });

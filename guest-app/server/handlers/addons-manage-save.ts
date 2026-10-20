@@ -43,6 +43,12 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "../lib/firebase-admin";
+// Per OCT-M1 (2026-10-20, decision #295): the hotel-wide
+// "Add-ons enabled" master switch + the message the guest sees.
+import {
+  loadOtherAddOnsHotelEnabled,
+  OTHER_ADD_ONS_UNAVAILABLE_ERROR
+} from "../lib/otherAddOns-settings";
 import {
   OtherAddOnUpdateSchema,
   computeOtherAddOnCutoffState,
@@ -51,6 +57,13 @@ import {
   normalizeAddOn,
   parseOtherAddOnSelectionKey,
   buildOtherAddOnSelectionKey,
+  // Per OCT-M3 (2026-10-20, decision #291): the shared
+  // read-only-booking rule.
+  isOtherAddOnBookingMutable,
+  OTHER_ADD_ON_READ_ONLY_ERROR,
+  // Per OCT-M5 (2026-10-20, decision #292): the shared UTC
+  // calendar-date key helper (the cut-off anchor).
+  toUtcDateKey,
   type AddOn,
   type OtherAddOnSelectionEntry
 } from "@spark-inn/shared";
@@ -117,6 +130,13 @@ function opErrorToMessage(code: string): string {
     const date = code.slice(OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX.length);
     return `Ordering closed for ${date}.`;
   }
+  // Per OCT-M5 (2026-10-20, decision #292): the booking has no
+  // usable check-in date, so the cut-off anchor cannot be
+  // computed. Refuse rather than fall back to the per-service-date
+  // anchor (which is the bug this fix removes).
+  if (code === "BOOKING_CHECK_IN_MISSING") {
+    return "This booking has no check-in date, so the add-on cut-off cannot be applied. Please contact the front desk.";
+  }
   return "Could not save the add-on change.";
 }
 
@@ -178,8 +198,34 @@ export async function handleUpdateAddOns(req: VercelRequest, res: VercelResponse
   const bookingId = bookingDoc.id;
   const bookingData = bookingDoc.data();
   const status = String(bookingData.status || "").trim();
-  if (status === "checked-out" || status === "cancelled") {
-    return res.status(400).json({ success: false, error: "Booking is read-only." });
+  // Per OCT-M3 (2026-10-20, decision #291): the read-only rule
+  // now lives in ONE shared helper (`isOtherAddOnBookingMutable`)
+  // so the guest path, the staff update path and the staff
+  // mark-served path can never drift apart.
+  if (!isOtherAddOnBookingMutable(status)) {
+    return res.status(400).json({ success: false, error: OTHER_ADD_ON_READ_ONLY_ERROR });
+  }
+
+  // Per OCT-M1 (2026-10-20, decision #295): the hotel-wide
+  // "Add-ons enabled" master switch gates the GUEST purchase path.
+  //
+  // The catalog endpoint already returns an empty catalog when the
+  // hotel has taken other add-ons off sale, so the guest UI cannot
+  // offer one — but the guest app is not the only way to reach this
+  // endpoint. Without this gate a guest could still POST an order
+  // for an enabled add-on while the hotel's switch was off, which
+  // is exactly the "admin believes add-ons are off, guests keep
+  // buying" gap OCT-M1 describes.
+  //
+  // The STAFF path (`addons-staff-update.ts`) is deliberately NOT
+  // gated: the front desk recording an add-on a guest asked for at
+  // the desk is an operational override, and the staff drawer gets
+  // an empty catalog from the config endpoint anyway.
+  const hotelEnabled = await loadOtherAddOnsHotelEnabled();
+  if (!hotelEnabled) {
+    return res
+      .status(400)
+      .json({ success: false, error: OTHER_ADD_ONS_UNAVAILABLE_ERROR });
   }
 
   // Load the add-on catalog inside the transaction's
@@ -210,6 +256,16 @@ export async function handleUpdateAddOns(req: VercelRequest, res: VercelResponse
         return;
       }
       const liveBooking = bookingSnap.data() || {};
+      // Per OCT-M5 (2026-10-20, decision #292): the booking's
+      // check-in date — the cut-off anchor for every op in this
+      // transaction. Derived with the shared helper so the write
+      // path, the Manage page and the admin drawer all use the
+      // same UTC calendar key.
+      const liveCheckInDate = toUtcDateKey(liveBooking.checkIn as any);
+      if (!liveCheckInDate) {
+        opCode = "BOOKING_CHECK_IN_MISSING";
+        return;
+      }
       const liveSelections: Record<string, OtherAddOnSelectionEntry[]> =
         liveBooking.otherAddOnSelections && typeof liveBooking.otherAddOnSelections === "object"
           ? { ...liveBooking.otherAddOnSelections }
@@ -255,7 +311,12 @@ export async function handleUpdateAddOns(req: VercelRequest, res: VercelResponse
           assertNotLocked({
             selectionKey: op.selectionKey,
             serverNow: now,
-            addOn: liveAddOn
+            addOn: liveAddOn,
+            // Per OCT-M5 (2026-10-20, decision #292): the
+            // cut-off anchor is the BOOKING's check-in, not the
+            // selection's own service date. The parameter is now
+            // required, so the compiler enforces it.
+            checkInDate: liveCheckInDate
           });
         } catch (err: any) {
           opCode = String(err?.message || OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX);
@@ -314,7 +375,12 @@ export async function handleUpdateAddOns(req: VercelRequest, res: VercelResponse
           assertNotLocked({
             selectionKey: op.selectionKey,
             serverNow: now,
-            addOn: liveAddOn
+            addOn: liveAddOn,
+            // Per OCT-M5 (2026-10-20, decision #292): the
+            // cut-off anchor is the BOOKING's check-in, not the
+            // selection's own service date. The parameter is now
+            // required, so the compiler enforces it.
+            checkInDate: liveCheckInDate
           });
         } catch (err: any) {
           opCode = String(err?.message || OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX);
@@ -394,7 +460,12 @@ export async function handleUpdateAddOns(req: VercelRequest, res: VercelResponse
           assertNotLocked({
             selectionKey: op.selectionKey,
             serverNow: now,
-            addOn: liveAddOn
+            addOn: liveAddOn,
+            // Per OCT-M5 (2026-10-20, decision #292): the
+            // cut-off anchor is the BOOKING's check-in, not the
+            // selection's own service date. The parameter is now
+            // required, so the compiler enforces it.
+            checkInDate: liveCheckInDate
           });
         } catch (err: any) {
           opCode = String(err?.message || OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX);

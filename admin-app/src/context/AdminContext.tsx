@@ -82,6 +82,11 @@ import {
   getEffectiveVatRate,
   normalizeVatConfig,
   type VatConfig,
+  // Per OCT-M1 (2026-10-20, decision #295): the hotel-wide
+  // "Add-ons enabled" master switch. Shared with the server so the
+  // stored value and the value the public catalog endpoint reads can
+  // never disagree on what "off" means.
+  normalizeOtherAddOnsEnabled,
   // Per MSL-01 (2026-10-15): the stay-length cap. Stored RESOLVED
   // (`Infinity` when the admin chose "no limit"), so every admin
   // read gets a safe number. The Settings editor maps `Infinity` back
@@ -6136,7 +6141,17 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
     // UI exposes a numeric input (deferred to a future
     // PR — out of EXB-10's scope, which is the server
     // invariant).
-    extraBedInventory: 0
+    extraBedInventory: 0,
+    // Per OCT-M1 (2026-10-20, decision #295): the hotel-wide
+    // "Add-ons enabled" master switch. `true` (the default) = other
+    // add-ons are on sale across the guest site. `false` = the
+    // public `/api/bookings/addons/config` endpoint returns an empty
+    // catalog and every guest-facing add-ons surface shows the
+    // "Add-ons are currently disabled" state.
+    //
+    // The default is `true` so a legacy settings doc without the
+    // field never silently switches a hotel's revenue stream off.
+    otherAddOnsEnabled: true
   });
 
   // Tracks whether the first `settings/websiteContent` snapshot
@@ -6504,7 +6519,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
           const docId = docSnap.id;
           switch (docId) {
             case "hotelConfig":
-              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope), paymentHoldWindowHours: normalizePaymentHoldWindowHours((data as Partial<typeof hotelConfig>)?.paymentHoldWindowHours), inFlowHoldMinutes: normalizeInFlowHoldMinutes((data as Partial<typeof hotelConfig>)?.inFlowHoldMinutes), vatConfig: normalizeVatConfig((data as Partial<typeof hotelConfig>)?.vatConfig), maxStayNights: resolveMaxStayNights((data as Partial<typeof hotelConfig>)?.maxStayNights) })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`. // Per PEX-01 (2026-08-01): always normalize the incoming window so legacy settings (or values outside the admin-allowed 1..72h range) hydrate to the 24h default. The per-booking `holdExpiresAt` is the only field the rest of the system reads; the Settings window is just the input. // Per VAT-01 (2026-10-12): always normalize the incoming `vatConfig` so legacy settings without the field hydrate to the BIR-compliant default (`enabled: true`); the 12% breakdown keeps showing everywhere until the admin opts out via the Settings → Discounts tab Tax card.
+              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope), paymentHoldWindowHours: normalizePaymentHoldWindowHours((data as Partial<typeof hotelConfig>)?.paymentHoldWindowHours), inFlowHoldMinutes: normalizeInFlowHoldMinutes((data as Partial<typeof hotelConfig>)?.inFlowHoldMinutes), vatConfig: normalizeVatConfig((data as Partial<typeof hotelConfig>)?.vatConfig), maxStayNights: resolveMaxStayNights((data as Partial<typeof hotelConfig>)?.maxStayNights), otherAddOnsEnabled: normalizeOtherAddOnsEnabled((data as Partial<typeof hotelConfig>)?.otherAddOnsEnabled) })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`. // Per PEX-01 (2026-08-01): always normalize the incoming window so legacy settings (or values outside the admin-allowed 1..72h range) hydrate to the 24h default. The per-booking `holdExpiresAt` is the only field the rest of the system reads; the Settings window is just the input. // Per VAT-01 (2026-10-12): always normalize the incoming `vatConfig` so legacy settings without the field hydrate to the BIR-compliant default (`enabled: true`); the 12% breakdown keeps showing everywhere until the admin opts out via the Settings → Discounts tab Tax card. // Per OCT-M1 (2026-10-20, decision #295): always normalize the incoming `otherAddOnsEnabled` so a legacy doc without the field hydrates to `true` and a hand-edited `"false"` string is read as the boolean it spells.
               break;
             case "websiteContent":
               setWebsiteContent(mergeWebsiteContent(data as Record<string, unknown>));

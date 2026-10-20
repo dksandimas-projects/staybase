@@ -81,15 +81,31 @@ describe("MBUX-05 — one context-aware Add-ons CTA on BookingPage.tsx", () => {
   });
 
   it("derives the count from the breakfast selections, not a hardcoded number", () => {
+    // Per OCT-M4 (2026-10-20, decision #297) the count covers the
+    // UNION of breakfast AND other add-ons, so it is now the sum of
+    // two DERIVED counts. The point of this net is unchanged — the
+    // number must never be a literal.
     expect(bookingPageSrc).toMatch(
-      /const addOnCount = Object\.keys\(breakfastSelections\)\.length/
+      /const breakfastAddOnCount = Object\.keys\(breakfastSelections\)\.length/
     );
+    expect(bookingPageSrc).toMatch(
+      /const addOnCount = breakfastAddOnCount \+ otherAddOnCount/
+    );
+    expect(bookingPageSrc).not.toMatch(/const addOnCount = \d/);
   });
 
-  it("quotes `breakfastTotal` — the SAME value the review step and create payload use", () => {
+  it("quotes the ADD-ONS total — the SAME value the create payload uses", () => {
     // A CTA total that can disagree with the bill is worse than no
     // total, so this pins the shared source rather than a copy.
-    expect(bookingPageSrc).toMatch(/formatPrice\(breakfastTotal\)/);
+    //
+    // Per OCT-M4 the quoted figure is `breakfastTotal +
+    // otherAddOnTotal` — the add-ons total, NOT the room bill (the
+    // other add-ons are not inside `totalPrice`; see
+    // `plan/features/OTHER-ADD-ONS.md` decision 2).
+    expect(bookingPageSrc).toMatch(
+      /const addOnsTotal = breakfastTotal \+ otherAddOnTotal/
+    );
+    expect(bookingPageSrc).toMatch(/formatPrice\(addOnsTotal\)/);
   });
 
   it("still advances to `guest-details` — retiring the ghost button mints no new step key", () => {

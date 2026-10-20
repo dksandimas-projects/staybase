@@ -219,6 +219,50 @@ export function clampIntegerInRange(
   return floored;
 }
 
+// Per OCT-M7 (2026-10-20, decision #296): the stay a hold covers.
+//
+// The hold doc stamps `roomType` / `checkIn` / `checkOut` /
+// `numNights` when it is created. `handleStartInFlowHold` was
+// idempotent by `holdId` — a second POST with the same id returned
+// the existing doc UNCHANGED — so those fields were never refreshed.
+// A guest who changed their dates on Step 2 (MBUX-18's edit sheet
+// widened this path) kept a hold that described the stay they had
+// abandoned, and the banner kept promising it.
+//
+// This helper is the ONE definition of "does the live hold still
+// cover the stay the guest is booking?". The client uses it to
+// decide whether to re-stamp; the server uses the same comparison
+// to decide whether to re-stamp. They cannot drift.
+export interface InFlowHoldStay {
+  roomType?: string | null;
+  checkIn?: string | null;
+  checkOut?: string | null;
+  numNights?: number | null;
+}
+
+/**
+ * Does the live hold still describe the stay the guest is booking?
+ *
+ * A missing hold or a missing input is NOT a match — the caller then
+ * re-stamps, which is the safe direction (the hold ends up
+ * describing what the guest is actually booking).
+ *
+ * `numNights` is compared numerically and a missing value on EITHER
+ * side counts as `0`, so a legacy doc that never stored it still
+ * matches only when the nights really are zero — otherwise the hold
+ * is re-stamped, which is harmless.
+ */
+export function inFlowHoldStayMatches(
+  hold: InFlowHoldStay | null | undefined,
+  input: InFlowHoldStay | null | undefined
+): boolean {
+  if (!hold || !input) return false;
+  if (String(hold.roomType ?? "") !== String(input.roomType ?? "")) return false;
+  if (String(hold.checkIn ?? "") !== String(input.checkIn ?? "")) return false;
+  if (String(hold.checkOut ?? "") !== String(input.checkOut ?? "")) return false;
+  return Number(hold.numNights ?? 0) === Number(input.numNights ?? 0);
+}
+
 // UUIDv4 shape used for `holdId` — the client preallocates
 // before the API call so a retry-after-uncertain-response can
 // re-use the same id (mirrors the `reservationId` pattern from

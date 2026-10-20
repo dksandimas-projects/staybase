@@ -39,6 +39,42 @@ export function toDateOrNull(value: DateLike): Date | null {
   return null;
 }
 
+/**
+ * Per OCT-M5 (2026-10-20, decision #292): the UTC calendar-date
+ * key (`YYYY-MM-DD`) of a booking date field.
+ *
+ * The other add-on cut-off helper
+ * (`computeOtherAddOnCutoffState`) anchors the cut-off at
+ * `${checkInDate}T00:00:00Z` — UTC midnight — so the date key it
+ * consumes MUST be the UTC calendar date of the booking's
+ * check-in. The Manage Add-Ons page already derived that key
+ * inline (a local `isIsoDate` + a `toDate()` + a UTC Y/M/D
+ * format); the two WRITE paths had no derivation at all, which
+ * is why the lock slid forward one day per service date (the
+ * per-date key was used as the "check-in" anchor instead of the
+ * booking's real check-in).
+ *
+ * This helper is the ONE derivation, so the read path, the two
+ * write paths and the admin drawer all agree on the anchor.
+ *
+ * @param value A booking date field — a Firestore Timestamp, a
+ *   `Date`, an ISO string, or `null`.
+ * @returns The `YYYY-MM-DD` UTC key, or `""` when the value is
+ *   missing or unparseable.
+ */
+export function toUtcDateKey(value: DateLike): string {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
+  }
+  const date = toDateOrNull(value);
+  if (!date) return "";
+  const yyyy = date.getUTCFullYear();
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 // Per BF-42 (booking-flow audit 2026-06-26): the
 // `getManilaDateInfo()` helper was duplicated in
 // `bookings.ts`, `store.ts`, `corporate-inquiries.ts`,

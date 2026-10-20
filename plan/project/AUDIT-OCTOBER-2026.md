@@ -366,6 +366,7 @@ The admin app already ships the correct pattern — `admin-app/src/utils/useFocu
 ## MEDIUM (8)
 
 ### OCT-M1 — The "Add-ons enabled" master toggle is a no-op, but its on-screen copy says it disables add-ons for guests
+**Status: FIXED (2026-10-20, decision #295).**
 **Anchor:** `admin-app/src/pages/SettingsPage.tsx:2838`, `:6852`, `:6866-6870` · `shared/utils/addOns.ts:81` · `guest-app/server/handlers/addons-config.ts:51-59`
 
 `addOnsEnabled` is a plain `useState(true)`. There is no localStorage mirror (despite the code comment claiming one), no Firestore read, and no Firestore write. The copy under the switch tells the admin:
@@ -377,6 +378,7 @@ The admin app already ships the correct pattern — `admin-app/src/utils/useFocu
 **Impact:** the admin flips the switch off, believes add-ons are off, and guests keep buying the airport transfer at ₱500/person. The code comment (`:6838-6847`) admits it is "a client-side local state … Persisted as part of the hotelConfig in a follow-up ticket" — but the *user-facing* copy claims full effect, and the comment's claim of a localStorage mirror is false.
 
 ### OCT-M2 — `bedSetupValues` is the one field where the guest client and the server disagree
+**Status: FIXED (2026-10-20, decision #290).**
 **Anchor:** `guest-app/src/hooks/useRoomTypes.ts:112-114` vs `shared/utils/roomTypes.ts:159-163`, `admin-app/src/context/AdminContext.tsx:7102-7104`, `guest-app/server/handlers/bookings.ts:2209-2212`
 
 | Surface | Field absent → |
@@ -391,6 +393,7 @@ The guest is the only surface that invents bed-setup choices. The comment at `us
 **Impact:** for a room type stored without the field (any type not re-saved since 2026-10-12, or a hand-edited doc), the guest sees the bed-setup radio group seeded with the default options, picks one, and the server rejects the booking with `Selected bed set-up "large-bed" is not offered for room type standard-double.` Because the radio group has no "no preference" option, **every** option 400s and the guest is stuck — the only way out is a page reload. It also burns attempts on a rate-limited public endpoint.
 
 ### OCT-M3 — Staff can add/remove add-ons on cancelled and checked-out bookings
+**Status: FIXED (2026-10-20, decision #291).**
 **Anchor:** `guest-app/server/handlers/addons-staff-update.ts:111-118` vs the guest path `addons-manage-save.ts:170-171`
 
 The guest path rejects with 400 "Booking is read-only."; the staff path never inspects `status`. `OTHER-ADD-ONS.md:226` requires **both** endpoints to reject. `addons-mark-served.ts` has the same gap (it never reads booking status at all).
@@ -398,6 +401,7 @@ The guest path rejects with 400 "Booking is read-only."; the staff path never in
 **Impact:** the front desk can add an airport transfer to a checked-out booking; if `paidAmount > 0` it writes a `category: "otherAddOn"` pending refund liability against a closed booking (`:220-222`), inflating the Liability tab and creating a refund for something already served.
 
 ### OCT-M4 — BR-12's guest Step 2 Other Add-Ons UI does not exist
+**Status: FIXED (2026-10-20, decision #297).**
 **Anchor:** `guest-app/src/pages/BookingPage.tsx` — `grep -c "otherAddOn\|OtherAddOn"` → **0**; the Step 2 branch at `:2707-2751` renders only `renderBreakfastSection()`
 
 `OTHER-ADD-ONS.md:183-186` requires: "Below the existing `renderBreakfastSection`, the Step 2 grid now also renders the enabled add-ons catalog with per-day quantity inputs. The dual-button pattern (BR-10) covers both breakfast AND other add-ons — 'No add-ons, continue' applies to the union."
@@ -405,6 +409,7 @@ The guest path rejects with 400 "Booking is read-only."; the staff path never in
 **Impact:** a guest cannot order an airport transfer at booking time at all. Combined with OCT-C5 (the create path never persists `otherAddOnSelections` even if it did), other add-ons are only purchasable post-booking at `/my-booking/addons` — the spec's headline BR-12 flow is unreachable, and the "No add-ons, continue" ghost button covers breakfast only.
 
 ### OCT-M5 — Other-add-on cut-off is measured from the service date, not the booking's check-in
+**Status: FIXED (2026-10-20, decision #292).**
 **Anchor:** `guest-app/server/lib/otherAddOn-selections.ts:114` (fallback) · callers `addons-manage-save.ts:244-248`, `addons-staff-update.ts:180-184`
 
 `assertNotLocked` accepts an optional `checkInDate` and falls back to the selection's own date: `const date = checkInDate || parsed.date;`. **No caller ever passes it**, so the lock slides forward one day per service date. The same pattern is in the display paths (`addons-manage.ts:152`, `BookingDrawerWorkspace.tsx:2065`).
@@ -414,6 +419,7 @@ The guest path rejects with 400 "Booking is read-only."; the staff path never in
 **Impact:** for an Oct 20 check-in with `cutoffHoursBeforeCheckIn: 24`, the policy lock is Oct 19 00:00Z, but the Oct 21 selection locks at Oct 20 00:00Z and the Oct 22 selection at Oct 21 00:00Z — the guest can add transfers a full day past the hotel's stated cut-off.
 
 ### OCT-M6 — The SET-SBG-01 tripwire does not enforce what it claims, and its tab count is stale
+**Status: FIXED (2026-10-20, decision #293).**
 **Anchor:** `admin-app/src/__tests__/set-sbg-01-settings-sidebar-grouping.test.ts:72` · render sites `admin-app/src/pages/SettingsPage.tsx:4760-4761`, `:4853-4854`
 
 ```ts
@@ -427,6 +433,7 @@ The render sites do `const tab = tabs.find((entry) => entry.id === tabId); if (!
 **Impact:** the general invariant remains unenforced, and the one-off `br-12-1` test only pins the current literal string.
 
 ### OCT-M7 — The in-flow hold is never re-stamped, so the banner promises a hold for a stay the guest abandoned
+**Status: FIXED (2026-10-20, decision #296).**
 **Anchor:** `guest-app/server/handlers/in-flow-hold.ts:188-201` · `guest-app/src/pages/BookingPage.tsx:1241`, `:1434-1441`
 
 `handleStartInFlowHold` is idempotent by `holdId` and returns the existing doc unchanged, so the hold's stamped `roomType` / `checkIn` / `checkOut` are never refreshed. The hold id lives in the URL and `updateDateParams` copies the whole `searchParams` object, so the stale `hold` param survives a date change.
@@ -434,6 +441,7 @@ The render sites do `const tab = tabs.find((entry) => entry.id === tabId); if (!
 **Impact:** the Step 2/3 banner reads "Your room is held for you until 8:45 PM" for the *original* dates while the guest is booking different ones. Because `bookingHolds` is consulted by neither the availability query nor the booking transaction, nothing is actually reserved — the guest completes the whole flow and only finds out at submit that the new dates are unavailable. MBUX-18's edit sheet widens this path.
 
 ### OCT-M8 — The breakfast copy-to-remaining-days confirmation never clears and renders once per date
+**Status: FIXED (2026-10-20, decision #294).**
 **Anchor:** `guest-app/src/pages/BookingPage.tsx:2263`, `:2561`, `:2572-2581`; false comment at `:2260-2262`
 
 `setBreakfastCopyNotice` is called in exactly two places: the `useState` and the setter. There is **no** `setBreakfastCopyNotice("")` anywhere, and the file's `useEffect` list (616, 688, 849, 892, 919, 1325, 1359, 1420, 2115) contains none that clears it. The comment at `:2260-2262` claims the clearing effect "lives further down but is gated on a render-path that only exists past the early return" — it does not exist.
@@ -441,6 +449,27 @@ The render sites do `const tab = tabs.find((entry) => entry.id === tabId); if (!
 Worse, the notice `<p>` sits **inside the `dates.map` body**, so it renders once per date (its `data-testid` is even date-scoped).
 
 **Impact:** on a 3-night stay, tapping "Use these choices for all remaining days" prints "Applied these choices to 2 remaining days." **three times**, in three different date cards, and it persists for the rest of the session — including after the guest edits a meal, where it falsely implies the copy was applied.
+
+---
+
+## What the 8 Medium fixes changed
+
+**All 8 are FIXED (2026-10-20, branch `fix/october-audit-medium`, decisions #290–#297).**
+
+| ID | Fix | Decision | Regression test |
+|---|---|---|---|
+| **OCT-M1** | The "Add-ons enabled" master switch is REAL. It persists to `settings/hotelConfig.otherAddOnsEnabled`, the shared normalizer only treats an explicit `false` as "off" (a legacy doc hydrates to `true`), and the public catalog endpoint + the guest Manage page + the guest save path all honour it. The staff path stays open on purpose — the front desk override is deliberate. | #295 | `guest-app/tests/api/oct-m1-addons-master-switch.test.ts` |
+| **OCT-M2** | The guest's bed-setup options now match the server's accepted set (`[]`, the same as the shared normalizer and the admin mapper), and the radio group gained an explicit "No preference" option so a guest can never be trapped on a 400. | #290 | `guest-app/tests/api/oct-m2-bed-setup-options.test.ts` |
+| **OCT-M3** | ONE shared rule (`isOtherAddOnBookingMutable`) decides whether an other-add-on booking is editable, and all three endpoints call it — the guest path had no check at all. `checked-in` stays mutable. | #291 | `guest-app/tests/api/oct-m3-other-addon-mutable.test.ts` |
+| **OCT-M4** | The guest booking flow HAS an Other Add-Ons grid: the enabled catalog below the breakfast section, one quantity input per service date, clamped to the guest count, cut-off honoured. The Step 2 CTA now covers the UNION of breakfast + other add-ons, and the create path rebuilds every selection from the live catalog and persists `otherAddOnSelections` + `otherAddOnTotal` + `hasAnyOtherAddOns`. | #297 | `guest-app/tests/api/oct-m4-guest-other-addons.test.ts` |
+| **OCT-M5** | The cut-off is anchored on the BOOKING's check-in in both the write path and the display path, and `AssertNotLockedInput.checkInDate` is now REQUIRED — the `checkInDate \|\| parsed.date` fallback is deleted, so the compiler forces every caller to pass the right anchor. | #292 | `guest-app/tests/api/oct-m5-cutoff-anchor.test.ts` |
+| **OCT-M6** | The SET-SBG-01 tripwire now parses `VALID_TAB_IDS`, `SETTINGS_GROUPS` and the flat `tabs` metadata OUT OF the source, so it compares the real union instead of a hardcoded copy with itself. The count is derived (19, not 18) and a tab with no group is caught. | #293 | `admin-app/src/__tests__/set-sbg-01-settings-sidebar-grouping.test.ts` |
+| **OCT-M7** | The in-flow hold follows the guest's CURRENT stay: the client detects the mismatch and re-stamps, the server refreshes the stay details — and the DEADLINE does not restart, so a date change can never be used to reset the window the extension cap exists to bound. | #296 | `guest-app/tests/api/oct-m7-in-flow-hold-restamp.test.ts` |
+| **OCT-M8** | The breakfast copy confirmation carries the date it belongs to (so it renders exactly ONCE), auto-clears after 8s, and clears the moment the guest edits a meal. | #294 | `guest-app/tests/api/oct-m8-breakfast-copy-notice.test.ts` |
+
+**Deliberately NOT done here:** OCT-M4 does **not** fold the other add-ons into `totalPrice`. `plan/features/OTHER-ADD-ONS.md` decision 2 pins them as additive `Booking` fields that are "added on top of it for the balance" — the same shape the walk-in path (OCT-C5) and the post-booking guest path already write. The Step 2 grid says so in one line, so the guest is not surprised that the transfer is not on the online room bill.
+
+**Observed while fixing OCT-M4, NOT fixed (outside the audit's scope):** the folio balance (`shared/utils/bookingFolio.ts`) reads `addOnNet` from the room-type extra-bed rate only — the other-add-on total is NOT part of the computed balance. That is pre-existing BR-12 v1 behaviour (it is the same for the walk-in and the post-booking purchase), but it means the add-on line is visible in the admin drawer, the Reports → Add-Ons sub-tab and the guest's Manage page, and not in the folio balance. Worth a separate pass.
 
 ---
 
