@@ -34,8 +34,16 @@ describe("BSP-01 — AdminContext snapshot mapper hydrates breakfastServed", () 
     // Both fields exist on the Booking type; the mapper must read both.
     // Guarding together catches a future "I removed the served line" edit.
     // The span tolerates the explanatory comment between the two lines.
+    //
+    // Per OCT-H4 (2026-10-20, decision #285): the mapper now
+    // hydrates `breakfastSelections` from a pre-computed
+    // `breakfastSelectionsHydrated` const (the same derived value
+    // the `breakfastTotal` + `hasAnyBreakfast` mirrors are computed
+    // from), so the pattern accepts either the direct read or the
+    // hydrated const. The invariant is unchanged: BOTH fields are
+    // read by the mapper.
     const mapperBlockMatch = adminContext.match(
-      /breakfastSelections:\s*data\.breakfastSelections\s*\|\|\s*\{\}[\s\S]{0,2000}?breakfastServed:\s*data\.breakfastServed\s*\|\|\s*\{\}/
+      /breakfastSelections:\s*(?:data\.breakfastSelections\s*\|\|\s*\{\}|breakfastSelectionsHydrated)[\s\S]{0,4000}?breakfastServed:\s*data\.breakfastServed\s*\|\|\s*\{\}/
     );
     expect(mapperBlockMatch).not.toBeNull();
   });

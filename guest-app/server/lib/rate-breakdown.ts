@@ -1,4 +1,13 @@
-import { calculatePercentDiscount, calculateVoucherBase } from "@spark-inn/shared";
+import {
+  calculatePercentDiscount,
+  calculateVoucherBase,
+  // Per OCT-H1 (2026-10-20, decision #282): the breakfast
+  // rate-breakdown label contract lives in ONE place so
+  // `sumBreakfastRateLines` (which reads the breakfast portion
+  // back out of a stored breakdown) can never drift from the
+  // label this builder writes.
+  BREAKFAST_RATE_LINE_LABEL
+} from "@spark-inn/shared";
 import type {
   BookingRateAdjustmentLine,
   BookingRateBreakdown,
@@ -175,7 +184,7 @@ export function buildRateBreakdown(input: BuildRateBreakdownInput): BookingRateB
   const breakfastAddOns: BookingRateAdjustmentLine[] = input.breakfastLines
     ? input.breakfastLines.filter((line) => Number(line.amount) > 0)
     : input.breakfastTotal > 0
-      ? [{ label: "Breakfast add-on", amount: input.breakfastTotal }]
+      ? [{ label: BREAKFAST_RATE_LINE_LABEL, amount: input.breakfastTotal }]
       : [];
   const extraBedAddOn: BookingRateAdjustmentLine | null =
     (input.extraBedTotal ?? 0) > 0

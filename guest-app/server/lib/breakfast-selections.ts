@@ -304,11 +304,22 @@ export const BREAKFAST_OP_ERROR = {
 
 // `auditBreakfastOp` writes one `breakfastAudit/{autoId}`
 // doc inside the caller's transaction. Mirrors the schema in
-// `shared/types/index.ts §BreakfastAuditEntry`. The
-// `reasonOrCutoff` argument is overloaded to accept either
-// a boolean (the cutoff-overrun flag — `true` means
-// `occurredAfterCutoff` is set) or a string (a free-text
-// reason — `occurredAfterCutoff` stays `false`).
+// `shared/types/index.ts §BreakfastAuditEntry`.
+//
+// Per OCT-H7 (2026-10-20, decision #286): the `reasonOrCutoff`
+// argument accepts EITHER a boolean (the cutoff-overrun flag —
+// `true` means `occurredAfterCutoff` is set) OR a string (a
+// free-text reason — `occurredAfterCutoff` stays `false`) OR an
+// object carrying BOTH.
+//
+// The object form exists because the previous two-way overload
+// could never express "a staff override with a reason". The
+// staff override paths passed the REASON STRING, so the helper
+// set `reason` and left `occurredAfterCutoff` at its `false`
+// default — the flag was `false` on EVERY override path, which
+// is exactly the case the "Late changes" metric exists to
+// count. The comment on those call sites asserted the flag was
+// "already implied"; it was explicitly `false`.
 //
 // The action enum covers both the guest Manage Breakfast
 // surface (BR-04) and the staff booking-drawer surface
@@ -337,7 +348,14 @@ export interface AuditBreakfastOpInput {
   // staff paths. The schema discriminator lets the
   // kitchen list filter on role later.
   actorRole: "guest" | "front-desk" | "admin";
-  reasonOrCutoff?: string | boolean;
+  reasonOrCutoff?: string | boolean | AuditReasonAndCutoff;
+}
+
+export interface AuditReasonAndCutoff {
+  /** The free-text reason for the change (staff override reason, etc.). */
+  reason?: string | null;
+  /** `true` when the change happened after the date's cut-off. */
+  occurredAfterCutoff?: boolean;
 }
 
 export function auditBreakfastOp(input: AuditBreakfastOpInput): void {
@@ -358,6 +376,14 @@ export function auditBreakfastOp(input: AuditBreakfastOpInput): void {
     reason = reasonOrCutoff;
   } else if (typeof reasonOrCutoff === "boolean") {
     occurredAfterCutoff = reasonOrCutoff;
+  } else if (reasonOrCutoff && typeof reasonOrCutoff === "object") {
+    // Per OCT-H7: the object form carries BOTH the reason and the
+    // cut-off flag. The previous two-way overload made the
+    // combination inexpressible, so every staff override wrote
+    // `occurredAfterCutoff: false` and the "Late changes" metric
+    // was permanently zero.
+    reason = reasonOrCutoff.reason ?? null;
+    occurredAfterCutoff = reasonOrCutoff.occurredAfterCutoff === true;
   }
 
   const auditRef = adminDb

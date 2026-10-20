@@ -294,7 +294,12 @@ describe("DR-02 — DateRangePicker is a range calendar, not two date inputs", (
     expect(pickerSrc).toMatch(/describeMaxStayNights\(maxNights\)/);
     // The prop must be threaded from the settings hook, not invented.
     expect(pickerSrc).toMatch(/maxStayNights\?: number \| null/);
-    expect(bookingPageSrc).toMatch(/maxStayNights\s*\}\s*=\s*usePublicSiteContent\(\)/);
+    // Per OCT-H9 (2026-10-20, decision #283): the settings hook
+    // destructure gained `vatConfig` (the guest-side VAT surfaces
+    // are gated on the admin's Tax toggle), so the assertion
+    // matches the member by NAME rather than requiring it to be
+    // the last one in the list.
+    expect(bookingPageSrc).toMatch(/maxStayNights[\s\S]{0,80}?\}\s*=\s*usePublicSiteContent\(\)/);
     expect(bookingPageSrc).toMatch(/maxStayNights=\{maxStayNights\}/);
   });
 

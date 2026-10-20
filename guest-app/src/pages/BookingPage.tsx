@@ -33,6 +33,14 @@ import {
   calculateSeasonalAwareRoomBreakdown,
   calculateSeasonalAwareRoomTotal,
   calculateVatBreakdown,
+  // Per OCT-H9 (2026-10-20, decision #283): the guest-side
+  // VAT surfaces must be gated on the admin's Tax (VAT)
+  // toggle. `PriceBreakdown.tsx` already consults
+  // `isVatEnabled`; the pre-submission live preview in
+  // `BookingReviewAside` did not, so a VAT-exempt hotel
+  // still saw the 12% VAT reconciliation on the booking
+  // page. Same helper, same default.
+  isVatEnabled,
   calculateBreakfastMealsTotal,
   getDateKeyInTimezone,
   getNumNights,
@@ -355,7 +363,12 @@ export function BookingPage() {
   // for `hotelCheckInTime` (the arrival-time dropdown).
   // Per MSL-01 (2026-10-15): `maxStayNights` is the admin's
   // stay-length cap (raw; `null` = no field = 30-night default).
-  const { hotelCheckInTime, maxStayNights } = usePublicSiteContent();
+  const { hotelCheckInTime, maxStayNights, vatConfig } = usePublicSiteContent();
+  // Per OCT-H9 (2026-10-20, decision #283): the admin's Tax
+  // (VAT) toggle decides whether the guest-facing surfaces
+  // render the 12% VAT reconciliation at all. Default is
+  // `true` (BIR-compliant) when the snapshot is missing.
+  const vatEnabled = isVatEnabled(vatConfig);
   const currentStepKey = normalizeStepKey(searchParams.get("step"));
   const isAddOnsStep = currentStepKey === STEP_KEYS.addOns;
   const isGuestDetailsStep = currentStepKey === STEP_KEYS.guestDetails;
@@ -2828,6 +2841,9 @@ const addOnCount = Object.keys(breakfastSelections).length;
             // cart state, so the per-date breakdown
             // is identical.
             breakfastSelections={breakfastSelections}
+            // Per OCT-H9 (2026-10-20, decision #283): gate the
+            // guest-side VAT lines on the admin's Tax toggle.
+            vatEnabled={vatEnabled}
           />
         </section>
 
@@ -3152,6 +3168,9 @@ const addOnCount = Object.keys(breakfastSelections).length;
             // cart state (separate call site below),
             // so both sidebars render the same shape.
             breakfastSelections={breakfastSelections}
+            // Per OCT-H9 (2026-10-20, decision #283): gate the
+            // guest-side VAT lines on the admin's Tax toggle.
+            vatEnabled={vatEnabled}
           />
         </section>
 
@@ -4008,6 +4027,9 @@ const addOnCount = Object.keys(breakfastSelections).length;
             // cart state, so the per-date breakdown
             // is identical.
             breakfastSelections={breakfastSelections}
+            // Per OCT-H9 (2026-10-20, decision #283): gate the
+            // guest-side VAT lines on the admin's Tax toggle.
+            vatEnabled={vatEnabled}
           />
         </section>
 
@@ -5339,6 +5361,13 @@ interface BookingReviewAsideProps {
   // entry's `price` snapshot at capture time.
   // plan).
   breakfastSelections?: Record<string, BreakfastSelectionEntry> | null;
+  // Per OCT-H9 (2026-10-20, decision #283): whether the
+  // admin's Tax (VAT) toggle is ON. Threaded down from
+  // `BookingPage` (which owns the `usePublicSiteContent`
+  // subscription) so the aside does not open a second
+  // one. Defaults to `true` — the BIR-compliant default
+  // when the snapshot is missing.
+  vatEnabled?: boolean;
 }
 
 function BookingReviewAside({
@@ -5372,7 +5401,9 @@ function BookingReviewAside({
   // boolean` + `breakfastRate: number` +
   // `breakfastIncludesChildren: boolean` props are deleted;
   // the sidebar reads the new shape only.
-  breakfastSelections = null
+  breakfastSelections = null,
+  // Per OCT-H9 (2026-10-20, decision #283).
+  vatEnabled = true
 }: BookingReviewAsideProps) {
   const roomTotal = useMemo(() => {
     if (!typeRates || !typeValue) return 0;
@@ -5567,11 +5598,27 @@ function BookingReviewAside({
                     (RA 9994) is the VAT-exempt portion when
                     the booking carried one. Mirrors the same
                     three lines on the receipt PDF + XLSX
-                    export + admin booking drawer. */}
-                {(() => {
+                    export + admin booking drawer.
+
+                    Per OCT-H9 (2026-10-20, decision #283): this
+                    block was NOT gated on the admin's Tax (VAT)
+                    toggle, so a hotel that had switched VAT off
+                    still saw "VATable Sales / VAT-Exempt Sales /
+                    VAT Amount (12% × VATable)" on the guest's
+                    booking page — the ONE surface VAT-01's
+                    "must not display on any bill surface"
+                    requirement missed. The sibling
+                    `<PriceBreakdown>` component was already
+                    gated (`PriceBreakdown.tsx:102`); this
+                    fallback branch is the PRE-SUBMISSION live
+                    preview, so it was the one the guest actually
+                    sees before booking. Both are now gated on
+                    `isVatEnabled(vatConfig)`. */}
+                {vatEnabled ? (() => {
                   const vat = calculateVatBreakdown({
                     totalPrice: total,
-                    seniorDiscountAmount: discountPct > 0 ? discountAmount : 0
+                    seniorDiscountAmount: discountPct > 0 ? discountAmount : 0,
+                    vatRate: vatEnabled ? 0.12 : 0
                   });
                   return (
                     <div className="mt-2 space-y-1 border-t border-dashed border-gray-200 pt-2 text-[11px] text-gray-500">
@@ -5589,7 +5636,7 @@ function BookingReviewAside({
                       </div>
                     </div>
                   );
-                })()}
+                })() : null}
               </>
             )}
           </div>

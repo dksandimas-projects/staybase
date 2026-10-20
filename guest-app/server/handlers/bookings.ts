@@ -229,6 +229,30 @@ import {
   type OtherAddOnSelectionEntry
 } from "@spark-inn/shared";
 
+// Per OCT-H8 (2026-10-20, decision #288): the re-dating helpers
+// the reschedule + cancel paths use to drop the add-on selections
+// that fell outside the stay window (and to open the refund
+// liabilities the spec requires). Kept in a separate import block
+// so the `mbr-05-aggregate-and-handler-mirror.test.ts` source-text
+// pattern still matches.
+import {
+  redateBreakfastSelections,
+  redateOtherAddOnSelections
+} from "@spark-inn/shared";
+
+// Per OCT-H8 (2026-10-20, decision #288): the audit + refund
+// liability writers the reschedule + cancel paths use for the
+// auto-cancelled selections.
+import {
+  auditBreakfastOp,
+  createBreakfastRefundLiability
+} from "../lib/breakfast-selections";
+import {
+  auditOtherAddOnOp,
+  createOtherAddOnRefundLiability
+} from "../lib/otherAddOn-selections";
+import type { BreakfastSelectionEntry } from "@spark-inn/shared";
+
 // Per OCT-C5 (2026-10-20): the error the walk-in path raises when
 // the desk selected an add-on that is not in the live catalog (or
 // has been disabled). Mapped to a 400 in the walk-in catch block
@@ -1930,7 +1954,7 @@ export async function handleCreateBooking(req: any, res: any) {
     }> = [];
     let computedData: any = {};
     let alreadyExistingBookingResponse: any = null;
-    // Public clients cannot read `bookings/*`. Keep the creation status in a
+    // Public clients cannot read the bookings collection. Keep the creation status in a
     // function-scope value so the persisted document and success response use
     // the same authoritative value.
     const initialBookingStatus = paymentProofPath || paymentProofUrl
@@ -7225,6 +7249,155 @@ export async function handleRejectPayment(req: any, res: any) {
   }
 }
 
+// Per OCT-H8 (2026-10-20, decision #288): the cancel path's
+// add-on re-dating.
+//
+// Per `plan/features/BREAKFAST.md` §Edge cases 3: "any unpaid
+// `breakfastSelections` for future dates is dropped; any paid
+// selections for future dates generate refund liabilities with
+// `category: "breakfast"`. Past-date selections are not refunded."
+//
+// THE DOUBLE-REFUND GUARD
+//
+// The CRL-07 policy refund is a PERCENTAGE OF THE COLLECTED
+// MONEY (`policyRefund = netCollected × refundPct / 100`), and
+// `netCollected` covers the whole bill — the room AND the
+// add-ons. So when the cancellation policy refunds money, the
+// breakfast the guest paid for is ALREADY inside that refund.
+//
+// Opening a second `category: "breakfast"` liability on top would
+// refund the same meal twice. So the add-on liabilities are opened
+// ONLY when the cancellation produced NO policy refund — which is
+// exactly the case the spec's rule exists for: a late cancel
+// (0% policy) where the guest keeps nothing back, yet they had
+// already paid for breakfasts for nights that will never happen.
+//
+// The selections themselves are ALWAYS dropped (marked removed) and
+// audited, regardless of the policy outcome — the booking is
+// cancelled, so the doc must not keep carrying meals for dates
+// that will not occur. `breakfastTotal` is recomputed over the
+// survivors (the BR-01 invariant holds); `totalPrice` is NOT
+// rewritten, because the cancel path never rewrote it and the
+// policy liability is computed from the collected amount.
+//
+// The `paidAmount` test ("was this meal paid for?") is the same
+// heuristic the BR-04 / BR-05 / BR-12 remove paths use.
+function redateAddOnsForCancel(input: {
+  transaction: FirebaseFirestore.Transaction;
+  bookingId: string;
+  bookingRef: string;
+  booking: any;
+  today: string;
+  actorUid: string;
+  actorRole: "guest" | "front-desk" | "admin";
+  // `true` when the cancellation policy already refunds the collected money.
+  policyRefunded: boolean;
+}): {
+  breakfastSelections: Record<string, BreakfastSelectionEntry>;
+  breakfastTotal: number;
+  hasAnyBreakfast: boolean;
+  otherAddOnSelections: Record<string, OtherAddOnSelectionEntry[]>;
+  otherAddOnTotal: number;
+  hasAnyOtherAddOns: boolean;
+} {
+  const { transaction, bookingId, bookingRef, booking, today, actorUid, actorRole } = input;
+  const paidAmount = Number(booking.paidAmount) || 0;
+
+  const redatedBreakfast = redateBreakfastSelections({
+    mode: "cancel",
+    window: { checkIn: String(booking.checkIn || ""), checkOut: String(booking.checkOut || "") },
+    today,
+    selections: booking.breakfastSelections as Record<string, BreakfastSelectionEntry>,
+    paidAmount
+  });
+  const redatedOtherAddOns = redateOtherAddOnSelections({
+    mode: "cancel",
+    window: { checkIn: String(booking.checkIn || ""), checkOut: String(booking.checkOut || "") },
+    today,
+    selections: booking.otherAddOnSelections as Record<string, OtherAddOnSelectionEntry[]>,
+    paidAmount
+  });
+
+  const reason = "Booking cancelled — the meal date is in the future and will not be served.";
+
+  for (const removed of redatedBreakfast.removed) {
+    auditBreakfastOp({
+      transaction,
+      bookingId,
+      slotKey: removed.key,
+      action: "remove",
+      mealSnapshot: {
+        mealId: String(removed.entry.mealId || ""),
+        mealName: String(removed.entry.mealName || ""),
+        price: removed.amount
+      },
+      actorUid,
+      actorRole,
+      reasonOrCutoff: { reason, occurredAfterCutoff: false }
+    });
+    if (removed.wasPaid && !input.policyRefunded) {
+      createBreakfastRefundLiability({
+        transaction,
+        booking: { id: bookingId, bookingRef },
+        slotKey: removed.key,
+        mealEntry: {
+          mealId: String(removed.entry.mealId || ""),
+          mealName: String(removed.entry.mealName || ""),
+          price: removed.amount
+        },
+        amount: removed.amount,
+        reason,
+        recordedBy: actorRole,
+        recordedByUid: actorUid
+      });
+    }
+  }
+
+  for (const removed of redatedOtherAddOns.removed) {
+    auditOtherAddOnOp({
+      transaction,
+      bookingId,
+      selectionKey: removed.selectionKey,
+      action: "remove",
+      addOnSnapshot: {
+        addOnId: removed.addOnId,
+        name: String(removed.entry.nameSnapshot || ""),
+        price: Number(removed.entry.priceSnapshot) || 0,
+        quantity: Math.max(0, Math.floor(Number(removed.entry.quantity) || 0))
+      },
+      actorUid,
+      actorRole,
+      reasonOrCutoff: { reason, occurredAfterCutoff: false }
+    });
+    if (removed.wasPaid && !input.policyRefunded) {
+      createOtherAddOnRefundLiability({
+        transaction,
+        booking: { id: bookingId, bookingRef },
+        selectionKey: removed.selectionKey,
+        addOnEntry: {
+          addOnId: removed.addOnId,
+          nameSnapshot: String(removed.entry.nameSnapshot || ""),
+          priceSnapshot: Number(removed.entry.priceSnapshot) || 0,
+          quantity: Math.max(0, Math.floor(Number(removed.entry.quantity) || 0))
+        },
+        amount: removed.amount,
+        reason,
+        recordedBy: actorRole,
+        recordedByUid: actorUid
+      });
+    }
+  }
+
+  return {
+    breakfastSelections: redatedBreakfast.selections,
+    breakfastTotal: redatedBreakfast.total,
+    hasAnyBreakfast: redatedBreakfast.total > 0,
+    otherAddOnSelections: redatedOtherAddOns.selections,
+    otherAddOnTotal: redatedOtherAddOns.total,
+    hasAnyOtherAddOns: redatedOtherAddOns.total > 0
+  };
+}
+
 export async function handleCancelBooking(req: any, res: any) {
   const { bookingId, bookingRef, guestEmail, reason } = req.body;
 
@@ -7251,6 +7424,12 @@ export async function handleCancelBooking(req: any, res: any) {
   const cancelledBy = isStaffCancellation
     ? String(req.staff.uid)
     : "guest";
+
+  // Per OCT-H8 (2026-10-20, decision #288): today's date in the
+  // hotel timezone, captured ONCE at the entry point so every
+  // transaction retry sees the same "future date" boundary (the
+  // cancel path's auto-cancel rule is "service date >= today").
+  const { todayStr: todayKey } = getManilaDateInfo();
 
   // Per BK-05 / decision #221 (2026-08-19): staff cancellations
   // require a non-empty reason. Mirrors the UCO pattern at the
@@ -7682,6 +7861,47 @@ export async function handleCancelBooking(req: any, res: any) {
           }
         }
 
+        // Per OCT-H8 (2026-10-20, decision #288): the add-on
+        // re-dating for each cancelled child.
+        //
+        // Placed at the END of the transaction so every
+        // `transaction.get` in this branch (the children read, the
+        // member read, the voucher / corporate-code reads) has
+        // already happened — the repo's FOL-03 "all reads before
+        // any write" rule.
+        //
+        // `policyRefunded` is `true` when the CRL-07 policy
+        // snapshot refunds money: the policy refund is a
+        // PERCENTAGE OF THE COLLECTED AMOUNT, and the collected
+        // amount already includes the add-ons — so a second
+        // `category: "breakfast"` liability would refund the same
+        // meal twice. See the helper's comment.
+        const cancelPolicyRefunded = Boolean(
+          liabilitySnapshot && Number(liabilitySnapshot.policyResult?.policyRefund) > 0
+        );
+        for (const child of children) {
+          if (!cancellableIds.has(child.id)) continue;
+          const redated = redateAddOnsForCancel({
+            transaction,
+            bookingId: child.id,
+            bookingRef: String(child.data.bookingRef || ""),
+            booking: child.data,
+            today: todayKey,
+            actorUid: cancelledBy,
+            actorRole: isStaffCancellation ? "front-desk" : "guest",
+            policyRefunded: cancelPolicyRefunded
+          });
+          transaction.update(child.ref, {
+            breakfastSelections: redated.breakfastSelections,
+            breakfastTotal: redated.breakfastTotal,
+            hasAnyBreakfast: redated.hasAnyBreakfast,
+            otherAddOnSelections: redated.otherAddOnSelections,
+            otherAddOnTotal: redated.otherAddOnTotal,
+            hasAnyOtherAddOns: redated.hasAnyOtherAddOns,
+            updatedAt: now
+          });
+        }
+
         // Per BAR-02 (2026-08-08, per decision #203):
         // the five aggregate counter fields +
         // `paymentStatus` are no longer written to the
@@ -7906,6 +8126,45 @@ export async function handleCancelBooking(req: any, res: any) {
       if (liabilitySnapshot) {
         bookingUpdate.cancellationLiability = liabilitySnapshot;
       }
+
+      // Per OCT-H8 (2026-10-20, decision #288): the add-on
+      // re-dating for the cancelled booking.
+      //
+      // Per `plan/features/BREAKFAST.md` §Edge cases 3, the
+      // future-date selections are dropped and the PAID ones
+      // generate a `category: "breakfast"` refund liability.
+      //
+      // The liability is opened ONLY when the cancellation policy
+      // refunded nothing: the CRL-07 policy refund is a
+      // PERCENTAGE OF THE COLLECTED MONEY, and the collected
+      // money already includes the breakfast — a second
+      // liability would refund the same meal twice. (A late
+      // cancel refunds 0% of the policy, and that is exactly the
+      // case the spec's rule exists for.)
+      //
+      // The re-dating runs AFTER the `liabilitySnapshot` (which
+      // performs its own reads) and BEFORE the booking update, so
+      // every read in this transaction precedes every write.
+      const perChildCancelPolicyRefunded = Boolean(
+        liabilitySnapshot && Number(liabilitySnapshot.policyResult?.policyRefund) > 0
+      );
+      const perChildRedated = redateAddOnsForCancel({
+        transaction,
+        bookingId: bookingDocumentRef.id,
+        bookingRef: String(freshBooking.bookingRef || ""),
+        booking: freshBooking,
+        today: todayKey,
+        actorUid: cancelledBy,
+        actorRole: isStaffCancellation ? "front-desk" : "guest",
+        policyRefunded: perChildCancelPolicyRefunded
+      });
+      bookingUpdate.breakfastSelections = perChildRedated.breakfastSelections;
+      bookingUpdate.breakfastTotal = perChildRedated.breakfastTotal;
+      bookingUpdate.hasAnyBreakfast = perChildRedated.hasAnyBreakfast;
+      bookingUpdate.otherAddOnSelections = perChildRedated.otherAddOnSelections;
+      bookingUpdate.otherAddOnTotal = perChildRedated.otherAddOnTotal;
+      bookingUpdate.hasAnyOtherAddOns = perChildRedated.hasAnyOtherAddOns;
+
       transaction.update(bookingDocumentRef, bookingUpdate);
 
       // Per MRB-05 (2026-08-02, per decision #159):
@@ -12489,6 +12748,41 @@ export async function handleRescheduleBooking(req: any, res: any) {
           });
       const roomTotal = roomBreakdown.roomSubtotal;
 
+      // Per OCT-H8 (2026-10-20, decision #288): the stay window
+      // moved, so the add-on selections must move with it.
+      //
+      // Before this, the reschedule carried `booking.breakfastTotal`
+      // forward verbatim and never touched `breakfastSelections` —
+      // so a guest who rescheduled Oct 14–17 → Oct 20–23 kept
+      // paying for three breakfasts that were never served (the
+      // kitchen list for Oct 20 showed nothing, because the
+      // selection keys still said `2026-10-14…`).
+      //
+      // The re-dating rule (per `plan/features/BREAKFAST.md` §Edge
+      // cases 2): any selection whose service date falls outside
+      // the NEW window is auto-cancelled; a PAID removal opens a
+      // refund liability, an UNPAID removal simply comes off the
+      // bill.
+      //
+      // The `mode: "extend"` wrapper reaches this same code with a
+      // window that only GROWS (the check-in is locked and the
+      // check-out moves later), so nothing ever falls out of range
+      // and the re-dating is a no-op there.
+      const redatedBreakfast = redateBreakfastSelections({
+        mode: "reschedule",
+        window: { checkIn, checkOut },
+        today: todayKey,
+        selections: booking.breakfastSelections as Record<string, BreakfastSelectionEntry>,
+        paidAmount: Number(booking.paidAmount) || 0
+      });
+      const redatedOtherAddOns = redateOtherAddOnSelections({
+        mode: "reschedule",
+        window: { checkIn, checkOut },
+        today: todayKey,
+        selections: booking.otherAddOnSelections as Record<string, OtherAddOnSelectionEntry[]>,
+        paidAmount: Number(booking.paidAmount) || 0
+      });
+
       // Per BR-08 (decision #238, 2026-10-14 — close-out):
       // the legacy `breakfastRate × numGuests × numNights`
       // derivation is gone. The reschedule path reads the
@@ -12499,6 +12793,9 @@ export async function handleRescheduleBooking(req: any, res: any) {
       // `breakfastTotal` field the create transaction
       // stamps on every booking doc.
       //
+      // Per OCT-H8: the total is now the RE-DATED total (the
+      // survivors only) rather than the carried-forward one.
+      //
       // A walk-in manual override (`manualNightlyRate !== null`)
       // is the complete staff-agreed pricing basis; its
       // original breakdown intentionally carries no separate
@@ -12507,7 +12804,7 @@ export async function handleRescheduleBooking(req: any, res: any) {
       const preservedExtraBedCount = Number(booking.extraBedCount) || 0;
       const preservedExtraBedRate = Number(booking.extraBedRate) || 0;
       const breakfastTotal = manualNightlyRate === null
-        ? Number(booking.breakfastTotal) || 0
+        ? redatedBreakfast.total
         : 0;
       const extraBedTotal = manualNightlyRate === null
         ? calculateExtraBedAddOn({
@@ -12690,6 +12987,31 @@ export async function handleRescheduleBooking(req: any, res: any) {
           finalTotalPrice
         ),
         rescheduleHistory: [...(Array.isArray(booking.rescheduleHistory) ? booking.rescheduleHistory : []), rescheduleEntry],
+        // Per OCT-H8 (2026-10-20, decision #288): the re-dated
+        // add-on selections + their recomputed totals.
+        //
+        // Without this, the booking kept the OLD selection keys
+        // and the OLD breakfast total after a date change — the
+        // guest was charged for meals on dates they were no longer
+        // staying for, and the kitchen list for the new dates
+        // showed nothing.
+        //
+        // `breakfastTotal` is the recomputed total over the
+        // survivors (the auto-cancelled entries are marked
+        // `removedAt`, and `recomputeBreakfastTotal` skips those),
+        // so the BR-01 invariant
+        // `breakfastTotal === recomputeBreakfastTotal(selections)`
+        // holds.
+        //
+        // The other add-ons are NOT inside `totalPrice` (they are
+        // added on top of it for the balance), so they are written
+        // separately — the same shape the BR-12 write paths use.
+        breakfastSelections: redatedBreakfast.selections,
+        breakfastTotal: redatedBreakfast.total,
+        hasAnyBreakfast: redatedBreakfast.total > 0,
+        otherAddOnSelections: redatedOtherAddOns.selections,
+        otherAddOnTotal: redatedOtherAddOns.total,
+        hasAnyOtherAddOns: redatedOtherAddOns.total > 0,
         updatedAt: new Date()
       };
 
@@ -12704,6 +13026,95 @@ export async function handleRescheduleBooking(req: any, res: any) {
         const oldRoomRef = adminDb.collection("rooms").doc(booking.roomId);
         transaction.update(oldRoomRef, { status: "available" });
         transaction.update(roomRef, { status: "occupied" });
+      }
+
+      // Per OCT-H8 (2026-10-20, decision #288): the auto-cancelled
+      // selections get an audit entry + (for the PAID ones) a
+      // refund liability — all inside the SAME transaction, so the
+      // liability commits atomically with the date move.
+      //
+      // The audit action is `"remove"` with a reason naming the
+      // reschedule, and `occurredAfterCutoff: false` (the change
+      // was caused by the date move, not by a late staff
+      // override).
+      for (const removed of redatedBreakfast.removed) {
+        auditBreakfastOp({
+          transaction,
+          bookingId: String(bookingId),
+          slotKey: removed.key,
+          action: "remove",
+          mealSnapshot: {
+            mealId: String(removed.entry.mealId || ""),
+            mealName: String(removed.entry.mealName || ""),
+            price: removed.amount
+          },
+          actorUid: "system",
+          actorRole: "admin",
+          reasonOrCutoff: {
+            reason: `Auto-cancelled — the stay moved to ${checkIn} → ${checkOut} and this date is outside the new window.`,
+            occurredAfterCutoff: false
+          }
+        });
+        if (removed.wasPaid) {
+          createBreakfastRefundLiability({
+            transaction,
+            booking: {
+              id: String(bookingId),
+              bookingRef: String(booking.bookingRef || "")
+            },
+            slotKey: removed.key,
+            mealEntry: {
+              mealId: String(removed.entry.mealId || ""),
+              mealName: String(removed.entry.mealName || ""),
+              price: removed.amount
+            },
+            amount: removed.amount,
+            reason: "Booking rescheduled — the breakfast date is outside the new stay window.",
+            recordedBy: "admin",
+            recordedByUid: "system"
+          });
+        }
+      }
+
+      for (const removed of redatedOtherAddOns.removed) {
+        auditOtherAddOnOp({
+          transaction,
+          bookingId: String(bookingId),
+          selectionKey: removed.selectionKey,
+          action: "remove",
+          addOnSnapshot: {
+            addOnId: removed.addOnId,
+            name: String(removed.entry.nameSnapshot || ""),
+            price: Number(removed.entry.priceSnapshot) || 0,
+            quantity: Math.max(0, Math.floor(Number(removed.entry.quantity) || 0))
+          },
+          actorUid: "system",
+          actorRole: "admin",
+          reasonOrCutoff: {
+            reason: `Auto-cancelled — the stay moved to ${checkIn} → ${checkOut} and this date is outside the new window.`,
+            occurredAfterCutoff: false
+          }
+        });
+        if (removed.wasPaid) {
+          createOtherAddOnRefundLiability({
+            transaction,
+            booking: {
+              id: String(bookingId),
+              bookingRef: String(booking.bookingRef || "")
+            },
+            selectionKey: removed.selectionKey,
+            addOnEntry: {
+              addOnId: removed.addOnId,
+              nameSnapshot: String(removed.entry.nameSnapshot || ""),
+              priceSnapshot: Number(removed.entry.priceSnapshot) || 0,
+              quantity: Math.max(0, Math.floor(Number(removed.entry.quantity) || 0))
+            },
+            amount: removed.amount,
+            reason: "Booking rescheduled — the add-on date is outside the new stay window.",
+            recordedBy: "admin",
+            recordedByUid: "system"
+          });
+        }
       }
 
       transaction.update(bookingRef, updatedBooking);

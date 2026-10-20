@@ -25,6 +25,79 @@
 import type { BreakfastSelectionEntry } from "../types";
 
 /**
+ * The rate-breakdown line label for the legacy SINGLE breakfast line
+ * (one entry for the whole stay). Per BR-03 the per-date lines
+ * replaced it — see {@link BREAKFAST_RATE_LINE_PREFIX}.
+ */
+export const BREAKFAST_RATE_LINE_LABEL = "Breakfast add-on";
+
+/**
+ * The prefix every per-date breakfast rate-breakdown line starts with
+ * (`Breakfast (Oct 14, 2 meals)`). Per BR-03 these replace the
+ * single {@link BREAKFAST_RATE_LINE_LABEL} entry.
+ */
+export const BREAKFAST_RATE_LINE_PREFIX = "Breakfast (";
+
+/**
+ * Is this rate-breakdown add-on line a BREAKFAST line?
+ *
+ * The rate breakdown's `addOns[]` array holds the breakfast term
+ * AND the extra-bed term (`buildRateBreakdown`). The two are
+ * distinguished by their label:
+ *
+ *   • breakfast  → `"Breakfast add-on"` (legacy single line) or
+ *                  `"Breakfast (Oct 14, 2 meals)"` (BR-03 per-date)
+ *   • extra bed  → `"Extra bed add-on"` / `"Extra bed add-on (2 beds × 3 nights)"`
+ *
+ * Matching is EXACT against the two known breakfast shapes rather
+ * than a loose `startsWith("Breakfast")`, so a future add-on line
+ * that happens to start with the same word can never be mistaken
+ * for breakfast.
+ */
+export function isBreakfastRateLine(label: unknown): boolean {
+  const text = String(label ?? "");
+  return text === BREAKFAST_RATE_LINE_LABEL || text.startsWith(BREAKFAST_RATE_LINE_PREFIX);
+}
+
+/**
+ * The breakfast amount already included in a booking's `totalPrice`.
+ *
+ * Per BR-01 / BR-03 the booking's `totalPrice` is
+ * `roomTotal + breakfastTotal + extraBedTotal` (minus discounts) —
+ * the breakfast is a COMPONENT of the total, not an addition to it.
+ * So any surface that recomputes a bill AFTER the guest edits their
+ * breakfast must SUBTRACT the breakfast that is already inside the
+ * total before adding the new one, or the breakfast is counted
+ * twice. (Per OCT-H1, 2026-10-20, decision #282.)
+ *
+ * The anchor is the booking's `rateBreakdown.addOns[]`, which is
+ * snapshotted at create time and preserved verbatim by
+ * `rebuildRateBreakdown` (it keeps the original add-on labels), so
+ * it still holds the ORIGINAL breakfast amount after the guest
+ * edits their selections — unlike `booking.breakfastTotal`, which
+ * the manage path overwrites on every write.
+ *
+ * Returns `null` when the booking has no rate breakdown at all
+ * (a pre-breakfast-refactor booking). The caller decides what to
+ * do with that; the balance surfaces treat it as "unknown" and
+ * fall back to NOT adding the breakfast on top, which is the
+ * conservative direction (it never over-charges the guest).
+ */
+export function sumBreakfastRateLines(breakdown: {
+  addOns?: Array<{ label?: string; amount?: number } | null> | null;
+} | null | undefined): number | null {
+  if (!breakdown || !Array.isArray(breakdown.addOns)) return null;
+  let total = 0;
+  for (const line of breakdown.addOns) {
+    if (!line || !isBreakfastRateLine(line.label)) continue;
+    const amount = Number(line.amount);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    total += amount;
+  }
+  return Math.round(total * 100) / 100;
+}
+
+/**
  * Recompute the denormalized `breakfastTotal` for a booking.
  *
  * Iterates every entry in `selections`, skips entries whose
@@ -143,7 +216,7 @@ export function buildBreakfastRateBreakdownLines(
       dateLabel = date;
     }
     return {
-      label: `Breakfast (${dateLabel}, ${count} meal${count === 1 ? "" : "s"})`,
+      label: `${BREAKFAST_RATE_LINE_PREFIX}${dateLabel}, ${count} meal${count === 1 ? "" : "s"})`,
       amount: total
     };
   });

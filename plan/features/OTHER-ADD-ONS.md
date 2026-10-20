@@ -255,6 +255,8 @@ Mirrors the breakfast tab's read pattern. Shows per-day selections + per-add-on 
 | Missing `turnstileToken` in non-test mode | 400 from the apiRouter gate. |
 | Same add-on id, multiple dates | Each date gets its own entry array in `otherAddOnSelections[date]`. |
 | Catalog price change after order | Existing entries keep the snapshotted `priceSnapshot`. |
+| Stay dates change (reschedule / extend) | Per OCT-H8 (2026-10-20, decision #287): a selection whose service date falls outside the NEW window is auto-cancelled (marked `removedAt`, kept in the map for the audit trail). A PAID removal opens a `category: "otherAddOn"` refund liability; an UNPAID removal simply comes off the bill. The other add-ons are NOT inside `totalPrice` (they are added on top of it for the balance), so removing one does not change the room bill — the liability is the only money effect. The `mode: "extend"` wrapper only GROWS the window, so nothing is ever cancelled there. |
+| Booking cancelled | Per OCT-H8 (2026-10-20, decision #287): future-date selections (service date ≥ today in the hotel timezone) are dropped; past-date selections are left alone and never refunded. The cancel path does NOT rewrite `totalPrice` (the CRL-07 policy liability is computed from the collected amount), and the add-on liability is opened ONLY when the cancellation policy refunded NOTHING — the policy refund is a percentage of the collected money, which already includes the add-ons, so a second liability would refund the same add-on twice. |
 
 ---
 

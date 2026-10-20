@@ -163,7 +163,22 @@ export interface AuditOtherAddOnOpInput {
   addOnSnapshot: { addOnId: string; name: string; price: number; quantity: number } | null;
   actorUid: string;
   actorRole: "guest" | "front-desk" | "admin";
-  reasonOrCutoff?: string | boolean;
+  reasonOrCutoff?: string | boolean | AuditOtherAddOnReasonAndCutoff;
+}
+
+/**
+ * Per OCT-H7 (2026-10-20, decision #286): the object form carries
+ * BOTH the free-text reason and the cut-off flag. The previous
+ * two-way overload (`string | boolean`) could not express "a staff
+ * override with a reason", so every add-on override wrote
+ * `occurredAfterCutoff: false` and the late-change counter was
+ * permanently zero.
+ */
+export interface AuditOtherAddOnReasonAndCutoff {
+  /** The free-text reason for the change (staff override reason, etc.). */
+  reason?: string | null;
+  /** `true` when the change happened after the date's cut-off. */
+  occurredAfterCutoff?: boolean;
 }
 
 export function auditOtherAddOnOp(input: AuditOtherAddOnOpInput): void {
@@ -184,6 +199,12 @@ export function auditOtherAddOnOp(input: AuditOtherAddOnOpInput): void {
     reason = reasonOrCutoff;
   } else if (typeof reasonOrCutoff === "boolean") {
     occurredAfterCutoff = reasonOrCutoff;
+  } else if (reasonOrCutoff && typeof reasonOrCutoff === "object") {
+    // Per OCT-H7: the object form carries BOTH the reason and the
+    // cut-off flag (the two-way overload could not express the
+    // combination, so every override logged `false`).
+    reason = reasonOrCutoff.reason ?? null;
+    occurredAfterCutoff = reasonOrCutoff.occurredAfterCutoff === true;
   }
 
   const auditRef = adminDb

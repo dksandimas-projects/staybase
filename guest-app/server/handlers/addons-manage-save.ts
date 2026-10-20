@@ -496,7 +496,16 @@ export async function handleUpdateAddOns(req: VercelRequest, res: VercelResponse
           addOnSnapshot: a.addOnSnapshot,
           actorUid: "guest",
           actorRole: a.actorRole,
-          reasonOrCutoff: a.reason
+          // Per OCT-H7 (2026-10-20, decision #286): the object form
+          // carries BOTH the free-text reason and the cut-off flag.
+          // On the guest surface the flag is always `false` (the
+          // guest is blocked once a date locks), but passing it
+          // explicitly keeps the intent visible instead of
+          // relying on the default.
+          reasonOrCutoff: {
+            reason: a.reason,
+            occurredAfterCutoff: a.occurredAfterCutoff
+          }
         });
       }
     });

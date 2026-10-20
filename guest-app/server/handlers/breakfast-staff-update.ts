@@ -461,14 +461,27 @@ export async function handleStaffUpdateBreakfast(
           },
           actorUid: staff.uid,
           actorRole: staff.role,
-          // Non-override actions stamp `false` so the
-          // audit's `occurredAfterCutoff` stays false
-          // (it mirrors the BR-04 guest path). Override
-          // actions stamp the staff's free-text reason
-          // + flip `occurredAfterCutoff: true` is
-          // already implied (the override was used
-          // because the lock-state was crossed).
-          reasonOrCutoff: isOverride ? reason : false
+          // Per OCT-H7 (2026-10-20, decision #286): the object
+          // form carries BOTH the free-text reason and the
+          // cut-off flag.
+          //
+          // The previous call passed the reason STRING (or
+          // `false`) through the two-way `string | boolean`
+          // overload, so the helper could set EITHER the reason
+          // OR the flag — never both. An override therefore
+          // wrote `reason: "<text>"` with
+          // `occurredAfterCutoff: false`, and the "Late changes"
+          // metric (which filters
+          // `occurredAfterCutoff == true`) was permanently empty
+          // for precisely the case it exists to count: a staff
+          // member overriding a locked date after cut-off.
+          //
+          // Non-override actions still stamp `false` (they mirror
+          // the BR-04 guest path, which is always pre-cutoff).
+          reasonOrCutoff: {
+            reason: isOverride ? reason : null,
+            occurredAfterCutoff: isOverride
+          }
         });
         if (isOverride) overrideCount += 1;
       };
@@ -543,7 +556,16 @@ export async function handleStaffUpdateBreakfast(
           },
           actorUid: staff.uid,
           actorRole: staff.role,
-          reasonOrCutoff: reason
+          // Per OCT-H7 (2026-10-20, decision #286): the object
+          // form carries BOTH the free-text reason and the
+          // cut-off flag. The previous two-way overload could
+          // only carry one of them, so a staff override of a
+          // locked date logged `occurredAfterCutoff: false` and
+          // the "Late changes" metric never counted it.
+          reasonOrCutoff: {
+            reason,
+            occurredAfterCutoff: isOverride
+          }
         });
         if (isOverride) overrideCount += 1;
       };

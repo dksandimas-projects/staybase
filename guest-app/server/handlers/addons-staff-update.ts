@@ -386,7 +386,17 @@ export async function handleStaffUpdateAddOns(req: VercelRequest, res: VercelRes
           addOnSnapshot: a.addOnSnapshot,
           actorUid,
           actorRole,
-          reasonOrCutoff: a.reason
+          // Per OCT-H7 (2026-10-20, decision #286): the object form
+          // carries BOTH the free-text reason and the cut-off flag.
+          // The previous two-way `string | boolean` overload could
+          // only carry one, so an override (which the action name
+          // already flagged as `override-*`) still wrote
+          // `occurredAfterCutoff: false` and the late-change
+          // counter stayed at zero.
+          reasonOrCutoff: {
+            reason: a.reason,
+            occurredAfterCutoff: a.occurredAfterCutoff
+          }
         });
       }
     });

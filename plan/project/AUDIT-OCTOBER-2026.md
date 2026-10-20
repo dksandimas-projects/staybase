@@ -41,7 +41,7 @@ October shipped nine feature blocks: the breakfast redesign (BR-01..BR-10), Othe
 | OCT-C4 | `isoToTzDate` builds the `TZDate` from its **Y/M/D components** (`new TZDate(year, month - 1, day, config.timezone)`) — the exact construction rdp uses. **OCT-H2 also fixed here** — the breakfast date list now uses the `Z` anchor. | `guest-app/tests/api/oct-c4-calendar-timezone.test.ts` — 14 guards, incl. a runtime round-trip across 8 browser timezones |
 | OCT-C5 | The walk-in validates + persists the breakfast selections and rebuilds the other add-ons from the live catalog. A walk-in skips the per-date cut-off (a new booking has no prior selection to lock). | `guest-app/tests/api/oct-c5-walkin-addons.test.ts` — 16 guards; 12 fail against the pre-fix code |
 
-**Not fixed here, on purpose:** `handleAddRoomToReservation` also writes `breakfastSelections: {}` while inheriting the **reservation's** `breakfastTotal` onto the new room's subtotal — a separate double-charge defect (the new room is billed for the existing guests' breakfast and has no meal slots of its own). It is a different bug from OCT-C5 and changing that billing behaviour is a separate decision. **Also still open: the 11 High and 8 Medium findings below.**
+**Not fixed here, on purpose:** `handleAddRoomToReservation` also writes `breakfastSelections: {}` while inheriting the **reservation's** `breakfastTotal` onto the new room's subtotal — a separate double-charge defect (the new room is billed for the existing guests' breakfast and has no meal slots of its own). It is a different bug from OCT-C5 and changing that billing behaviour is a separate decision. **The 11 High findings are now also FIXED (2026-10-20, branch `fix/october-audit-highs`, decisions #282–#289) — see §What the 11 High fixes changed below. Still open: the 8 Medium and 6 Low findings below.**
 
 ---
 
@@ -161,9 +161,34 @@ breakfastSelections: {},      // :5553
 
 ---
 
+## What the 11 High fixes changed
+
+**All 11 are FIXED (2026-10-20, branch `fix/october-audit-highs`, decisions #282–#289).**
+
+| ID | Fix | Decision | Regression test |
+|---|---|---|---|
+| **OCT-H1** | The guest balance subtracts the breakfast already inside `totalPrice` before adding the current one. The anchor is the booking's `rateBreakdown.addOns[]` (snapshotted at create, preserved by `rebuildRateBreakdown`) — **not** `booking.breakfastTotal`, which the manage path overwrites on every write. A booking with no rate breakdown has an unknown breakfast component, so the fallback never over-charges. | #282 | `shared/__tests__/oct-h1-breakfast-rate-lines.test.ts` (11, real behavioural) + `guest-app/tests/api/oct-h1-guest-balance.test.ts` (6 pins) |
+| **OCT-H2** | The booking flow's breakfast date list uses the `Z` anchor (shipped with OCT-C4). | #280 | `guest-app/tests/api/oct-c4-calendar-timezone.test.ts` |
+| **OCT-H3** | The "Booking & Holds" form re-syncs from the snapshot — each field only when its SOURCE value actually changed, so a snapshot can no longer clobber an in-progress edit. "No limit" (`Infinity`) renders back as the literal `0`. The two hold-window fields shared the defect and are fixed too. | #284 | `admin-app/src/__tests__/oct-h3-max-stay-sync.test.ts` (8) |
+| **OCT-H4** | The admin booking mapper hydrates `breakfastTotal` / `hasAnyBreakfast` / `revenueAllocation` / `otherAddOnSelections` / `otherAddOnTotal` / `hasAnyOtherAddOns` / `otherAddOnServed`, DERIVING the mirrors with the server's own helpers when the doc carries no explicit flag. | #285 | `admin-app/src/__tests__/oct-h4-admin-booking-mapper.test.ts` (9) |
+| **OCT-H5** | A cleared optional meal field is REMOVED from the object (not left `undefined`), and every settings write strips `undefined`-valued keys as a safety net (`stripUndefinedValues`). | #288 | `shared/__tests__/oct-h5-firestore-payload.test.ts` (12, real behavioural) + `admin-app/src/__tests__/oct-h5-h10-meal-photo.test.ts` (10) |
+| **OCT-H6** | The two missing `collectionGroup` Firestore rules (shipped with OCT-C3). | #279 | `guest-app/tests/api/oct-c3-firestore-rules.test.ts` |
+| **OCT-H7** | The audit helper can now carry a reason AND the cut-off flag; every override path stamps both, so the kitchen list's "Late changes" column counts the case it exists for. | #286 | `guest-app/tests/api/oct-h7-occurred-after-cutoff.test.ts` (8) |
+| **OCT-H8** | The reschedule / cancel paths re-date the add-on selections: out-of-window selections are auto-cancelled, the totals are recomputed, and the refund liabilities the spec requires are opened — with a double-refund guard against the CRL-07 policy refund (the policy refund is a percentage of the COLLECTED money, which already includes the add-ons). | #287 | `shared/__tests__/oct-h8-addon-redate.test.ts` (26, real behavioural) + `guest-app/tests/api/oct-h8-server-wiring.test.ts` (12) |
+| **OCT-H9** | The guest booking page's live VAT preview is gated on the admin's Tax toggle with the same shared helper `PriceBreakdown.tsx` uses. | #283 | `guest-app/tests/api/oct-h9-vat-gate.test.ts` (6) |
+| **OCT-H10** | The meal-photo upload / removal persists the `meals` array immediately, through the same schema validation the Save button uses. The success toast fires only after the row is in Firestore, and the Storage object is deleted only after the row stops referencing it. | #288 | `admin-app/src/__tests__/oct-h5-h10-meal-photo.test.ts` (10) |
+| **OCT-H11** | The MBUX-18 edit sheet traps focus, closes on Escape, restores focus and locks the body scroll. The guest app gains the same primitive the admin app has had since decision #107. | #289 | `guest-app/src/__tests__/oct-h11-edit-stay-sheet-a11y.test.ts` (12) |
+
+**Not fixed here, on purpose:** the add-room / remove-room paths (`handleAddRoomToReservation`) are still not re-dated, and the same double-charge noted above applies. The late-serve flag (`breakfast-mark-served.ts`) is stamped on every serve — the BR-08 late-served email behaviour was left UNCHANGED because changing it would alter when the guest email fires. Both are recorded as open items in `plan/features/BREAKFAST.md`.
+
+**Observed while fixing OCT-H8, NOT fixed (out of the audit's scope):** `handleCancelBooking` has a PRE-EXISTING read-after-write inside its transactions — the loyalty-clawback member read (`transaction.get(clawbackMemberRef)`) and the voucher / corporate-code reads run AFTER the booking's status flip, which contradicts `GOTCHAS.md §Firebase` ("all reads before any writes"). The OCT-H8 re-dating was deliberately placed at the END of each branch so it adds no new read-after-write. Hoisting the clawback read would be a small, safe change, but it would move a shipped MRB-05 contract (`guest-app/tests/api/mrb-05-pr2-loyalty-clawback.test.ts` pins the exact source shape of that read) and touches the rewards path — a separate decision, flagged here for the owner.
+
+---
+
 ## HIGH (11)
 
-### OCT-H1 — The guest balance double-counts breakfast
+### OCT-H1 — The guest balance double-counts breakfast  
+**Status: FIXED (2026-10-20, decision #282).**
 **Anchor:** `guest-app/server/handlers/breakfast-manage.ts:401`
 
 ```ts
@@ -178,7 +203,8 @@ The add-on counterpart (`addons-manage.ts:192`) is correct because `otherAddOnTo
 
 ---
 
-### OCT-H2 — Booking Step 2 shows the wrong breakfast dates in every timezone east of UTC
+### OCT-H2 — Booking Step 2 shows the wrong breakfast dates in every timezone east of UTC  
+**Status: FIXED (2026-10-20, decision #280).**
 **Anchor:** `guest-app/src/pages/BookingPage.tsx:257-264`
 
 ```ts
@@ -199,7 +225,8 @@ TZ=UTC               -> ["2026-10-14","2026-10-15","2026-10-16"]   ✅ (the Z-an
 
 ---
 
-### OCT-H3 — The admin "Maximum stay length" field never round-trips, so a save silently rewrites "unlimited" to 30
+### OCT-H3 — The admin "Maximum stay length" field never round-trips, so a save silently rewrites "unlimited" to 30  
+**Status: FIXED (2026-10-20, decision #284).**
 **Anchor:** `admin-app/src/pages/SettingsPage.tsx:2564-2568` (initializer), `:4200` (the write) · `admin-app/src/context/AdminContext.tsx:5957` (default) vs `:6345` (hydration)
 
 ```ts
@@ -214,7 +241,8 @@ const [maxStayNightsInput, setMaxStayNightsInput] = useState<string>(() =>
 
 ---
 
-### OCT-H4 — The admin booking mapper drops `breakfastTotal`, `hasAnyBreakfast`, `revenueAllocation` and every `otherAddOn*` field
+### OCT-H4 — The admin booking mapper drops `breakfastTotal`, `hasAnyBreakfast`, `revenueAllocation` and every `otherAddOn*` field  
+**Status: FIXED (2026-10-20, decision #285).**
 **Anchor:** `admin-app/src/context/AdminContext.tsx:1733-2047` (the mapper) · type declarations at `:489-503`
 
 The `Booking` type declares `breakfastTotal`, `otherAddOnSelections`, `otherAddOnTotal`, `hasAnyOtherAddOns`, `otherAddOnServed` — and the mapper (an explicit-field object with no `...data` spread) hydrates **none** of them. `breakfastTotal` appears in the mapper range only inside a *comment* (`:1865`); `hasAnyBreakfast`, `revenueAllocation` and every `otherAddOn*` field appear nowhere in it.
@@ -231,7 +259,8 @@ The write path is field-scoped (`updateBookingStatus` writes `...details`, `:271
 
 ---
 
-### OCT-H5 — "Remove image" on a breakfast meal makes every Dining settings save fail
+### OCT-H5 — "Remove image" on a breakfast meal makes every Dining settings save fail  
+**Status: FIXED (2026-10-20, decision #288).**
 **Anchor:** `admin-app/src/pages/SettingsPage.tsx:4498` → `:4510` → `admin-app/src/context/AdminContext.tsx:6381`
 
 ```ts
@@ -254,7 +283,8 @@ parsed keeps key     : true
 
 ---
 
-### OCT-H6 — `breakfastAudit` / `otherAddOnAudit` have no rules, so the client-side audit reads in Reports are denied
+### OCT-H6 — `breakfastAudit` / `otherAddOnAudit` have no rules, so the client-side audit reads in Reports are denied  
+**Status: FIXED (2026-10-20, decision #279).**
 **Anchor:** `admin-app/src/pages/ReportsPage.tsx:497` and `:520` vs `firebase/firestore.rules` (0 blocks)
 
 ```ts
@@ -268,7 +298,8 @@ The rules file **already documents this exact failure and fixes it for a sibling
 
 ---
 
-### OCT-H7 — `occurredAfterCutoff` is never `true` on any override path, so "Late changes" is always empty
+### OCT-H7 — `occurredAfterCutoff` is never `true` on any override path, so "Late changes" is always empty  
+**Status: FIXED (2026-10-20, decision #286).**
 **Anchor:** `guest-app/server/handlers/breakfast-staff-update.ts:471` · `guest-app/server/lib/breakfast-selections.ts:326-330`
 
 `auditBreakfastOp` / `auditOtherAddOnOp` overload one parameter:
@@ -284,7 +315,8 @@ A string can never carry the flag. The staff override passes the reason string (
 
 ---
 
-### OCT-H8 — Reschedule, cancel and extend never re-date or auto-cancel add-on selections
+### OCT-H8 — Reschedule, cancel and extend never re-date or auto-cancel add-on selections  
+**Status: FIXED (2026-10-20, decision #287).**
 **Anchor:** `guest-app/server/handlers/bookings.ts` — `handleCancelBooking` (7031-8023), `handleRescheduleBooking` (11872-12793), `handleExtendStay` (12794-12877) contain **zero** references to `breakfastSelections` / `otherAddOnSelections`
 
 `BREAKFAST.md:418-419` requires both: reschedule "must add a step: any `breakfastSelections[date-*]` whose date falls outside the new date range is auto-cancelled; for paid removals, a refund liability is opened"; cancel "must add a step: any unpaid `breakfastSelections` for future dates is dropped; any paid selections for future dates generate refund liabilities with `category: "breakfast"`."
@@ -293,7 +325,8 @@ A string can never carry the flag. The staff override passes the reason string (
 
 ---
 
-### OCT-H9 — The guest booking page shows an ungated 12% VAT breakdown
+### OCT-H9 — The guest booking page shows an ungated 12% VAT breakdown  
+**Status: FIXED (2026-10-20, decision #283).**
 **Anchor:** `guest-app/src/pages/BookingPage.tsx:5555-5576` vs `guest-app/src/components/PriceBreakdown.tsx:102`
 
 The PriceBreakdown component is correctly gated on `isVatEnabled(vatConfig)` (`:102`) — but `BookingPage.tsx` renders a **second, ungated** copy of the same breakdown in its own price-summary aside:
@@ -308,7 +341,8 @@ const vat = calculateVatBreakdown({ totalPrice: total, seniorDiscountAmount: …
 
 ---
 
-### OCT-H10 — The admin meal-photo upload is not persisted until the admin separately presses Save
+### OCT-H10 — The admin meal-photo upload is not persisted until the admin separately presses Save  
+**Status: FIXED (2026-10-20, decision #288).**
 **Anchor:** `admin-app/src/pages/SettingsPage.tsx:4478` (upload) vs `:4066-4080` (the only writer)
 
 `handleUploadBreakfastMealImage` only mutates local state (`handleUpdateBreakfastMeal(mealId, { imageUrl: result.url })`) and toasts "Meal image uploaded" (`AdminContext.tsx:6935`). The catalog row is written only by the Dining form's own Save button.
@@ -317,7 +351,8 @@ const vat = calculateVatBreakdown({ totalPrice: total, seniorDiscountAmount: …
 
 ---
 
-### OCT-H11 — The MBUX-18 edit sheet declares `aria-modal` with no focus trap, no Escape, no scroll lock
+### OCT-H11 — The MBUX-18 edit sheet declares `aria-modal` with no focus trap, no Escape, no scroll lock  
+**Status: FIXED (2026-10-20, decision #289).**
 **Anchor:** `guest-app/src/components/EditStayDetailsSheet.tsx:93-95`, `:105-107`
 
 The backdrop comment states: *"the guest can hit Escape via the document keydown listener below."* There is **no** document keydown listener in the file, and a repo-wide grep for `keydown`/`Escape` in `guest-app/src` finds only `HomePage.tsx:94-100` (a popover) and a comment in `ManageBreakfastPage.tsx:599`. The panel declares `role="dialog" aria-modal="true"` but has no focus trap, no initial focus, no focus restore, and there is no `document.body.style.overflow` anywhere in the guest app (0 hits).

@@ -84,7 +84,7 @@ import {
   // "Airport transfer" row on a brand-new install.
   AddOnSchema
 } from "@spark-inn/shared/schemas/booking";
-import { BreakfastConfigSchema } from "@spark-inn/shared/schemas/booking";
+import { BreakfastConfigSchema, BreakfastMealSchema } from "@spark-inn/shared/schemas/booking";
 import {
   Settings, Globe, Gift, Coffee, ShoppingBag,
   Save, Landmark, Sparkles, Check, CheckSquare, Square,
@@ -2567,6 +2567,64 @@ export function SettingsPage() {
       : "0"
   );
 
+  // Per OCT-H3 (2026-10-20, decision #282): the three Booking &
+  // Holds inputs above were initialized from `hotelConfig` with
+  // `useState`'s lazy initializer, which only runs on the FIRST
+  // render — BEFORE the Firestore snapshot lands. On a direct
+  // load of `/settings` (F5 / bookmark / shared URL) the fields
+  // were therefore stuck at the pre-snapshot defaults, and the
+  // next save of an UNRELATED field silently rewrote the stored
+  // policy: a hotel that had set the stay cap to "no limit"
+  // (`0`) had it replaced with `30`, with the field still
+  // displaying "30" so there was no signal that anything
+  // changed. The guest site then started refusing 31+ night
+  // stays it previously accepted.
+  //
+  // The fix re-syncs each input from the snapshot, but ONLY when
+  // that field's SOURCE value actually changed since the last
+  // sync. A snapshot that arrives while the admin is mid-typing
+  // therefore cannot clobber the in-progress edit, while the
+  // initial hydration (and any genuine external change) does
+  // land.
+  const holdsFormSyncRef = useRef<{
+    paymentHoldWindowHours: string;
+    inFlowHoldMinutes: string;
+    maxStayNights: string;
+  } | null>(null);
+
+  useEffect(() => {
+    const next = {
+      paymentHoldWindowHours: String(hotelConfig.paymentHoldWindowHours),
+      inFlowHoldMinutes: String(hotelConfig.inFlowHoldMinutes),
+      // `resolveMaxStayNights` maps the stored `0` ("no limit")
+      // to `Infinity`; render it back as the literal `0` the
+      // admin saved so the field round-trips.
+      maxStayNights: Number.isFinite(hotelConfig.maxStayNights)
+        ? String(hotelConfig.maxStayNights)
+        : "0"
+    };
+    const prev = holdsFormSyncRef.current;
+    holdsFormSyncRef.current = next;
+    // First run: the snapshot has not landed yet, so these are
+    // the pre-snapshot defaults the `useState` initializers
+    // already used. Record them WITHOUT touching the inputs so
+    // the real snapshot is treated as a genuine change.
+    if (!prev) return;
+    if (prev.paymentHoldWindowHours !== next.paymentHoldWindowHours) {
+      setPaymentHoldWindowHoursInput(next.paymentHoldWindowHours);
+    }
+    if (prev.inFlowHoldMinutes !== next.inFlowHoldMinutes) {
+      setInFlowHoldMinutesInput(next.inFlowHoldMinutes);
+    }
+    if (prev.maxStayNights !== next.maxStayNights) {
+      setMaxStayNightsInput(next.maxStayNights);
+    }
+  }, [
+    hotelConfig.paymentHoldWindowHours,
+    hotelConfig.inFlowHoldMinutes,
+    hotelConfig.maxStayNights
+  ]);
+
   // `0` = no limit is a LEGAL value here, so this cannot use
   // `clampIntegerInRange` (whose `min` is >= 1 for every other field).
   // Rejects: blank, non-numeric, fractional, negative, and anything
@@ -4481,6 +4539,35 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
   // object is deleted LAST, after the row no longer references it.
   // Reversing either step can leave the guest menu strip pointing at a
   // deleted file — a broken image in front of a paying guest.
+  // Per OCT-H10 (2026-10-20, decision #284): a meal-photo change is
+  // PERSISTED immediately, so the guest-facing catalog never lags
+  // the admin's screen. Before this, the upload only mutated local
+  // state and toasted "Meal image uploaded" — the guest still saw
+  // no photo until the admin separately pressed Save, and
+  // navigating away orphaned the Storage object so the upload
+  // appeared lost.
+  //
+  // Only the `meals` array is written (`updateSettings` merges at
+  // the top level of the doc), so the rest of the Dining form keeps
+  // its own Save semantics — an unsaved cut-off-time edit is never
+  // committed as a side effect of a photo action.
+  const persistBreakfastMeals = async (meals: BreakfastMeal[]) => {
+    const parsed = BreakfastMealSchema.array().safeParse(meals);
+    if (!parsed.success) {
+      const firstIssue = parsed.error.issues[0];
+      toast.error(
+        "Could not save the meal photo",
+        firstIssue?.message ?? "The meal row is invalid — fix it and try again."
+      );
+      return false;
+    }
+    return updateSettings("breakfastConfig", {
+      meals: parsed.data,
+      updatedBy: currentUser?.uid || currentUser?.email || "staff",
+      updatedAt: new Date().toISOString()
+    });
+  };
+
   const handleUploadBreakfastMealImage = async (mealId: string, file: File | undefined) => {
     if (!file) return;
     const previousUrl = breakfastMeals.find((meal) => meal.id === mealId)?.imageUrl;
@@ -4488,9 +4575,18 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
     try {
       const result = await uploadBreakfastMealImage(mealId, file);
       if (result.success && result.url) {
+        // Per OCT-H10: build the next array explicitly (the
+        // `setBreakfastMeals` state update is async, so reading
+        // `breakfastMeals` inside the same tick would still see the
+        // OLD array) and persist it right away.
+        const nextMeals = applyBreakfastMealPatch(breakfastMeals, mealId, { imageUrl: result.url });
         handleUpdateBreakfastMeal(mealId, { imageUrl: result.url });
-        if (previousUrl) {
-          void removeBreakfastMealImage(mealId, previousUrl);
+        const saved = await persistBreakfastMeals(nextMeals);
+        if (saved) {
+          if (previousUrl) {
+            void removeBreakfastMealImage(mealId, previousUrl);
+          }
+          toast.success("Meal image uploaded");
         }
       }
     } finally {
@@ -4508,22 +4604,65 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
   const handleRemoveBreakfastMealImage = async (mealId: string) => {
     const previousUrl = breakfastMeals.find((meal) => meal.id === mealId)?.imageUrl;
     if (!previousUrl) return;
+    // Per OCT-H10: persist the removal immediately, for the same
+    // reason as the upload. The Storage object is deleted only
+    // AFTER the row no longer references it, so the guest menu can
+    // never point at a deleted file.
+    const nextMeals = applyBreakfastMealPatch(breakfastMeals, mealId, { imageUrl: undefined });
     handleUpdateBreakfastMeal(mealId, { imageUrl: undefined });
+    const saved = await persistBreakfastMeals(nextMeals);
+    if (!saved) return;
     await removeBreakfastMealImage(mealId, previousUrl);
     toast.success("Meal image removed");
   };
+
+  // Per OCT-H5 (2026-10-20, decision #283) + OCT-H10 (decision
+  // #284): the ONE place a meal-row patch is applied. The inline
+  // editors, the photo upload and the photo removal all route
+  // through it, so the `undefined`-key rule is enforced identically
+  // on every path.
+  //
+  // WHY THE RULE EXISTS: object spread copies own enumerable keys
+  // INCLUDING undefined-valued ones, so a `{ imageUrl: undefined }`
+  // patch left the meal object OWNING an `imageUrl` key with the
+  // value `undefined`. Zod's `.optional()` validates the VALUE, not
+  // the key's presence, so the bad payload passed schema validation
+  // and then threw `Unsupported field value: undefined` at the
+  // Firestore SDK boundary — which made EVERY Dining settings save
+  // fail, not just the image removal.
+  //
+  // The fix drops undefined-valued keys from the patch so the key is
+  // simply ABSENT, and — when the patch explicitly cleared a
+  // previously-set optional field — removes the key from the merged
+  // meal so neither the stale value nor an unwritable `undefined`
+  // can survive.
+  const applyBreakfastMealPatch = (
+    meals: BreakfastMeal[],
+    id: string,
+    patch: Partial<Omit<BreakfastMeal, "id" | "createdAt">>
+  ): BreakfastMeal[] =>
+    meals.map((meal) => {
+      if (meal.id !== id) return meal;
+      const patchKeys = Object.keys(patch);
+      const cleanPatch = Object.fromEntries(
+        Object.entries(patch).filter(([, value]) => value !== undefined)
+      ) as Partial<Omit<BreakfastMeal, "id" | "createdAt">>;
+      const next = { ...meal, ...cleanPatch, updatedAt: new Date().toISOString() };
+      if (patchKeys.includes("imageUrl") && cleanPatch.imageUrl === undefined) {
+        // The photo was removed: the key must be GONE (so the
+        // rewritten `meals` array element has no `imageUrl`), not
+        // left as `undefined` (unwritable) and not left holding the
+        // old URL (which would point at a deleted Storage object).
+        delete (next as { imageUrl?: string }).imageUrl;
+      }
+      return next;
+    });
 
   const handleUpdateBreakfastMeal = (
     id: string,
     patch: Partial<Omit<BreakfastMeal, "id" | "createdAt">>
   ) => {
-    setBreakfastMeals((prev) =>
-      prev.map((meal) =>
-        meal.id === id
-          ? { ...meal, ...patch, updatedAt: new Date().toISOString() }
-          : meal
-      )
-    );
+    setBreakfastMeals((prev) => applyBreakfastMealPatch(prev, id, patch));
   };
 
   const handleDeleteBreakfastMeal = (id: string) => {
