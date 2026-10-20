@@ -744,6 +744,12 @@ function sumBilledAddToBillOrders(snapshot: any): number {
 interface TransactionalFolioSnapshot {
   reservationId: string;
   totalPrice: number;
+  /**
+   * Per OCT-FOL-01 (2026-10-20, decision #298): the BR-12
+   * "other add-ons" total included in the folio. NOT inside
+   * `totalPrice` (BR-12 decision 2), but part of the balance.
+   */
+  otherAddOnTotal: number;
   collectedTotal: number;
   incidentalTotal: number;
   addToBillTotal: number;
@@ -785,15 +791,24 @@ async function readTransactionalFolioSnapshot(input: {
     const collectedTotal = sumLedgerAmounts(paymentsSnapshot);
     const incidentalTotal = sumLedgerAmounts(chargesSnapshot);
     const addToBillTotal = sumBilledAddToBillOrders(storeOrdersSnapshot);
+    // Per OCT-FOL-01 (2026-10-20, decision #298): the BR-12 other
+    // add-ons are NOT inside `totalPrice` but ARE part of the
+    // balance, so they join the folio total here.
+    const otherAddOnTotal = Math.max(
+      0,
+      Number((bookingData as any).otherAddOnTotal) || 0
+    );
     const totals = computeServerFolioTotals({
       totalPrice: Number(bookingData.totalPrice) || 0,
       incidentalTotal,
       addToBillTotal,
-      collectedTotal
+      collectedTotal,
+      otherAddOnTotal
     });
     return {
       reservationId: "",
       totalPrice: Number(bookingData.totalPrice) || 0,
+      otherAddOnTotal,
       collectedTotal,
       incidentalTotal,
       addToBillTotal,
@@ -864,16 +879,30 @@ async function readTransactionalFolioSnapshot(input: {
     sumLedgerAmounts(reservationChargesSnapshot)
     + transitionalIncidentalTotal;
   const totalPrice = Number(reservationDoc.data()?.totalPrice) || 0;
+  // Per OCT-FOL-01 (2026-10-20, decision #298): the reservation's
+  // other add-ons are the SUM of its child bookings' — the same
+  // shape as `totalPrice` (the reservation header's total IS the
+  // sum of the children's `totalPrice`). The children's
+  // `otherAddOnTotal` is NOT inside that total, so without this
+  // term a reservation with an unpaid airport transfer showed a
+  // ₱0 balance.
+  const otherAddOnTotal = childBookingsSnapshot.docs.reduce(
+    (sum: number, docSnap: any) =>
+      sum + Math.max(0, Number(docSnap.data()?.otherAddOnTotal) || 0),
+    0
+  );
   const totals = computeServerFolioTotals({
     totalPrice,
     incidentalTotal,
     addToBillTotal,
-    collectedTotal
+    collectedTotal,
+    otherAddOnTotal
   });
 
   return {
     reservationId: bookingReservationId,
     totalPrice,
+    otherAddOnTotal,
     collectedTotal,
     incidentalTotal,
     addToBillTotal,

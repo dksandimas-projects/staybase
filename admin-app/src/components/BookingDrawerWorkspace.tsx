@@ -113,6 +113,22 @@ interface BookingDrawerWorkspaceHeaderProps {
   onSectionChange: (section: BookingDrawerSection) => void;
   totalPaid: number;
   balance: number;
+  /**
+   * Per OCT-FOL-01 (2026-10-20, decision #298): the folio's grand
+   * total for this booking — the base the `balance` is derived from
+   * (room + breakfast + extra bed + other add-ons + store charges +
+   * incidental charges).
+   *
+   * The strip's "Total" metric used to read `booking.totalPrice`,
+   * which is NOT the balance's base: the folio also carries the
+   * other add-ons and the extras, and for a multi-room reservation
+   * `totalPrice` is the CHILD's while the balance is the
+   * RESERVATION's. So the three strip metrics (Total / Paid /
+   * Balance) did not reconcile. The parent passes the folio's grand
+   * total; this component falls back to `booking.totalPrice` when
+   * it is not supplied.
+   */
+  folioTotal?: number | null;
   missingCheckInItems: string[];
   // Per WPM-06 (2026-07-31): the header used to render the raw
   // `booking.paymentMethod` key (e.g. "gcash" instead of "GCash"). The
@@ -167,6 +183,7 @@ export function BookingDrawerWorkspaceHeader({
   onSectionChange,
   totalPaid,
   balance,
+  folioTotal,
   missingCheckInItems,
   paymentMethodLabel,
   latestPaymentReference
@@ -256,7 +273,7 @@ export function BookingDrawerWorkspaceHeader({
           </div>
 
           <div className="grid grid-cols-3 gap-2 lg:min-w-[320px]">
-            <SummaryMetric label="Total" value={formatPrice(booking.totalPrice)} />
+            <SummaryMetric label="Total" value={formatPrice(folioTotal ?? booking.totalPrice)} />
             <SummaryMetric label="Paid" value={formatPrice(totalPaid)} />
             <SummaryMetric
               label={balance > 0 ? "Balance" : balance < 0 ? "Overpaid" : "Settled"}

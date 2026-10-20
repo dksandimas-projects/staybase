@@ -969,7 +969,7 @@ export function ReportsPage() {
         const bookingStoreTotal = storeOrders
           .filter((storeOrder) => storeOrder.bookingId === booking.id && storeOrder.paymentMethod === "add-to-bill" && storeOrder.status === "delivered" && storeOrder.isBilled)
           .reduce((sum, storeOrder) => sum + storeOrder.totalAmount, 0);
-        const balance = Math.max(Number(booking.totalPrice || 0) + bookingCharges + bookingStoreTotal - bookingPayments, 0);
+        const balance = Math.max(Number(booking.totalPrice || 0) + Number(booking.otherAddOnTotal || 0) + bookingCharges + bookingStoreTotal - bookingPayments, 0);
         if (balance <= 0) return summary;
         summary.count += 1;
         summary.total += Math.min(Number(order.totalAmount || 0), balance);
@@ -1028,7 +1028,13 @@ export function ReportsPage() {
           .filter((order) => order.bookingId === booking.id && order.paymentMethod === "add-to-bill" && order.status === "delivered" && order.isBilled)
           .reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
         const collected = payments.filter((payment) => payment.bookingId === booking.id).reduce((sum, payment) => sum + payment.amount, 0);
-        const billed = Number(booking.totalPrice || 0) + bookingCharges + addToBillTotal;
+        // Per OCT-FOL-01 (2026-10-20, decision #298): the BR-12
+        // other add-ons are NOT inside `booking.totalPrice` (BR-12
+        // decision 2 — "added on top of it for the balance"), so the
+        // receivables report has to add them explicitly. Without the
+        // term a guest with an unpaid airport transfer did not
+        // appear as owing the hotel anything.
+        const billed = Number(booking.totalPrice || 0) + Number(booking.otherAddOnTotal || 0) + bookingCharges + addToBillTotal;
         const outstanding = Math.max(billed - collected, 0);
         const checkOut = toDate(booking.checkOut);
         const ageDays = booking.status === "checked-out" && checkOut
@@ -2221,7 +2227,7 @@ export function ReportsPage() {
       const addToBillTotal = storeOrders
         .filter((o) => o.bookingId === b.id && o.paymentMethod === "add-to-bill" && o.status === "delivered" && o.isBilled)
         .reduce((sum, o) => sum + Number(o.totalAmount || 0), 0);
-      const billedTotalAmount = b.totalPrice + bookingCharges + addToBillTotal;
+      const billedTotalAmount = b.totalPrice + Number(b.otherAddOnTotal || 0) + bookingCharges + addToBillTotal;
       const outstanding = Math.max(billedTotalAmount - collected, 0);
 
       return [

@@ -18,13 +18,13 @@
 
 4. **Separate Firestore collection `addOns/{addOnId}`** — NOT a sub-field of `breakfastConfig`. The new admin Settings tab manages the catalog. Pre-seeded with "Airport transfer" on first load if empty.
 
-5. **Unified `markRefundPaid` helper gains the `"otherAddOn"` category** — the BR-06 helper now handles three categories (`"cancellation"`, `"breakfast"`, `"otherAddOn"`). The same UPDATE-existing-pending-entry path applies; the audit row lands in `otherAddOnAudit`.
+5. **Unified `markRefundPaid` helper gains the `"otherAddOn"` category** — the BR-06 helper now handles three categories (`"cancellation"`, `"breakfast"`, `"otherAddOn"`), on the same UPDATE-existing-pending-entry path; the audit row lands in `otherAddOnAudit`.
 
-6. **No generic-add-on abstract base class** — premature abstraction is rejected per design. The BR-13 refactor will pull common patterns from the two add-on paths (breakfast + other add-on) when the second **type** lands, without forcing a v1 schema migration.
+6. **No generic-add-on abstract base class** — premature abstraction is rejected per design. The BR-13 refactor will pull common patterns from the two add-on paths when the second **type** lands, without forcing a v1 schema migration.
 
 7. **Zero new Vercel functions** — the 6 new routes register in the existing catch-all `apiRouter.ts` (the Hobby-plan 12-function cap stays).
 
-8. **No kitchen list for other add-ons** — add-ons are "served at check-in / by-arrival". The `mark-served` action stamps `otherAddOnServed` + `otherAddOnAudit` for the booking-drawer "Served at HH:MM" badge + receipt, but no printable list view ships in v1.
+8. **No kitchen list for other add-ons** — add-ons are "served at check-in / by-arrival". The `mark-served` action stamps `otherAddOnServed` + `otherAddOnAudit` for the drawer badge + receipt, but no printable list view ships in v1.
 
 ---
 
@@ -59,30 +59,25 @@ match /addOns/{addOnId} {
 
 The guest app never reads this collection directly — the public catalog goes through `GET /api/bookings/addons/config` (Admin SDK, rules not applied) — so **no public read** is granted.
 
-The collection shipped in BR-12 (2026-10-15) **without** a rule block. Firestore denies unmatched paths by default, so every admin read + write failed with `PERMISSION_DENIED`, and because each error was swallowed the tab rendered its "No add-ons yet" empty state: the hotel could not see, price, enable/disable, create or delete any other add-on, while the guest path kept selling the read-only pre-seed. The same commit also introduced the top-level `auditLogs` collection, which likewise needed a rule block (admin read, staff create, append-only).
+The collection shipped in BR-12 (2026-10-15) **without** a rule block. Firestore denies unmatched paths by default, so every admin read + write failed with `PERMISSION_DENIED`, and because each error was swallowed the tab rendered its "No add-ons yet" empty state: the hotel could not see, price, enable/disable, create or delete any other add-on, while the guest path kept selling the read-only pre-seed. The same commit introduced the top-level `auditLogs` collection, which likewise needed a rule block (admin read, staff create, append-only).
 
 **Price authority (OCT-C2, 2026-10-20; decision #278) — the SERVER owns the snapshot.**
 `nameSnapshot`, `priceSnapshot`, `unitSnapshot` and `cutoffHoursBeforeCheckInSnapshot` on a selection entry are a snapshot of the **live `addOns` catalog** taken when the order is placed. They are **never** read from the request body. The wire fields are accepted-and-ignored (so a cached guest bundle keeps working) and are documented as ADVISORY ONLY.
 
-Rationale: the add op read `op.priceSnapshot ?? liveAddOn.price` — the `??` fallback was DEAD CODE because the client always sends the field, so a guest could buy a ₱500 airport transfer for ₱1, and the tampered price was snapshotted permanently. The same op preferred the client's `cutoffHoursBeforeCheckInSnapshot`, which is the lock window — a client could widen its own cut-off to 168 hours.
+Rationale: the add op read `op.priceSnapshot ?? liveAddOn.price` — the `??` fallback was DEAD CODE because the client always sends the field, so a guest could buy a ₱500 airport transfer for ₱1 and the tampered price was snapshotted permanently. The same op preferred the client's `cutoffHoursBeforeCheckInSnapshot` — the lock window — so a client could widen its own cut-off to 168 hours.
 
 A **CHANGE** op may only alter the `quantity`. The name / price / unit stay the entry's EXISTING snapshot: the guest keeps the price they ordered at even if the admin changes the catalog price afterwards. A **NEW** order takes the current catalog price.
 
 **Walk-in parity (OCT-C5, 2026-10-20; decision #281).** A walk-in booking rebuilds the desk's selected add-ons from the live catalog (read inside the transaction, before any write) and persists them + `otherAddOnTotal` + `hasAnyOtherAddOns` on the booking doc. The catalog falls back to the read-only `AIRPORT_TRANSFER_PRESEED` when the collection is empty, so the walk-in grid (which renders from the public config endpoint) and the server validation always agree. A disabled add-on is refused with a 400.
 
-**Guest booking parity (OCT-M4, 2026-10-20; decision #297).** The GUEST booking flow now has the Step 2 grid the spec always described. Before this, `BookingPage.tsx` contained ZERO occurrences of "otherAddOn" — a guest could not order an airport transfer at booking time at all, so the spec's headline BR-12 flow was unreachable and other add-ons were only purchasable post-booking at `/my-booking/addons`.
+**Guest booking parity (OCT-M4, 2026-10-20; decision #297).** The GUEST booking flow now has the Step 2 grid this spec always described. Before it, `BookingPage.tsx` contained ZERO occurrences of "otherAddOn" — a guest could not order an airport transfer at booking time at all, so the headline BR-12 flow was unreachable and other add-ons were only purchasable post-booking at `/my-booking/addons`.
 
-- **The grid** renders below `renderBreakfastSection` (per this spec): one card per enabled add-on × one quantity input per service date, clamped to the booking's guest count. The quantity is PER DAY × PER ADD-ON (decision 3 above) — NOT the per-guest × per-date slot shape breakfast uses. The catalog comes from the PUBLIC endpoint `GET /api/bookings/addons/config`; the guest app never reads the `addOns` collection directly. The section renders NOTHING when the catalog is empty or the hotel has taken other add-ons off sale (OCT-M1 below) — an empty grid under a heading reads as a broken page.
-- **The BR-10 dual-button pattern covers the UNION.** The Step 2 CTA's count is the breakfast slots + the other-add-on rows, and the figure is `breakfastTotal + otherAddOnTotal`. The "without add-ons" branch therefore means "without add-ons of ANY kind".
-- **The create path rebuilds from the live catalog** (the OCT-C2 price authority), refuses an add-on that is not on sale with a 400, clamps the quantity to the guest count, and writes `otherAddOnSelections` + `otherAddOnTotal` + `hasAnyOtherAddOns` — the SAME additive fields the walk-in path writes.
-- **The other add-ons are NOT inside `totalPrice`** (decision 2 above). They are added on top of it for the balance, exactly like the walk-in and the post-booking purchase. The Step 2 grid says so in one line so the guest is not surprised that the transfer is not on the online room bill.
+- **The grid** renders below `renderBreakfastSection`: one card per enabled add-on × one quantity input per service date, clamped to the guest count. The quantity is PER DAY × PER ADD-ON (decision 3 above) — NOT the per-guest × per-date slot shape breakfast uses. The catalog comes from the PUBLIC endpoint `GET /api/bookings/addons/config`; the guest app never reads the `addOns` collection directly. The section renders NOTHING when the catalog is empty or the hotel has taken other add-ons off sale (OCT-M1 below) — an empty grid under a heading reads as a broken page.
+- **The BR-10 dual-button pattern covers the UNION.** The CTA's count is the breakfast slots + the other-add-on rows, the figure is `breakfastTotal + otherAddOnTotal`. The "without add-ons" branch means "without add-ons of ANY kind".
+- **The create path rebuilds from the live catalog** (the OCT-C2 price authority), refuses an add-on that is not on sale with a 400, clamps the quantity, and writes `otherAddOnSelections` + `otherAddOnTotal` + `hasAnyOtherAddOns` — the SAME additive fields the walk-in path writes.
+- **The other add-ons are NOT inside `totalPrice`** (decision 2 above) — they are added on top of it for the balance, exactly like the walk-in and the post-booking purchase. The grid says so in one line so the guest is not surprised the transfer is not on the online room bill.
 
-**Hotel-wide master switch (OCT-M1, 2026-10-20; decision #295).** The Settings → Other Add-Ons tab's hotel-wide "Add-ons enabled" toggle is now REAL. It persists to `settings/hotelConfig.otherAddOnsEnabled` and is read by `guest-app/server/lib/otherAddOns-settings.ts` — the single reader. When it is off:
-
-- `GET /api/bookings/addons/config` returns an EMPTY catalog plus `otherAddOnsEnabled: false`, so the guest Step 2 grid disappears and the staff drawer has nothing to add from.
-- The guest Manage page shows an empty catalog.
-- The guest save path (`POST /api/bookings/addons/manage/save`) refuses the order with a 400 — without this the catalog would be hidden but a direct POST could still buy one.
-- The STAFF path stays open on purpose: the front desk recording an add-on a guest asked for at the desk is an operational override.
+**Hotel-wide master switch (OCT-M1, 2026-10-20; decision #295).** The Settings → Other Add-Ons tab's hotel-wide "Add-ons enabled" toggle is now REAL: it persists to `settings/hotelConfig.otherAddOnsEnabled` and is read by `guest-app/server/lib/otherAddOns-settings.ts` (the single reader). When off, the public catalog endpoint returns an EMPTY catalog + `otherAddOnsEnabled: false` (so the guest Step 2 grid disappears and the staff drawer has nothing to add from), the guest Manage page shows an empty catalog, and the guest save path refuses the order with a 400 — without that last gate the catalog would be hidden but a direct POST could still buy one. The STAFF path stays open on purpose: the front desk recording an add-on a guest asked for at the desk is an operational override.
 
 **Only an explicit `false` disables the catalog.** A settings doc written before OCT-M1 has no `otherAddOnsEnabled` field and hydrates to `true`, so a hotel's revenue stream is never silently switched off by a missing field.
 
@@ -95,6 +90,28 @@ The cut-off is `cutoffHoursBeforeCheckIn` hours before the **BOOKING's check-in 
 ### Read-only bookings (OCT-M3, 2026-10-20; decision #291)
 
 A `checked-out` or `cancelled` booking is NOT editable — the guest save path, the staff add/remove path and the mark-served path all refuse it through ONE shared rule (`isOtherAddOnBookingMutable`), so the three can never drift apart. `checked-in` stays mutable: a guest can still buy a transfer on arrival.
+
+### The other add-ons are part of the BALANCE (OCT-FOL-01, 2026-10-20; decision #298)
+
+Decision 2 above says the other add-ons are "added on top of it [the room bill] for the balance". The implementation now matches that sentence literally:
+
+```
+folio grand total = booking.totalPrice   // the room bill (breakfast + extra bed included)
+                   + otherAddOnTotal     // ← BR-12 other add-ons (NOT inside totalPrice)
+                   + storeTotal          // add-to-bill store orders
+                   + chargesTotal        // incidental charges
+folio balance     = grand total − paymentsTotal
+```
+
+`computeBookingFolio` (admin) + `computeServerFolioTotals` (server) both take an optional `otherAddOnTotal` and add the term. For a multi-room reservation the value is the SUM of the children's — the same shape as the reservation header's `totalPrice`.
+
+**Before this the balance ignored the add-ons entirely.** A booking with a ₱2,000 airport transfer the guest had not paid for showed a **₱0 balance** — the hotel was owed the money and every balance surface said the guest was settled. The guest's own Manage page had always computed it correctly, so the guest and the desk disagreed about the same booking.
+
+**What now includes them:** the admin drawer folio, the receipt PDF, the verify-payment / confirm-with-balance / checkout paths, the admin table's payment-state filter, and the Reports → Receivables + Collections balances.
+
+**Two changes keep the numbers from contradicting each other:** the payment-state filter now uses the FOLIO's denominator (`folio.grandTotal`) instead of `booking.totalPrice` (already inconsistent about store + incidental charges; with the add-ons it would have called a booking with an unpaid transfer "paid" while the drawer showed a balance); and the folio breakdown + receipt PDF **itemise** an "Other add-ons" line so the lines add up to the total beneath them (the receipt's "Folio Charges" section now also prints for a booking that has only other add-ons).
+
+**What deliberately still shows the ROOM BILL:** the bookings table's "Total" column + the reservation "due" pill (they show what was BOOKED online, and MRB-12 decision #179 pins the reservation row's balance to `header.totalPrice − paidAmount` so a filtered child cannot drop from the total); the `fullyPaid` transition in the payment handlers (that settles the ROOM bill, consistently with the store + incidental charges); and the guest booking email's "Total Amount Due" (the amount payable ONLINE — the other add-ons are settled at the property, and the guest's Manage page is where that balance lives).
 
 ### Booking extensions (additive — BR-08 breakfast fields FROZEN)
 
@@ -187,7 +204,7 @@ The helper computes `cutoffAt` even when locked (so the UI can render a "would-b
 
 6 new route handlers — all registered in `guest-app/server/apiRouter.ts`:
 
-1. **`GET /api/bookings/addons/config`** — public; returns the hotel's enabled add-ons catalog (read through `addOns` where `isEnabled === true`). Falls back to the pre-seed row if the collection is empty. Cached 60s. Rate-limited 60/min/IP.
+1. **`GET /api/bookings/addons/config`** — public; returns the hotel's enabled add-ons catalog (read through `addOns` where `isEnabled === true`), falling back to the pre-seed row if the collection is empty. Cached 60s. Also returns `otherAddOnsEnabled` — the hotel-wide master switch (OCT-M1, decision #295); when it is off the catalog is EMPTY. Rate-limited 60/min/IP.
 
 2. **`GET /api/bookings/addons/manage?ref=…&token=…`** — guest manage read; returns booking + per-add-on lock states + the enabled catalog + the persisted `otherAddOnSelections` / `otherAddOnServed`. Lookup-token gated. Rate-limited 10/min/IP.
 
@@ -261,9 +278,8 @@ Mirrors the breakfast tab's read pattern. Shows per-day selections + per-add-on 
 
 ## Email + PDF + Receipt
 
-- `buildReservationEmailView` extends with an "Other Add-Ons" block below the breakfast block
-- PDF receipt mirrors the breakfast per-day × per-guest breakdown
-- **No new email templates for v1** — the existing "Confirmation" / "Update" / "Refund paid" templates get an additional paragraph; the dedicated add-on email template is a follow-up if needed
+- `buildReservationEmailView` extends with an "Other Add-Ons" block below the breakfast block; the PDF receipt itemises an "Other add-ons" line in the Folio Charges section (OCT-FOL-01, decision #298)
+- **No new email templates for v1** — the existing "Confirmation" / "Update" / "Refund paid" templates get an extra paragraph; a dedicated add-on template is a follow-up if needed
 
 ---
 
@@ -272,11 +288,11 @@ Mirrors the breakfast tab's read pattern. Shows per-day selections + per-add-on 
 | Case | Behavior |
 |---|---|
 | Catalog empty | Pre-seed falls back to `AIRPORT_TRANSFER_PRESEED` (read-only). The admin's first Settings save promotes it to a real doc. |
-| Booking checked-out / cancelled | Both guest and staff update endpoints reject with 400 "Booking is read-only." Per OCT-M3 (2026-10-20, decision #291) the rule lives in ONE shared helper (`isOtherAddOnBookingMutable`) used by the guest save path, the staff add/remove path AND the mark-served path — the guest path previously had NO check at all. The comparison is case-insensitive, so a hand-edited `"Cancelled"` doc still refuses. |
+| Booking checked-out / cancelled | Both guest + staff update endpoints reject with 400 "Booking is read-only." Per OCT-M3 (decision #291) ONE shared helper (`isOtherAddOnBookingMutable`) covers the guest save path, the staff path AND mark-served — the guest path previously had NO check. The comparison is case-insensitive. |
 | Add-on disabled in catalog | `addons-disabled` reason — every date is locked. |
-| Hotel-wide "Add-ons enabled" switch OFF | Per OCT-M1 (2026-10-20, decision #295): the public catalog endpoint returns an empty catalog + `otherAddOnsEnabled: false`; the guest Manage page shows an empty catalog; the guest save path refuses the order with a 400. The STAFF path stays open (front-desk override). |
-| Guest books with an add-on, then the hotel disables it | Per OCT-M4 (2026-10-20, decision #297): the create path rebuilds from the live catalog and refuses an add-on that is not on sale with a 400 ("One of the selected add-ons is no longer available. Please refresh and try again."). The guest returns to Step 2, drops it and resubmits. |
-| Cut-off passed | `cutoff-passed` reason — the lock is per ADD-ON (anchored on the booking's check-in for every date), not per date. Per OCT-M5 (2026-10-20, decision #292) the anchor is the booking's check-in; the old per-service-date anchor slid forward a day per row. |
+| Hotel-wide "Add-ons enabled" switch OFF | Per OCT-M1 (decision #295): empty catalog on the public endpoint + the guest Manage page; the guest save path refuses with a 400. The STAFF path stays open. |
+| Guest books with an add-on, then the hotel disables it | Per OCT-M4 (decision #297): the create path rebuilds from the live catalog and refuses an add-on that is not on sale with a 400. The guest returns to Step 2, drops it and resubmits. |
+| Cut-off passed | `cutoff-passed` reason — the lock is per ADD-ON (anchored on the booking's check-in for every date), not per date. Per OCT-M5 (decision #292) the anchor is the booking's check-in; the old per-service-date anchor slid forward a day per row. |
 | Past cut-off + staff write | Allowed only with `overrideReason` (≥8 chars). Audit row stamped with `action: "override-*"`. |
 | Quantity > 50 | Zod schema rejects. |
 | `clientBatchId` replay within 60s | Returns prior result without re-applying. |
@@ -301,35 +317,21 @@ Back-compat: pre-BR-12 bookings have no `otherAddOnSelections`. The guest Manage
 
 ## Open Items
 
-1. ✅ **Email template dedicated to other add-on refund paid** — the BR-12 v1 piggy-backs on the existing breakfast `mark-refund-paid` email copy. A dedicated `add-on-refund-paid` template is a follow-up if operations finds the conflation confusing. *(Follow-up unchanged; intentionally deferred per the BR-12 spec.)*
+1. ✅ **Email template dedicated to other add-on refund paid** — BR-12 v1 piggy-backs on the existing breakfast `mark-refund-paid` copy. A dedicated `add-on-refund-paid` template is a follow-up if operations finds the conflation confusing. *(Intentionally deferred per the BR-12 spec.)*
 
-2. ✅ **Walk-in modal + calendar-create modal mirror** — BR-12.1 (2026-10-15, decision #247) ships the `WalkinOtherAddOnGrid` parallel to `WalkinBreakfastGrid` and mounts it in both the walk-in modal AND the calendar-create modal Step 2.
+2. ✅ **Walk-in modal + calendar-create modal mirror** — BR-12.1 (decision #247) ships the `WalkinOtherAddOnGrid` parallel to `WalkinBreakfastGrid` and mounts it in both the walk-in modal AND the calendar-create modal Step 2.
 
-3. ✅ **Hotel-wide `otherAddOnCutoffsEnabled` toggle** — mirrors BR-10's `cutoffsEnabled`. Skipped for BR-12 v1 because the per-add-on `isEnabled` switch is operationally equivalent for v1. The BR-13 refactor may add the toggle when a second add-on **type** (seaport) lands with its own semantics. *(BR-12.1 ships the Settings tab's "Add-ons enabled" UI affordance as a v1 placeholder; the underlying helper still returns `[]` on an empty catalog. Persisting the toggle to `settings/hotelConfig` is a follow-up.)*
+3. ✅ **Hotel-wide `otherAddOnCutoffsEnabled` toggle** — mirrors BR-10's `cutoffsEnabled`. Skipped for BR-12 v1 because the per-add-on `isEnabled` switch is operationally equivalent for v1. The BR-13 refactor may add the toggle when a second add-on **type** (seaport) lands with its own semantics. *(The Settings tab's "Add-ons enabled" affordance shipped as a v1 placeholder in BR-12.1; **OCT-M1 (decision #295) made it real** — it persists to `settings/hotelConfig.otherAddOnsEnabled` and gates the public catalog endpoint, the guest Manage page and the guest save path. See §Hotel-wide master switch above.)*
 
-4. ✅ **Reports → Sales → Add-Ons sub-tab** — BR-12.1 (2026-10-15, decision #247) ships the new sub-tab with 5 metrics (total selections, total revenue, top add-ons, late-change count, pending refund liability) + a top-add-ons bar chart + the per-booking detail table.
+4. ✅ **Reports → Sales → Add-Ons sub-tab** — BR-12.1 (decision #247) ships the new sub-tab with 5 metrics (total selections, total revenue, top add-ons, late-change count, pending refund liability) + a top-add-ons bar chart + the per-booking detail table.
 
-5. ✅ **Admin edit UI for individual selections** — BR-12.1 (2026-10-15, decision #247) replaces the BR-12 read-only booking-drawer tab with the full edit UI: per-day × per-add-on grid with quantity inputs + add row + remove + locked-date badges + override modal + Save changes button. The drawer now writes through `/api/bookings/addons/staff-update`.
+5. ✅ **Admin edit UI for individual selections** — BR-12.1 (decision #247) replaces the BR-12 read-only booking-drawer tab with the full edit UI: per-day × per-add-on grid with quantity inputs + add row + remove + locked-date badges + override modal + Save changes button, writing through `/api/bookings/addons/staff-update`.
 
 ---
 
 ## Implementation Order
 
-The BR-12 build ships in a single `feat(breakfast): BR-12` commit. The following implementation order was followed:
-
-| Step | Description | Files |
-|---|---|---|
-| BR-12a | Shared types + Booking interface | `shared/types/index.ts` |
-| BR-12b | Shared helpers (cutoff, total, normalize) | `shared/utils/otherAddOn*.ts`, `shared/utils/addOns.ts` |
-| BR-12c | Shared Zod schemas | `shared/schemas/booking.ts` |
-| BR-12d | Server lib (assertions, audit, refund-liability writer) | `guest-app/server/lib/otherAddOn-selections.ts` |
-| BR-12e | Unified refunds helper extension | `guest-app/server/lib/refunds.ts` |
-| BR-12f | Server handlers (5 routes) | `guest-app/server/handlers/addons-*.ts` |
-| BR-12g | apiRouter wiring | `guest-app/server/apiRouter.ts` |
-| BR-12h | Guest Manage Other Add-Ons page + App route | `guest-app/src/pages/ManageOtherAddOnsPage.tsx`, `guest-app/src/App.tsx` |
-| BR-12i | Booking drawer Other Add-Ons tab + AdminContext extension | `admin-app/src/components/BookingDrawerWorkspace.tsx`, `admin-app/src/context/AdminContext.tsx`, `admin-app/src/pages/BookingsPage.tsx` |
-| BR-12j | Tests (5 files, ~108 tripwires) | `shared/__tests__/br-12-*.test.ts`, `guest-app/tests/api/br-12-*.test.ts` |
-| BR-12k | Spec MD + decision entry + ROADMAP update | `plan/features/OTHER-ADD-ONS.md`, `plan/docs/DECISIONS-FEATURES.md` (#245), `plan/project/ROADMAP.md` |
+The BR-12 build shipped in a single `feat(breakfast): BR-12` commit, in this order: shared types + helpers + schemas → server lib (assertions / audit / refund-liability writer) → the 5 server handlers + apiRouter wiring → the guest Manage Other Add-Ons page + the booking-drawer tab → tests → this spec + decision entry #245 + the ROADMAP update. The per-step file map is in `plan/docs/DECISIONS-FEATURES.md` #245.
 
 The BR-13 refactor (when a second add-on **type** — seaport — lands) will extract the common patterns into a shared abstraction. This is the day BR-12's flexible-enough catalog pays off — the BR-13 refactor is a non-breaking refactor, not a rewrite.
 
@@ -346,7 +348,7 @@ The BR-13 refactor (when a second add-on **type** — seaport — lands) will ex
 
 ## Rejected Alternatives
 
-**(A)** Generic-add-on abstract base class with `breakfast: BreakfastSelections` + `seaport: OtherAddOnSelections` discriminated union on the `Booking` interface — premature abstraction. The BR-13 refactor will pull the common patterns when a second add-on TYPE (seaport) lands, not before.
+**(A)** Generic-add-on abstract base class with a `breakfast` / `seaport` discriminated union on the `Booking` interface — premature abstraction. The BR-13 refactor will pull the common patterns when a second add-on TYPE (seaport) lands, not before.
 
 **(B)** Hotel-wide `otherAddOnCutoffsEnabled` toggle for v1 — operationally redundant with the per-add-on `isEnabled` switch. The BR-13 refactor may add the toggle if operations asks for it.
 
@@ -354,7 +356,7 @@ The BR-13 refactor (when a second add-on **type** — seaport — lands) will ex
 
 **(D)** Add-on email template dedicated to the `mark-refund-paid` action — the v1 piggy-back on the existing breakfast refund-paid email copy is operationally acceptable. A dedicated template is a follow-up.
 
-**(E)** Walk-in modal Step 2 mirror (`WalkinOtherAddOnGrid`) — out of scope for v1. The walk-in flow has a different UX (staff-curated, not guest-curated) and the BR-12 v1 focuses on the public + guest-manage + staff-drawer surfaces.
+**(E)** Walk-in modal Step 2 mirror (`WalkinOtherAddOnGrid`) — out of scope for BR-12 v1 (the walk-in flow is staff-curated); BR-12.1 later shipped it in the walk-in + calendar-create modals.
 
 **(F)** Generic add-on admin Settings tab with both breakfast + other add-ons — the two collections have different shapes (`breakfastConfig` is a single doc with a meals sub-array; `addOns` is a collection of independent docs). A unified tab would force a schema migration that BR-08 just closed out.
 

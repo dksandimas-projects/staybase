@@ -221220,7 +221220,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.17.3";
+    VERSION2 = "2.18.0";
   }
 });
 
@@ -222573,7 +222573,8 @@ function computeBookingFolio(input) {
     0
   );
   const totalPrice = Number(booking.totalPrice) || 0;
-  const grandTotal = totalPrice + storeTotal + chargesTotal;
+  const otherAddOnTotal = Math.max(0, Number(booking.otherAddOnTotal) || 0);
+  const grandTotal = totalPrice + otherAddOnTotal + storeTotal + chargesTotal;
   const balance = grandTotal - paymentsTotal;
   return {
     storeCharges,
@@ -222581,6 +222582,7 @@ function computeBookingFolio(input) {
     charges,
     chargesTotal,
     paymentsTotal,
+    otherAddOnTotal,
     grandTotal,
     balance
   };
@@ -222590,7 +222592,8 @@ function computeServerFolioTotals(input) {
   const incidentalTotal = Number(input.incidentalTotal) || 0;
   const addToBillTotal = Number(input.addToBillTotal) || 0;
   const collectedTotal = Number(input.collectedTotal) || 0;
-  const folioTotal = totalPrice + incidentalTotal + addToBillTotal;
+  const otherAddOnTotal = Math.max(0, Number(input.otherAddOnTotal) || 0);
+  const folioTotal = totalPrice + otherAddOnTotal + incidentalTotal + addToBillTotal;
   const computedBalance = Math.max(folioTotal - collectedTotal, 0);
   return { folioTotal, computedBalance };
 }
@@ -231110,15 +231113,21 @@ async function readTransactionalFolioSnapshot(input) {
     const collectedTotal2 = sumLedgerAmounts(paymentsSnapshot);
     const incidentalTotal2 = sumLedgerAmounts(chargesSnapshot);
     const addToBillTotal2 = sumBilledAddToBillOrders(storeOrdersSnapshot);
+    const otherAddOnTotal2 = Math.max(
+      0,
+      Number(bookingData2.otherAddOnTotal) || 0
+    );
     const totals2 = computeServerFolioTotals({
       totalPrice: Number(bookingData2.totalPrice) || 0,
       incidentalTotal: incidentalTotal2,
       addToBillTotal: addToBillTotal2,
-      collectedTotal: collectedTotal2
+      collectedTotal: collectedTotal2,
+      otherAddOnTotal: otherAddOnTotal2
     });
     return {
       reservationId: "",
       totalPrice: Number(bookingData2.totalPrice) || 0,
+      otherAddOnTotal: otherAddOnTotal2,
       collectedTotal: collectedTotal2,
       incidentalTotal: incidentalTotal2,
       addToBillTotal: addToBillTotal2,
@@ -231176,15 +231185,21 @@ async function readTransactionalFolioSnapshot(input) {
   const collectedTotal = sumLedgerAmounts(reservationPaymentsSnapshot) + sumLedgerAmounts(reservationRefundsSnapshot) + transitionalCollectedTotal;
   const incidentalTotal = sumLedgerAmounts(reservationChargesSnapshot) + transitionalIncidentalTotal;
   const totalPrice = Number(reservationDoc.data()?.totalPrice) || 0;
+  const otherAddOnTotal = childBookingsSnapshot.docs.reduce(
+    (sum, docSnap) => sum + Math.max(0, Number(docSnap.data()?.otherAddOnTotal) || 0),
+    0
+  );
   const totals = computeServerFolioTotals({
     totalPrice,
     incidentalTotal,
     addToBillTotal,
-    collectedTotal
+    collectedTotal,
+    otherAddOnTotal
   });
   return {
     reservationId: bookingReservationId2,
     totalPrice,
+    otherAddOnTotal,
     collectedTotal,
     incidentalTotal,
     addToBillTotal,
