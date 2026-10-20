@@ -11,6 +11,20 @@ export type RoomType = string;
 export type RoomStatus = (typeof ROOM_STATUSES)[number];
 export type HousekeepingStatus = (typeof HOUSEKEEPING_STATUSES)[number];
 export type BookingStatus = (typeof BOOKING_STATUSES)[number];
+/**
+ * The Firestore `Timestamp` value type. The shared types
+ * use a `Timestamp | string` union (see the BR-01
+ * breakfast types below) for back-compat: writes may
+ * stamp a `Timestamp` (server-side, via
+ * `FieldValue.serverTimestamp()`) while reads may hydrate
+ * to an ISO string (admin mappers + the public site's
+ * `usePublicSiteContent`). Local to this file because
+ * `firebase-admin` / `firebase` are not workspace
+ * dependencies of `@spark-inn/shared` (the shared
+ * package is intentionally Firebase-free per the
+ * backend's no-Firebase-Cloud-Functions rule).
+ */
+export type Timestamp = { seconds: number; nanoseconds: number };
 // Per NBS-03 (2026-07-31): widened from the historical union
 // ("online" | "walk-in" | "phone" | "facebook" | "corporate") to
 // `string` so new configured entries (e.g. "agoda" per CVQ-08) flow
@@ -828,19 +842,52 @@ export interface Booking {
   confirmedWithBalanceAt?: Date | null;
   /** Staff UID who approved the confirm-with-balance transition. */
   confirmedWithBalanceBy?: string | null;
-  hasBreakfast: boolean;
-  breakfastRate: number;
   /**
-   * Per CHD-10 (2026-07-31, per CVQ-01): whether children are included
-   * in the breakfast charge. Snapshotted from the admin default
-   * (`settings/breakfastConfig.breakfastIncludesChildrenDefault`) at
-   * booking time so a later policy change never rewrites an existing
-   * bill. `undefined` on legacy bookings reads as `true` for back-compat
-   * (the historical "children pay the full rate" default).
+   * Per BR-01 (Phase 13 — Breakfast Redesign, decision #231,
+   * 2026-10-12) + BR-08 (decision #238, 2026-10-14 — close-out):
+   * per-meal-per-guest slot map. Each entry carries
+   * the snapshotted meal triple (mealId / mealName / price)
+   * + audit metadata. The slot key format is preserved from
+   * the legacy `Record<string, string>` shape (`yyyy-mm-dd-guest-n`)
+   * so existing views keep rendering until they migrate. Absent
+   * on bookings that never had breakfast ordered; an empty `{}`
+   * after a full remove. Cancelled meals are flagged via
+   * `removedAt !== null` (and excluded from `breakfastTotal`).
+   *
+   * Replaces the legacy flat-rate `hasBreakfast: boolean` +
+   * `breakfastRate: number` + `breakfastIncludesChildren:
+   * boolean` + `extraBedBreakfast: boolean` shape — those
+   * fields were deleted from the type and from the create
+   * path in BR-08.
    */
-  breakfastIncludesChildren?: boolean | null;
-  breakfastSelections?: Record<string, string>;
-  breakfastServed?: Record<string, boolean>;
+  breakfastSelections?: Record<string, BreakfastSelectionEntry>;
+  /**
+   * Per BR-01: per-slot served record. The legacy
+   * `Record<string, boolean>` shape is replaced with
+   * `Record<string, BreakfastServedEntry>` to carry the
+   * audit metadata (`servedBy`, `servedAt`, optional
+   * `unservedAt` / `unservedBy` for the grace-window
+   * un-mark).
+   */
+  breakfastServed?: Record<string, BreakfastServedEntry>;
+  /**
+   * Per BR-01: the denormalized breakfast total. Sum of every
+   * non-cancelled entry's snapshotted `price`. Recomputed by
+   * the server on every `breakfastSelections` write — never
+   * client-written (per GOTCHAS §Firebase). The single source
+   * of truth for the recompute is `recomputeBreakfastTotal`
+   * in `shared/utils/breakfastTotal.ts`. `0` for bookings
+   * that never had breakfast.
+   */
+  breakfastTotal?: number;
+  /**
+   * Per BR-01: replaces the legacy `hasBreakfast: boolean` for
+   * read sites that just need "is there any breakfast on this
+   * booking". `true` when `breakfastSelections` has at least
+   * one non-cancelled entry. Maintained server-side alongside
+   * `breakfastTotal` so the read is O(1).
+   */
+  hasAnyBreakfast?: boolean;
   /**
    * Per EXB-01 (2026-07-31): extra-bed count + snapshotted rate.
    * `extraBedCount` is the number of extra beds the guest is renting
@@ -853,17 +900,6 @@ export interface Booking {
    */
   extraBedCount?: number;
   extraBedRate?: number;
-  /**
-   * Per EXB-12 (2026-08-06, per decision #199): whether the
-   * guest opted in to breakfast for the extra-bed occupant(s).
-   * When `true`, all `extraBedCount` beds in this room are
-   * counted toward the breakfast total (priced as
-   * `breakfastRate × extraBedCount × nights`). Snapshotted
-   * from the cart at booking time. The server validates that
-   * `extraBedBreakfast` can only be `true` when `extraBedCount > 0`.
-   * Defaults to `false` (no breakfast for extra beds).
-   */
-  extraBedBreakfast?: boolean;
   /**
    * Per DSC-01..05 (2026-08-01, per CVQ-06): the admin's
    * per-class discount scope at the moment this booking was
@@ -926,7 +962,406 @@ export interface Booking {
 
   createdAt: Date;
   updatedAt: Date;
+
+  // ------------------------------------------------------------------
+  // BR-12 — Other Add-Ons (Phase 14, decision #245, 2026-10-14)
+  // ------------------------------------------------------------------
+  // Additive on top of the BR-01 breakfast fields — the breakfast
+  // shape is frozen per BR-08 (decision #238). Other add-ons use
+  // their own per-day × per-add-on selection map (NOT a per-guest
+  // slot — add-ons are quantity-based, not guest-slot-based).
+  //
+  // `otherAddOnSelections` is keyed by `yyyy-mm-dd` (the service
+  // date). The value is a flat array of `OtherAddOnSelectionEntry`
+  // items — one per add-on type on that date. The composite key
+  // `${date}-${addOnId}` lives in the entry's `selectionKey`
+  // mirror field so audit + refund lookups don't have to scan
+  // arrays.
+  //
+  // `otherAddOnTotal` is the denormalized total recomputed by
+  // `recomputeOtherAddOnTotal(selections)` on every write —
+  // source of truth is the helper, `0` for bookings that never
+  // had add-ons.
+  //
+  // `hasAnyOtherAddOns` mirrors `hasAnyBreakfast` so the read
+  // sites that just need "is there any add-on on this booking"
+  // are O(1).
+  //
+  // BR-13 refactor note: when a second add-on TYPE lands
+  // (seaport), this shape stays — the BR-13 refactor pulls
+  // the common patterns out without touching the booking
+  // schema.
+  // ------------------------------------------------------------------
+  /**
+   * `yyyy-mm-dd` → `OtherAddOnSelectionEntry[]`. Absent on
+   * pre-BR-12 bookings; reads as `null` per `normalizeBooking`.
+   */
+  otherAddOnSelections?: Record<string, OtherAddOnSelectionEntry[]> | null;
+  /** Denormalized sum, PHP. Recomputed by `recomputeOtherAddOnTotal`. */
+  otherAddOnTotal?: number;
+  /** O(1) "is there any other add-on on this booking" flag. */
+  hasAnyOtherAddOns?: boolean;
 }
+
+// ----------------------------------------------------------------------------
+// Per BR-01 (Phase 13 — Breakfast Redesign, decision #231,
+// 2026-10-12): the new meal-based breakfast shapes.
+//
+// The legacy flat-rate toggle (`Booking.hasBreakfast: boolean` +
+// `Booking.breakfastRate: number` +
+// `PublicRoomSelection.hasBreakfast: boolean`) is replaced
+// by a per-meal catalog (`BreakfastMeal[]`), a per-slot
+// snapshot map (`breakfastSelections: Record<key,
+// BreakfastSelectionEntry>`), and a per-slot served map
+// (`breakfastServed: Record<key, BreakfastServedEntry>`).
+//
+// `Timestamp | string` is the existing codebase's
+// back-compat pattern for Firestore Timestamp-on-write +
+// string-on-read values (see `CancellationPolicySnapshot`
+// + `Booking.revenueAllocation` for similar unions). The
+// client never writes `Timestamp` directly — server
+// writes via `FieldValue.serverTimestamp()` and the
+// admin mapper hydrates to ISO strings on read.
+// ----------------------------------------------------------------------------
+
+/**
+ * One meal in the breakfast catalog. `id` is the
+ * kebab-case key referenced by
+ * `BreakfastSelectionEntry.mealId`; immutable once a
+ * booking snapshots it (per spec §Decisions Locked #9).
+ * `price` is the live catalog price in PHP. The booking
+ * snapshots its own copy at order time so later edits
+ * never rewrite existing bills. `isActive: false` hides
+ * the meal from new orders but keeps existing snapshots
+ * visible (the view appends "(no longer offered)" to the
+ * meal name per the spec).
+ */
+export interface BreakfastMeal {
+  id: string;
+  name: string;
+  /** Optional marketing copy (max 200 chars). Free-text today; per-meal dietary flags are a follow-up (Open Item #2). */
+  description: string;
+  /** PHP; >= 0. The booking snapshots its own copy at order time. */
+  price: number;
+  /** `false` hides the meal from new order UIs; existing snapshots remain visible. */
+  isActive: boolean;
+  /** Asc; drives the meal-picker sort. */
+  displayOrder: number;
+  /**
+   * Per MBUX-04 (decision #256, 2026-10-15): optional guest-safe
+   * download URL for a meal thumbnail. OMITTED entirely (not empty
+   * string) when no image is set, so "no image" is unambiguous.
+   *
+   * Deliberately NOT snapshotted onto a booking. `breakfastSelections`
+   * entries are built field-by-field (`mealId` + `mealName` + `price`),
+   * so a catalog image can never leak into, or later mutate, a
+   * historical booking or financial record — see
+   * `BOOKING-MOBILE-UX.md §Snapshot invariant`.
+   */
+  imageUrl?: string;
+  createdAt: Timestamp | string;
+  updatedAt: Timestamp | string;
+}
+
+/**
+ * The settings doc shape at
+ * `settings/breakfastConfig`. `cutoffTime` is `HH:MM` 24h
+ * (default `20:00`); `cutoffTimezone` is IANA (falls back
+ * to the hotel-config timezone, default `Asia/Manila`).
+ * `frontDeskOverrideEnabled: false` is the strict-policy
+ * switch — when off, staff cannot override the cutoff for
+ * walk-ins / late changes. `defaultMealInstructions` is
+ * shown in Step 2, Manage Booking, and the booking review.
+ */
+export interface BreakfastConfig {
+  /** Master toggle. When `false`, the Step 2 section + Manage Booking + the booking-drawer breakfast tab all hide. */
+  isEnabled: boolean;
+  /**
+   * Per BR-10 (decision #244 reserved, 2026-10-14 — Phase 14):
+   * the cut-off enforcement toggle. Default `true`. When `false`,
+   * `computeBreakfastCutoffState` short-circuits to `isLocked: false`
+   * for every date — guests can edit breakfast meals right up
+   * until the morning of service, and the staff override flow
+   * becomes a no-op (no date ever locks). The `cutoffTime` +
+   * `cutoffTimezone` settings stay on the doc so flipping the
+   * toggle back on doesn't lose the configured time.
+   */
+  cutoffsEnabled: boolean;
+  /** `HH:MM` 24h, default `"20:00"`. */
+  cutoffTime: string;
+  /** IANA timezone, defaults to the hotel-config timezone. */
+  cutoffTimezone: string;
+  /** When `false`, staff cannot override the cutoff for any write. */
+  frontDeskOverrideEnabled: boolean;
+  /**
+   * Per decision #231 + open item #5: how long after a meal is
+   * marked `served` can staff un-serve it without an override
+   * reason. After this window, un-serve requires a reason. Configurable
+   * in admin Settings; default 15 minutes. Range 0..60.
+   */
+  servedGraceMinutes: number;
+  /** Multi-line text shown to guests in Step 2 + Manage Booking + booking review. */
+  defaultMealInstructions: string;
+  meals: BreakfastMeal[];
+  updatedAt: Timestamp | string;
+  /** Staff UID who last edited the config. */
+  updatedBy: string;
+}
+
+/**
+ * One per-meal-per-guest slot on a booking. The
+ * `mealId` + `mealName` + `price` triple is the snapshot
+ * at order time; later catalog edits never rewrite it.
+ * `removedAt` / `removedBy` track cancellations (a paid
+ * removal opens a refund liability in BR-06).
+ * `overrideCutoff: true` + `overrideReason` track late
+ * changes from staff (audit trail for the kitchen's
+ * "Late changes" column).
+ */
+export interface BreakfastSelectionEntry {
+  /** Snapshotted `BreakfastMeal.id`. */
+  mealId: string;
+  /** Snapshotted name; views may append " (no longer offered)" when the catalog meal is now `isActive: false`. */
+  mealName: string;
+  /** Snapshotted price (PHP). */
+  price: number;
+  addedAt: Timestamp | string;
+  /** Staff UID or the literal `"guest"`. */
+  addedBy: string;
+  lastModifiedAt: Timestamp | string;
+  lastModifiedBy: string;
+  /** Non-null when the meal was cancelled (before / after the cutoff). */
+  removedAt: Timestamp | string | null;
+  removedBy: string | null;
+  /** `true` for any staff write that crossed the cutoff. */
+  overrideCutoff: boolean;
+  /** Required when `overrideCutoff === true`; `MIN_BREAKFAST_OVERRIDE_REASON_LENGTH` chars min. */
+  overrideReason: string | null;
+}
+
+/**
+ * The served record per slot. `servedBy` + `servedAt`
+ * capture the staff mark; `unservedAt` + `unservedBy`
+ * capture the grace-window un-mark (within
+ * `BreakfastConfig.servedGraceMinutes`, default 15).
+ * Beyond the grace window the un-serve writes to the
+ * `BreakfastAuditEntry` instead of mutating this record.
+ */
+export interface BreakfastServedEntry {
+  servedAt: Timestamp | string;
+  servedBy: string;
+  unservedAt: Timestamp | string | null;
+  unservedBy: string | null;
+}
+
+/**
+ * The audit subcollection entry at
+ * `bookings/{id}/breakfastAudit/{auditId}`. The `action`
+ * enum distinguishes the regular lifecycle (add / change /
+ * remove / serve / unserve) from the override variants
+ * (override-add / override-change / override-remove). The
+ * kitchen list's "Late changes" column filters on
+ * `occurredAfterCutoff === true` — a separate flag from
+ * the per-slot `overrideCutoff` (the override-marker
+ * stamped onto `BreakfastSelectionEntry`).
+ */
+export interface BreakfastAuditEntry {
+  id?: string;
+  action:
+    | "add"
+    | "change"
+    | "remove"
+    | "serve"
+    | "unserve"
+    | "override-add"
+    | "override-change"
+    | "override-remove";
+  /** `yyyy-mm-dd-guest-n` (the same slot-key shape as `breakfastSelections`). */
+  slotKey: string;
+  /** Snapshotted meal triple; `null` on remove / unserve. */
+  mealSnapshot: { mealId: string; mealName: string; price: number } | null;
+  /** Staff UID or the literal `"guest"`. */
+  actorUid: string;
+  actorRole: "guest" | "front-desk" | "admin";
+  /** Required for any `override-*` action; `null` otherwise. */
+  reason: string | null;
+  occurredAt: Timestamp | string;
+  /** `true` when `now > cutoffForDate(slotKey.date)` at the moment of the write. */
+  occurredAfterCutoff: boolean;
+}
+
+/**
+ * Per BR-01 (decision #231 §OnsitePayment extension): the
+ * refund-context blob stamped onto a
+ * `bookings/{id}/refunds/{refundId}` doc when the refund
+ * is for a removed breakfast meal (vs. the legacy
+ * cancellation refund). The `category` discriminator is
+ * added to `OnsitePayment` (defined in the admin app's
+ * `AdminContext`) — this interface is the
+ * `breakfastRefundContext` payload that follows the
+ * discriminator. Mirror values from
+ * `BreakfastSelectionEntry` so a later catalog price
+ * change never rewrites the refund amount.
+ *
+ * NOTE: BR-01 is shared-only by ticket scope. The
+ * `OnsitePayment` interface itself lives in
+ * `admin-app/src/context/AdminContext.tsx` (per the
+ * pre-existing layout) — the admin type gains the
+ * `category: "cancellation" | "breakfast"` field +
+ * `breakfastRefundContext: BreakfastRefundContext | null`
+ * in the same BR-01 follow-up. This file defines the
+ * payload shape; the admin-app extension is tracked
+ * separately.
+ */
+export interface BreakfastRefundContext {
+  mealId: string;
+  slotKey: string;
+  mealName: string;
+  priceSnapshot: number;
+}
+
+// ============================================================================
+// BR-12 — Other Add-Ons (Phase 14, 2026-10-14, decision #245 reserved)
+// ============================================================================
+//
+// v1 ships the "Airport transfer" catalog and readies the
+// schema for the BR-13 generic-add-on refactor that will
+// pull out common patterns when a second add-on TYPE (e.g.
+// seaport transfer with its own booking-time semantics)
+// lands. The data model is intentionally close to the
+// breakfast shape (per-day × per-guest selections,
+// denormalized total, audit subcollection, refund
+// context) but lives in its own Firestore collection +
+// separate booking fields — *no* shared base type, per
+// the BR-12 brief ("DO NOT add a generic-add-on abstract
+// base class"). The BR-13 refactor is expected to be a
+// non-breaking extraction, not a schema migration.
+
+/**
+ * One entry in the admin-managed add-on catalog at
+ * `addOns/{addOnId}`. v1 only ships
+ * `unit: "per-person"` (airport transfer is per-person),
+ * but `unit: "per-stay"` is reserved for the BR-13
+ * refactor — the spec accepts the union now to avoid a
+ * future schema migration.
+ *
+ * `cutoffHoursBeforeCheckIn` is the per-add-on lead
+ * window (default 24h). The shared
+ * `computeOtherAddOnCutoffState` helper computes
+ * `cutoffAt = checkInDate - cutoffHoursBeforeCheckIn`.
+ * When `isEnabled === false`, the helper short-circuits
+ * to `isLocked: true, reasonOrCutoff: "addons-disabled"`
+ * — same UX as breakfast's `cutoffsEnabled: false`.
+ */
+export interface AddOn {
+  id: string;
+  name: string;
+  description: string;
+  /** PHP; >= 0. The booking snapshots its own copy at order time (the `priceSnapshot` on the entry). */
+  price: number;
+  /** v1 only uses `"per-person"`; `"per-stay"` is reserved for the BR-13 refactor. */
+  unit: "per-person" | "per-stay";
+  /** Master per-add-on switch. `false` hides the add-on from new orders + locks existing bookings for new writes. */
+  isEnabled: boolean;
+  /** Cut-off lead time in hours before each check-in date (default 24). */
+  cutoffHoursBeforeCheckIn: number;
+  /** Asc; drives the catalog sort. */
+  displayOrder: number;
+  updatedAt: Timestamp | string;
+  updatedBy: string;
+}
+
+/**
+ * Per-day × per-add-on selection entry on a booking.
+ * Mirrors `BreakfastSelectionEntry` exactly: the
+ * `priceSnapshot` + `nameSnapshot` triple is frozen at
+ * order time so a later catalog price edit never
+ * rewrites existing bills; `quantity` is the count of
+ * guests using the add-on that day (default = the
+ * booking's total guest count, editable 0..guest count).
+ *
+ * `cutoffHoursBeforeCheckInSnapshot` is frozen so a
+ * later admin edit to the catalog lead time never
+ * rewrites the per-booking lock (the BR-13 refactor
+ * may move to a hotel-wide `otherAddOnCutoffsEnabled`
+ * toggle, which is why this is captured separately from
+ * the live catalog).
+ */
+export interface OtherAddOnSelectionEntry {
+  addOnId: string;
+  /** Snapshotted `AddOn.name`. */
+  nameSnapshot: string;
+  /** Snapshotted price (PHP, per unit). */
+  priceSnapshot: number;
+  /** Number of guests using the add-on that day. 0 means "removed but keep history". */
+  quantity: number;
+  /** Snapshotted `unit` so the receipt stays correct even if the catalog later flips. */
+  unitSnapshot: "per-person" | "per-stay";
+  addedAt: Timestamp | string;
+  addedBy: string;
+  lastModifiedAt: Timestamp | string;
+  lastModifiedBy: string;
+  removedAt: Timestamp | string | null;
+  removedBy: string | null;
+  /** Snapshotted at first add. */
+  cutoffHoursBeforeCheckInSnapshot: number;
+}
+
+/**
+ * Audit subcollection entry at
+ * `bookings/{id}/otherAddOnAudit/{auditId}`. Mirrors
+ * `BreakfastAuditEntry`. `occurredAfterCutoff === true`
+ * drives any "Late changes" UI surface (BR-12 v1 has
+ * none — the add-ons are served at check-in/by-arrival
+ * and don't need a kitchen list).
+ */
+export interface OtherAddOnAuditEntry {
+  id?: string;
+  action: "add" | "change" | "remove" | "mark-served" | "override-add" | "override-change" | "override-remove";
+  /** `yyyy-mm-dd-{addOnId}` — composite per-day × per-add-on key (analog of breakfast's slotKey). */
+  selectionKey: string;
+  /** Snapshotted add-on triple; `null` on remove. */
+  addOnSnapshot: { addOnId: string; name: string; price: number; quantity: number } | null;
+  actorUid: string;
+  actorRole: "guest" | "front-desk" | "admin";
+  reason: string | null;
+  occurredAt: Timestamp | string;
+  occurredAfterCutoff: boolean;
+}
+
+/**
+ * Refund-context blob stamped onto a
+ * `bookings/{id}/refunds/{refundId}` doc when the
+ * refund is for a removed add-on selection. Mirror
+ * values from `OtherAddOnSelectionEntry` so a later
+ * catalog price change never rewrites the refund amount.
+ * Mirrors `BreakfastRefundContext` — kept in a separate
+ * type (not a discriminated union) so the BR-13
+ * refactor can normalize without a breaking change.
+ */
+export interface OtherAddOnRefundContext {
+  addOnId: string;
+  selectionKey: string;
+  addOnName: string;
+  priceSnapshot: number;
+  quantitySnapshot: number;
+}
+
+/**
+ * Per BR-08 (decision #238, 2026-10-14 — close-out):
+ * `PublicRoomSelection` is deleted from the type. The
+ * legacy flat-rate `hasBreakfast: boolean` +
+ * `breakfastIncludesChildren: boolean` +
+ * `extraBedBreakfast: boolean` fields never appear in
+ * the BR-03+ create payload (the per-room selection is
+ * the Step 1 shape; meals are picked in Step 2). The
+ * `@deprecated` JSDoc above is kept as an audit trail
+ * for the BR-08 close-out — see
+ * `plan/features/BREAKFAST.md §Decisions Locked`
+ * (decision 4 — children + extra-bed occupants are
+ * ordinary meal slots, and decision 5 — Step 1 carries
+ * no breakfast data).
+ */
 
 /**
  * Per MRB-11 (2026-08-03, per decision #177): the
@@ -1368,4 +1803,119 @@ export interface AudioRouting {
   // wearing a headset. `null` = system default output.
   ringtoneOutputDeviceId: string | null;
   updatedAt?: Date;
+}
+
+// Per Phase 2 of the Spark Rewards tier system (2026-10-12, decision
+// pending). A tier is the editable row in the Settings → Rewards
+// tab: a name, a stay-completion threshold, a room-rate discount
+// percentage, a points multiplier applied at earn time, and a free-
+// text perks blurb shown to the member on their rewards portal. The
+// `fromStays` is integer ≥ 0 and must be unique within the array
+// (one tier per threshold). The `id` is stable so admin can rename
+// the tier without breaking existing `members/{uid}.currentLevel`
+// caches. Decimals allowed on `pointsMultiplier` (e.g. 1.25, 1.5)
+// so admins can tune earn rate per tier.
+export interface LevelDef {
+  id: string;
+  name: string;                  // 1..24 chars
+  fromStays: number;             // integer ≥ 0, unique within the array
+  discountPct: number;           // 0..100
+  pointsMultiplier: number;      // > 0, decimals allowed
+  perks: string;                  // ≤ 280 chars, free-text
+}
+
+// Canonical `settings/rewardsConfig` document. Phase 1 fields are
+// required at read time (callers coalesce defaults when absent).
+// Phase 2 fields are all optional with safe defaults — admin can
+// leave them at "off" until they tune. The booking engine falls
+// back to `memberDiscountPct` for tier-less members (decision #,
+// 2026-10-12 — see DECISIONS-FEATURES.md). `welcomePoints` is
+// credited on `POST /api/members/register` (idempotency via
+// `pointsHistory` `type: "welcome"` row check). `minPointsToRedeem`
+// guards the redeem-points endpoint. `pointsCanPayUpToBillPct` caps
+// how much of a booking's subtotal can be paid with points (0..100,
+// `100` = no cap, default). `freeNightEvery` writes a voucher when
+// `completedStays % N === 0` at checkout.
+export interface RewardsConfig {
+  // Phase 1 fields:
+  pointsEnabled: boolean;
+  earningMode: "per-booking" | "per-spend";
+  pointsPerBooking: number;
+  pointsPerHundred: number;
+  memberDiscountEnabled: boolean;
+  memberDiscountPct: number;
+  pointsRedemptionRate: number;
+  earlyCheckInEnabled?: boolean;
+  updatedAt?: Date;
+  // Phase 2 fields (all optional, safe defaults):
+  welcomePoints?: number;            // 0 = off
+  minPointsToRedeem?: number;        // 0 = no minimum
+  pointsCanPayUpToBillPct?: number;  // 0..100, default 100 (no cap)
+  freeNightEvery?: number;           // integer, 0 = off
+  levels?: LevelDef[];               // ordered ascending by fromStays
+  // Per PR #9 (2026-10-13): admin opt-in toggle for member
+  // self-service points redemption at booking Step 3. Default false
+  // (front-desk-mediated). When true, the booking flow exposes an
+  // "Apply my points" input alongside the voucher code, and the
+  // member-authenticated /api/members/redeem-points-self endpoint
+  // is enabled. All 7 guards (min-redeem, bill cap, balance, one-
+  // per-booking, status pre-checkin, member match, booking exists)
+  // still run server-side.
+  allowMemberPointsRedemption?: boolean;
+}
+
+// Canonical `members/{memberId}` document. Same UID as
+// `guests/{userId}` — member accounts are guest accounts with the
+// Spark Rewards fields populated. All Phase 2 fields are optional
+// with safe defaults. `completedStays` is incremented at checkout
+// (in the same transaction as the points earn step, with a
+// cancellation clawback per the existing MRB-05 / CRL-02 pattern).
+// `currentLevel` is a cached snapshot — refreshed at checkout +
+// on settings save — and falls back to null for members who haven't
+// earned enough stays for the lowest configured tier.
+export interface Member {
+  memberNumber: string;        // e.g. "SR-10023"
+  uid: string;                 // Firebase Auth UID
+  email: string;
+  firstName: string;
+  lastName: string;
+  phone?: string | null;
+  rewardsPoints: number;
+  status: "active" | "suspended";
+  // Phase 2 fields (all optional):
+  completedStays?: number;          // default 0
+  currentLevel?: LevelDef | null;   // cache, default null
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+// Per Phase 2 (2026-10-12, decision pending): extended to cover
+// the new entry types wired up in subsequent PRs ("welcome" on
+// register, "free-night" when a tier promotion completes). Today
+// the live points ledger writes "earn" / "redeem" / "adjust" /
+// "clawback"; "welcome" and "free-night" join the union now so
+// the type is honest and downstream consumers (Reports, audit
+// logs) can render them without a TS cast.
+export type PointsHistoryType =
+  | "earn"
+  | "redeem"
+  | "adjust"
+  | "clawback"
+  | "welcome"        // Phase 2 — register bonus, wired in Phase 6
+  | "free-night";    // Phase 2 — tier reward, wired in Phase 5
+
+// Canonical `members/{memberId}/pointsHistory/{historyId}` entry.
+// The ledger is append-only — cancellations claw back via a
+// compensating entry of `type: "clawback"` rather than by
+// mutating the original row. `points` is signed: positive for
+// earn / welcome / free-night, negative for redeem / clawback.
+export interface PointsHistoryEntry {
+  id: string;
+  memberId: string;
+  type: PointsHistoryType;
+  points: number;
+  bookingRef?: string | null;
+  note?: string;
+  createdAt: Date;
+  createdBy?: string;        // staff uid for adjust / welcome / free-night
 }

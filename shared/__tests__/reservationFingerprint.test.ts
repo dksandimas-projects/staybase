@@ -104,10 +104,20 @@ describe("MRB-01 reservation request fingerprint", () => {
   });
 
   it("rejects different per-room breakfast choices as a different fingerprint", () => {
+    // BR-08: the legacy `hasBreakfast: true` toggle is
+    // replaced by a `breakfastSelections` array. The host
+    // code (the reservation create handler) projects the
+    // `breakfastSelections` record into this array before
+    // calling `computeRequestFingerprint` — a request with
+    // a meal picked on day 1 / guest 1 produces a different
+    // fingerprint than one without any meals.
     const changed = computeRequestFingerprint({
       ...SAMPLE_REQUEST,
       roomLines: SAMPLE_REQUEST.roomLines.map((room, index) => (
-        index === 0 ? { ...room, hasBreakfast: true } : room
+        index === 0 ? {
+          ...room,
+          breakfastSelections: [{ key: "2026-10-15-guest-1", mealId: "silog", price: 250 }]
+        } : room
       ))
     }, deterministicHasher());
     const original = computeRequestFingerprint(SAMPLE_REQUEST, deterministicHasher());

@@ -58,12 +58,13 @@ No direct guest-client writes to `bookings`, `guests`, `corporateInquiries`, or 
 
 ## Booking Flow Summary
 
-4-step flow in `BookingPage.tsx`. State persists across steps via React Context or URL params.
+Five-step flow in `BookingPage.tsx`. State persists across steps via React Context or URL params.
 
 1. **Select Room** — date pickers, filters, availability results
-2. **Guest Details** — personal info form (+ company fields if corporate)
-3. **Review & Pay** — summary, discount selector, voucher input, payment method, screenshot upload
-4. **Confirmation** — booking ref, summary, Add to Calendar, payment instructions
+2. **Add-ons** — breakfast by guest/date plus any enabled optional extras
+3. **Guest Details** — personal info form (+ company fields if corporate)
+4. **Review & Pay** — summary, discount selector, voucher input, payment method, screenshot upload
+5. **Confirmation** — booking ref, summary, Add to Calendar, payment instructions
 
 Booking creation calls `/api/bookings/create` — never writes directly to Firestore from the client.
 
@@ -73,10 +74,10 @@ See `plan/features/BOOKING-FLOW.md` for full checklist.
 
 ## Corporate Booking (`/corporate/book`)
 
-Reuses the same 4-step booking flow components with:
+Reuses the same five-step booking flow components with:
 - Access code validation on landing before entering flow
 - Corporate skin (dark header, persistent rate badge)
-- Company name field added in Step 2
+- Company name field added in Step 3
 - Flat corporate rate or custom negotiated rate from access code
 
 See `plan/features/CORPORATE-BOOKING.md`.

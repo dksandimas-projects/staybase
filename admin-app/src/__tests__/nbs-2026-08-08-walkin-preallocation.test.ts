@@ -94,8 +94,11 @@ describe("NBS-2026-08-08 — admin walk-in create preallocates bookingId + reser
 
   describe("BookingsPage New Booking modal — preallocation + rotation", () => {
     it("imports generateReservationId from @spark-inn/shared (the preallocation contract)", () => {
+      // The import may be anywhere in the multi-line @spark-inn/shared
+      // block (VAT-01 added isVatEnabled + getEffectiveVatRate after
+      // generateReservationId, shifting the closing brace).
       expect(bookingsPageSrc).toMatch(
-        /generateReservationId\s*\n\} from "@spark-inn\/shared"/
+        /generateReservationId[\s\S]*?\} from "@spark-inn\/shared"/
       );
     });
 

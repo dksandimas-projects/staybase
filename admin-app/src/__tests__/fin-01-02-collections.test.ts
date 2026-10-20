@@ -35,7 +35,10 @@ describe("FIN-01 and FIN-02 collections reporting", () => {
 
   it("separates unsettled Add-to-Bill folios from actual payment methods", () => {
     expect(reports).toMatch(/Add to Bill — Uncollected/);
-    expect(reports).toMatch(/booking\.totalPrice \|\| 0\) \+ bookingCharges \+ bookingStoreTotal - bookingPayments/);
+    // Per OCT-FOL-01 (2026-10-20, decision #298): the BR-12 other
+    // add-ons are part of the folio, so the Add-to-Bill collections
+    // balance includes them — they are not inside `booking.totalPrice`.
+    expect(reports).toMatch(/booking\.totalPrice \|\| 0\) \+ Number\(booking\.otherAddOnTotal \|\| 0\) \+ bookingCharges \+ bookingStoreTotal - bookingPayments/);
     expect(reports).toMatch(/isUncollected: true/);
   });
 });

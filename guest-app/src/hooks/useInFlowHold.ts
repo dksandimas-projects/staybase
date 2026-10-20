@@ -34,7 +34,8 @@
 // cheap (1 request per page mount) and matches the
 // existing /api/bookings/lookup pattern.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { canExtendInFlowHold, inFlowHoldStayMatches } from "@spark-inn/shared";
 
 export interface InFlowHoldView {
   id: string;
@@ -45,6 +46,13 @@ export interface InFlowHoldView {
   expiresAt: string;
   status: "active" | "consumed" | "expired";
   holdMinutes: number;
+  /**
+   * Per IMT-02: how many times `/api/holds/extend` has fired on this
+   * hold. Absent on pre-IMT payloads, which read as 0. The banner uses
+   * it to hide the CTA at the cap instead of letting the guest click a
+   * button the server will reject with a 409.
+   */
+  extensionCount: number;
 }
 
 export interface InFlowHoldStartInput {
@@ -56,6 +64,17 @@ export interface InFlowHoldStartInput {
   turnstileToken?: string;
 }
 
+export interface ExtendHoldResult {
+  ok: boolean;
+  error?: string;
+  /**
+   * The server's authoritative new deadline (ISO) on success, so the
+   * banner can announce the exact new time instead of a vague "done".
+   * Absent on failure.
+   */
+  expiresAt?: string;
+}
+
 export interface UseInFlowHoldResult {
   hold: InFlowHoldView | null;
   secondsLeft: number;
@@ -64,6 +83,23 @@ export interface UseInFlowHoldResult {
   isLoading: boolean;
   error: string | null;
   refresh: () => void;
+  // --- IMT-03: the "I need more time" surface ---
+  /**
+   * Fires `POST /api/holds/extend`. Deliberately NEVER auto-called —
+   * revival is always an explicit guest action (see
+   * `plan/docs/GOTCHAS.md §Booking Flow`, "never auto-revive").
+   */
+  extendHold: () => Promise<ExtendHoldResult>;
+  /** True while the extend request is in flight — the CTA disables on it. */
+  isExtending: boolean;
+  /** Last extend failure, cleared on the next attempt. Never clobbers the countdown. */
+  extendError: string | null;
+  /**
+   * Server-authoritative gate, delegated to the shared
+   * `canExtendInFlowHold` rather than reimplemented here — the banner
+   * must not re-derive the status + cap rules or hardcode the number.
+   */
+  canExtend: boolean;
 }
 
 const RESYNC_MS = 30_000;
@@ -78,6 +114,9 @@ export function useInFlowHold(
   const [isLoading, setIsLoading] = useState<boolean>(Boolean(holdId));
   const [now, setNow] = useState<number>(() => Date.now());
   const [refreshTick, setRefreshTick] = useState<number>(0);
+  // --- IMT-03 ---
+  const [isExtending, setIsExtending] = useState<boolean>(false);
+  const [extendError, setExtendError] = useState<string | null>(null);
   const isMountedRef = useRef<boolean>(true);
 
   useEffect(() => {
@@ -88,6 +127,42 @@ export function useInFlowHold(
       return;
     }
     let cancelled = false;
+
+    /**
+     * POST /api/holds/start.
+     *
+     * Per OCT-M7 (2026-10-20, decision #296) this is also the
+     * RE-STAMP call: the server refreshes the hold's stay details
+     * when they no longer match the stay the guest is booking, while
+     * keeping the original deadline.
+     */
+    async function startHold(): Promise<void> {
+      await fetch("/api/holds/start", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
+        body: JSON.stringify({
+          holdId,
+          reservationId: startInput?.reservationId,
+          roomType: startInput?.roomType,
+          checkIn: startInput?.checkIn,
+          checkOut: startInput?.checkOut,
+          numNights: startInput?.numNights
+        })
+      });
+    }
+
+    async function readHold(): Promise<any> {
+      const response = await fetch(
+        `/api/holds/read?holdId=${encodeURIComponent(holdId as string)}`,
+        { method: "GET", headers: { Accept: "application/json" } }
+      );
+      if (!response.ok) return null;
+      return await response.json();
+    }
+
     async function load() {
       let json: any = null;
       try {
@@ -109,21 +184,7 @@ export function useInFlowHold(
           // gate is the booking transaction's
           // /api/bookings/create). See
           // fix/holds-start-turnstile.
-          await fetch("/api/holds/start", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Accept: "application/json"
-            },
-            body: JSON.stringify({
-              holdId,
-              reservationId: startInput.reservationId,
-              roomType: startInput.roomType,
-              checkIn: startInput.checkIn,
-              checkOut: startInput.checkOut,
-              numNights: startInput.numNights
-            })
-          });
+          await startHold();
           if (cancelled) return;
           const retry = await fetch(
             `/api/holds/read?holdId=${encodeURIComponent(holdId as string)}`,
@@ -144,6 +205,40 @@ export function useInFlowHold(
           return;
         } else {
           json = await readResponse.json();
+
+          // Per OCT-M7 (2026-10-20, decision #296): the hold EXISTS,
+          // but it may describe a stay the guest has since
+          // abandoned — they changed their dates (MBUX-18's edit
+          // sheet) or their room type on Step 2. The hold's stamped
+          // `checkIn` / `checkOut` / `roomType` are then for the
+          // ORIGINAL stay, and the banner would promise a room
+          // the guest is no longer booking.
+          //
+          // The fix re-stamps the hold against the current stay.
+          // The deadline is NOT reset (the server keeps
+          // `expiresAt`), so this cannot be used to extend the
+          // window — it only makes the hold describe what the guest
+          // is actually booking.
+          if (
+            startInput &&
+            json?.data &&
+            !inFlowHoldStayMatches(json.data, {
+              roomType: startInput.roomType,
+              checkIn: startInput.checkIn,
+              checkOut: startInput.checkOut,
+              numNights: startInput.numNights
+            })
+          ) {
+            await startHold();
+            if (cancelled) return;
+            const refreshed = await readHold();
+            if (cancelled) return;
+            // If the re-read fails we keep the ORIGINAL payload:
+            // a slightly stale hold beats no banner at all, and the
+            // error copy already tells the guest the booking still
+            // goes through.
+            if (refreshed) json = refreshed;
+          }
         }
       } catch (err) {
         if (cancelled) return;
@@ -199,6 +294,100 @@ export function useInFlowHold(
   const isExpired = Boolean(hold && (hold.status !== "active" || secondsLeft <= 0));
   const isConsumed = hold?.status === "consumed";
 
+  // Server-authoritative gate. `canExtendInFlowHold` accepts BOTH
+  // "active" and "expired" and refuses "consumed" + anything unknown,
+  // which is exactly the banner's requirement. Delegating keeps the
+  // cap number in shared only — the component never hardcodes it.
+  const canExtend = Boolean(hold) && canExtendInFlowHold({
+    status: hold?.status,
+    extensionCount: hold?.extensionCount
+  });
+
+  /**
+   * IMT-03: extend the hold.
+   *
+   * Success path: the server returns the authoritative post-update
+   * hold, and we push it straight into `hold`. The existing 1s tick
+   * and 30s resync then carry over with NO timer restart — the hook
+   * never owns a separate countdown, it just reads `hold.expiresAt`.
+   *
+   * Failure path: we surface `extendError` and leave `hold` untouched,
+   * so a failed extend never disturbs the running countdown. The
+   * copy is deliberately honest about what still works — the hold is
+   * a soft signal, and the guest can still submit.
+   */
+  const extendHold = useCallback(async (): Promise<ExtendHoldResult> => {
+    if (!holdId || !hold) {
+      return { ok: false, error: "We couldn't find your room hold." };
+    }
+    if (isExtending) {
+      // Guard against a double-submit from a fast double-tap. The CTA
+      // also disables, but the server would burn an extension on the
+      // second click otherwise — and the cap is finite.
+      return { ok: false, error: "We're already extending your hold." };
+    }
+
+    setIsExtending(true);
+    setExtendError(null);
+    try {
+      const response = await fetch("/api/holds/extend", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
+        // `holdId` + `reservationId` ONLY. The endpoint's schema is
+        // `.strict()`, so sending anything else (a duration, a status
+        // guess) is a 400 — the window always comes from the server.
+        body: JSON.stringify({
+          holdId,
+          reservationId: hold.reservationId
+        })
+      });
+
+      let json: any = null;
+      try {
+        json = await response.json();
+      } catch {
+        json = null;
+      }
+
+      if (!response.ok || !json || json.success !== true) {
+        const message =
+          typeof json?.error === "string" && json.error
+            ? json.error
+            : "We couldn't extend your hold right now. Your current time is still counting.";
+        setExtendError(message);
+        return { ok: false, error: message };
+      }
+
+      if (json.data) {
+        // Adopt the server's authoritative shape wholesale — it carries
+        // the new `expiresAt`, the incremented `extensionCount`, and
+        // the revived `status`.
+        setHold(json.data as InFlowHoldView);
+      }
+      // Re-baseline the local clock so `secondsLeft` recomputes from
+      // the new deadline on the very next tick instead of briefly
+      // showing a stale value.
+      setNow(Date.now());
+      setExtendError(null);
+      return {
+        ok: true,
+        expiresAt: typeof json.data?.expiresAt === "string" ? json.data.expiresAt : undefined
+      };
+    } catch (err) {
+      const message =
+        "We couldn't reach the server to extend your hold. Your current time is still counting.";
+      setExtendError(message);
+      return { ok: false, error: message };
+    } finally {
+      if (isMountedRef.current) {
+        setIsExtending(false);
+      }
+    }
+  }, [holdId, hold, isExtending]);
+
   return {
     hold,
     secondsLeft,
@@ -206,6 +395,10 @@ export function useInFlowHold(
     isConsumed,
     isLoading,
     error,
-    refresh: () => setRefreshTick((value) => value + 1)
+    refresh: () => setRefreshTick((value) => value + 1),
+    extendHold,
+    isExtending,
+    extendError,
+    canExtend
   };
 }

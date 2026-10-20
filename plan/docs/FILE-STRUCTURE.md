@@ -44,7 +44,7 @@ guest-app/
 │   │   ├── CorporatePage.tsx           ← Marketing page
 │   │   ├── CorporateBookingPage.tsx    ← /corporate/book
 │   │   ├── ContactPage.tsx
-│   │   ├── BookingPage.tsx             ← 4-step booking flow
+│   │   ├── BookingPage.tsx             ← Five-step booking flow
 │   │   ├── BookingConfirmPage.tsx
 │   │   ├── BookingLookupPage.tsx       ← /my-booking
 │   │   ├── IntercomPage.tsx
@@ -236,6 +236,8 @@ Agent reference MDs. See `CLAUDE.md` Table of Contents for full list.
 ## `plan/features/`
 
 Feature spec MDs. See `CLAUDE.md` Table of Contents for full list.
+
+`BOOKING-MOBILE-UX.md` owns the Phase 15 mobile-first presentation and interaction contract for the five-step guest booking flow; the underlying booking rules remain owned by `BOOKING-FLOW.md` and the relevant breakfast, add-on, corporate, backend, and security specs.
 
 ---
 

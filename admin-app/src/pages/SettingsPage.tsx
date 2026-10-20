@@ -4,7 +4,15 @@ import { useAdmin, type StoreItem, type StaffMember } from "../context/AdminCont
 import type { TestRun } from "@spark-inn/shared";
 import {
   compressImageFile,
-  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
+  // Per BR-02 (decision #231, 2026-10-12, breakfast redesign):
+  // the Breakfast & Dining tab now seeds the cutoff + served-grace
+  // inputs from the new shared constants (replacing the legacy flat
+  // rate). Per BR-08 (decision #238, 2026-10-14 — close-out):
+  // `DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT` import was
+  // removed — the constant was deleted from `shared/constants`.
+  // The AdminContext default state no longer seeds it.
+  DEFAULT_BREAKFAST_CUTOFF_TIME,
+  DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES,
   DEFAULT_CORPORATE_PAGE_CONTENT,
   MAX_PAYMENT_METHOD_QR_BYTES,
   MAX_ROOM_TYPE_PHOTOS,
@@ -25,11 +33,27 @@ import {
   MAX_IN_FLOW_HOLD_MINUTES,
   MIN_IN_FLOW_HOLD_MINUTES,
   clampIntegerInRange,
+  // Per MSL-01 (2026-10-15): bounds for the stay-length cap editor.
+  // `0` is legal here and means "no limit", so `clampIntegerInRange`
+  // (which requires `min >= 1`) cannot be reused for this field.
+  MAX_MAX_STAY_NIGHTS,
+  MIN_MAX_STAY_NIGHTS,
+  DEFAULT_MAX_STAY_NIGHTS,
   type BookingSourceConfig,
   type DiscountScope,
   type PaymentMethodConfig,
   type ProtectedPaymentMethod,
   type RoomTypeEntry,
+  // Per BR-02 (decision #231, 2026-10-12, breakfast redesign):
+  // the Breakfast & Dining tab now hydrates + saves against the
+  // new shared `BreakfastConfig` / `BreakfastMeal` shapes (replacing
+  // the legacy `silogItems` / `ratePerPersonPerNight` fields). The
+  // legacy `breakfastIncludesChildrenDefault` toggle is gone from
+  // the save payload entirely — children are ordinary meal slots
+  // per spec decision #4. BR-03 deletes the `breakfastConfig`
+  // legacy shape from the AdminContext default state.
+  type BreakfastConfig,
+  type BreakfastMeal,
   // Per VAT-01 (2026-10-12): the admin toggle for the
   // hotel's VAT-registration status. The Tax card on
   // the Discounts tab mirrors the existing `isVatEnabled`
@@ -37,8 +61,36 @@ import {
   // across every product surface (Reports, admin drawer,
   // admin receipt PDF, guest live preview).
   isVatEnabled,
-  type VatConfig
+  type VatConfig,
+  // Per BR-12.1 (2026-10-15, decision #247 reserved): the
+  // "Other Add-Ons" tab catalog CRUD uses the same normalized
+  // AddOn shape the public config endpoint serves. The
+  // pre-seed constant seeds the first "Airport transfer" row
+  // on a brand-new install.
+  AIRPORT_TRANSFER_PRESEED,
+  // Per OCT-M1 (2026-10-20, decision #295): the normalizer for the
+  // hotel-wide "Add-ons enabled" master switch
+  // (`settings/hotelConfig.otherAddOnsEnabled`). Shared with the
+  // server so the admin's stored value and the value the public
+  // catalog endpoint reads can never disagree on what "off" means.
+  normalizeOtherAddOnsEnabled,
+  type AddOn,
+  // Per Phase 2 of the Spark Rewards tier system (2026-10-12):
+  // Zod schema + inferred types for the settings/rewardsConfig
+  // payload — used for client-side validation before save (the
+  // API also re-validates as defense-in-depth).
+  RewardsConfigSchema,
+  type LevelDef
 } from "@spark-inn/shared";
+import {
+  // Per BR-12.1 (2026-10-15, decision #247 reserved): the
+  // "Other Add-Ons" tab catalog CRUD uses the same
+  // normalized AddOn shape the public config endpoint
+  // serves. The pre-seed constant seeds the first
+  // "Airport transfer" row on a brand-new install.
+  AddOnSchema
+} from "@spark-inn/shared/schemas/booking";
+import { BreakfastConfigSchema, BreakfastMealSchema } from "@spark-inn/shared/schemas/booking";
 import {
   Settings, Globe, Gift, Coffee, ShoppingBag,
   Save, Landmark, Sparkles, Check, CheckSquare, Square,
@@ -62,8 +114,9 @@ import {
 } from "lucide-react";
 import config from "@config";
 import { auth } from "../firebase/auth";
-import { storage } from "../firebase/config";
+import { db, storage } from "../firebase/config";
 import { deleteObject, getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
+import { addDoc, collection, deleteDoc, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc } from "firebase/firestore";
 import { formatPrice } from "../utils/format";
 import { Modal } from "../components/Modal";
 import { ConfirmForm } from "../components/ConfirmForm";
@@ -73,7 +126,7 @@ import { getApiBaseUrl, isStagingAdminEnvironment } from "../utils/apiBaseUrl";
 import { ListEditor, type ListEditorItem } from "../components/ListEditor";
 import { TypePicker } from "../components/TypePicker";
 
-type TabId = "hotel" | "payment" | "sources" | "roomtypes" | "preferences" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "email" | "intercom" | "legal" | "staff" | "environment" | "discounts" | "holds";
+type TabId = "hotel" | "payment" | "sources" | "roomtypes" | "preferences" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "addons" | "store" | "email" | "intercom" | "legal" | "staff" | "environment" | "discounts" | "holds";
 type SettingsSaveKey = "hotel" | "branding" | "website" | "seo" | "rewards" | "breakfast" | "store" | "intercom" | "legal" | "discounts" | "holds" | "vat";
 type SettingsSaveStatus = "idle" | "saving" | "saved" | "error";
 
@@ -154,7 +207,12 @@ const VALID_TAB_IDS: TabId[] = [
   "staff",
   "environment",
   "discounts",
-  "holds"
+  "holds",
+  // Per BR-12.1 (2026-10-15, decision #247 reserved): the
+  // new "Other Add-Ons" catalog management tab. Without
+  // this whitelist entry, the deep-link `?tab=addons`
+  // falls back to "hotel" and the new tab never renders.
+  "addons"
 ];
 
 // Per SET-SBG-01 (2026-10-12, settings-sidebar-grouping):
@@ -171,7 +229,7 @@ type SettingsGroup = {
 const SETTINGS_GROUPS: readonly SettingsGroup[] = [
   { id: "property",  label: "Property",             tabs: ["hotel", "roomtypes", "branding"] },
   { id: "bookings",  label: "Bookings & Revenue",   tabs: ["preferences", "sources", "holds", "payment", "discounts"] },
-  { id: "guest",     label: "Guest Experience",     tabs: ["rewards", "breakfast", "store", "intercom"] },
+  { id: "guest",     label: "Guest Experience",     tabs: ["rewards", "breakfast", "addons", "store", "intercom"] },
   { id: "reach",     label: "Marketing & Reach",    tabs: ["website", "seo", "email"] },
   { id: "admin",     label: "Admin",                tabs: ["staff", "legal", "environment"] }
 ];
@@ -2231,6 +2289,8 @@ export function SettingsPage() {
     deletePaymentMethod,
     uploadPaymentMethodQr,
     resetPaymentMethodQr,
+    uploadBreakfastMealImage,
+    removeBreakfastMealImage,
     bookingSources,
     addBookingSource,
     updateBookingSource,
@@ -2504,6 +2564,87 @@ export function SettingsPage() {
     String(hotelConfig.inFlowHoldMinutes)
   );
 
+  // Per MSL-01 (2026-10-15): the maximum stay length. `AdminContext`
+  // holds the RESOLVED value, so "no limit" arrives as `Infinity` and
+  // is rendered back as the literal `0` the admin actually saved.
+  const [maxStayNightsInput, setMaxStayNightsInput] = useState<string>(() =>
+    Number.isFinite(hotelConfig.maxStayNights)
+      ? String(hotelConfig.maxStayNights)
+      : "0"
+  );
+
+  // Per OCT-H3 (2026-10-20, decision #282): the three Booking &
+  // Holds inputs above were initialized from `hotelConfig` with
+  // `useState`'s lazy initializer, which only runs on the FIRST
+  // render — BEFORE the Firestore snapshot lands. On a direct
+  // load of `/settings` (F5 / bookmark / shared URL) the fields
+  // were therefore stuck at the pre-snapshot defaults, and the
+  // next save of an UNRELATED field silently rewrote the stored
+  // policy: a hotel that had set the stay cap to "no limit"
+  // (`0`) had it replaced with `30`, with the field still
+  // displaying "30" so there was no signal that anything
+  // changed. The guest site then started refusing 31+ night
+  // stays it previously accepted.
+  //
+  // The fix re-syncs each input from the snapshot, but ONLY when
+  // that field's SOURCE value actually changed since the last
+  // sync. A snapshot that arrives while the admin is mid-typing
+  // therefore cannot clobber the in-progress edit, while the
+  // initial hydration (and any genuine external change) does
+  // land.
+  const holdsFormSyncRef = useRef<{
+    paymentHoldWindowHours: string;
+    inFlowHoldMinutes: string;
+    maxStayNights: string;
+  } | null>(null);
+
+  useEffect(() => {
+    const next = {
+      paymentHoldWindowHours: String(hotelConfig.paymentHoldWindowHours),
+      inFlowHoldMinutes: String(hotelConfig.inFlowHoldMinutes),
+      // `resolveMaxStayNights` maps the stored `0` ("no limit")
+      // to `Infinity`; render it back as the literal `0` the
+      // admin saved so the field round-trips.
+      maxStayNights: Number.isFinite(hotelConfig.maxStayNights)
+        ? String(hotelConfig.maxStayNights)
+        : "0"
+    };
+    const prev = holdsFormSyncRef.current;
+    holdsFormSyncRef.current = next;
+    // First run: the snapshot has not landed yet, so these are
+    // the pre-snapshot defaults the `useState` initializers
+    // already used. Record them WITHOUT touching the inputs so
+    // the real snapshot is treated as a genuine change.
+    if (!prev) return;
+    if (prev.paymentHoldWindowHours !== next.paymentHoldWindowHours) {
+      setPaymentHoldWindowHoursInput(next.paymentHoldWindowHours);
+    }
+    if (prev.inFlowHoldMinutes !== next.inFlowHoldMinutes) {
+      setInFlowHoldMinutesInput(next.inFlowHoldMinutes);
+    }
+    if (prev.maxStayNights !== next.maxStayNights) {
+      setMaxStayNightsInput(next.maxStayNights);
+    }
+  }, [
+    hotelConfig.paymentHoldWindowHours,
+    hotelConfig.inFlowHoldMinutes,
+    hotelConfig.maxStayNights
+  ]);
+
+  // `0` = no limit is a LEGAL value here, so this cannot use
+  // `clampIntegerInRange` (whose `min` is >= 1 for every other field).
+  // Rejects: blank, non-numeric, fractional, negative, and anything
+  // past the booking horizon (a stay longer than the horizon is
+  // unreachable, so the horizon is the honest upper bound).
+  const maxStayNightsValid = (() => {
+    const trimmed = maxStayNightsInput.trim();
+    if (trimmed === "") return null;
+    const value = Number(trimmed);
+    if (!Number.isInteger(value)) return null;
+    if (value < 0 || value > MAX_MAX_STAY_NIGHTS) return null;
+    return value;
+  })();
+
   // Validate at the form layer. `clampIntegerInRange`
   // returns `null` for out-of-range / non-finite /
   // non-integer — the form surfaces an inline error
@@ -2521,7 +2662,9 @@ export function SettingsPage() {
     MAX_IN_FLOW_HOLD_MINUTES
   );
   const holdsFormValid =
-    paymentHoldWindowHoursValid !== null && inFlowHoldMinutesValid !== null;
+    paymentHoldWindowHoursValid !== null &&
+    inFlowHoldMinutesValid !== null &&
+    maxStayNightsValid !== null;
 
   // 2. Website Content states (Branding tab). Hero copy for every page
   // lives here. The Website Content tab (amenities / services / etc.)
@@ -2646,6 +2789,12 @@ export function SettingsPage() {
   const [earlyCheckInEnabled, setEarlyCheckInEnabled] = useState<boolean>(
     rewardsConfig.earlyCheckInEnabled !== false
   );
+  // Per PR #9 (2026-10-13): admin opt-in for member self-service
+  // points redemption at booking Step 3. Default OFF (false) so
+  // existing deployments preserve the front-desk-mediated flow.
+  const [allowMemberPointsRedemption, setAllowMemberPointsRedemption] = useState<boolean>(
+    rewardsConfig.allowMemberPointsRedemption === true
+  );
   const [pointsEnabled, setPointsEnabled] = useState(rewardsConfig.pointsEnabled);
   const [earningMode, setEarningMode] = useState<"per-booking" | "per-spend">(rewardsConfig.earningMode);
   const [pointsPerBooking, setPointsPerBooking] = useState(String(rewardsConfig.pointsPerBooking));
@@ -2653,20 +2802,401 @@ export function SettingsPage() {
   const [pointsRedemptionRate, setPointsRedemptionRate] = useState(String(rewardsConfig.pointsRedemptionRate));
   const [memberDiscountEnabled, setMemberDiscountEnabled] = useState(rewardsConfig.memberDiscountEnabled);
   const [memberDiscountPct, setMemberDiscountPct] = useState(String(rewardsConfig.memberDiscountPct));
+  // Per Phase 2 of the Spark Rewards tier system (2026-10-12):
+  // six new scalars + the levels array. All read from
+  // `rewardsConfig` with safe defaults so a fresh deploy
+  // (or a pre-Phase-2 doc with the fields absent) renders
+  // identically to the legacy single-toggle UI.
+  const [welcomePoints, setWelcomePoints] = useState(String(rewardsConfig.welcomePoints ?? 0));
+  const [minPointsToRedeem, setMinPointsToRedeem] = useState(String(rewardsConfig.minPointsToRedeem ?? 0));
+  const [pointsCanPayUpToBillPct, setPointsCanPayUpToBillPct] = useState(String(rewardsConfig.pointsCanPayUpToBillPct ?? 100));
+  const [freeNightEvery, setFreeNightEvery] = useState(String(rewardsConfig.freeNightEvery ?? 0));
+  const [levels, setLevels] = useState<LevelDef[]>(Array.isArray(rewardsConfig.levels) ? rewardsConfig.levels : []);
 
   // 4. Breakfast Config states
-  const [breakfastEnabled, setBreakfastEnabled] = useState(breakfastConfig.isEnabled);
-  const [breakfastRate, setBreakfastRate] = useState(String(breakfastConfig.ratePerPersonPerNight));
-  // Per CHD-10 (2026-07-31, per CVQ-01): hotel-wide default for
-  // "include children in the breakfast charge". The server snapshots
-  // this onto every new booking whose client did not send a
-  // per-booking override. The admin can flip it here as policy
-  // changes; existing bookings are unaffected (the snapshot is
-  // per-booking, not per-policy).
-  const [breakfastIncludesChildrenDefault, setBreakfastIncludesChildrenDefault] = useState(
-    breakfastConfig.breakfastIncludesChildrenDefault !== false
+  // Per BR-02 / decision #231 (2026-10-12, breakfast redesign):
+  // the Breakfast & Dining tab now hydrates against the new shared
+  // `BreakfastConfig` shape (replacing the legacy `silogItems` /
+  // `ratePerPersonPerNight` / `breakfastIncludesChildrenDefault`
+  // fields). The old fields are still on the AdminContext default
+  // state until BR-03 migrates the create path; the form hydrates
+  // defensively when the legacy shape is the only thing available
+  // (e.g. an existing settings doc that hasn't been re-saved yet).
+  const [breakfastEnabled, setBreakfastEnabled] = useState(breakfastConfig.isEnabled ?? false);
+  // Default 8:00 PM per spec §Decisions Locked #5. The hotel
+  // timezone (used by the cut-off rule) is sourced from
+  // `hotel.config.ts` and rendered read-only below — it is NOT a
+  // form input and is NOT a `useState`.
+  const [breakfastCutoffTime, setBreakfastCutoffTime] = useState(
+    breakfastConfig.cutoffTime ?? DEFAULT_BREAKFAST_CUTOFF_TIME
   );
-  const [silogItems, setSilogItems] = useState<{ id: string; name: string; isActive: boolean }[]>(breakfastConfig.silogItems);
+  // Per BR-10 (decision #244 reserved, 2026-10-14 —
+  // Phase 14): the cut-off enforcement toggle. Defaults
+  // to `true` (pre-BR-10 behaviour) for legacy / missing
+  // values. When flipped off, the shared
+  // `computeBreakfastCutoffState` helper short-circuits
+  // to `isLocked: false` on every read path (guest
+  // Add-ons step, Manage Breakfast, staff drawer,
+  // walk-in + calendar-create modals, and the server
+  // gate). The `cutoffTime` + `cutoffTimezone` settings
+  // stay on the doc so flipping the toggle back on
+  // restores the original cut-off without re-entering.
+  const [breakfastCutoffsEnabled, setBreakfastCutoffsEnabled] = useState(
+    breakfastConfig.cutoffsEnabled !== false
+  );
+  // Per spec decision #7: defensive default `true` — historical
+  // behavior allowed staff to override the cut-off, so a missing
+  // config field hydrates to the permissive side until the admin
+  // explicitly opts into the strict policy.
+  const [breakfastFrontDeskOverrideEnabled, setBreakfastFrontDeskOverrideEnabled] = useState(
+    breakfastConfig.frontDeskOverrideEnabled ?? true
+  );
+  // Shown in Step 2 + Manage Booking + booking review per spec.
+  // Capped at 2000 chars by `BreakfastConfigSchema`.
+  const [breakfastDefaultMealInstructions, setBreakfastDefaultMealInstructions] = useState(
+    breakfastConfig.defaultMealInstructions ?? ""
+  );
+  // Per Open Item #5 (BR-02): the served-grace window in minutes.
+  // Default 15 per the spec recommendation; 0 disables the grace
+  // window (every un-serve needs an override reason).
+  const [breakfastServedGraceMinutes, setBreakfastServedGraceMinutes] = useState(
+    String(breakfastConfig.servedGraceMinutes ?? DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES)
+  );
+  // The catalog itself. Hydration order (per BR-02 acceptance criteria):
+  //   1. If the new shape's `meals[]` is populated, use it.
+  //   2. Otherwise, if the legacy `silogItems[]` is populated, derive
+  //      a new-shape `meals[]` from it (price/description backfilled
+  //      with safe defaults so the AdminContext's seed catalog doesn't
+  //      lose its rows on first save).
+  //   3. Otherwise, default to `[]` (the AdminContext's empty-state
+  //      branch — the operator must add at least one meal).
+  const [breakfastMeals, setBreakfastMeals] = useState<BreakfastMeal[]>(() => {
+    if (Array.isArray(breakfastConfig.meals) && breakfastConfig.meals.length > 0) {
+      return breakfastConfig.meals;
+    }
+    if (Array.isArray(breakfastConfig.silogItems) && breakfastConfig.silogItems.length > 0) {
+      const now = new Date().toISOString();
+      return breakfastConfig.silogItems.map((item: { id: string; name: string; isActive: boolean }, index: number): BreakfastMeal => ({
+        id: item.id,
+        name: item.name,
+        description: "",
+        price: 0,
+        isActive: item.isActive,
+        displayOrder: index,
+        createdAt: now,
+        updatedAt: now
+      }));
+    }
+    return [];
+  });
+
+  // 4b. Other Add-Ons catalog states (BR-12.1, 2026-10-15, decision #247
+  //     reserved). The catalog is the `addOns/{addOnId}` collection
+  //     (BR-12) and the tab CRUDs it directly through Firestore. The
+  //     live snapshot is the source of truth; the local state mirrors
+  //     it for instant render after a write.
+  const [addOnsCatalog, setAddOnsCatalog] = useState<AddOn[]>([]);
+  const [addOnsCatalogLoading, setAddOnsCatalogLoading] = useState(true);
+  // Per OCT-C3 (2026-10-20, audit `plan/project/AUDIT-OCTOBER-2026.md`):
+  // the `onSnapshot` error handler used to swallow the failure and
+  // just clear the loading flag, so a PERMISSION_DENIED read
+  // rendered the SAME "No add-ons yet" empty state as a genuinely
+  // empty catalog — telling the admin to create a row that already
+  // existed and that they could not read. Surface the failure.
+  const [addOnsCatalogError, setAddOnsCatalogError] = useState<string | null>(null);
+  const [editingAddOnId, setEditingAddOnId] = useState<string | null>(null);
+  const [editingAddOnDraft, setEditingAddOnDraft] = useState<AddOn | null>(null);
+  // Per OCT-M1 (2026-10-20, decision #295): the hotel-wide
+  // "Add-ons enabled" master switch.
+  //
+  // This used to be a bare `useState(true)` — no Firestore read, no
+  // write, no localStorage mirror — while the copy under it claimed
+  // that turning it off would empty every `getEnabledAddOnsByHotel`
+  // call. An admin who flipped it believed other add-ons were off
+  // sale while guests kept buying the airport transfer.
+  //
+  // It is now REAL: the value persists to
+  // `settings/hotelConfig.otherAddOnsEnabled` and the public
+  // `/api/bookings/addons/config` endpoint reads it, so "off" means
+  // the guest-facing catalog is genuinely empty.
+  const [addOnsEnabled, setAddOnsEnabled] = useState(
+    normalizeOtherAddOnsEnabled(hotelConfig.otherAddOnsEnabled)
+  );
+  // Per OCT-M1: the sync guard for the switch above. Mirrors the
+  // OCT-H3 (decision #282) pattern used by the Booking & Holds
+  // inputs — `useState`'s lazy initializer only runs on the FIRST
+  // render, which is BEFORE the Firestore snapshot lands, so a
+  // direct load of `/settings` would show the pre-snapshot default
+  // instead of the stored value. The ref records the last SEEN
+  // snapshot value so a snapshot that arrives while the admin is
+  // mid-toggle cannot clobber the in-progress change.
+  const addOnsEnabledSyncRef = useRef<boolean | null>(null);
+  const [confirmDeleteAddOn, setConfirmDeleteAddOn] = useState<AddOn | null>(null);
+  const [addOnSaveStatus, setAddOnSaveStatus] = useState<SettingsSaveStatus>("idle");
+  const [addOnSaveError, setAddOnSaveError] = useState<string | null>(null);
+
+  // Per OCT-M1 (decision #295): re-sync the master switch from the
+  // live `settings/hotelConfig` snapshot. Only a GENUINE change in
+  // the SOURCE value lands, so a snapshot that arrives while the
+  // admin is mid-toggle cannot clobber the in-progress change.
+  useEffect(() => {
+    const next = normalizeOtherAddOnsEnabled(hotelConfig.otherAddOnsEnabled);
+    const prev = addOnsEnabledSyncRef.current;
+    addOnsEnabledSyncRef.current = next;
+    // First run: the snapshot has not landed yet, so this is the
+    // pre-snapshot default the `useState` initializer already used.
+    // Record it WITHOUT touching the state so the real snapshot is
+    // treated as a genuine change.
+    if (prev === null) return;
+    if (prev !== next) setAddOnsEnabled(next);
+  }, [hotelConfig.otherAddOnsEnabled]);
+
+  // Live snapshot of the `addOns` collection — the
+  // source of truth. The tab mutates this directly via
+  // `setDoc` / `deleteDoc` (no separate admin route; the
+  // BR-12 brief routes everything through the existing
+  // catch-all dispatcher + the public config endpoint).
+  useEffect(() => {
+    const q = query(collection(db, "addOns"));
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const rows: AddOn[] = [];
+        snap.forEach((d) => {
+          const raw = { id: d.id, ...d.data() } as any;
+          // Defensive normalization — never trust the
+          // raw doc shape because a hand-written doc
+          // could carry a corrupt `unit` or a missing
+          // `isEnabled`. The shared `AddOnSchema`
+          // would be ideal but parsing every doc is
+          // expensive on the admin-tab load path;
+          // instead we re-use the lenient validation
+          // rules from `AddOnSchema` and drop rows
+          // that fail the `id` / `name` invariants.
+          if (!raw || typeof raw !== "object") return;
+          const id = String(raw.id || d.id || "").trim();
+          const name = String(raw.name || "").trim();
+          if (!id || !name) return;
+          rows.push({
+            id,
+            name,
+            description: String(raw.description || "").trim().slice(0, 500),
+            price: Math.max(0, Number(raw.price) || 0),
+            unit: raw.unit === "per-stay" ? "per-stay" : "per-person",
+            isEnabled: raw.isEnabled !== false,
+            cutoffHoursBeforeCheckIn: Math.max(
+              0,
+              Math.min(168, Math.floor(Number(raw.cutoffHoursBeforeCheckIn) || 24))
+            ),
+            displayOrder: Math.floor(Number(raw.displayOrder) || 0),
+            updatedAt: raw.updatedAt || new Date().toISOString(),
+            updatedBy: String(raw.updatedBy || "")
+          });
+        });
+        rows.sort((a, b) => {
+          if (a.displayOrder !== b.displayOrder) return a.displayOrder - b.displayOrder;
+          return a.name.localeCompare(b.name);
+        });
+        setAddOnsCatalog(rows);
+        setAddOnsCatalogLoading(false);
+        setAddOnsCatalogError(null);
+      },
+      (err) => {
+        setAddOnsCatalogLoading(false);
+        setAddOnsCatalogError(
+          err?.message
+            ? `Could not load the other add-ons catalog: ${err.message}`
+            : "Could not load the other add-ons catalog."
+        );
+      }
+    );
+    return () => unsub();
+  }, []);
+
+  // Per BR-12.1: pre-seed the catalog with the
+  // "Airport transfer" row on first visit if the
+  // collection is empty. The seed is best-effort:
+  // a failed write is logged + swallowed so a
+  // permission-denied edge case doesn't crash the
+  // tab. The check is reactive (re-runs on every
+  // snapshot) but the write only fires once because
+  // `getDocs(addOns).empty` is the gate.
+  useEffect(() => {
+    if (addOnsCatalogLoading) return;
+    if (addOnsCatalog.length > 0) return;
+    (async () => {
+      try {
+        const snap = await getDocs(query(collection(db, "addOns")));
+        if (!snap.empty) return;
+        const now = new Date().toISOString();
+        const seed = {
+          ...AIRPORT_TRANSFER_PRESEED,
+          updatedAt: now,
+          updatedBy: currentUser?.uid || "seed"
+        };
+        await setDoc(doc(db, "addOns", "airport-transfer"), seed);
+      } catch (err) {
+        // The pre-seed is best-effort. A failure
+        // here is non-blocking — the admin can
+        // add the row manually via "Add add-on".
+        // eslint-disable-next-line no-console
+        console.warn("addOns pre-seed failed", err);
+      }
+    })();
+  }, [addOnsCatalogLoading, addOnsCatalog.length, currentUser?.uid]);
+
+  // Audit-log writer for catalog CRUD. Every
+  // add/edit/delete writes one row to the top-level
+  // `auditLogs/{auditId}` collection with the
+  // BR-12.1 action set
+  // (`addons.create` | `addons.update` | `addons.delete`).
+  //
+  // Per the October 2026 audit closeout (2026-10-20): this comment
+  // previously claimed "The Reports late-change metric reads the same
+  // collection (via collectionGroup on a top-level
+  // `targetCollection: "addOns"` filter)". That was wrong — there is
+  // NO `auditLogs` read anywhere in the admin app. The Reports →
+  // Sales → Add-Ons sub-tab's late-change metric reads the per-booking
+  // `otherAddOnAudit` subcollection (`collectionGroup(db,
+  // "otherAddOnAudit")`, `ReportsPage.tsx:520`), which is the
+  // PER-BOOKING op trail, not the catalog trail.
+  //
+  // So `auditLogs` is a write-only trail as far as the product is
+  // concerned: the rows are written (and are admin-readable per the
+  // rules), but no screen reads them. The catalog rows here are the
+  // source of truth for "who changed the catalog"; the per-booking
+  // audit trail is the source of truth for "who changed this
+  // booking's add-ons".
+  const writeAddOnAuditLog = async (input: {
+    action: "addons.create" | "addons.update" | "addons.delete";
+    targetId: string;
+    before: AddOn | null;
+    after: AddOn | null;
+  }) => {
+    try {
+      await addDoc(collection(db, "auditLogs"), {
+        action: input.action,
+        targetCollection: "addOns",
+        targetId: input.targetId,
+        actor: currentUser?.uid || "staff",
+        actorName: currentUser?.displayName || currentUser?.email || "staff",
+        before: input.before,
+        after: input.after,
+        timestamp: serverTimestamp()
+      });
+    } catch (err) {
+      // Audit log is a side-effect of the save —
+      // a failed log entry must not roll back the
+      // primary write. Log + swallow so the
+      // operator still sees the success toast.
+      // eslint-disable-next-line no-console
+      console.warn("auditLogs write failed", err);
+    }
+  };
+
+  // CRUD: create / update an add-on. The id is
+  // generated from the name (kebab-cased) so the
+  // admin doesn't have to type an id. If the id
+  // already exists (edit mode) the call updates
+  // in place. New rows are seeded with the
+  // `updatedAt` / `updatedBy` audit fields.
+  const handleSaveAddOn = async (row: AddOn) => {
+    setAddOnSaveStatus("saving");
+    setAddOnSaveError(null);
+    const existing = addOnsCatalog.find((a) => a.id === row.id) || null;
+    const validated = AddOnSchema.safeParse({
+      ...row,
+      updatedAt: new Date().toISOString(),
+      updatedBy: currentUser?.uid || "staff"
+    });
+    if (!validated.success) {
+      setAddOnSaveStatus("error");
+      setAddOnSaveError(validated.error.issues[0]?.message || "Invalid add-on payload.");
+      return;
+    }
+    try {
+      await setDoc(
+        doc(db, "addOns", row.id),
+        {
+          ...validated.data,
+          updatedAt: serverTimestamp(),
+          updatedBy: currentUser?.uid || "staff"
+        },
+        { merge: true }
+      );
+      await writeAddOnAuditLog({
+        action: existing ? "addons.update" : "addons.create",
+        targetId: row.id,
+        before: existing,
+        after: { ...validated.data, id: row.id } as AddOn
+      });
+      setAddOnSaveStatus("saved");
+      setEditingAddOnId(null);
+      setEditingAddOnDraft(null);
+      setTimeout(() => setAddOnSaveStatus("idle"), 1200);
+    } catch (err: any) {
+      setAddOnSaveStatus("error");
+      setAddOnSaveError(err?.message || "Failed to save add-on.");
+    }
+  };
+
+  // Per-add-on enabled toggle. The brief says
+  // "no save button" — the per-add-on `isEnabled`
+  // toggle writes immediately on click. The
+  // write goes through `setDoc({ merge: true })`
+  // so the rest of the row stays untouched.
+  const handleToggleAddOnEnabled = async (row: AddOn, next: boolean) => {
+    const before = row;
+    const after: AddOn = { ...row, isEnabled: next };
+    // Optimistic local update so the toggle
+    // feels instant; the snapshot subscriber
+    // reconciles in a few hundred ms.
+    setAddOnsCatalog((p) =>
+      p.map((a) => (a.id === row.id ? after : a))
+    );
+    try {
+      await setDoc(
+        doc(db, "addOns", row.id),
+        { isEnabled: next, updatedAt: serverTimestamp(), updatedBy: currentUser?.uid || "staff" },
+        { merge: true }
+      );
+      await writeAddOnAuditLog({
+        action: "addons.update",
+        targetId: row.id,
+        before,
+        after
+      });
+    } catch (err) {
+      // Revert on failure so the UI doesn't drift
+      // from the source of truth.
+      setAddOnsCatalog((p) =>
+        p.map((a) => (a.id === row.id ? before : a))
+      );
+      // eslint-disable-next-line no-console
+      console.warn("toggle add-on enabled failed", err);
+    }
+  };
+
+  // Delete: confirmation modal → `deleteDoc` +
+  // audit log. The `confirmDeleteAddOn` state
+  // holds the row pending confirmation.
+  const handleConfirmDeleteAddOn = async () => {
+    if (!confirmDeleteAddOn) return;
+    const target = confirmDeleteAddOn;
+    try {
+      await deleteDoc(doc(db, "addOns", target.id));
+      await writeAddOnAuditLog({
+        action: "addons.delete",
+        targetId: target.id,
+        before: target,
+        after: null
+      });
+      setConfirmDeleteAddOn(null);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("delete add-on failed", err);
+    }
+  };
 
   // 5. Store Config states
   const [storeEnabled, setStoreEnabled] = useState(storeConfig.isEnabled);
@@ -2725,10 +3255,13 @@ export function SettingsPage() {
   const [destroyConfirmText, setDestroyConfirmText] = useState("");
   const [refreshExportJson, setRefreshExportJson] = useState<string>("");
 
-  // Breakfast item CRUD states
-  const [isBreakfastItemModalOpen, setIsBreakfastItemModalOpen] = useState(false);
-  const [editingSilogItem, setEditingSilogItem] = useState<{ id: string; name: string; isActive: boolean } | null>(null);
-  const [breakfastItemNameInput, setBreakfastItemNameInput] = useState("");
+  // Per BR-02 (decision #231, 2026-10-12, breakfast redesign):
+  // the legacy `isBreakfastItemModalOpen` / `editingSilogItem` /
+  // `breakfastItemNameInput` CRUD modal was replaced by the inline
+  // meals table on the Breakfast & Dining tab. The modal would
+  // surface as unused-state warnings; deleted as part of the
+  // shape migration. New meal adds now open an inline edit row
+  // (see `handleAddBreakfastMeal` below).
 
   useEffect(() => {
     if (!pendingDeleteStoreItemId) return;
@@ -2858,6 +3391,16 @@ export function SettingsPage() {
     // true when absent so pre-EC-02 deployments keep the perk
     // on until the admin explicitly turns it off.
     setEarlyCheckInEnabled(rewardsConfig.earlyCheckInEnabled !== false);
+    setAllowMemberPointsRedemption(rewardsConfig.allowMemberPointsRedemption === true);
+    // Phase 2 rehydrate — match the initial-state defaults above
+    // (welcomePoints=0, minPointsToRedeem=0, pointsCanPayUpToBillPct=100,
+    // freeNightEvery=0, levels=[]) so the form never renders
+    // stale or undefined values when the snapshot updates mid-edit.
+    setWelcomePoints(String(rewardsConfig.welcomePoints ?? 0));
+    setMinPointsToRedeem(String(rewardsConfig.minPointsToRedeem ?? 0));
+    setPointsCanPayUpToBillPct(String(rewardsConfig.pointsCanPayUpToBillPct ?? 100));
+    setFreeNightEvery(String(rewardsConfig.freeNightEvery ?? 0));
+    setLevels(Array.isArray(rewardsConfig.levels) ? rewardsConfig.levels : []);
     setHomepageHeroEyebrow(websiteContent.homepage?.heroEyebrow || "");
     setHomepageHeroHeading(websiteContent.homepage?.heroHeading || "");
     setHomepageHeroSubtext(websiteContent.homepage?.heroSubtext || "");
@@ -3475,6 +4018,53 @@ export function SettingsPage() {
     }));
   };
 
+  // Per Phase 2 of the Spark Rewards tier system (2026-10-12):
+// helpers for the Levels table editor. The `+ Add a level`
+// button appends a sensible default tier (id from
+// `crypto.randomUUID()` or a timestamp fallback, name
+// "New tier", threshold one above the current max, 5% off,
+// 1× points, empty perks blurb). The row-delete handler is a
+// straight filter — the snap-down member migration that the
+// spec describes happens at Phase 3 (member-side counters)
+// and Phase 5 (free-night voucher), not in the UI handler.
+const handleAddLevel = () => {
+    setLevels((prev) => {
+      const maxFromStays = prev.length > 0 ? Math.max(...prev.map((l) => l.fromStays)) : 0;
+      const newLevel: LevelDef = {
+        id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `tier_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        name: "New tier",
+        fromStays: maxFromStays + 1,
+        discountPct: 5,
+        pointsMultiplier: 1,
+        perks: "",
+      };
+      return [...prev, newLevel];
+    });
+  };
+
+  const handleRemoveLevel = (id: string) => {
+    setLevels((prev) => prev.filter((l) => l.id !== id));
+  };
+
+  const handleUpdateLevelField = (
+    id: string,
+    field: "name" | "fromStays" | "discountPct" | "pointsMultiplier" | "perks",
+    raw: string
+  ) => {
+    setLevels((prev) => prev.map((l) => {
+      if (l.id !== id) return l;
+      if (field === "name" || field === "perks") {
+        return { ...l, [field]: raw };
+      }
+      // Numeric fields — empty string becomes 0 (matches the
+      // sibling scalar inputs' `parseFloat(...) || 0` pattern).
+      const parsed = field === "pointsMultiplier" ? parseFloat(raw) : parseInt(raw, 10);
+      return { ...l, [field]: Number.isFinite(parsed) ? parsed : 0 };
+    }));
+  };
+
   const handleSaveRewards = async (e: React.FormEvent) => {
     e.preventDefault();
     // Per EC-02 (2026-08-21): the early-check-in toggle rides
@@ -3484,16 +4074,41 @@ export function SettingsPage() {
     // partial update. The flag defaults to true server-side
     // (via `rewardsConfig.earlyCheckInEnabled !== false`) so a
     // missing field on the legacy doc is treated as enabled.
-    await runSettingsSave("rewards", "Rewards settings saved", () => updateSettings("rewardsConfig", {
+    //
+    // Per Phase 2 (2026-10-12): the payload now also carries
+    // the six new scalars + the levels array. Client-side
+    // Zod validation runs first as a UX guard (the API also
+    // re-validates as defense-in-depth — Hard Rule #1).
+    const candidate = {
       pointsEnabled,
       earningMode,
       pointsPerBooking: parseFloat(pointsPerBooking) || 0,
       pointsPerHundred: parseFloat(pointsPerHundred) || 0,
-      pointsRedemptionRate: parseFloat(pointsRedemptionRate) || 0,
       memberDiscountEnabled,
       memberDiscountPct: parseFloat(memberDiscountPct) || 0,
-      earlyCheckInEnabled
-    }));
+      pointsRedemptionRate: parseFloat(pointsRedemptionRate) || 0,
+      earlyCheckInEnabled,
+      welcomePoints: parseInt(welcomePoints, 10) || 0,
+      minPointsToRedeem: parseInt(minPointsToRedeem, 10) || 0,
+      pointsCanPayUpToBillPct: parseFloat(pointsCanPayUpToBillPct) || 100,
+      freeNightEvery: parseInt(freeNightEvery, 10) || 0,
+      allowMemberPointsRedemption,
+      // Sort ascending by `fromStays` before save so the
+      // canonical Firestore shape matches the UI's display
+      // order — defends against an admin who edits values
+      // out of order (the resolveCurrentLevel helper is
+      // defensive too, but a sorted write is friendlier to
+      // anyone reading the doc raw).
+      levels: [...levels].sort((a, b) => a.fromStays - b.fromStays),
+    };
+    const validation = RewardsConfigSchema.safeParse(candidate);
+    if (!validation.success) {
+      const first = validation.error.issues[0];
+      const where = first.path.length > 0 ? first.path.join(".") : "settings";
+      toast.error(`Cannot save: ${where} — ${first.message}`);
+      return;
+    }
+    await runSettingsSave("rewards", "Rewards settings saved", () => updateSettings("rewardsConfig", validation.data));
   };
 
   const handleOpenPreview = async (action: string, label: string) => {
@@ -3529,14 +4144,133 @@ export function SettingsPage() {
     }
   };
 
-  const handleSaveBreakfast = async (e: React.FormEvent) => {
+  // Per BR-02 (decision #231, 2026-10-12, breakfast redesign): the
+// Per BR-02 (decision #231, 2026-10-12, breakfast redesign): the
+// Breakfast & Dining save handler writes the new
+// `BreakfastConfig` shape only (no legacy `ratePerPersonPerNight` /
+// `breakfastIncludesChildrenDefault` / `silogItems`). The payload
+// is Zod-validated against `BreakfastConfigSchema` from
+// `@spark-inn/shared/schemas/booking` (added in BR-01) so a
+// malformed `cutoffTime` ("25:99") or a meal row that exceeds the
+// 10,000 PHP price cap is rejected client-side with a toast. The
+// server is still the authoritative gate (per Hard Rule — never
+// trust the client); this is a UX hint + early-feedback layer.
+//
+// `cutoffTimezone` is sourced from `hotel.config.ts` (the property
+// timezone — the only authoritative source). It is rendered
+// read-only in the UI and NOT a `useState` (per BR-02 acceptance).
+//
+// `servedGraceMinutes` (per spec §Open Items #5) is included in the
+// payload. BR-01 originally omitted it from the shared schema (gap
+// patched in the BR-01 close-out commit, see `shared/types/index.ts`
+// `BreakfastConfig.servedGraceMinutes` + `BreakfastConfigSchema`).
+// The UI input is wired up + hydrated from
+// `DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES`.
+//
+// After the save commits, a one-shot diff against the previous
+// `breakfastConfig` snapshot writes a
+// `settings/breakfastConfig/breakfastConfigChangeLog/{auditId}`
+// entry for each changed CONFIG field (cutoff time, override flag,
+// instructions). Meal-row changes are content — not config —
+// and are NOT audited (per spec §Admin Settings). The audit
+// subcollection lives under the existing `settings/breakfastConfig`
+// doc, not a new top-level collection, so the BR-02 "no new
+// collections" constraint is honored.
+const handleSaveBreakfast = async (e: React.FormEvent) => {
     e.preventDefault();
-    await runSettingsSave("breakfast", "Dining settings saved", () => updateSettings("breakfastConfig", {
+    const payload = {
       isEnabled: breakfastEnabled,
-      ratePerPersonPerNight: parseFloat(breakfastRate) || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
-      breakfastIncludesChildrenDefault,
-      silogItems
-    }));
+      // Per BR-10 (decision #244 reserved, 2026-10-14
+      // — Phase 14): the cut-off enforcement toggle is
+      // explicit on every write. The Zod schema
+      // requires a boolean so the writer can never
+      // silently lose the field. The reader
+      // (`normalizeBreakfastConfig`) defaults missing
+      // values to `true` for legacy docs.
+      cutoffsEnabled: breakfastCutoffsEnabled,
+      cutoffTime: breakfastCutoffTime,
+      cutoffTimezone: config.timezone,
+      frontDeskOverrideEnabled: breakfastFrontDeskOverrideEnabled,
+      servedGraceMinutes: parseInt(breakfastServedGraceMinutes, 10) || DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES,
+      defaultMealInstructions: breakfastDefaultMealInstructions,
+      meals: breakfastMeals,
+      updatedBy: currentUser?.uid || currentUser?.email || "staff",
+      updatedAt: new Date().toISOString()
+    };
+    const parsed = BreakfastConfigSchema.safeParse(payload);
+    if (!parsed.success) {
+      const firstIssue = parsed.error.issues[0];
+      toast.error(
+        "Invalid breakfast config",
+        firstIssue?.message ?? "Review the cutoff time and meal rows, then try again."
+      );
+      return;
+    }
+    await runSettingsSave("breakfast", "Dining settings saved", async () => {
+      const success = await updateSettings("breakfastConfig", parsed.data);
+      if (success) {
+        // Capture the before-state for the audit diff. The audit
+        // log only fires for CONFIG fields — not meal rows (per
+        // spec). The previous snapshot may be undefined on the
+        // first-ever save; in that case every config field is
+        // "new" and a single entry per field is still too noisy,
+        // so we short-circuit when no prior snapshot exists.
+        const previous = (breakfastConfig ?? {}) as Partial<BreakfastConfig>;
+        const previousSnapshot: Record<string, unknown> = {
+          // Per BR-10 (decision #244 reserved,
+          // 2026-10-14 — Phase 14): the cut-off
+          // enforcement toggle is part of the
+          // config-level audit diff. A flip to / from
+          // `false` writes a single audit entry naming
+          // `cutoffsEnabled` so the change is
+          // traceable (a hotel can recover who
+          // disabled cut-offs and when). Legacy docs
+          // hydrate to `true` (`!== false` defensively),
+          // so a first-ever save writes every config
+          // field once.
+          cutoffsEnabled: previous.cutoffsEnabled !== false,
+          cutoffTime: previous.cutoffTime,
+          frontDeskOverrideEnabled: previous.frontDeskOverrideEnabled,
+          servedGraceMinutes: previous.servedGraceMinutes,
+          defaultMealInstructions: previous.defaultMealInstructions
+        };
+        const nextSnapshot: Record<string, unknown> = {
+          cutoffsEnabled: parsed.data.cutoffsEnabled,
+          cutoffTime: parsed.data.cutoffTime,
+          frontDeskOverrideEnabled: parsed.data.frontDeskOverrideEnabled,
+          servedGraceMinutes: parsed.data.servedGraceMinutes,
+          defaultMealInstructions: parsed.data.defaultMealInstructions
+        };
+        const auditRef = collection(db, "settings", "breakfastConfig", "breakfastConfigChangeLog");
+        const changedBy = currentUser?.uid || currentUser?.email || "staff";
+        const writes: Promise<unknown>[] = [];
+        for (const field of Object.keys(nextSnapshot)) {
+          if (previousSnapshot[field] !== nextSnapshot[field]) {
+            writes.push(
+              addDoc(auditRef, {
+                field,
+                before: previousSnapshot[field] ?? null,
+                after: nextSnapshot[field] ?? null,
+                changedBy,
+                changedAt: serverTimestamp()
+              }).catch((err) => {
+                // The audit log is a side-effect of the save —
+                // a failed log entry must not roll back the
+                // primary write. Log + swallow so the operator
+                // still sees the success toast.
+                // eslint-disable-next-line no-console
+                console.warn("breakfastConfigChangeLog write failed", err);
+              })
+            );
+          }
+        }
+        // Run all writes in parallel; do not block the success
+        // toast on their resolution (the caller awaits the save
+        // promise, not the audit promise).
+        void Promise.all(writes);
+      }
+      return success;
+    });
   };
 
   // Per DSC-01..05 (2026-08-01, per CVQ-06): save the per-class
@@ -3581,13 +4315,19 @@ export function SettingsPage() {
     e.preventDefault();
     if (!holdsFormValid) {
       toast.error(
-        "Please enter a valid hold window — payment hold must be 1..72 hours, in-flow hold must be 5..30 minutes."
+        "Please enter a valid value — payment hold must be 1..72 hours, in-flow hold must be 5..30 minutes, and maximum stay must be 0 (no limit) or 1..365 nights."
       );
       return;
     }
-    await runSettingsSave("holds", "Hold windows saved", () => updateSettings("hotelConfig", {
+    await runSettingsSave("holds", "Booking limits saved", () => updateSettings("hotelConfig", {
       paymentHoldWindowHours: paymentHoldWindowHoursValid!,
-      inFlowHoldMinutes: inFlowHoldMinutesValid!
+      inFlowHoldMinutes: inFlowHoldMinutesValid!,
+      // Per MSL-01 (2026-10-15): written as the literal integer the
+      // admin typed, including `0` for "no limit". `resolveMaxStayNights`
+      // on the read side turns that `0` into `Infinity` for the clamp
+      // arithmetic; storing `Infinity` here would be meaningless in
+      // Firestore and would break the reader.
+      maxStayNights: maxStayNightsValid!
     }));
   };
 
@@ -3805,86 +4545,201 @@ export function SettingsPage() {
     );
 
   // Toggle item status in local states
-  const toggleSilogItem = (id: string) => {
-    setSilogItems(prev => prev.map(item => item.id === id ? { ...item, isActive: !item.isActive } : item));
-  };
-
-  const handleAddSilogItemClick = () => {
-    setEditingSilogItem(null);
-    setBreakfastItemNameInput("");
-    setIsBreakfastItemModalOpen(true);
-  };
-
-  const handleEditSilogItem = (item: { id: string; name: string; isActive: boolean }) => {
-    setEditingSilogItem(item);
-    setBreakfastItemNameInput(item.name);
-    setIsBreakfastItemModalOpen(true);
-  };
-
-  const handleDeleteSilogItem = (id: string) => {
-    setSilogItems(prev => prev.filter(item => item.id !== id));
-    toast.success("Breakfast Item Deleted", "The menu item was removed. Save Dining Settings to commit.");
-  };
-
-  const handleSaveSilogItemSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmedName = breakfastItemNameInput.trim();
-    if (!trimmedName) {
-      toast.error("Name is required", "Please enter a name for the breakfast menu item.");
-      return;
-    }
-
-    // Generate a URL/ID safe key
-    const generatedId = trimmedName
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "");
-
-    if (!generatedId) {
-      toast.error("Invalid name", "Name must contain letters or numbers.");
-      return;
-    }
-
-    if (editingSilogItem) {
-      // Editing
-      // Check for duplicates (excluding the item we're editing)
-      const duplicateExists = silogItems.some(
-        item => item.id !== editingSilogItem.id && item.name.toLowerCase() === trimmedName.toLowerCase()
-      );
-      if (duplicateExists) {
-        toast.error("Duplicate Item", "A breakfast item with this name already exists.");
-        return;
+  // Per BR-02 (decision #231, 2026-10-12, breakfast redesign):
+  // the legacy `toggleSilogItem` / `handleAddSilogItemClick` /
+  // `handleEditSilogItem` / `handleDeleteSilogItem` /
+  // `handleSaveSilogItemSubmit` helpers are replaced by inline
+  // table-row editing. The table exposes per-row price /
+  // description / display-order / isActive controls; adding a
+  // new meal appends an empty edit row at the bottom. The new
+  // meal id is `meal-{nanoid(8)}` (Math.random + Date.now,
+  // matching the QRManagementPage id pattern at
+  // admin-app/src/pages/QRManagementPage.tsx:368 — no `nanoid`
+  // dependency).
+  //
+  // Meal-row changes are CONTENT (catalog) — not CONFIG — and
+  // are NOT written to `settings/breakfastConfigChangeLog`
+  // (per spec §Admin Settings: the audit subcollection is for
+  // config-shape changes only). The setter mutates
+  // `breakfastMeals` in place; the next Save click writes the
+  // full array to Firestore.
+  const handleAddBreakfastMeal = () => {
+    const maxOrder = breakfastMeals.reduce(
+      (max, meal) => (meal.displayOrder > max ? meal.displayOrder : max),
+      -1
+    );
+    const newId = `meal-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    const now = new Date().toISOString();
+    setBreakfastMeals((prev) => [
+      ...prev,
+      {
+        id: newId,
+        name: "",
+        description: "",
+        price: 0,
+        isActive: true,
+        displayOrder: maxOrder + 1,
+        createdAt: now,
+        updatedAt: now
       }
+    ]);
+  };
 
-      setSilogItems(prev =>
-        prev.map(item =>
-          item.id === editingSilogItem.id
-            ? { ...item, name: trimmedName }
-            : item
-        )
-      );
-      toast.success("Breakfast Item Renamed", "Click Save Dining Settings to commit changes.");
-    } else {
-      // Adding new
-      // Check for duplicates
-      const duplicateExists = silogItems.some(
-        item => item.name.toLowerCase() === trimmedName.toLowerCase() || item.id === generatedId
-      );
-      if (duplicateExists) {
-        toast.error("Duplicate Item", "A breakfast item with this name or ID already exists.");
-        return;
-      }
+  // Per MBUX-04 (decision #256, 2026-10-15): per-meal thumbnail
+  // upload state. Kept as a Set of meal ids rather than one global
+  // flag so an admin can see exactly which row is mid-upload in a
+  // table of rows.
+  const [uploadingMealImageIds, setUploadingMealImageIds] = useState<Set<string>>(new Set());
 
-      setSilogItems(prev => [
-        ...prev,
-        { id: generatedId, name: trimmedName, isActive: true }
-      ]);
-      toast.success("Breakfast Item Added", "Click Save Dining Settings to commit changes.");
+  // Per MBUX-04: upload (or replace) one meal's thumbnail.
+  //
+  // ORDER MATTERS. The new object is uploaded FIRST and the catalog
+  // row is only repointed once the upload resolves. The superseded
+  // object is deleted LAST, after the row no longer references it.
+  // Reversing either step can leave the guest menu strip pointing at a
+  // deleted file — a broken image in front of a paying guest.
+  // Per OCT-H10 (2026-10-20, decision #284): a meal-photo change is
+  // PERSISTED immediately, so the guest-facing catalog never lags
+  // the admin's screen. Before this, the upload only mutated local
+  // state and toasted "Meal image uploaded" — the guest still saw
+  // no photo until the admin separately pressed Save, and
+  // navigating away orphaned the Storage object so the upload
+  // appeared lost.
+  //
+  // Only the `meals` array is written (`updateSettings` merges at
+  // the top level of the doc), so the rest of the Dining form keeps
+  // its own Save semantics — an unsaved cut-off-time edit is never
+  // committed as a side effect of a photo action.
+  const persistBreakfastMeals = async (meals: BreakfastMeal[]) => {
+    const parsed = BreakfastMealSchema.array().safeParse(meals);
+    if (!parsed.success) {
+      const firstIssue = parsed.error.issues[0];
+      toast.error(
+        "Could not save the meal photo",
+        firstIssue?.message ?? "The meal row is invalid — fix it and try again."
+      );
+      return false;
     }
+    return updateSettings("breakfastConfig", {
+      meals: parsed.data,
+      updatedBy: currentUser?.uid || currentUser?.email || "staff",
+      updatedAt: new Date().toISOString()
+    });
+  };
 
-    setIsBreakfastItemModalOpen(false);
-    setEditingSilogItem(null);
-    setBreakfastItemNameInput("");
+  const handleUploadBreakfastMealImage = async (mealId: string, file: File | undefined) => {
+    if (!file) return;
+    const previousUrl = breakfastMeals.find((meal) => meal.id === mealId)?.imageUrl;
+    setUploadingMealImageIds((prev) => new Set(prev).add(mealId));
+    try {
+      const result = await uploadBreakfastMealImage(mealId, file);
+      if (result.success && result.url) {
+        // Per OCT-H10: build the next array explicitly (the
+        // `setBreakfastMeals` state update is async, so reading
+        // `breakfastMeals` inside the same tick would still see the
+        // OLD array) and persist it right away.
+        const nextMeals = applyBreakfastMealPatch(breakfastMeals, mealId, { imageUrl: result.url });
+        handleUpdateBreakfastMeal(mealId, { imageUrl: result.url });
+        const saved = await persistBreakfastMeals(nextMeals);
+        if (saved) {
+          if (previousUrl) {
+            void removeBreakfastMealImage(mealId, previousUrl);
+          }
+          toast.success("Meal image uploaded");
+        }
+      }
+    } finally {
+      setUploadingMealImageIds((prev) => {
+        const next = new Set(prev);
+        next.delete(mealId);
+        return next;
+      });
+    }
+  };
+
+  // Per MBUX-04: clear a meal's thumbnail. The row is cleared first so
+  // the guest UI immediately falls back to its no-image state, then the
+  // object is best-effort removed.
+  const handleRemoveBreakfastMealImage = async (mealId: string) => {
+    const previousUrl = breakfastMeals.find((meal) => meal.id === mealId)?.imageUrl;
+    if (!previousUrl) return;
+    // Per OCT-H10: persist the removal immediately, for the same
+    // reason as the upload. The Storage object is deleted only
+    // AFTER the row no longer references it, so the guest menu can
+    // never point at a deleted file.
+    const nextMeals = applyBreakfastMealPatch(breakfastMeals, mealId, { imageUrl: undefined });
+    handleUpdateBreakfastMeal(mealId, { imageUrl: undefined });
+    const saved = await persistBreakfastMeals(nextMeals);
+    if (!saved) return;
+    await removeBreakfastMealImage(mealId, previousUrl);
+    toast.success("Meal image removed");
+  };
+
+  // Per OCT-H5 (2026-10-20, decision #283) + OCT-H10 (decision
+  // #284): the ONE place a meal-row patch is applied. The inline
+  // editors, the photo upload and the photo removal all route
+  // through it, so the `undefined`-key rule is enforced identically
+  // on every path.
+  //
+  // WHY THE RULE EXISTS: object spread copies own enumerable keys
+  // INCLUDING undefined-valued ones, so a `{ imageUrl: undefined }`
+  // patch left the meal object OWNING an `imageUrl` key with the
+  // value `undefined`. Zod's `.optional()` validates the VALUE, not
+  // the key's presence, so the bad payload passed schema validation
+  // and then threw `Unsupported field value: undefined` at the
+  // Firestore SDK boundary — which made EVERY Dining settings save
+  // fail, not just the image removal.
+  //
+  // The fix drops undefined-valued keys from the patch so the key is
+  // simply ABSENT, and — when the patch explicitly cleared a
+  // previously-set optional field — removes the key from the merged
+  // meal so neither the stale value nor an unwritable `undefined`
+  // can survive.
+  const applyBreakfastMealPatch = (
+    meals: BreakfastMeal[],
+    id: string,
+    patch: Partial<Omit<BreakfastMeal, "id" | "createdAt">>
+  ): BreakfastMeal[] =>
+    meals.map((meal) => {
+      if (meal.id !== id) return meal;
+      const patchKeys = Object.keys(patch);
+      const cleanPatch = Object.fromEntries(
+        Object.entries(patch).filter(([, value]) => value !== undefined)
+      ) as Partial<Omit<BreakfastMeal, "id" | "createdAt">>;
+      const next = { ...meal, ...cleanPatch, updatedAt: new Date().toISOString() };
+      if (patchKeys.includes("imageUrl") && cleanPatch.imageUrl === undefined) {
+        // The photo was removed: the key must be GONE (so the
+        // rewritten `meals` array element has no `imageUrl`), not
+        // left as `undefined` (unwritable) and not left holding the
+        // old URL (which would point at a deleted Storage object).
+        delete (next as { imageUrl?: string }).imageUrl;
+      }
+      return next;
+    });
+
+  const handleUpdateBreakfastMeal = (
+    id: string,
+    patch: Partial<Omit<BreakfastMeal, "id" | "createdAt">>
+  ) => {
+    setBreakfastMeals((prev) => applyBreakfastMealPatch(prev, id, patch));
+  };
+
+  const handleDeleteBreakfastMeal = (id: string) => {
+    setBreakfastMeals((prev) => prev.filter((meal) => meal.id !== id));
+  };
+
+  const handleMoveBreakfastMeal = (id: string, direction: -1 | 1) => {
+    setBreakfastMeals((prev) => {
+      const sorted = [...prev].sort((a, b) => a.displayOrder - b.displayOrder);
+      const idx = sorted.findIndex((meal) => meal.id === id);
+      if (idx < 0) return prev;
+      const swapIdx = idx + direction;
+      if (swapIdx < 0 || swapIdx >= sorted.length) return prev;
+      const tmp = sorted[idx].displayOrder;
+      sorted[idx] = { ...sorted[idx], displayOrder: sorted[swapIdx].displayOrder, updatedAt: new Date().toISOString() };
+      sorted[swapIdx] = { ...sorted[swapIdx], displayOrder: tmp, updatedAt: new Date().toISOString() };
+      return sorted;
+    });
   };
 
   const editingStoreItem = storeItems.find(item => item.id === editingStoreItemId) ?? null;
@@ -4009,6 +4864,16 @@ export function SettingsPage() {
     { id: "seo" as const, label: seoSettings.sourceChangesPending ? "SEO & Search •" : "SEO & Search", icon: Eye },
     { id: "rewards" as const, label: "Loyalty Rewards", icon: Gift },
     { id: "breakfast" as const, label: "Breakfast & Dining", icon: Coffee },
+    // Per BR-12.1 (2026-10-15, decision #247): the Other Add-Ons
+    // tab body reads/writes the `addOns/{addOnId}` collection.
+    // This entry was added post-merge (decision #251 follow-up)
+    // because the SETTINGS_GROUPS.guest.tabs entry referenced
+    // "addons" but the `tabs` array below was missing the
+    // matching entry — the pill/sidebar render does
+    // `tabs.find(...)` and silently returned `null`, so the
+    // tab was hidden from both the mobile pill bar and the
+    // desktop sidebar even though the badge counter said "5".
+    { id: "addons" as const, label: "Other Add-Ons", icon: Package },
     { id: "store" as const, label: "In-Room Store", icon: ShoppingBag },
     { id: "email" as const, label: "Email Config", icon: Mail },
     { id: "intercom" as const, label: "Intercom", icon: MessageSquare },
@@ -5333,15 +6198,22 @@ export function SettingsPage() {
             <form onSubmit={handleSaveRewards} className="space-y-6 text-xs">
               <div>
                 <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">{config.rewardsName} Modifiers</h3>
-                <p className="text-[10px] text-gray-500 mt-0.5">Fine-tune loyalty point distributions, redemption rate, and member discount rules.</p>
+                <p className="text-[10px] text-gray-500 mt-0.5">
+                  Configure earning rate, redemption value, welcome bonus, redemption thresholds, and the member tier program.
+                </p>
               </div>
 
-              {/* Toggles */}
-              <div className="space-y-3.5 bg-gray-50 p-5 rounded-xl border border-gray-150">
+              {/* Master toggle — matches the screenshot's "Spark Rewards
+                  is on" line. When off, all guest-app surfaces hide and
+                  the booking-engine points earn step becomes a no-op
+                  (per the existing `pointsEnabled` branch in
+                  `guest-app/server/handlers/bookings.ts`). */}
+              <div className="rounded-xl border border-gray-150 bg-gray-50 p-4">
                 <label className="flex items-center gap-3 cursor-pointer text-xs font-bold text-gray-800">
                   <button
                     type="button"
                     onClick={() => setPointsEnabled(!pointsEnabled)}
+                    aria-label="Toggle Spark Rewards program"
                     className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
                       pointsEnabled ? "bg-primary" : "bg-gray-200"
                     }`}
@@ -5350,152 +6222,364 @@ export function SettingsPage() {
                       pointsEnabled ? "translate-x-5" : "translate-x-0"
                     }`} />
                   </button>
-                  Activate Loyalty Points Earning System
-                </label>
-
-                <label className="flex items-center gap-3 cursor-pointer text-xs font-bold text-gray-800">
-                  <button
-                    type="button"
-                    onClick={() => setMemberDiscountEnabled(!memberDiscountEnabled)}
-                    className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
-                      memberDiscountEnabled ? "bg-primary" : "bg-gray-200"
-                    }`}
-                  >
-                    <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
-                      memberDiscountEnabled ? "translate-x-5" : "translate-x-0"
-                    }`} />
-                  </button>
-                  Enable Member Base Room Discount
-                </label>
-
-                {/* Per EC-02 (2026-08-21): the early-check-in
-                    perk toggle. Sits alongside the existing
-                    points + member-discount toggles so the
-                    admin sees all loyalty perks in one block.
-                    The label copy spells out the side-effect
-                    (hides the guest button + rejects the API)
-                    so the admin understands the toggle's scope
-                    before flipping it. */}
-                <label className="flex items-start gap-3 cursor-pointer text-xs font-bold text-gray-800">
-                  <button
-                    type="button"
-                    onClick={() => setEarlyCheckInEnabled(!earlyCheckInEnabled)}
-                    aria-label="Toggle Spark Rewards early check-in requests"
-                    className={`mt-0.5 h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
-                      earlyCheckInEnabled ? "bg-primary" : "bg-gray-200"
-                    }`}
-                  >
-                    <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
-                      earlyCheckInEnabled ? "translate-x-5" : "translate-x-0"
-                    }`} />
-                  </button>
                   <span>
-                    Allow Spark Rewards Early Check-In Requests
-                    <span className="block mt-0.5 text-[10px] font-medium text-gray-500 leading-relaxed">
-                      When off, the button disappears from the booking confirmation page and the server rejects new requests with 403. Pending + historical requests on existing bookings stay visible until resolved.
+                    {config.rewardsName} is on
+                    <span className="block mt-0.5 text-[10px] font-medium text-gray-500">
+                      Shown on the website, members can join and earn.
                     </span>
                   </span>
                 </label>
               </div>
 
-              {/* Earning Mode */}
-              <div className="space-y-3">
-                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Earning Mode</h4>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className={`flex items-start gap-3 cursor-pointer rounded-lg border p-3 transition ${
-                    earningMode === "per-spend"
-                      ? "border-primary bg-primary/5"
-                      : "border-gray-200 bg-white hover:border-gray-300"
-                  }`}>
-                    <input
-                      type="radio"
-                      name="earningMode"
-                      value="per-spend"
-                      checked={earningMode === "per-spend"}
-                      onChange={() => setEarningMode("per-spend")}
-                      disabled={!pointsEnabled}
-                      className="mt-1 h-4 w-4 cursor-pointer text-primary focus:ring-primary-light"
-                    />
-                    <div>
-                      <p className="text-xs font-bold text-gray-800">Per ₱100 spent</p>
-                      <p className="mt-1 text-[10px] leading-relaxed text-gray-500">Awards points based on booking subtotal. Best for properties with wide price ranges.</p>
-                    </div>
-                  </label>
-
-                  <label className={`flex items-start gap-3 cursor-pointer rounded-lg border p-3 transition ${
-                    earningMode === "per-booking"
-                      ? "border-primary bg-primary/5"
-                      : "border-gray-200 bg-white hover:border-gray-300"
-                  }`}>
-                    <input
-                      type="radio"
-                      name="earningMode"
-                      value="per-booking"
-                      checked={earningMode === "per-booking"}
-                      onChange={() => setEarningMode("per-booking")}
-                      disabled={!pointsEnabled}
-                      className="mt-1 h-4 w-4 cursor-pointer text-primary focus:ring-primary-light"
-                    />
-                    <div>
-                      <p className="text-xs font-bold text-gray-800">Flat per completed stay</p>
-                      <p className="mt-1 text-[10px] leading-relaxed text-gray-500">Awards a fixed number of points per stay regardless of total. Simpler for members to predict.</p>
-                    </div>
-                  </label>
-                </div>
-              </div>
-
+              {/* Phase 2 scalar inputs — 6 in a 3-column grid
+                  (2 rows), matching the Settings → Rewards tab
+                  screenshot. The first two fields are RELABELED
+                  reciprocals of the existing per-spend inputs so
+                  the admin thinks in "1 point = N peso" terms
+                  (cleaner mental model). The underlying values
+                  stay the same — `pointsPerHundred` and
+                  `pointsRedemptionRate` — so no behavior change. */}
               <div className="grid gap-4 sm:grid-cols-3">
-                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                  {earningMode === "per-booking" ? "Points per Completed Stay" : "Points Granted per ₱100 Spent"}
+                <label className="flex flex-col gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                  ₱ Spent for 1 Point
                   <input
                     type="number"
-                    required
-                    min="0"
-                    value={earningMode === "per-booking" ? pointsPerBooking : pointsPerHundred}
-                    onChange={(e) =>
-                      earningMode === "per-booking"
-                        ? setPointsPerBooking(e.target.value)
-                        : setPointsPerHundred(e.target.value)
-                    }
-                    disabled={!pointsEnabled}
-                    className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-                  />
-                </label>
-
-                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                  Points per ₱1 Redemption Rate
-                  <input
-                    type="number"
-                    required
                     min="1"
-                    value={pointsRedemptionRate}
-                    onChange={(e) => setPointsRedemptionRate(e.target.value)}
+                    value={Math.max(1, Math.round(100 / (parseFloat(pointsPerHundred) || 10)))}
+                    onChange={(e) => {
+                      const php = Math.max(1, parseInt(e.target.value, 10) || 100);
+                      setPointsPerHundred(String(Math.max(1, Math.round(100 / php))));
+                    }}
                     disabled={!pointsEnabled}
-                    className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-semibold text-gray-900 focus:border-primary disabled:cursor-not-allowed disabled:opacity-60"
                   />
                 </label>
-
-                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                  Member Discount Percentage (%)
+                <label className="flex flex-col gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                  1 Point is Worth ₱
                   <input
                     type="number"
-                    required
+                    min="0.01"
+                    step="0.01"
+                    value={(parseFloat(pointsRedemptionRate) || 100) / 100}
+                    onChange={(e) => {
+                      const val = Math.max(0.01, parseFloat(e.target.value) || 1);
+                      setPointsRedemptionRate(String(Math.max(1, Math.round(val * 100))));
+                    }}
+                    disabled={!pointsEnabled}
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-semibold text-gray-900 focus:border-primary disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                  Welcome Points
+                  <input
+                    type="number"
+                    min="0"
+                    value={welcomePoints}
+                    onChange={(e) => setWelcomePoints(e.target.value)}
+                    disabled={!pointsEnabled}
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-semibold text-gray-900 focus:border-primary disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                  Use at Least (Points)
+                  <input
+                    type="number"
+                    min="0"
+                    value={minPointsToRedeem}
+                    onChange={(e) => setMinPointsToRedeem(e.target.value)}
+                    disabled={!pointsEnabled}
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-semibold text-gray-900 focus:border-primary disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                  Points Can Pay Up To (% of Bill)
+                  <input
+                    type="number"
                     min="0"
                     max="100"
-                    value={memberDiscountPct}
-                    onChange={(e) => setMemberDiscountPct(e.target.value)}
-                    disabled={!memberDiscountEnabled}
-                    className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                    value={pointsCanPayUpToBillPct}
+                    onChange={(e) => setPointsCanPayUpToBillPct(e.target.value)}
+                    disabled={!pointsEnabled}
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-semibold text-gray-900 focus:border-primary disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                  Free Night Every (Stays, 0 = Off)
+                  <input
+                    type="number"
+                    min="0"
+                    value={freeNightEvery}
+                    onChange={(e) => setFreeNightEvery(e.target.value)}
+                    disabled={!pointsEnabled}
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-semibold text-gray-900 focus:border-primary disabled:cursor-not-allowed disabled:opacity-60"
                   />
                 </label>
               </div>
 
-              <p className="text-[10px] leading-relaxed text-gray-500">
-                Redemption rate is the number of points required to redeem ₱1 at booking checkout (server reads <code>settings/rewardsConfig.pointsRedemptionRate</code>).
-                Earning mode is the server-side branch in <code>handleCreateBooking</code> that decides whether to award by subtotal or by flat count.
-              </p>
+              {/* Levels table editor — matches the screenshot's
+                  5-column grid. Each row is a controllable LevelDef.
+                  The "+ Add a level" button appends a sensible
+                  default. The UI auto-sorts rows ascending by
+                  `fromStays` on render so the admin sees the
+                  canonical order even if they edited values out
+                  of sequence. (The save handler also re-sorts
+                  defensively before writing — see handleSaveRewards.) */}
+              <div className="space-y-3">
+                <div>
+                  <h4 className="text-sm font-heading text-gray-900">Levels</h4>
+                  <p className="mt-1 text-[11px] leading-relaxed text-gray-500">
+                    Level depends on the number of completed stays as a member. The member discount is never added on top of a promo; the bigger one is used.
+                  </p>
+                </div>
 
-              <SaveActionFooter label="Save Rewards Matrix" status={getSaveStatus("rewards")} />
+                {/* Table header — only visible when there's at least
+                    one row to label (an empty array hides the whole
+                    table header to keep the empty state clean). */}
+                {levels.length > 0 && (
+                  <div className="hidden gap-2 sm:grid sm:grid-cols-[1.4fr_0.8fr_0.8fr_0.8fr_2.2fr_auto] text-[10px] font-bold uppercase tracking-wider text-gray-500 px-1">
+                    <span>Level Name</span>
+                    <span>From Stays</span>
+                    <span>Discount %</span>
+                    <span>Points ×</span>
+                    <span>Perks</span>
+                    <span className="sr-only">Remove</span>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  {[...levels]
+                    .sort((a, b) => a.fromStays - b.fromStays)
+                    .map((level) => (
+                      <div
+                        key={level.id}
+                        className="grid items-center gap-2 sm:grid-cols-[1.4fr_0.8fr_0.8fr_0.8fr_2.2fr_auto]"
+                      >
+                        <input
+                          type="text"
+                          value={level.name}
+                          maxLength={24}
+                          onChange={(e) => handleUpdateLevelField(level.id, "name", e.target.value)}
+                          placeholder="Tier name"
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-semibold focus:border-primary"
+                          aria-label="Level name"
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          value={level.fromStays}
+                          onChange={(e) => handleUpdateLevelField(level.id, "fromStays", e.target.value)}
+                          placeholder="0"
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-semibold focus:border-primary"
+                          aria-label="Stays required"
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={level.discountPct}
+                          onChange={(e) => handleUpdateLevelField(level.id, "discountPct", e.target.value)}
+                          placeholder="0"
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-semibold focus:border-primary"
+                          aria-label="Discount percentage"
+                        />
+                        <input
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={level.pointsMultiplier}
+                          onChange={(e) => handleUpdateLevelField(level.id, "pointsMultiplier", e.target.value)}
+                          placeholder="1"
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-semibold focus:border-primary"
+                          aria-label="Points multiplier"
+                        />
+                        <input
+                          type="text"
+                          value={level.perks}
+                          maxLength={280}
+                          onChange={(e) => handleUpdateLevelField(level.id, "perks", e.target.value)}
+                          placeholder="Member-facing perks blurb (≤ 280 chars)"
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary"
+                          aria-label="Perks"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveLevel(level.id)}
+                          aria-label={`Remove ${level.name} tier`}
+                          className="flex h-10 w-10 items-center justify-center rounded-full border border-red-200 bg-white text-red-600 transition hover:bg-red-50 active:scale-95"
+                        >
+                          <X size={16} aria-hidden="true" />
+                        </button>
+                      </div>
+                    ))}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleAddLevel}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-primary bg-primary/5 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-primary transition hover:bg-primary/10 active:scale-95"
+                >
+                  <Plus size={14} aria-hidden="true" />
+                  Add a Level
+                </button>
+
+                {levels.length === 0 && (
+                  <p className="text-[11px] leading-relaxed text-gray-500">
+                    No tiers configured. The booking engine falls back to the legacy member discount percentage below for tier-less members.
+                  </p>
+                )}
+              </div>
+
+              {/* Advanced / legacy controls — the per-booking /
+                  per-spend branch + the EC-02 early check-in toggle
+                  + the legacy member-discount toggle + the global
+                  `memberDiscountPct` fallback. Kept accessible so
+                  no existing functionality regresses; the primary
+                  tier-editing surface is the Levels table above. */}
+              <details className="rounded-xl border border-gray-150 bg-gray-50 p-4">
+                <summary className="cursor-pointer text-xs font-bold uppercase tracking-wider text-gray-700">
+                  Advanced / legacy controls
+                </summary>
+                <div className="mt-4 space-y-5">
+
+                  <label className="flex items-start gap-3 cursor-pointer text-xs font-bold text-gray-800">
+                    <button
+                      type="button"
+                      onClick={() => setMemberDiscountEnabled(!memberDiscountEnabled)}
+                      aria-label="Toggle global member discount"
+                      className={`mt-0.5 h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
+                        memberDiscountEnabled ? "bg-primary" : "bg-gray-200"
+                      }`}
+                    >
+                      <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                        memberDiscountEnabled ? "translate-x-5" : "translate-x-0"
+                      }`} />
+                    </button>
+                    <span>
+                      Enable Global Member Discount Fallback
+                      <span className="block mt-0.5 text-[10px] font-medium text-gray-500 leading-relaxed">
+                        When on, the Member Discount % below applies to tier-less members. When your Levels table has a 0-stay base tier, that tier's discount takes precedence and this fallback is dormant.
+                      </span>
+                    </span>
+                  </label>
+
+                  <label className="flex items-start gap-3 cursor-pointer text-xs font-bold text-gray-800">
+                    <button
+                      type="button"
+                      onClick={() => setAllowMemberPointsRedemption(!allowMemberPointsRedemption)}
+                      aria-label="Toggle member self-service points redemption at checkout"
+                      className={`mt-0.5 h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
+                        allowMemberPointsRedemption ? "bg-primary" : "bg-gray-200"
+                      }`}
+                    >
+                      <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                        allowMemberPointsRedemption ? "translate-x-5" : "translate-x-0"
+                      }`} />
+                    </button>
+                    <span>
+                      Allow Member Self-Redemption at Checkout
+                      <span className="block mt-0.5 text-[10px] font-medium text-gray-500 leading-relaxed">
+                        When on, signed-in members can apply their own points balance to a booking from the Step 3 review panel. The same min-redeem, bill cap, and balance guards still run server-side — only the actor changes. When off (the default), points redemption remains admin-only via the booking drawer.
+                      </span>
+                    </span>
+                  </label>
+
+                  <label className="flex items-start gap-3 cursor-pointer text-xs font-bold text-gray-800">
+                    <button
+                      type="button"
+                      onClick={() => setEarlyCheckInEnabled(!earlyCheckInEnabled)}
+                      aria-label="Toggle Spark Rewards early check-in requests"
+                      className={`mt-0.5 h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
+                        earlyCheckInEnabled ? "bg-primary" : "bg-gray-200"
+                      }`}
+                    >
+                      <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                        earlyCheckInEnabled ? "translate-x-5" : "translate-x-0"
+                      }`} />
+                    </button>
+                    <span>
+                      Allow Spark Rewards Early Check-In Requests
+                      <span className="block mt-0.5 text-[10px] font-medium text-gray-500 leading-relaxed">
+                        When off, the button disappears from the booking confirmation page and the server rejects new requests with 403. Pending + historical requests on existing bookings stay visible until resolved.
+                      </span>
+                    </span>
+                  </label>
+
+                  <div className="space-y-3">
+                    <h5 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Earning Mode</h5>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className={`flex items-start gap-3 cursor-pointer rounded-lg border p-3 transition ${
+                        earningMode === "per-spend"
+                          ? "border-primary bg-primary/5"
+                          : "border-gray-200 bg-white hover:border-gray-300"
+                      }`}>
+                        <input
+                          type="radio"
+                          name="earningMode"
+                          value="per-spend"
+                          checked={earningMode === "per-spend"}
+                          onChange={() => setEarningMode("per-spend")}
+                          disabled={!pointsEnabled}
+                          className="mt-1 h-4 w-4 cursor-pointer text-primary focus:ring-primary-light"
+                        />
+                        <div>
+                          <p className="text-xs font-bold text-gray-800">Per ₱100 spent</p>
+                          <p className="mt-1 text-[10px] leading-relaxed text-gray-500">Awards points based on booking subtotal. Best for properties with wide price ranges.</p>
+                        </div>
+                      </label>
+                      <label className={`flex items-start gap-3 cursor-pointer rounded-lg border p-3 transition ${
+                        earningMode === "per-booking"
+                          ? "border-primary bg-primary/5"
+                          : "border-gray-200 bg-white hover:border-gray-300"
+                      }`}>
+                        <input
+                          type="radio"
+                          name="earningMode"
+                          value="per-booking"
+                          checked={earningMode === "per-booking"}
+                          onChange={() => setEarningMode("per-booking")}
+                          disabled={!pointsEnabled}
+                          className="mt-1 h-4 w-4 cursor-pointer text-primary focus:ring-primary-light"
+                        />
+                        <div>
+                          <p className="text-xs font-bold text-gray-800">Flat per completed stay</p>
+                          <p className="mt-1 text-[10px] leading-relaxed text-gray-500">Awards a fixed number of points per stay regardless of total. Simpler for members to predict.</p>
+                        </div>
+                      </label>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                        {earningMode === "per-booking" ? "Points per Completed Stay" : "Points Granted per ₱100 Spent"}
+                        <input
+                          type="number"
+                          min="0"
+                          value={earningMode === "per-booking" ? pointsPerBooking : pointsPerHundred}
+                          onChange={(e) =>
+                            earningMode === "per-booking"
+                              ? setPointsPerBooking(e.target.value)
+                              : setPointsPerHundred(e.target.value)
+                          }
+                          disabled={!pointsEnabled}
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary disabled:cursor-not-allowed disabled:opacity-60"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                        Member Discount Percentage (%)
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={memberDiscountPct}
+                          onChange={(e) => setMemberDiscountPct(e.target.value)}
+                          disabled={!memberDiscountEnabled}
+                          className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:border-primary disabled:cursor-not-allowed disabled:opacity-60"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </details>
+
+              <SaveActionFooter label="Save Settings" status={getSaveStatus("rewards")} />
             </form>
             ) : (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
@@ -5509,12 +6593,18 @@ export function SettingsPage() {
           {activeTab === "breakfast" && (
             <form onSubmit={handleSaveBreakfast} className="space-y-6 text-xs">
               <div>
-                <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Breakfast Silog Management</h3>
-                <p className="text-[10px] text-gray-500 mt-0.5">Toggle breakfast service rates and configure menu items for walk-ins.</p>
+                <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Breakfast &amp; Dining</h3>
+                <p className="text-[10px] text-gray-500 mt-0.5">
+                  Configure the daily cut-off, per-meal pricing, and meal instructions shown
+                  to guests at Step 2, on the booking review, and on the Manage Breakfast page.
+                </p>
               </div>
 
-              {/* Breakfast service toggles */}
-              <div className="space-y-4">
+              {/* Master toggle (per spec §Admin Settings: keeps the
+                  existing isEnabled behavior — when off, the Step 2
+                  section + Manage Booking + the booking-drawer
+                  breakfast tab all hide). */}
+              <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-4">
                 <label className="flex items-center gap-3 cursor-pointer text-xs font-bold text-gray-800">
                   <button
                     type="button"
@@ -5522,6 +6612,8 @@ export function SettingsPage() {
                     className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
                       breakfastEnabled ? "bg-primary" : "bg-gray-200"
                     }`}
+                    aria-pressed={breakfastEnabled}
+                    aria-label="Enable Guest Daily Breakfast Add-on"
                   >
                     <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
                       breakfastEnabled ? "translate-x-5" : "translate-x-0"
@@ -5529,114 +6621,901 @@ export function SettingsPage() {
                   </button>
                   Enable Guest Daily Breakfast Add-on
                 </label>
+                <p className="text-[10px] text-gray-500 leading-relaxed">
+                  When off, the breakfast section disappears from public Step 2, the guest
+                  Manage Breakfast page, and the admin booking drawer. Existing bookings with
+                  ordered meals keep their snapshotted prices (the snapshot is immutable).
+                </p>
+              </div>
 
-                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700 max-w-xs">
-                  Breakfast Tariff Rate (PHP / Person / Night)
-                  <input
-                    type="number"
-                    required
-                    value={breakfastRate}
-                    onChange={(e) => setBreakfastRate(e.target.value)}
-                    disabled={!breakfastEnabled}
-                    className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed"
-                  />
-                </label>
+              {/* Cutoff &amp; override config (per BR-02). The
+                  cutoff rule is `(serviceDate - 1 calendar day) at
+                  cutoffTime, in hotel timezone`. The cut-off applies
+                  to add, change, AND remove (server-enforced; this
+                  input is the source of truth the server reads). */}
+              <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-4">
+                <h4 className="text-[10px] font-bold uppercase tracking-wider text-gray-400 border-b border-gray-100 pb-1.5">
+                  Cutoff &amp; Override
+                </h4>
 
-                {/* Per CHD-10 (2026-07-31, per CVQ-01): hotel-wide
-                    default for "include children in the breakfast
-                    charge". The server snapshots this onto every new
-                    booking whose client did not send a per-booking
-                    override. Existing bookings are unaffected (the
-                    snapshot is per-booking, not per-policy). */}
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    Cutoff time (HH:MM, 24h)
+                    <input
+                      type="time"
+                      data-testid="breakfast-cutoff-time"
+                      value={breakfastCutoffTime}
+                      onChange={(e) => setBreakfastCutoffTime(e.target.value)}
+                      disabled={!breakfastEnabled}
+                      className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed"
+                    />
+                    <span className="text-[10px] font-normal text-gray-500 leading-relaxed">
+                      Guests must order breakfast for the next day before this time. Default is
+                      8:00 PM. After this time, the date&apos;s meal grid locks and staff must
+                      use the override flow to add/change/remove.
+                    </span>
+                  </label>
+
+                  <div className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                    <span>Hotel timezone</span>
+                    <div
+                      data-testid="breakfast-cutoff-timezone"
+                      className="min-h-[44px] inline-flex items-center rounded border border-gray-200 bg-gray-50 px-3 text-sm font-medium text-gray-700"
+                    >
+                      {config.timezone}
+                    </div>
+                    <span className="text-[10px] font-normal text-gray-500 leading-relaxed">
+                      Cutoffs are enforced in hotel timezone. Contact the developer to change.
+                    </span>
+                  </div>
+                </div>
+
                 <label className="flex items-center gap-3 text-xs font-semibold text-gray-700 cursor-pointer">
                   <button
                     type="button"
-                    onClick={() => setBreakfastIncludesChildrenDefault(!breakfastIncludesChildrenDefault)}
+                    onClick={() => setBreakfastFrontDeskOverrideEnabled(!breakfastFrontDeskOverrideEnabled)}
                     disabled={!breakfastEnabled}
                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition disabled:opacity-50 disabled:cursor-not-allowed ${
-                      breakfastIncludesChildrenDefault ? "bg-primary" : "bg-gray-300"
+                      breakfastFrontDeskOverrideEnabled ? "bg-primary" : "bg-gray-300"
                     }`}
-                    aria-pressed={breakfastIncludesChildrenDefault}
-                    aria-label="Include children in the breakfast charge by default"
+                    aria-pressed={breakfastFrontDeskOverrideEnabled}
+                    aria-label="Allow front desk to override the breakfast cutoff"
                   >
                     <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
-                      breakfastIncludesChildrenDefault ? "translate-x-5" : "translate-x-0"
+                      breakfastFrontDeskOverrideEnabled ? "translate-x-5" : "translate-x-0"
                     }`} />
                   </button>
-                  Include children in the breakfast charge by default
+                  Front desk can override the cutoff
+                </label>
+
+                {/* Per BR-10 (decision #244 reserved, 2026-10-14 —
+                    Phase 14): the cut-off enforcement toggle. When
+                    off, every per-date breakfast lock is bypassed
+                    and guests can edit meals up until the morning of
+                    service. Visual mirror of the "Front desk can
+                    override the cutoff" toggle — `bg-primary` for
+                    the on state per FRONTEND.md brand colors. The
+                    helper text calls out the BR-10 intent (a guest
+                    who edits at 11:59 PM the night before still
+                    goes through). */}
+                <label className="flex items-center gap-3 text-xs font-semibold text-gray-700 cursor-pointer">
+                  <button
+                    type="button"
+                    onClick={() => setBreakfastCutoffsEnabled(!breakfastCutoffsEnabled)}
+                    disabled={!breakfastEnabled}
+                    data-testid="breakfast-cutoffs-enabled-toggle"
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition disabled:opacity-50 disabled:cursor-not-allowed ${
+                      breakfastCutoffsEnabled ? "bg-primary" : "bg-gray-300"
+                    }`}
+                    aria-pressed={breakfastCutoffsEnabled}
+                    aria-label="Enforce the breakfast cutoff"
+                  >
+                    <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                      breakfastCutoffsEnabled ? "translate-x-5" : "translate-x-0"
+                    }`} />
+                  </button>
+                  <span className="flex flex-col gap-0.5">
+                    <span>Cut-offs enabled</span>
+                    <span className="text-[10px] font-normal text-gray-500 leading-relaxed">
+                      When off, guests can edit breakfast meals up until the morning of service.
+                    </span>
+                  </span>
+                </label>
+
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                  <span className="flex items-center justify-between">
+                    Default meal instructions
+                    <span className="text-[10px] font-normal text-gray-400">
+                      {breakfastDefaultMealInstructions.length} / 2000
+                    </span>
+                  </span>
+                  <textarea
+                    data-testid="breakfast-default-meal-instructions"
+                    value={breakfastDefaultMealInstructions}
+                    onChange={(e) => setBreakfastDefaultMealInstructions(e.target.value.slice(0, 2000))}
+                    disabled={!breakfastEnabled}
+                    maxLength={2000}
+                    rows={3}
+                    placeholder='e.g. "Order by 8:00 PM the evening before your breakfast date. Same-day orders must go through the front desk."'
+                    className="min-h-[88px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 py-2 text-xs font-medium focus:bg-white disabled:cursor-not-allowed"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700 max-w-xs">
+                  Served-grace window (minutes)
+                  <input
+                    type="number"
+                    data-testid="breakfast-served-grace-minutes"
+                    min={0}
+                    max={60}
+                    step={1}
+                    value={breakfastServedGraceMinutes}
+                    onChange={(e) => setBreakfastServedGraceMinutes(e.target.value)}
+                    disabled={!breakfastEnabled}
+                    className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed"
+                  />
+                  <span className="text-[10px] font-normal text-gray-500 leading-relaxed">
+                    How long after a meal is marked served can staff un-serve without an
+                    override reason. After this window, un-serving requires a reason. Default
+                    is 15 minutes.
+                  </span>
                 </label>
               </div>
 
-              {/* Menu items toggler checkboxes */}
-              <div className="space-y-3">
-                <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">
-                  Available Breakfast Silog Menu Items
-                </h4>
-                
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {silogItems.map(item => (
-                    <div
-                      key={item.id}
-                      className={`min-h-[44px] flex items-center justify-between px-3.5 rounded-lg border text-xs font-semibold transition ${
-                        item.isActive && breakfastEnabled
-                          ? "bg-primary/5 border-primary/30 text-primary-dark" 
-                          : "bg-white border-gray-200 text-gray-550 hover:bg-gray-50"
-                      } ${!breakfastEnabled ? "opacity-50" : ""}`}
-                    >
-                      <button
-                        type="button"
-                        disabled={!breakfastEnabled}
-                        onClick={() => toggleSilogItem(item.id)}
-                        className="flex-1 flex items-center justify-between py-2 text-left disabled:cursor-not-allowed"
-                      >
-                        <span className="truncate">{item.name} Service</span>
-                        <span className="shrink-0 mr-3">
-                          {item.isActive ? (
-                            <CheckSquare size={16} className="text-primary" />
-                          ) : (
-                            <Square size={16} className="text-gray-300" />
-                          )}
-                        </span>
-                      </button>
-
-                      <div className="flex items-center gap-1.5 border-l border-gray-150 pl-3">
-                        <button
-                          type="button"
-                          disabled={!breakfastEnabled}
-                          onClick={() => handleEditSilogItem(item)}
-                          className="p-1.5 text-gray-400 hover:text-primary transition rounded hover:bg-gray-100 disabled:cursor-not-allowed disabled:hover:text-gray-400"
-                          title="Edit Item Name"
-                        >
-                          <Pencil size={12} />
-                        </button>
-                        <button
-                          type="button"
-                          disabled={!breakfastEnabled}
-                          onClick={() => handleDeleteSilogItem(item.id)}
-                          className="p-1.5 text-gray-400 hover:text-red-600 transition rounded hover:bg-red-50 disabled:cursor-not-allowed disabled:hover:text-gray-400"
-                          title="Delete Item"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-
+              {/* Meals table (per BR-02). Replaces the legacy 2-column
+                  `silogItems` grid. Columns: order · name · price ·
+                  description · isActive · delete. Inline edit; the
+                  `id` becomes immutable once a booking references it
+                  (server-enforced; the form never re-keys). Inactive
+                  rows show a red "Inactive" pill per spec. */}
+              <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4">
+                <div className="flex items-center justify-between border-b border-gray-100 pb-1.5">
+                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                    Breakfast meal catalog
+                  </h4>
                   <button
                     type="button"
+                    onClick={handleAddBreakfastMeal}
                     disabled={!breakfastEnabled}
-                    onClick={handleAddSilogItemClick}
-                    className="min-h-[44px] flex items-center justify-center gap-2 px-3.5 rounded-lg border border-dashed border-gray-300 bg-white hover:bg-gray-50 text-xs font-bold text-gray-500 hover:text-primary transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-gray-500 disabled:hover:bg-white"
+                    className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-dashed border-gray-300 bg-white px-3 text-[10px] font-bold text-gray-500 transition hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <Plus size={14} />
-                    Add Menu Item
+                    <Plus size={12} aria-hidden="true" />
+                    Add meal
                   </button>
+                </div>
+
+                {breakfastMeals.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-[10px] text-gray-500">
+                    No meals yet. Click <strong>Add meal</strong> to create the first one.
+                    The Step 2 + Manage Booking sections are hidden until at least one
+                    active meal exists.
+                  </p>
+                ) : null}
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="text-[10px] uppercase tracking-wider text-gray-400">
+                        <th className="w-12 px-2 py-2 font-bold">Order</th>
+                        <th className="px-2 py-2 font-bold">Name</th>
+                        <th className="w-32 px-2 py-2 font-bold">Price (PHP)</th>
+                        <th className="px-2 py-2 font-bold">Description</th>
+                        <th className="w-20 px-2 py-2 font-bold">Active</th>
+                        <th className="w-10 px-2 py-2 font-bold" aria-label="Row actions"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...breakfastMeals]
+                        .sort((a, b) => a.displayOrder - b.displayOrder)
+                        .map((meal) => {
+                          const descRemaining = 200 - meal.description.length;
+                          const priceValid =
+                            Number.isFinite(meal.price) && meal.price >= 0 && meal.price <= 10000;
+                          return (
+                            <tr
+                              key={meal.id}
+                              data-testid={`breakfast-meal-row-${meal.id}`}
+                              className="border-t border-gray-100 align-top"
+                            >
+                              <td className="px-2 py-2">
+                                <div className="flex flex-col items-center gap-1">
+                                  <span className="font-mono text-[10px] text-gray-500">
+                                    {meal.displayOrder}
+                                  </span>
+                                  <div className="flex items-center gap-0.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMoveBreakfastMeal(meal.id, -1)}
+                                      disabled={!breakfastEnabled}
+                                      className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                                      title="Move up"
+                                      aria-label={`Move ${meal.name} up`}
+                                    >
+                                      <ArrowUp size={12} aria-hidden="true" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMoveBreakfastMeal(meal.id, 1)}
+                                      disabled={!breakfastEnabled}
+                                      className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                                      title="Move down"
+                                      aria-label={`Move ${meal.name} down`}
+                                    >
+                                      <ArrowDown size={12} aria-hidden="true" />
+                                    </button>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-2 py-2">
+                                <input
+                                  type="text"
+                                  data-testid={`breakfast-meal-name-${meal.id}`}
+                                  value={meal.name}
+                                  maxLength={80}
+                                  onChange={(e) =>
+                                    handleUpdateBreakfastMeal(meal.id, { name: e.target.value })
+                                  }
+                                  disabled={!breakfastEnabled}
+                                  placeholder="e.g. Tapsilog"
+                                  className="min-h-[36px] w-full rounded border border-gray-250 bg-white px-2 text-xs font-semibold focus:bg-white focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                                />
+                                <span className="mt-1 block font-mono text-[10px] text-gray-400">
+                                  id: {meal.id}
+                                </span>
+                                {/* Per MBUX-04 (decision #256, 2026-10-15):
+                                    the optional meal thumbnail. Upload /
+                                    preview / replace / remove, with
+                                    per-row progress. The image is OPTIONAL:
+                                    a meal with no file is a valid meal, and
+                                    the guest menu strip falls back to its
+                                    no-image tile rather than a broken img.
+                                    The row is saved through the ordinary
+                                    handleSaveBreakfast path, so the Zod
+                                    schema validates it like any other edit. */}
+                                <div
+                                  className="mt-2 flex items-center gap-2"
+                                  data-testid={`breakfast-meal-image-${meal.id}`}
+                                >
+                                  {meal.imageUrl ? (
+                                    <img
+                                      src={meal.imageUrl}
+                                      alt=""
+                                      // Consistent 4:3 crop per spec, so a
+                                      // mixed-format catalog still reads as
+                                      // one grid in the guest menu strip.
+                                      className="h-12 w-16 shrink-0 rounded border border-gray-200 bg-gray-100 object-cover"
+                                      style={{ aspectRatio: "4 / 3" }}
+                                    />
+                                  ) : (
+                                    <span
+                                      className="flex h-12 w-16 shrink-0 items-center justify-center rounded border border-dashed border-gray-300 bg-gray-50 text-[9px] font-semibold uppercase tracking-wide text-gray-400"
+                                      aria-hidden="true"
+                                    >
+                                      No image
+                                    </span>
+                                  )}
+                                  <span className="flex flex-col gap-1">
+                                    <label className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded border border-primary px-2 text-[11px] font-semibold text-primary hover:bg-primary-light focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary">
+                                      {uploadingMealImageIds.has(meal.id)
+                                        ? "Uploading…"
+                                        : meal.imageUrl
+                                          ? "Replace image"
+                                          : "Upload image"}
+                                      <input
+                                        type="file"
+                                        className="sr-only"
+                                        data-testid={`breakfast-meal-image-input-${meal.id}`}
+                                        accept="image/jpeg,image/png,image/webp"
+                                        disabled={uploadingMealImageIds.has(meal.id)}
+                                        onChange={(e) => {
+                                          void handleUploadBreakfastMealImage(meal.id, e.target.files?.[0]);
+                                          // Reset so re-picking the SAME file
+                                          // fires change again — otherwise
+                                          // "replace" silently does nothing
+                                          // when the admin re-selects the
+                                          // identical file after a failed
+                                          // compression step.
+                                          e.target.value = "";
+                                        }}
+                                      />
+                                    </label>
+                                    {meal.imageUrl ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => void handleRemoveBreakfastMealImage(meal.id)}
+                                        data-testid={`breakfast-meal-image-remove-${meal.id}`}
+                                        className="min-h-11 rounded border border-gray-200 px-2 text-[11px] font-semibold text-gray-600 hover:bg-gray-50"
+                                      >
+                                        Remove image
+                                      </button>
+                                    ) : null}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="px-2 py-2">
+                                <input
+                                  type="number"
+                                  data-testid={`breakfast-meal-price-${meal.id}`}
+                                  value={Number.isFinite(meal.price) ? meal.price : 0}
+                                  min={0}
+                                  max={10000}
+                                  step="0.01"
+                                  onChange={(e) =>
+                                    handleUpdateBreakfastMeal(meal.id, {
+                                      price: parseFloat(e.target.value) || 0
+                                    })
+                                  }
+                                  disabled={!breakfastEnabled}
+                                  className={`min-h-[36px] w-full rounded border bg-white px-2 text-xs font-medium focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+                                    priceValid ? "border-gray-250" : "border-red-300 bg-red-50"
+                                  }`}
+                                />
+                                {!priceValid ? (
+                                  <span className="mt-1 block text-[10px] font-semibold text-red-600">
+                                    Must be 0–10,000 PHP
+                                  </span>
+                                ) : null}
+                              </td>
+                              <td className="px-2 py-2">
+                                <input
+                                  type="text"
+                                  data-testid={`breakfast-meal-description-${meal.id}`}
+                                  value={meal.description}
+                                  maxLength={200}
+                                  onChange={(e) =>
+                                    handleUpdateBreakfastMeal(meal.id, {
+                                      description: e.target.value
+                                    })
+                                  }
+                                  disabled={!breakfastEnabled}
+                                  placeholder="Optional marketing copy"
+                                  className="min-h-[36px] w-full rounded border border-gray-250 bg-white px-2 text-xs font-medium focus:bg-white focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                                />
+                                <span
+                                  className={`mt-1 block text-[10px] ${
+                                    descRemaining < 0 ? "text-red-600" : "text-gray-400"
+                                  }`}
+                                >
+                                  {meal.description.length} / 200
+                                </span>
+                              </td>
+                              <td className="px-2 py-2">
+                                <div className="flex flex-col items-start gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleUpdateBreakfastMeal(meal.id, {
+                                        isActive: !meal.isActive
+                                      })
+                                    }
+                                    disabled={!breakfastEnabled}
+                                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                                      meal.isActive ? "bg-primary" : "bg-gray-300"
+                                    }`}
+                                    aria-pressed={meal.isActive}
+                                    aria-label={`Toggle ${meal.name} active`}
+                                  >
+                                    <div className={`h-4 w-4 rounded-full bg-white transition shadow-sm transform ${
+                                      meal.isActive ? "translate-x-4" : "translate-x-0"
+                                    }`} />
+                                  </button>
+                                  {!meal.isActive ? (
+                                    <span
+                                      className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700"
+                                      title="Existing bookings still reference this meal. They will continue to show it on their record (snapshot is immutable)."
+                                    >
+                                      Inactive
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </td>
+                              <td className="px-2 py-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteBreakfastMeal(meal.id)}
+                                  disabled={!breakfastEnabled}
+                                  className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                  title="Delete meal"
+                                  aria-label={`Delete ${meal.name}`}
+                                >
+                                  <Trash2 size={12} aria-hidden="true" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
               <SaveActionFooter label="Save Dining Settings" status={getSaveStatus("breakfast")} />
             </form>
           )}
+
+          {/* TAB 4b: OTHER ADD-ONS (BR-12.1, 2026-10-15, decision #247) */}
+          {activeTab === "addons" && (
+            <div className="space-y-6 text-xs">
+              <div>
+                <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Other Add-Ons</h3>
+                <p className="text-[10px] text-gray-500 mt-0.5">
+                  Manage the per-day add-on catalog shown on the public booking Step 2, the
+                  guest Manage page, and the admin booking-drawer Other Add-Ons tab. v1 ships
+                  the airport transfer; admins can add/edit/delete the catalog freely.
+                </p>
+              </div>
+
+              {/* Hotel-wide setting: add-ons enabled. Per OCT-M1
+                  (2026-10-20, decision #295) this switch is now
+                  REAL. It used to be a bare `useState` with no
+                  persistence at all — no Firestore read, no write,
+                  no localStorage mirror — while the copy under it
+                  claimed that turning it off would empty every
+                  `getEnabledAddOnsByHotel` call. An admin who
+                  flipped it believed other add-ons were off sale
+                  while guests kept buying the airport transfer.
+
+                  It now persists to
+                  `settings/hotelConfig.otherAddOnsEnabled` and
+                  `GET /api/bookings/addons/config` reads it, so
+                  "off" genuinely empties the guest-facing catalog.
+                  The per-row Status toggle in the catalog table
+                  below stays the finer-grained control: it takes
+                  ONE add-on off sale while this switch takes the
+                  whole category off. */}
+              <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-4">
+                <label className="flex items-center gap-3 cursor-pointer text-xs font-bold text-gray-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !addOnsEnabled;
+                      setAddOnsEnabled(next);
+                      setAddOnSaveError(null);
+                      // Persist through the same `settings/hotelConfig`
+                      // channel every other hotel-wide setting uses.
+                      // `updateSettings` surfaces its own failure
+                      // toast; the local state is reverted so the
+                      // switch never shows a value that is not
+                      // stored.
+                      void updateSettings("hotelConfig", {
+                        otherAddOnsEnabled: next
+                      }).then((ok) => {
+                        if (!ok) {
+                          setAddOnsEnabled(!next);
+                          setAddOnSaveError(
+                            "Failed to save the add-ons switch. The previous setting is still in effect."
+                          );
+                        }
+                      });
+                    }}
+                    data-testid="addons-enabled-toggle"
+                    className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
+                      addOnsEnabled ? "bg-primary" : "bg-gray-200"
+                    }`}
+                    aria-pressed={addOnsEnabled}
+                    aria-label="Enable Other Add-Ons"
+                  >
+                    <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                      addOnsEnabled ? "translate-x-5" : "translate-x-0"
+                    }`} />
+                  </button>
+                  Add-ons enabled
+                </label>
+                <p className="text-[10px] text-gray-500 leading-relaxed">
+                  {/* Per OCT-M1 (2026-10-20, decision #295): the copy
+                      now matches the behaviour. The switch persists
+                      to `settings/hotelConfig.otherAddOnsEnabled` and
+                      the public `/api/bookings/addons/config` endpoint
+                      reads it, so turning it off genuinely empties
+                      the guest-facing catalog — the booking flow's
+                      add-ons grid and the guest Manage page both show
+                      the "Add-ons are currently disabled" state.
+
+                      The previous copy claimed this effect while the
+                      switch was a dead `useState` (audit OCT-M1), and
+                      an earlier revision admitted it was NOT wired up
+                      at all. Neither matched reality; this one does. */}
+                  When off, other add-ons are hidden from guests across
+                  the whole site — the booking flow, the guest{" "}
+                  <strong>Manage</strong> page, and the staff booking
+                  drawer — and the add-ons grid shows the{" "}
+                  <strong>Add-ons are currently disabled</strong> state.
+                  This saves immediately. To take a single add-on off
+                  sale instead, switch its <strong>Status</strong> to{" "}
+                  <strong>Off</strong> in the catalog table below.
+                </p>
+                {addOnSaveError ? (
+                  <p
+                    role="alert"
+                    data-testid="addons-enabled-error"
+                    className="text-[10px] font-semibold text-red-600"
+                  >
+                    {addOnSaveError}
+                  </p>
+                ) : null}
+              </div>
+
+              {/* Catalog sub-section: table of all addOns/{id} docs
+                  with name + price + unit + cutoff + enabled + edit +
+                  delete columns. Per BR-12.1 the per-row enabled
+                  toggle writes immediately on click (no save
+                  button) — the existing admin-CRUD pattern. */}
+              <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4">
+                <div className="flex items-center justify-between border-b border-gray-100 pb-1.5">
+                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                    Add-on catalog
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingAddOnId("__new__");
+                      setEditingAddOnDraft({
+                        id: "",
+                        name: "",
+                        description: "",
+                        price: 0,
+                        unit: "per-person",
+                        isEnabled: true,
+                        cutoffHoursBeforeCheckIn: 24,
+                        displayOrder: (addOnsCatalog[addOnsCatalog.length - 1]?.displayOrder ?? 0) + 10,
+                        updatedAt: new Date().toISOString(),
+                        updatedBy: currentUser?.uid || "staff"
+                      });
+                    }}
+                    data-testid="add-addon-button"
+                    className="inline-flex min-h-[36px] items-center gap-1.5 rounded-lg border border-dashed border-gray-300 bg-white px-3 text-[10px] font-bold text-gray-500 transition hover:border-primary hover:text-primary"
+                  >
+                    <Plus size={12} aria-hidden="true" />
+                    Add add-on
+                  </button>
+                </div>
+
+                {addOnsCatalogLoading ? (
+                  <p className="text-[10px] text-gray-500">Loading catalog…</p>
+                ) : addOnsCatalogError ? (
+                  // Per OCT-C3 (2026-10-20): a failed read must NOT
+                  // masquerade as an empty catalog. Before this, a
+                  // PERMISSION_DENIED read rendered the "No add-ons
+                  // yet" panel below, which told the admin to create
+                  // a row that may already have existed.
+                  <div
+                    data-testid="addons-catalog-error"
+                    role="alert"
+                    className="rounded-lg border border-red-200 bg-red-50 p-4 text-[11px] text-red-700"
+                  >
+                    <p className="font-bold">Could not load the other add-ons catalog.</p>
+                    <p className="mt-1">{addOnsCatalogError}</p>
+                    <p className="mt-2 text-red-600">
+                      The catalog is stored in the <code>addOns</code> collection. If this says
+                      &ldquo;Missing or insufficient permissions&rdquo;, the Firestore rules may
+                      not have been deployed yet.
+                    </p>
+                  </div>
+                ) : addOnsCatalog.length === 0 ? (
+                  <div
+                    data-testid="addons-catalog-empty"
+                    className="rounded-lg border border-dashed border-gray-200 p-4 text-center text-[11px] text-gray-500"
+                  >
+                    No add-ons yet. Use the "Add add-on" button above to create the first row.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[11px]">
+                      <thead>
+                        <tr className="border-b border-gray-100 text-left text-[10px] uppercase tracking-wider text-gray-500">
+                          <th className="px-2 py-1.5">Name</th>
+                          <th className="px-2 py-1.5">Price</th>
+                          <th className="px-2 py-1.5">Unit</th>
+                          <th className="px-2 py-1.5">Cutoff (h)</th>
+                          <th className="px-2 py-1.5">Status</th>
+                          <th className="px-2 py-1.5 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {addOnsCatalog.map((row) => (
+                          <tr
+                            key={row.id}
+                            data-testid={`addons-row-${row.id}`}
+                            className="border-b border-gray-100 last:border-0"
+                          >
+                            <td className="px-2 py-2 font-semibold text-gray-800">
+                              {row.name}
+                              {row.description ? (
+                                <p className="text-[10px] font-normal text-gray-500">{row.description.slice(0, 80)}</p>
+                              ) : null}
+                            </td>
+                            <td className="px-2 py-2 text-gray-700">₱{row.price.toLocaleString()}</td>
+                            <td className="px-2 py-2 text-gray-700">{row.unit}</td>
+                            <td className="px-2 py-2 text-gray-700">{row.cutoffHoursBeforeCheckIn}</td>
+                            <td className="px-2 py-2">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleAddOnEnabled(row, !row.isEnabled)}
+                                data-testid={`addons-toggle-${row.id}`}
+                                className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${
+                                  row.isEnabled ? "bg-primary" : "bg-gray-300"
+                                }`}
+                                aria-pressed={row.isEnabled}
+                                aria-label={`Toggle ${row.name}`}
+                              >
+                                <div className={`h-4 w-4 rounded-full bg-white transition shadow-sm transform ${
+                                  row.isEnabled ? "translate-x-4" : "translate-x-0"
+                                }`} />
+                              </button>
+                            </td>
+                            <td className="px-2 py-2 text-right">
+                              <div className="inline-flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingAddOnId(row.id);
+                                    setEditingAddOnDraft({ ...row });
+                                  }}
+                                  data-testid={`addons-edit-${row.id}`}
+                                  className="inline-flex min-h-[32px] items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 text-[10px] font-semibold text-gray-700 hover:border-primary hover:text-primary"
+                                >
+                                  <Pencil size={11} aria-hidden="true" /> Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteAddOn(row)}
+                                  data-testid={`addons-delete-${row.id}`}
+                                  className="inline-flex min-h-[32px] items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 text-[10px] font-semibold text-red-600 hover:border-red-400"
+                                >
+                                  <Trash2 size={11} aria-hidden="true" /> Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {addOnSaveError ? (
+                <p role="alert" className="text-[10px] text-red-600">
+                  {addOnSaveError}
+                </p>
+              ) : null}
+            </div>
+          )}
+
+          {/* ADD/EDIT ADD-ON MODAL (BR-12.1) */}
+          {editingAddOnId && editingAddOnDraft ? (
+            <Modal
+              open={!!editingAddOnId}
+              onClose={() => {
+                setEditingAddOnId(null);
+                setEditingAddOnDraft(null);
+                setAddOnSaveError(null);
+              }}
+              title={editingAddOnId === "__new__" ? "Add add-on" : `Edit “${editingAddOnDraft.name || ""}”`}
+              footer={null}
+            >
+              <form
+                data-testid="addon-edit-form"
+                onSubmit={async (ev) => {
+                  ev.preventDefault();
+                  const draft = editingAddOnDraft;
+                  if (!draft) return;
+                  // Derive a stable id from the name (kebab-cased) for
+                  // new rows. Editing keeps the existing id.
+                  const id =
+                    editingAddOnId === "__new__"
+                      ? String(draft.name || "")
+                          .toLowerCase()
+                          .trim()
+                          .replace(/[^a-z0-9]+/g, "-")
+                          .replace(/^-+|-+$/g, "")
+                          .slice(0, 80) || "add-on"
+                      : editingAddOnId;
+                  await handleSaveAddOn({ ...draft, id });
+                }}
+                className="space-y-3 text-sm"
+              >
+                <label className="flex flex-col gap-1 text-xs font-semibold text-gray-700">
+                  Name
+                  <input
+                    required
+                    type="text"
+                    data-testid="addon-name-input"
+                    value={editingAddOnDraft.name}
+                    onChange={(e) =>
+                      setEditingAddOnDraft((p: AddOn | null) => (p ? { ...p, name: e.target.value } : p))
+                    }
+                    className="min-h-[44px] rounded border border-gray-250 bg-white px-3 text-sm"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs font-semibold text-gray-700">
+                  Description (optional)
+                  <textarea
+                    rows={2}
+                    maxLength={500}
+                    data-testid="addon-description-input"
+                    value={editingAddOnDraft.description}
+                    onChange={(e) =>
+                      setEditingAddOnDraft((p: AddOn | null) =>
+                        p ? { ...p, description: e.target.value.slice(0, 500) } : p
+                      )
+                    }
+                    className="min-h-[60px] rounded border border-gray-250 bg-white px-3 py-2 text-xs"
+                  />
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex flex-col gap-1 text-xs font-semibold text-gray-700">
+                    Price (₱)
+                    <input
+                      required
+                      type="number"
+                      min={0}
+                      max={10000}
+                      data-testid="addon-price-input"
+                      value={editingAddOnDraft.price}
+                      onChange={(e) =>
+                        setEditingAddOnDraft((p: AddOn | null) =>
+                          p ? { ...p, price: Math.max(0, Number(e.target.value) || 0) } : p
+                        )
+                      }
+                      className="min-h-[44px] rounded border border-gray-250 bg-white px-3 text-sm"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs font-semibold text-gray-700">
+                    Unit
+                    <select
+                      data-testid="addon-unit-input"
+                      value={editingAddOnDraft.unit}
+                      onChange={(e) =>
+                        setEditingAddOnDraft((p: AddOn | null) =>
+                          p ? { ...p, unit: e.target.value as "per-person" | "per-stay" } : p
+                        )
+                      }
+                      className="min-h-[44px] rounded border border-gray-250 bg-white px-3 text-sm"
+                    >
+                      <option value="per-person">per-person</option>
+                      <option value="per-stay">per-stay</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex flex-col gap-1 text-xs font-semibold text-gray-700">
+                    Cutoff (hours before check-in)
+                    <input
+                      type="number"
+                      min={0}
+                      max={168}
+                      data-testid="addon-cutoff-input"
+                      value={editingAddOnDraft.cutoffHoursBeforeCheckIn}
+                      onChange={(e) =>
+                        setEditingAddOnDraft((p: AddOn | null) =>
+                          p
+                            ? {
+                                ...p,
+                                cutoffHoursBeforeCheckIn: Math.max(
+                                  0,
+                                  Math.min(168, Math.floor(Number(e.target.value) || 0))
+                                )
+                              }
+                            : p
+                        )
+                      }
+                      className="min-h-[44px] rounded border border-gray-250 bg-white px-3 text-sm"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs font-semibold text-gray-700">
+                    Display order
+                    <input
+                      type="number"
+                      min={0}
+                      max={1000}
+                      data-testid="addon-display-order-input"
+                      value={editingAddOnDraft.displayOrder}
+                      onChange={(e) =>
+                        setEditingAddOnDraft((p: AddOn | null) =>
+                          p
+                            ? {
+                                ...p,
+                                displayOrder: Math.max(
+                                  0,
+                                  Math.min(1000, Math.floor(Number(e.target.value) || 0))
+                                )
+                              }
+                            : p
+                        )
+                      }
+                      className="min-h-[44px] rounded border border-gray-250 bg-white px-3 text-sm"
+                    />
+                  </label>
+                </div>
+                <label className="flex items-center gap-3 cursor-pointer text-xs font-semibold text-gray-700">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditingAddOnDraft((p: AddOn | null) =>
+                        p ? { ...p, isEnabled: !p.isEnabled } : p
+                      )
+                    }
+                    data-testid="addon-enabled-toggle"
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                      editingAddOnDraft.isEnabled ? "bg-primary" : "bg-gray-300"
+                    }`}
+                    aria-pressed={editingAddOnDraft.isEnabled}
+                  >
+                    <div className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                      editingAddOnDraft.isEnabled ? "translate-x-5" : "translate-x-0"
+                    }`} />
+                  </button>
+                  Enabled
+                </label>
+                {addOnSaveError ? (
+                  <p role="alert" className="text-[10px] text-red-600">{addOnSaveError}</p>
+                ) : null}
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingAddOnId(null);
+                      setEditingAddOnDraft(null);
+                      setAddOnSaveError(null);
+                    }}
+                    className="min-h-[44px] rounded-lg border border-gray-200 px-4 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    data-testid="addon-save-button"
+                    disabled={addOnSaveStatus === "saving"}
+                    className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-primary px-5 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95 disabled:opacity-50"
+                  >
+                    <Save size={14} />
+                    {addOnSaveStatus === "saving" ? "Saving…" : "Save"}
+                  </button>
+                </div>
+              </form>
+            </Modal>
+          ) : null}
+
+          {/* DELETE ADD-ON CONFIRMATION MODAL (BR-12.1) */}
+          {confirmDeleteAddOn ? (
+            <Modal
+              open={!!confirmDeleteAddOn}
+              onClose={() => setConfirmDeleteAddOn(null)}
+              title={`Delete ${confirmDeleteAddOn.name}?`}
+              footer={null}
+            >
+              <div
+                data-testid="addon-delete-confirm"
+                className="space-y-4 text-sm"
+              >
+                <p className="text-gray-700">
+                  This will remove the add-on from any future bookings.
+                </p>
+                <p className="text-[11px] text-gray-500">
+                  Existing bookings with this add-on will retain their snapshots.
+                </p>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeleteAddOn(null)}
+                    className="min-h-[44px] rounded-lg border border-gray-200 px-4 text-xs font-bold text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="addon-delete-confirm-button"
+                    onClick={handleConfirmDeleteAddOn}
+                    className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-red-600 px-5 text-xs font-bold text-white shadow-sm transition hover:bg-red-700 active:scale-95"
+                  >
+                    <Trash2 size={14} />
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </Modal>
+          ) : null}
 
           {/* TAB 5: IN-ROOM STORE CONFIG */}
           {activeTab === "store" && (
@@ -8230,10 +10109,13 @@ export function SettingsPage() {
                   <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Booking &amp; Holds</h3>
                   <p className="text-[10px] text-gray-500 mt-0.5">
                     Two hold windows that control how long a guest's room reservation stays
-                    locked. Both values are snapshotted at the moment they matter (booking
-                    create for the payment hold, hold start for the in-flow hold), so changing
-                    either value here never shortens or lengthens a promise already in
-                    flight. Front-desk users cannot reach this editor.
+                    locked, plus the longest stay a guest may book. The hold values are
+                    snapshotted at the moment they matter (booking create for the payment
+                    hold, hold start for the in-flow hold), so changing either here never
+                    shortens or lengthens a promise already in flight. The maximum stay
+                    length is NOT snapshotted — it applies to every booking from the moment
+                    you save it, including stays already checked in. Front-desk users
+                    cannot reach this editor.
                   </p>
                 </div>
 
@@ -8329,6 +10211,57 @@ export function SettingsPage() {
                       </p>
                     </div>
                   </div>
+
+                  {/* Per MSL-01 (2026-10-15): maximum stay length.
+                      Full-width because `0` = "no limit" needs more
+                      explanation than the two bounded windows above,
+                      and a half-width cell would truncate that copy. */}
+                  <div className="border-t border-gray-100 p-5">
+                    <label htmlFor="maxStayNights" className="block text-xs font-bold text-gray-800">
+                      Maximum stay length
+                    </label>
+                    <p className="mt-1 text-[10px] text-gray-500 leading-relaxed">
+                      The longest single stay a guest may book on the public site. Enter{" "}
+                      <code className="rounded bg-gray-100 px-1 py-0.5">0</code> for{" "}
+                      <strong>no limit</strong>. Default{" "}
+                      {DEFAULT_MAX_STAY_NIGHTS}, maximum {MAX_MAX_STAY_NIGHTS} (anything longer is
+                      unreachable — the calendar stops at the booking horizon anyway).
+                      Enforced by the server on guest booking, walk-in, and reschedule.
+                    </p>
+                    <div className="mt-3 flex items-center gap-2">
+                      <input
+                        id="maxStayNights"
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        max={MAX_MAX_STAY_NIGHTS}
+                        step={1}
+                        required
+                        value={maxStayNightsInput}
+                        onChange={(e) => setMaxStayNightsInput(e.target.value)}
+                        aria-invalid={maxStayNightsValid === null}
+                        aria-describedby="maxStayNights-help"
+                        className={`min-h-11 w-32 rounded-lg border bg-white px-3 py-2 text-sm font-semibold tabular-nums focus:outline-none focus:ring-2 ${
+                          maxStayNightsValid === null
+                            ? "border-red-300 focus:ring-red-200"
+                            : "border-gray-200 focus:ring-primary/30"
+                        }`}
+                      />
+                      <span className="text-xs text-gray-600">
+                        {maxStayNightsValid === 0 ? "no limit" : "nights"}
+                      </span>
+                    </div>
+                    <p
+                      id="maxStayNights-help"
+                      className="mt-2 text-[10px] text-gray-500"
+                    >
+                      {maxStayNightsValid === null
+                        ? `Enter 0 for no limit, or a whole number between ${MIN_MAX_STAY_NIGHTS} and ${MAX_MAX_STAY_NIGHTS}.`
+                        : maxStayNightsValid === 0
+                          ? "Unlimited — the guest can book any stay length the horizon allows."
+                          : "Looks good."}
+                    </p>
+                  </div>
                 </div>
 
                 <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-3 text-[10px] text-blue-900/80 leading-relaxed">
@@ -8344,7 +10277,7 @@ export function SettingsPage() {
                 </div>
 
                 <SaveActionFooter
-                  label="Save Hold Windows"
+                  label="Save Booking Limits"
                   status={getSaveStatus("holds")}
                   disabled={!holdsFormValid}
                 />
@@ -8353,10 +10286,11 @@ export function SettingsPage() {
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
                 <p className="font-semibold">Admin-only section</p>
                 <p className="mt-1 leading-relaxed">
-                  The hold windows are restricted to admin accounts. The payment hold
-                  deadline is a guest-facing promise (PEX-01); the in-flow hold controls
-                  the Steps 2 + 3 countdown banner on the public booking flow (IFH-01).
-                  Ask a hotel owner to make hold-window changes.
+                  The hold windows and the maximum stay length are restricted to admin
+                  accounts. The payment hold deadline is a guest-facing promise (PEX-01);
+                  the in-flow hold controls the Steps 2 + 3 countdown banner on the public
+                  booking flow (IFH-01); the maximum stay length decides what the public
+                  date picker will accept (MSL-01). Ask a hotel owner to change these.
                 </p>
               </div>
             )
@@ -8606,50 +10540,14 @@ export function SettingsPage() {
         </div>
       </Modal>
 
-      <Modal
-        title={editingSilogItem ? "Edit Breakfast Menu Item" : "Add Breakfast Menu Item"}
-        open={isBreakfastItemModalOpen}
-        onClose={() => {
-          setIsBreakfastItemModalOpen(false);
-          setEditingSilogItem(null);
-          setBreakfastItemNameInput("");
-        }}
-      >
-        <form onSubmit={handleSaveSilogItemSubmit} className="space-y-4 text-xs">
-          <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-            Item Name (e.g. Tocilog, Longsilog)
-            <input
-              type="text"
-              required
-              placeholder="e.g. Tocilog"
-              value={breakfastItemNameInput}
-              onChange={(e) => setBreakfastItemNameInput(e.target.value)}
-              className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
-            />
-          </label>
-
-          <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
-            <button
-              type="button"
-              onClick={() => {
-                setIsBreakfastItemModalOpen(false);
-                setEditingSilogItem(null);
-                setBreakfastItemNameInput("");
-              }}
-              className="min-h-[40px] rounded-lg border border-gray-250 px-5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-lg bg-primary px-5 text-xs font-semibold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
-            >
-              <Save size={14} />
-              {editingSilogItem ? "Save Changes" : "Add Item"}
-            </button>
-          </div>
-        </form>
-      </Modal>
+      {/* Per BR-02 (decision #231, 2026-10-12, breakfast redesign):
+          the legacy "Add/Edit Breakfast Menu Item" Modal is gone.
+          The new meals table on the Breakfast & Dining tab uses
+          inline editing (no modal). The `Modal` block above (the
+          bottom of the previous file) used `editingSilogItem` /
+          `isBreakfastItemModalOpen` / `breakfastItemNameInput` —
+          all three state hooks were removed from the SettingsPage
+          body in this same ticket. */}
 
       {/* Cleanup confirmation modal */}
       <Modal

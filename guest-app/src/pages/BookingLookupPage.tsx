@@ -1,9 +1,9 @@
-import { AlertTriangle, ArrowLeft, BedDouble, Calendar, ListChecks, Mail, Search, ShieldAlert, Sparkles, Users, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowLeft, BedDouble, Calendar, ListChecks, Mail, Search, ShieldAlert, Sparkles, Users, Utensils, Wallet } from "lucide-react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
-import { GUEST_CANCELLABLE_STATUSES, RESERVATION_REF_REGEX, resolvePaymentMethodLabel, scaleIn } from "@spark-inn/shared";
+import { GUEST_CANCELLABLE_STATUSES, RESERVATION_REF_REGEX, resolvePaymentMethodLabel, scaleIn, addDaysToIsoDate, isValidIsoDate } from "@spark-inn/shared";
 import type { BookingRateBreakdown, CancellationPreview } from "@spark-inn/shared";
 import config from "@config";
 import { db } from "../firebase/config";
@@ -55,7 +55,13 @@ interface BookingData {
   rateBreakdown?: BookingRateBreakdown | null;
   paymentMethod: string;
   status: string;
-  hasBreakfast: boolean;
+  // Per BR-08 (decision #238, 2026-10-14 — close-out):
+  // the legacy `hasBreakfast: boolean` flat-rate flag is
+  // removed from the Booking doc. The lookup view derives
+  // the "Room + Breakfast" / "Room Only" copy from
+  // `breakfastSelections` — a non-empty map of non-removed
+  // entries means the booking has a breakfast on file.
+  breakfastSelections?: Record<string, unknown> | null;
   specialRequests: string;
   // Per 2026-07-24 (refactor/unify-payment-reference-fields):
   // the previous top-level `paymentReferenceNumber` was retired.
@@ -119,7 +125,7 @@ interface ReservationRoom {
   numAdults: number;
   numChildren: number;
   extraBedCount: number;
-  hasBreakfast: boolean;
+  breakfastTotal?: number;
   ratePerNight: number;
   totalPrice: number;
   status: string;
@@ -173,6 +179,49 @@ function formatStayDate(value: string) {
 }
 
 const RESEND_COOLDOWN_MS = 60_000;
+
+// Per BR-04 (2026-10-13, decision #233): the "Manage
+// Breakfast" link card on the booking-detail surface.
+// Renders only for the booking statuses the spec allows
+// edits on (confirmed | payment-confirmed | checked-in);
+// for everything else the link is omitted so the
+// post-check-out and cancelled bookings don't get a
+// dead-end CTA.
+function ManageBreakfastLink({
+  bookingRef,
+  status,
+  token
+}: {
+  bookingRef: string;
+  status: string;
+  token: string;
+}) {
+  // Per the BR-04 manage gate (decision #233): the
+  // guest can edit breakfast only while the booking is
+  // pre-checkout. Post-checkout the page redirects to
+  // read-only.
+  const canManage = ["confirmed", "payment-confirmed", "checked-in"].includes(status);
+  if (!canManage) return null;
+  if (!bookingRef || !token) return null;
+  const target = `/my-booking/breakfast?ref=${encodeURIComponent(bookingRef)}&token=${encodeURIComponent(token)}`;
+  return (
+    <div className="flex items-start gap-3 p-4 bg-primary-light rounded-xl border border-primary/20">
+      <Utensils className="text-primary shrink-0 mt-0.5" size={18} aria-hidden="true" />
+      <div className="flex-1">
+        <p className="text-sm font-bold text-primary-dark">Manage Breakfast</p>
+        <p className="mt-1 text-xs text-gray-600 leading-relaxed">
+          Update your per-date breakfast selections — orders close at the cutoff time each evening.
+        </p>
+        <Link
+          to={target}
+          className="mt-3 inline-flex min-h-11 items-center justify-center rounded-lg bg-primary px-5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90"
+        >
+          Open Manage Breakfast
+        </Link>
+      </div>
+    </div>
+  );
+}
 
 export function BookingLookupPage() {
   const shouldReduceMotion = useReducedMotion();
@@ -248,6 +297,15 @@ export function BookingLookupPage() {
   const [cancelPreviewError, setCancelPreviewError] = useState<string | null>(null);
   const [completedCancellationPreview, setCompletedCancellationPreview] = useState<CancellationPreview | null>(null);
   const cancelPreviewRequestIdRef = useRef(0);
+
+  // Per EXT-02 (2026-01-27): guest self-service extend stay.
+  // Same bookingRef + (email | token) credential as cancel.
+  const [showExtendModal, setShowExtendModal] = useState(false);
+  const [extendCheckOut, setExtendCheckOut] = useState("");
+  const [extendReason, setExtendReason] = useState("");
+  const [isExtending, setIsExtending] = useState(false);
+  const [extendError, setExtendError] = useState("");
+  const [extendSuccess, setExtendSuccess] = useState(false);
 
   const [isResending, setIsResending] = useState(false);
   const [resendStatus, setResendStatus] = useState<"idle" | "sent" | "rate-limited" | "error">("idle");
@@ -616,7 +674,13 @@ export function BookingLookupPage() {
         rateBreakdown: data.rateBreakdown || null,
         paymentMethod: data.paymentMethod || "",
         status: data.status,
-        hasBreakfast: Boolean(data.hasBreakfast),
+        // Per BR-08: the legacy `hasBreakfast` flag is
+        // replaced by the new `breakfastSelections` map.
+        // A booking has a breakfast on file when the map
+        // has at least one non-removed entry — gated by
+        // `breakfastTotal` (the BR-01 server stamp) as
+        // a fast-path check.
+        breakfastSelections: data.breakfastSelections || null,
         specialRequests: data.specialRequests || "",
         paymentRejectionReason: data.paymentRejectionReason || null
       };
@@ -1022,6 +1086,79 @@ export function BookingLookupPage() {
       // Per BI-02: single-use token consumed — mint a fresh one.
       resetTurnstile();
       setIsCancelling(false);
+    }
+  };
+
+  // Per EXT-02 (2026-01-27): guest self-service extend stay.
+  // Sends `POST /api/bookings/extend-stay` with the same
+  // bookingRef + (email | token) credential as cancel.
+  // Turnstile is shared with the cancel flow (same token).
+  const handleExtendStaySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const activeRef = activeBooking?.bookingRef;
+    if (!activeRef || !extendCheckOut) return;
+    if (!turnstileToken) {
+      setExtendError("The security check hasn't finished yet. Please wait a moment and try again.");
+      return;
+    }
+    setIsExtending(true);
+    setExtendError("");
+
+    try {
+      const extendPayload: Record<string, string> = {
+        bookingRef: activeRef,
+        checkOut: extendCheckOut,
+        reason: extendReason,
+        turnstileToken
+      };
+      if (lookupAuthMode === "token" && activeLookupToken) {
+        extendPayload.token = activeLookupToken;
+      } else {
+        extendPayload.guestEmail = emailInput.trim();
+      }
+      const response = await fetch("/api/bookings/extend-stay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(extendPayload)
+      });
+
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok || !result?.success) {
+        // Per EXT-02: room-not-available surfaces as a CTA
+        // bundle (Call / Chat / Email) instead of an error.
+        if (result?.error === "ROOM_NOT_AVAILABLE") {
+          setExtendError("EXTEND_ROOM_NOT_AVAILABLE");
+          return;
+        }
+        setExtendError(result?.error || "We couldn't extend your stay. Please try again.");
+        return;
+      }
+
+      setExtendSuccess(true);
+      // Update the active booking with the new check-out so the
+      // card reflects the extended stay immediately.
+      if (activeBooking) {
+        const newCheckOutDate = new Date(`${extendCheckOut}T00:00:00Z`);
+        const newNumNights = Math.round(
+          (newCheckOutDate.getTime() - new Date(`${activeBooking.checkIn}T00:00:00Z`).getTime())
+          / 86400000
+        );
+        setActiveBooking({
+          ...activeBooking,
+          checkOut: extendCheckOut,
+          numNights: newNumNights,
+          totalPrice: result?.data?.totalPrice ?? activeBooking.totalPrice,
+          ratePerNight: result?.data?.ratePerNight ?? activeBooking.ratePerNight
+        });
+      }
+      setShowExtendModal(false);
+    } catch (err) {
+      console.error("Extend stay failed:", err);
+      setExtendError("We couldn't reach the booking service. Please try again.");
+    } finally {
+      resetTurnstile();
+      setIsExtending(false);
     }
   };
 
@@ -1479,7 +1616,15 @@ export function BookingLookupPage() {
                     <div className="flex justify-between text-sm text-gray-600">
                       <span>Rate Type</span>
                       <span className="font-semibold text-gray-900">
-                        {activeBooking.hasBreakfast ? "Room + Breakfast" : "Room Only"}
+                        {/* Per BR-08: derive from the
+                            `breakfastSelections` map (any non-removed
+                            entry = a breakfast on file). Keeps the
+                            legacy "Room + Breakfast" / "Room Only"
+                            copy post-close-out. */}
+                        {activeBooking.breakfastSelections &&
+                        Object.values(activeBooking.breakfastSelections).some((entry: any) =>
+                          entry && entry.removedAt == null
+                        ) ? "Room + Breakfast" : "Room Only"}
                       </span>
                     </div>
 
@@ -1522,13 +1667,55 @@ export function BookingLookupPage() {
                   </div>
                 )}
 
+                {/* Per BR-04 (2026-10-13, decision #233): the
+                    "Manage Breakfast" link. The link routes to
+                    `/my-booking/breakfast?ref=...&token=...`
+                    where `token` is the magic-link
+                    `lookupToken`. The page only renders the
+                    link when:
+                      • the URL still has a `token` param
+                        (the deep-link magic-link flow), AND
+                      • the booking's status is one the
+                        spec allows edits on (`confirmed`,
+                        `payment-confirmed`, `checked-in`).
+                    The token is required because the manage
+                    endpoint is lookup-token gated (per the
+                    spec's H2 inheritance). When the user
+                    instead searched with ref + email, there
+                    is no token — the link is omitted so a
+                    bot probing the route doesn't get an
+                    auth hint back. */}
+                {(searchParams.get("token") || "") && activeBooking && (
+                  <ManageBreakfastLink
+                    bookingRef={activeBooking.bookingRef}
+                    status={String(activeBooking.status || "")}
+                    token={String(searchParams.get("token") || "")}
+                  />
+                )}
+
                 <div className="flex items-start gap-3 p-4 bg-primary-light rounded-xl border border-primary/20">
-                  <Sparkles className="text-primary shrink-0 mt-0.5 animate-pulse" size={18} />
-                  <div>
-                    <p className="text-sm font-bold text-primary-dark">Need to make adjustments?</p>
+                  <Sparkles className="text-primary shrink-0 mt-0.5" size={18} />
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-primary-dark">Want to extend your stay?</p>
                     <p className="mt-1 text-xs text-gray-600 leading-relaxed">
-                      To change check-in dates, guest count, or breakfast selections, please call our front desk directly at {config.frontDeskPhone}.
+                      You can extend your check-out date directly — no need to call.
                     </p>
+                    <button
+                      onClick={() => {
+                        // Pre-fill with day after current check-out as default.
+                        const tomorrow = new Date(`${activeBooking.checkOut}T00:00:00Z`);
+                        tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+                        setExtendCheckOut(tomorrow.toISOString().slice(0, 10));
+                        setExtendReason("");
+                        setExtendError("");
+                        setExtendSuccess(false);
+                        setShowExtendModal(true);
+                      }}
+                      className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-bold text-white hover:bg-primary-dark transition-colors"
+                    >
+                      Extend stay
+                      <Calendar size={13} />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1697,7 +1884,11 @@ export function BookingLookupPage() {
                       <p className="mt-1 text-xs text-gray-500 font-mono">
                         {room.bookingRef}
                         {room.roomNumber ? ` · Room ${room.roomNumber}` : ""}
-                        {room.hasBreakfast ? " · breakfast" : ""}
+                        {/* Per BR-08: derive from `breakfastTotal`
+                            (the BR-01 server stamp); non-zero means
+                            the booking has at least one breakfast
+                            on file. */}
+                        {room.breakfastTotal && room.breakfastTotal > 0 ? " · breakfast" : ""}
                       </p>
                     </div>
                     <div className="text-right">
@@ -1722,6 +1913,166 @@ export function BookingLookupPage() {
           </div>
         )}
       </section>
+
+      {showExtendModal && activeBooking && (() => {
+        // DR-01 (2026-10-14): earliest legal new check-out —
+        // one night after the booking's current check-out.
+        const minExtendCheckOut = addDaysToIsoDate(activeBooking.checkOut, 1);
+        return (
+        <Modal
+          open={showExtendModal}
+          onClose={() => {
+            if (isExtending) return;
+            setShowExtendModal(false);
+            setExtendError("");
+            setExtendSuccess(false);
+          }}
+          title="Extend your stay"
+        >
+          {extendSuccess ? (
+            <div className="text-center py-6">
+              <div className="mx-auto w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mb-4">
+                <Sparkles className="text-green-600" size={22} />
+              </div>
+              <h3 className="text-lg font-bold text-gray-900">Stay extended!</h3>
+              <p className="mt-2 text-sm text-gray-600">
+                Your check-out has been pushed to{" "}
+                <strong>{new Date(`${extendCheckOut}T00:00:00Z`).toLocaleDateString("en-PH", { timeZone: "Asia/Manila", weekday: "long", month: "long", day: "numeric" })}</strong>.
+                We look forward to having you!
+              </p>
+              <button
+                onClick={() => {
+                  setShowExtendModal(false);
+                  setExtendSuccess(false);
+                }}
+                className="mt-5 inline-flex items-center gap-1.5 rounded-lg bg-primary px-5 py-2.5 text-sm font-bold text-white hover:bg-primary-dark transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleExtendStaySubmit} className="space-y-4">
+              {/* Current booking summary */}
+              <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-sm">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="font-semibold text-gray-900">{activeBooking.roomName}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Current check-out:{" "}
+                      <strong>
+                        {new Date(`${activeBooking.checkOut}T00:00:00Z`).toLocaleDateString("en-PH", { timeZone: "Asia/Manila", weekday: "long", month: "long", day: "numeric" })}
+                      </strong>
+                    </p>
+                  </div>
+                  <span className="text-xs font-medium text-primary bg-primary/10 px-2 py-1 rounded-md">
+                    + {Math.round((new Date(`${extendCheckOut}T00:00:00Z`).getTime() - new Date(`${activeBooking.checkOut}T00:00:00Z`).getTime()) / 86400000)} night{Math.round((new Date(`${extendCheckOut}T00:00:00Z`).getTime() - new Date(`${activeBooking.checkOut}T00:00:00Z`).getTime()) / 86400000) !== 1 ? "s" : ""}
+                  </span>
+                </div>
+              </div>
+
+              {/* New check-out date. DR-01 (2026-10-14): `min`
+                  alone never corrects an already-set value, and the
+                  extend form writes straight into the reschedule
+                  API — so the floor is now enforced on change and
+                  the CTA stays disabled while the range is invalid. */}
+              <label className="grid gap-2 text-sm font-semibold text-gray-700">
+                New check-out date
+                <input
+                  type="date"
+                  required
+                  min={minExtendCheckOut}
+                  value={extendCheckOut}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setExtendCheckOut(isValidIsoDate(value) && value < minExtendCheckOut ? minExtendCheckOut : value);
+                  }}
+                  aria-invalid={Boolean(extendCheckOut && extendCheckOut <= activeBooking.checkOut)}
+                  className="rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+                {extendCheckOut && extendCheckOut <= activeBooking.checkOut ? (
+                  <span role="alert" className="text-xs font-medium text-red-600">
+                    New check-out must be at least one night after your current check-out.
+                  </span>
+                ) : null}
+              </label>
+
+              {/* Reason */}
+              <label className="grid gap-2 text-sm font-semibold text-gray-700">
+                Reason for extending (optional)
+                <textarea
+                  placeholder="Let us know if you have any special requests for the extra night..."
+                  value={extendReason}
+                  onChange={(e) => setExtendReason(e.target.value)}
+                  rows={3}
+                  maxLength={500}
+                  className="rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                />
+              </label>
+
+              {/* Error states */}
+              {extendError === "EXTEND_ROOM_NOT_AVAILABLE" ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-4 space-y-3">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="text-red-600 shrink-0 mt-0.5" size={18} />
+                    <div>
+                      <p className="text-sm font-bold text-red-800">Room not available for those dates</p>
+                      <p className="mt-1 text-xs text-red-700 leading-relaxed">
+                        Your current room <strong>{activeBooking.roomName}</strong> is not available for extension. Please use one of the options below to arrange alternative accommodation.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2 pt-1">
+                    <a
+                      href={`tel:${config.frontDeskPhone}`}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-bold text-white hover:bg-primary-dark transition-colors"
+                    >
+                      <Calendar size={15} />
+                      Call front desk — {config.frontDeskPhone}
+                    </a>
+                    <a
+                      href={`mailto:${config.supportEmail}?subject=Extend stay — ${activeBooking.bookingRef}`}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                      <Mail size={15} />
+                      Send an email
+                    </a>
+                  </div>
+                </div>
+              ) : extendError ? (
+                <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-3">
+                  <AlertTriangle className="text-red-600 shrink-0 mt-0.5" size={16} />
+                  <p className="text-sm text-red-700">{extendError}</p>
+                </div>
+              ) : null}
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isExtending) return;
+                    setShowExtendModal(false);
+                    setExtendError("");
+                    setExtendSuccess(false);
+                  }}
+                  disabled={isExtending}
+                  className="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isExtending || !extendCheckOut}
+                  className="flex-1 rounded-lg bg-primary px-4 py-2.5 text-sm font-bold text-white hover:bg-primary-dark transition-colors disabled:opacity-50"
+                >
+                  {isExtending ? "Extending…" : "Confirm extension"}
+                </button>
+              </div>
+            </form>
+          )}
+        </Modal>
+        );
+      })()}
 
       {(showCancelModal && (activeBooking || activeReservation)) && (
         <Modal open={showCancelModal} onClose={() => {

@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import config from "@config";
 import { Analytics } from "./components/Analytics";
@@ -6,6 +6,8 @@ import { PageMeta } from "./components/PageMeta";
 import { AboutPage } from "./pages/AboutPage";
 import { BookingConfirmPage } from "./pages/BookingConfirmPage";
 import { BookingLookupPage } from "./pages/BookingLookupPage";
+import ManageBreakfastPage from "./pages/ManageBreakfastPage";
+import ManageOtherAddOnsPage from "./pages/ManageOtherAddOnsPage";
 import { BookingPage } from "./pages/BookingPage";
 import { ContactPage } from "./pages/ContactPage";
 import { CorporateBookingPage } from "./pages/CorporateBookingPage";
@@ -25,16 +27,35 @@ import { TermsPage } from "./pages/TermsPage";
 
 export function ScrollToTop() {
   const { pathname, search } = useLocation();
-
+  // Per MBUX-11 (decision #264, 2026-10-16): the original
+  // implementation watched the whole `search` string and
+  // called `window.scrollTo(0, 0)` on every change. That was
+  // wrong — the booking flow persists cart state
+  // (`adults`, `children`, `quantity`, etc.) into the same
+  // search string, so every +/- button and every room-card
+  // selection triggered a scroll-to-top, which the user
+  // reported as "scrolling back to top every time I change a
+  // quantity". The intent was to scroll on in-page STEP
+  // changes (the booking flow advances `?step=...` without
+  // changing the pathname); the implementation overreached
+  // by also scrolling on every other search mutation.
+  //
+  // The fix: track the previous pathname and the previous
+  // `step` query-param value via refs. Only scroll when
+  // either changed. Cart mutations and guest-count steppers
+  // no longer touch the scroll position.
+  const prevPathRef = useRef<string | null>(null);
+  const prevStepRef = useRef<string | null>(null);
   useEffect(() => {
-    // Scroll to top on every route change — including in-page step changes
-    // driven by search params (e.g. the booking flow at `/book` advances
-    // steps via `?step=guest-details|review|...` without changing the
-    // pathname). Without watching `search`, advancing a step leaves the
-    // viewport pinned at the previous step's scroll offset, which is
-    // confusing on long forms where the next step's primary CTA sits
-    // at the top of the new view.
-    window.scrollTo(0, 0);
+    const currentStep = new URLSearchParams(search).get("step");
+    const isFirstRender = prevPathRef.current === null;
+    const pathnameChanged = prevPathRef.current !== pathname;
+    const stepChanged = prevStepRef.current !== currentStep;
+    if (isFirstRender || pathnameChanged || stepChanged) {
+      window.scrollTo(0, 0);
+    }
+    prevPathRef.current = pathname;
+    prevStepRef.current = currentStep;
   }, [pathname, search]);
 
   return null;
@@ -83,6 +104,32 @@ export function App() {
           element={
             <WithMeta title="My Booking" description={`Look up your ${config.brandName} reservation using your booking reference and email.`} noIndex>
               <BookingLookupPage />
+            </WithMeta>
+          }
+        />
+        {/* Per BR-04 (2026-10-13, decision #233): the guest
+            Manage Breakfast page. The page reuses the same
+            magic-link auth as /my-booking (`ref` + `token`
+            query params). The page is the post-booking edit
+            surface for the new `breakfastSelections` field. */}
+        <Route
+          path="/my-booking/breakfast"
+          element={
+            <WithMeta title="Manage Breakfast" description={`Adjust your per-date breakfast selections at ${config.brandName}.`} noIndex>
+              <ManageBreakfastPage />
+            </WithMeta>
+          }
+        />
+        {/* Per BR-12 (2026-10-14, decision #245 reserved): the
+            guest Manage Other Add-Ons page. Same magic-link
+            auth as /my-booking/breakfast (`ref` + `token`
+            query params). Post-booking edit surface for the
+            new `otherAddOnSelections` field. */}
+        <Route
+          path="/my-booking/addons"
+          element={
+            <WithMeta title="Manage Add-Ons" description={`Adjust your other add-ons at ${config.brandName}.`} noIndex>
+              <ManageOtherAddOnsPage />
             </WithMeta>
           }
         />

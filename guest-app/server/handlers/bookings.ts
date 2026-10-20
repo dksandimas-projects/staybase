@@ -11,6 +11,13 @@ import { hasActiveStaffInventoryHoldConflict, isActiveStaffInventoryHold } from 
 import { Timestamp } from "firebase-admin/firestore";
 import { sendBookingTrigger, sendBookingConfirmedWithBalanceTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger, sendEarlyCheckinResolveTrigger, buildReservationEmailView } from "./email";
 import { writeNotification } from "../lib/notifications";
+// Per BR-06 (Phase 13 — Breakfast Redesign, decision
+// #235, 2026-10-13): the unified refund-write helper.
+// `handleAddRefund` (CRL-01) routes the actual entry
+// creation through `markRefundPaid` so the cancellation
+// path + the breakfast path + any future refund path
+// share one code path.
+import { markRefundPaid } from "../lib/refunds";
 import {
   calculateSeasonalAwareRoomBreakdown,
   calculateVoucherDiscount,
@@ -18,8 +25,14 @@ import {
   calculateVoucherBase,
   calculateDiscountChain,
   normalizeDiscountScope,
-  calculateBreakfastAddOn,
+  // Per BR-08 (decision #238, 2026-10-14 — close-out):
+  // `calculateBreakfastAddOn` import removed — the helper
+  // was deleted from `@spark-inn/shared`. The server now
+  // reads the snapshotted `booking.breakfastTotal` directly
+  // (computed by `calculateBreakfastMealsTotal` from
+  // `booking.breakfastSelections` at create time).
   calculateExtraBedAddOn,
+  getCheckInReadiness,
   getCheckInReadiness,
   normalizeSeasonalRateOverrides,
   toDateOrNull,
@@ -27,12 +40,10 @@ import {
   getManilaDateInfo,
   BOOKING_REF_REGEX,
   generateLookupToken,
-  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   getLockedManualNightlyRate,
   WalkinBookingSchema,
   RescheduleBookingSchema,
   AddRoomBookingSchema,
-  MAX_STAY_NIGHTS,
   MAX_ADVANCE_DAYS,
   // Per PEX-02 (2026-08-01, per decision #147): the shared
   // occupancy rule — one place that decides whether a booking
@@ -158,7 +169,13 @@ import {
   // in `guest-app/server/handlers/in-flow-hold.ts` and is
   // called best-effort AFTER the booking transaction
   // commits (a UX signal, not a hard inventory lock).
-  IN_FLOW_HOLD_MINUTES
+  IN_FLOW_HOLD_MINUTES,
+  // DR-01 (2026-10-14): strict ISO validation for the
+  // create-booking date-range guard below. The schema itself only
+  // bounded the string LENGTH (`.max(40)`), so an inverted pair
+  // parsed cleanly.
+  isValidIsoDate,
+  diffNightsBetweenIso
 } from "@spark-inn/shared";
 // Per CRL-06 (2026-08-02): the preview helper
 // (per-scope breakdown). The preview
@@ -184,9 +201,71 @@ import {
   // HH:MM values for the 24h window — same helper
   // shape the guest dropdown uses so the two can
   // never drift apart).
-  buildArrivalTimeOptions
+  buildArrivalTimeOptions,
+  // Per MSL-01 (2026-10-15): the stay-length cap is a per-hotel
+  // setting, so the server resolves the raw Firestore value through
+  // `resolveMaxStayNights` before any clamp arithmetic. Never pass
+  // the raw value — `0` means "no limit" and would otherwise
+  // collapse every stay to one night.
+  resolveMaxStayNights,
+  describeMaxStayNights
 } from "@spark-inn/shared";
 import type { BookingRateBreakdown } from "@spark-inn/shared";
+
+// Per OCT-C5 (2026-10-20, audit
+// `plan/project/AUDIT-OCTOBER-2026.md`): the BR-12 other add-on
+// helpers, needed by the walk-in path so the desk's selected
+// add-ons are VALIDATED against the live catalog and PERSISTED
+// (they were previously dropped on the floor by the walk-in
+// transaction). Kept in a separate import block so the
+// `mrb-05-aggregate-and-handler-mirror.test.ts` source-text
+// pattern — which asserts the last entry of the block above —
+// still matches.
+import {
+  normalizeAddOn,
+  recomputeOtherAddOnTotal,
+  // Per OCT-M4 (2026-10-20, decision #297): the guest create path
+  // reads the hotel-wide "Add-ons enabled" master switch (OCT-M1,
+  // decision #295) from the `settings/hotelConfig` doc the
+  // transaction already loaded, and writes the `hasAnyOtherAddOns`
+  // denormalized flag alongside the selections.
+  normalizeOtherAddOnsEnabled,
+  hasAnyOtherAddOns,
+  AIRPORT_TRANSFER_PRESEED,
+  type AddOn,
+  type OtherAddOnSelectionEntry
+} from "@spark-inn/shared";
+
+// Per OCT-H8 (2026-10-20, decision #288): the re-dating helpers
+// the reschedule + cancel paths use to drop the add-on selections
+// that fell outside the stay window (and to open the refund
+// liabilities the spec requires). Kept in a separate import block
+// so the `mbr-05-aggregate-and-handler-mirror.test.ts` source-text
+// pattern still matches.
+import {
+  redateBreakfastSelections,
+  redateOtherAddOnSelections
+} from "@spark-inn/shared";
+
+// Per OCT-H8 (2026-10-20, decision #288): the audit + refund
+// liability writers the reschedule + cancel paths use for the
+// auto-cancelled selections.
+import {
+  auditBreakfastOp,
+  createBreakfastRefundLiability
+} from "../lib/breakfast-selections";
+import {
+  auditOtherAddOnOp,
+  createOtherAddOnRefundLiability
+} from "../lib/otherAddOn-selections";
+import type { BreakfastSelectionEntry } from "@spark-inn/shared";
+
+// Per OCT-C5 (2026-10-20): the error the walk-in path raises when
+// the desk selected an add-on that is not in the live catalog (or
+// has been disabled). Mapped to a 400 in the walk-in catch block
+// so the desk sees a form-level message instead of a 500.
+const OTHER_ADDON_NOT_AVAILABLE_ERROR =
+  "One of the selected add-ons is no longer available. Please refresh and try again.";
 
 // Per SR-01..05 (2026-10-12): build the Set of
 // HH:MM strings the booking-create handler accepts
@@ -228,10 +307,23 @@ import { BookingRevenueAllocationSchema } from "@spark-inn/shared/schemas/bookin
 // by the create / confirm-with-balance / post-checkout transactions)
 // now routes through the shared `computeServerFolioTotals` helper
 // so MRB-04 edits one function instead of three.
-import { computeServerFolioTotals, calculateBreakfastAddOn, computeReservationActualDateRange, generateBookingRef } from "@spark-inn/shared";
+import { computeServerFolioTotals, computeReservationActualDateRange, generateBookingRef, recomputeBreakfastTotal } from "@spark-inn/shared";
+// Per Phase 2 of the Spark Rewards tier system (2026-10-12,
+// decision pending): `resolveCurrentLevel` + `calculatePointsWithMultiplier`
+// are the canonical tier-derivation + multiplier helpers. Both
+// are defensive (null/undefined inputs return safe defaults) so
+// they don't crash on legacy `rewardsConfig` docs that pre-date
+// the Phase 2 fields.
+import { resolveCurrentLevel, calculatePointsWithMultiplier, validatePointsRedemption } from "@spark-inn/shared";
 import { z } from "zod";
 import config from "../../../hotel.config";
 import { buildRateBreakdown, rebuildEarlyCheckoutRateBreakdown, rebuildRateBreakdown } from "../lib/rate-breakdown";
+import {
+  breakfastSelectionsSchema,
+  buildBreakfastRateBreakdownLines,
+  validateBreakfastSelections,
+  type ValidatedBreakfastSelections
+} from "../lib/breakfast-selections";
 
 export function getConfiguredBookingRefPrefix() {
   return config.bookingRefPrefix || "SI";
@@ -400,13 +492,16 @@ function buildCreateEmailView(args: {
     numAdults: number;
     numChildren: number;
     extraBedCount: number;
-    hasBreakfast: boolean;
+    // Per BR-08 (decision #238, 2026-10-14 — close-out):
+    // the legacy `hasBreakfast: boolean` is removed from
+    // the internal projection. The new per-stay breakfast
+    // state lives on `childPricing[].breakfastLines`
+    // (computed via `buildBreakfastRateBreakdownLines`).
     totalPrice: number;
   }>;
   childPricing: Array<{
     rateBreakdown: any;
     activeRoomRate: number;
-    finalHasBreakfast: boolean;
   }>;
   roomTypes: any[];
   guestName: string;
@@ -478,7 +573,7 @@ function buildCreateEmailView(args: {
   const children = args.finalRooms.map((room, index) => {
     const typeEntry = args.roomTypes.find((type: any) => type && type.value === room.roomType);
     const roomName = typeEntry?.label || typeEntry?.shortLabel || room.roomType;
-    const pricing = args.childPricing[index] || { rateBreakdown: null, activeRoomRate: 0, finalHasBreakfast: false };
+    const pricing = args.childPricing[index] || { rateBreakdown: null, activeRoomRate: 0 };
     return {
       id: room.bookingId,
       bookingRef: args.finalBookingRefs[index] || "",
@@ -490,7 +585,13 @@ function buildCreateEmailView(args: {
       numAdults: room.numAdults,
       numChildren: room.numChildren,
       extraBedCount: room.extraBedCount,
-      hasBreakfast: pricing.finalHasBreakfast,
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy `hasBreakfast: boolean` flat-rate flag
+      // is deleted from the create-write. The new meal-based
+      // model writes `breakfastSelections` +
+      // `breakfastTotal` directly (the room's per-child
+      // breakfast state lives on the snapshot map stamped
+      // later in the create transaction).
       ratePerNight: pricing.activeRoomRate,
       totalPrice: room.totalPrice,
       rateBreakdown: pricing.rateBreakdown,
@@ -643,6 +744,12 @@ function sumBilledAddToBillOrders(snapshot: any): number {
 interface TransactionalFolioSnapshot {
   reservationId: string;
   totalPrice: number;
+  /**
+   * Per OCT-FOL-01 (2026-10-20, decision #298): the BR-12
+   * "other add-ons" total included in the folio. NOT inside
+   * `totalPrice` (BR-12 decision 2), but part of the balance.
+   */
+  otherAddOnTotal: number;
   collectedTotal: number;
   incidentalTotal: number;
   addToBillTotal: number;
@@ -684,15 +791,24 @@ async function readTransactionalFolioSnapshot(input: {
     const collectedTotal = sumLedgerAmounts(paymentsSnapshot);
     const incidentalTotal = sumLedgerAmounts(chargesSnapshot);
     const addToBillTotal = sumBilledAddToBillOrders(storeOrdersSnapshot);
+    // Per OCT-FOL-01 (2026-10-20, decision #298): the BR-12 other
+    // add-ons are NOT inside `totalPrice` but ARE part of the
+    // balance, so they join the folio total here.
+    const otherAddOnTotal = Math.max(
+      0,
+      Number((bookingData as any).otherAddOnTotal) || 0
+    );
     const totals = computeServerFolioTotals({
       totalPrice: Number(bookingData.totalPrice) || 0,
       incidentalTotal,
       addToBillTotal,
-      collectedTotal
+      collectedTotal,
+      otherAddOnTotal
     });
     return {
       reservationId: "",
       totalPrice: Number(bookingData.totalPrice) || 0,
+      otherAddOnTotal,
       collectedTotal,
       incidentalTotal,
       addToBillTotal,
@@ -763,16 +879,30 @@ async function readTransactionalFolioSnapshot(input: {
     sumLedgerAmounts(reservationChargesSnapshot)
     + transitionalIncidentalTotal;
   const totalPrice = Number(reservationDoc.data()?.totalPrice) || 0;
+  // Per OCT-FOL-01 (2026-10-20, decision #298): the reservation's
+  // other add-ons are the SUM of its child bookings' — the same
+  // shape as `totalPrice` (the reservation header's total IS the
+  // sum of the children's `totalPrice`). The children's
+  // `otherAddOnTotal` is NOT inside that total, so without this
+  // term a reservation with an unpaid airport transfer showed a
+  // ₱0 balance.
+  const otherAddOnTotal = childBookingsSnapshot.docs.reduce(
+    (sum: number, docSnap: any) =>
+      sum + Math.max(0, Number(docSnap.data()?.otherAddOnTotal) || 0),
+    0
+  );
   const totals = computeServerFolioTotals({
     totalPrice,
     incidentalTotal,
     addToBillTotal,
-    collectedTotal
+    collectedTotal,
+    otherAddOnTotal
   });
 
   return {
     reservationId: bookingReservationId,
     totalPrice,
+    otherAddOnTotal,
     collectedTotal,
     incidentalTotal,
     addToBillTotal,
@@ -1179,19 +1309,18 @@ export const publicRoomSelectionSchema = z.object({
   numAdults: z.coerce.number().int().min(0).max(100),
   numChildren: z.coerce.number().int().min(0).max(100),
   extraBedCount: z.coerce.number().int().min(0).max(20).optional().default(0),
-  hasBreakfast: z.boolean(),
-  breakfastIncludesChildren: z.boolean().optional(),
-  // Per EXB-12 (2026-08-06, per decision #199): the
-  // per-room opt-in for breakfast on the extra-bed
-  // occupant(s). The client sends this from the
-  // per-type toggle in the Extras sub-section (or
-  // always, even when false — the strict schema
-  // would otherwise reject every booking because
-  // EXB-12's body always includes the field).
-  // The server enforces the invariant
-  // `extraBedBreakfast implies extraBedCount > 0`
-  // in the `validatedRoomStays` loop below.
-  extraBedBreakfast: z.boolean().optional(),
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy flat-rate `hasBreakfast: boolean` +
+  // `breakfastIncludesChildren: boolean` +
+  // `extraBedBreakfast: boolean` per-room fields are
+  // deleted from the public-room-selection schema. The
+  // new meal-based model carries breakfast intent in the
+  // request body's root-level `breakfastSelections`
+  // record (validated by `breakfastSelectionsSchema`)
+  // and applies it uniformly to every room in the booking
+  // — per-room flags are gone. The `extraBedCount` field
+  // stays (it's still a per-room physical-occupancy value,
+  // independent of breakfast).
   // Per SR-01..05 (2026-10-12): the per-room
   // bed-set-up choice. Empty string means
   // "no preference" (the guest left the
@@ -1241,14 +1370,15 @@ export const createBookingSchema = z.object({
   checkIn: z.string().trim().min(1).max(40),
   checkOut: z.string().trim().min(1).max(40),
   guests: z.number().finite().int().min(1).max(100),
-  hasBreakfast: z.boolean(),
-  // Per CHD-10 (2026-07-31, per CVQ-01): optional — when absent,
-  // the server snapshots the admin default from
-  // `settings/breakfastConfig.breakfastIncludesChildrenDefault`
-  // and writes the result to the booking doc alongside
-  // `hasBreakfast`. `true` is the safe default (matches the
-  // historical "children pay the full rate" math).
-  breakfastIncludesChildren: z.boolean().optional(),
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy `hasBreakfast: boolean` +
+  // `breakfastIncludesChildren: boolean` pair is deleted
+  // from the create-booking schema. The new meal-based
+  // model carries breakfast intent in the request body's
+  // optional `breakfastSelections` field (validated by
+  // `breakfastSelectionsSchema`); the legacy "include
+  // children in breakfast" toggle is gone (every guest —
+  // adult or child — is an ordinary meal slot in Step 2).
   // Per CHD-01 (2026-08-01, per decision #144): the
   // adults/children split. Both optional — when absent,
   // the server derives `numAdults = guests`, `numChildren
@@ -1266,17 +1396,13 @@ export const createBookingSchema = z.object({
   // snapshots the room type's `extraBedRate` onto the booking doc
   // alongside this field.
   extraBedCount: z.coerce.number().int().min(0).max(20).optional(),
-  // Per EXB-12 (2026-08-06, per decision #199): the
-  // top-level extra-bed breakfast toggle. The client
-  // always sends it (defaults to `false` from
-  // `bookingRoomCart.ts:63`), so the strict schema
-  // must accept the field. The server-side
-  // authoritative value lives on each
-  // `roomSelections[i].extraBedBreakfast` (per-room
-  // pricing + invariant enforcement); this top-level
-  // field is accepted for wire back-compat with the
-  // EXB-12 client shape and otherwise unused.
-  extraBedBreakfast: z.boolean().optional(),
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy top-level `extraBedBreakfast: boolean` toggle
+  // is deleted from the create-booking schema. Extra-bed
+  // occupants are ordinary meal slots in Step 2 (the
+  // per-meal picker). The room-level `extraBedCount`
+  // (line above) stays — it's still a per-room physical
+  // occupancy value independent of breakfast.
   guestDetails: guestDetailsSchema,
   discountType: z.enum(["", "senior", "pwd"]),
   // Per X-01 (E2E audit 2026-07-17): the URL is derived server-side
@@ -1296,6 +1422,15 @@ export const createBookingSchema = z.object({
   corporateCode: z.string().trim().max(120).optional().default(""),
   corporateFlatRate: z.boolean().optional().default(false),
   linkedInquiryId: z.string().trim().max(160).nullable().optional().default(null),
+  // Per PR #9 fix (2026-10-13): the optional points amount a
+  // signed-in member wants to apply at booking creation time.
+  // The server applies the redemption atomically inside the
+  // create transaction via the shared `applyPointsRedemption`
+  // helper (passes `skipBookingUpdate: true` so the caller writes
+  // the booking with the discounted totalPrice). Default 0 =
+  // no points applied. Max bounded to prevent accidental
+  // underflow (real-world redemptions are < 100,000 points).
+  pointsToRedeem: z.coerce.number().int().min(0).max(1_000_000).optional().default(0),
   // Per MRB-06 (2026-08-02, per decision #159): the N>1
   // generalization. The client requests N rooms of the
   // same `roomType`; the server assigns N DISTINCT
@@ -1389,6 +1524,42 @@ export const createBookingSchema = z.object({
   // missing value matches the "LOU not yet received"
   // state.
   louReceived: z.boolean().optional().default(false),
+  // Per BR-03 (2026-10-12, decision #232): the new
+  // per-guest × per-date breakfast selections rich
+  // shape. Optional — when absent, the create handler
+  // falls back to the legacy `hasBreakfast` flat-rate
+  // model (per-room + per-occupancy), preserving back-
+  // compat for the walkin modal + older clients. When
+  // present (even as an empty `{}`), the handler
+  // switches to the new path: the `breakfastTotal` is
+  // recomputed from the selections, the legacy
+  // `hasBreakfast` / `breakfastRate` /
+  // `breakfastIncludesChildren` / `extraBedBreakfast`
+  // fields are NOT written to the booking doc, and the
+  // new `breakfastSelections` map is snapshotted onto
+  // the doc. The strict schema validates the entry
+  // shape (the per-class fields + the date key); the
+  // server-side `validateBreakfastSelections` helper
+  // applies the meal-catalog + cutoff gates and throws
+  // a 400 with a human message on violation.
+  breakfastSelections: breakfastSelectionsSchema.optional(),
+  // Per OCT-M4 (2026-10-20, decision #297): the BR-12 other
+  // add-ons the guest selected in the Step 2 grid.
+  //
+  // BR-12 shipped the catalog, the staff walk-in grid and the
+  // post-booking "Manage Other Add-Ons" page — but the GUEST
+  // booking flow had no grid at all (`BookingPage.tsx` contained
+  // ZERO occurrences of "otherAddOn"), so a guest could not order an
+  // airport transfer at booking time. Combined with OCT-C5 (the
+  // create path never persisted `otherAddOnSelections` even if it
+  // did), other add-ons were only purchasable post-booking.
+  //
+  // The values are ADVISORY: the server rebuilds every entry from
+  // the live `addOns` catalog (catalog price + name + unit), so a
+  // client-supplied price is never persisted and an add-on that is
+  // no longer on sale is refused. Same shape + same rule as the
+  // walk-in schema (OCT-C5).
+  otherAddOnSelections: z.record(z.string(), z.array(z.unknown())).optional(),
   _hp: z.string().max(200).optional().default("")
 }).strict();
 
@@ -1398,6 +1569,47 @@ export const createBookingSchema = z.object({
 // `reference.ts`). The shared implementation lives in
 // `shared/utils/bookingDates.ts` and is imported as
 // `getManilaDateInfo` above. Local definitions removed BF-42.
+
+// Per MSL-01 (2026-10-15): the maximum stay length is a per-hotel
+// setting (`settings/hotelConfig.maxStayNights`), not a compile-time
+// constant, so the hotel raises or removes the cap from Settings
+// without a deploy.
+//
+// `resolveMaxStayNights` owns the whole raw-value mapping — in
+// particular `0` means "no limit" and must NEVER reach the clamp
+// arithmetic as a literal, where `Math.max(Math.min(0, horizon), 1)`
+// would collapse every stay to one night. Callers pass the RESOLVED
+// value only.
+//
+// Fails SAFE: any read error falls back to the default cap rather than
+// to unlimited. A Firestore blip must not open the hotel to unbounded
+// bookings, and the historical behavior on this path was "capped at
+// 30", so the fallback is also the no-regression choice.
+async function loadMaxStayNights(): Promise<number> {
+try {
+  const snap = await adminDb.collection("settings").doc("hotelConfig").get();
+  if (!snap.exists) return resolveMaxStayNights(undefined);
+  return resolveMaxStayNights((snap.data() as Record<string, unknown> | undefined)?.maxStayNights);
+} catch {
+  return resolveMaxStayNights(undefined);
+}
+}
+
+/**
+ * MSL-01: the shared 400 for an over-cap stay. Kept in one place so
+ * the guest booking, walk-in, and reschedule paths refuse identically
+ * and quote the SAME live cap the guest's picker enforced — so the
+ * error names the number the guest was just shown.
+ *
+ * Only ever reached when a FINITE cap refused (`n > Infinity` is
+ * false), so `describeMaxStayNights` always yields "N nights" here.
+ */
+function buildMaxStayNightsError(res: any, maxNights: number): void {
+res.status(400).json({
+  success: false,
+  error: `Maximum stay length is ${describeMaxStayNights(maxNights)}. Please shorten your stay.`
+});
+}
 
 export async function handleCreateBooking(req: any, res: any) {
   if (req.method !== "POST") {
@@ -1414,13 +1626,41 @@ export async function handleCreateBooking(req: any, res: any) {
 
   const body = parsedBody.data;
 
+  // DR-01 (2026-10-14): reject an inverted / zero-night range at the
+  // boundary. `createBookingSchema` validated these as free-form
+  // strings (`.min(1).max(40)`) and the night count was computed as
+  // `Math.max(checkOut - checkIn, 0)`, so a client that sent
+  // check-out BEFORE check-in produced a real, confirmed **0-night
+  // booking** instead of an error. `handleRescheduleBooking` already
+  // guarded this correctly; this closes the same hole on create.
+  if (!isValidIsoDate(body.checkIn) || !isValidIsoDate(body.checkOut)) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid check-in or check-out date."
+    });
+  }
+  if (diffNightsBetweenIso(body.checkIn, body.checkOut) < 1) {
+    return res.status(400).json({
+      success: false,
+      error: "Check-out must be at least one night after check-in."
+    });
+  }
+
   const {
     bookingId,
     roomType,
     checkIn,
     checkOut,
     guests,
-    hasBreakfast,
+    // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+    // legacy `hasBreakfast: boolean` +
+    // `breakfastIncludesChildren: boolean` pair is gone
+    // from the create handler's body destructure. The new
+    // meal-based model carries breakfast intent in the
+    // optional `breakfastSelections` field (validated by
+    // `breakfastSelectionsSchema`); the create transaction
+    // reads it below and stamps `breakfastSelections` +
+    // `breakfastTotal` onto the booking doc.
     // Per CHD-01 (2026-08-01, per decision #144): the
     // adults/children split. Both optional — when absent,
     // the server derives `numAdults = guests`, `numChildren
@@ -1434,14 +1674,6 @@ export async function handleCreateBooking(req: any, res: any) {
     // (CHD-07 follow-up).
     numAdults: requestedNumAdults,
     numChildren: requestedNumChildren,
-    // Per CHD-10 (2026-07-31, per CVQ-01): the optional per-booking
-    // override for "include children in the breakfast charge". When
-    // undefined, the server snapshots the admin default from
-    // `settings/breakfastConfig.breakfastIncludesChildrenDefault`
-    // inside the create transaction. Storing the result on the
-    // booking doc means a later policy change never rewrites an
-    // existing bill.
-    breakfastIncludesChildren: requestedBreakfastIncludesChildren,
     // Per EXB-01 (2026-07-31): extra-bed count. Optional — when
     // absent, treated as 0. Bounded server-side by the room type's
     // `maxExtraBeds` (a booking with `extraBedCount > maxExtraBeds`
@@ -1487,6 +1719,13 @@ export async function handleCreateBooking(req: any, res: any) {
     holdId
   } = body;
 
+  // Per PR #9 fix (2026-10-13): the member's desired points
+  // amount to apply at booking creation. Default 0. The actual
+  // redemption happens later in the create transaction via the
+  // shared `applyPointsRedemption` helper — this is just the
+  // validated + coerced value.
+  const pointsToRedeem = body.pointsToRedeem || 0;
+
   const guestDetails: GuestDetails = rawGuestDetails;
 
   const normalizedRoomSelections = requestedRoomSelections?.length
@@ -1498,8 +1737,16 @@ export async function handleCreateBooking(req: any, res: any) {
         numAdults: selection.numAdults,
         numChildren: selection.numChildren,
         extraBedCount: selection.extraBedCount || 0,
-        hasBreakfast: selection.hasBreakfast,
-        breakfastIncludesChildren: selection.breakfastIncludesChildren,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy per-room `hasBreakfast` +
+        // `breakfastIncludesChildren` + `extraBedBreakfast`
+        // flags are deleted from the room-selection
+        // normalization. The new meal-based model carries
+        // breakfast intent in the request body's root-level
+        // `breakfastSelections` record (validated by
+        // `breakfastSelectionsSchema`); the create
+        // transaction reads it below and stamps per-room
+        // snapshots via the rate-breakdown builder.
         // Per SR-01..05 (2026-10-12): the per-room
         // bed-set-up choice. Empty string means
         // "no preference" (the guest left the
@@ -1514,8 +1761,14 @@ export async function handleCreateBooking(req: any, res: any) {
         numAdults: Math.max(0, Math.floor(Number(requestedNumAdults ?? guests) || 0)),
         numChildren: Math.max(0, Math.floor(Number(requestedNumChildren ?? 0) || 0)),
         extraBedCount: Math.max(0, Math.floor(Number(requestedExtraBedCount ?? 0) || 0)),
-        hasBreakfast,
-        breakfastIncludesChildren: requestedBreakfastIncludesChildren,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `hasBreakfast: boolean` field is
+        // deleted from the room-selection normalization.
+        // The breakfast data is carried by the root-level
+        // `breakfastSelections` record (validated by
+        // `breakfastSelectionsSchema`); the create
+        // transaction reads it below and stamps per-room
+        // snapshots via the rate-breakdown builder.
         // Per SR-01..05 (2026-10-12): the corporate
         // path sends `bedSetup` at the top level;
         // mirror it onto every room (the corporate
@@ -1547,6 +1800,17 @@ export async function handleCreateBooking(req: any, res: any) {
 
   const checkInDate = new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = new Date(`${checkOut}T00:00:00Z`);
+
+  // Per OCT-L7 (2026-10-20, decision #299): strict ISO validation
+  // here as well as at the top of the handler. `new Date("2026-02-31
+  // T00:00:00Z")` ROLLS OVER to Mar 3 instead of producing an Invalid
+  // Date, so the `isNaN(getTime())` guard never fires for a
+  // calendar-impossible date — the booking would be stored for a day
+  // the caller never sent. `isValidIsoDate` (the shared helper in
+  // `shared/utils/stayRange.ts`) rejects it.
+  if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) {
+    return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
+  }
 
   if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
     return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
@@ -1582,11 +1846,16 @@ export async function handleCreateBooking(req: any, res: any) {
   // advance-booking window server-side before any Firestore work.
   // Permits same-day bookings (checkIn === manilaToday). Walk-ins
   // are exempt from the advance window.
-  if (numNights > MAX_STAY_NIGHTS) {
-    return res.status(400).json({
-      success: false,
-      error: `Maximum stay length is ${MAX_STAY_NIGHTS} nights. Please shorten your stay.`
-    });
+  //
+  // MSL-01: the cap itself now comes from
+  // `settings/hotelConfig.maxStayNights` (resolved via
+  // `loadMaxStayNights`) instead of a constant. `Infinity` = the
+  // admin set `0` = no limit, and `numNights > Infinity` is false, so
+  // an unlimited hotel skips this branch entirely.
+  const maxStayNights = await loadMaxStayNights();
+  if (numNights > maxStayNights) {
+    buildMaxStayNightsError(res, maxStayNights);
+    return;
   }
 
   const advanceDays = Math.round((checkInDate.getTime() - currentManilaDate.getTime()) / 86400000);
@@ -1676,8 +1945,6 @@ export async function handleCreateBooking(req: any, res: any) {
       adults: selection.numAdults,
       children: selection.numChildren,
       extraBeds: selection.extraBedCount,
-      hasBreakfast: selection.hasBreakfast,
-      breakfastIncludesChildren: selection.breakfastIncludesChildren
     })),
     checkIn: String(checkIn || "").trim(),
     checkOut: String(checkOut || "").trim(),
@@ -1741,12 +2008,17 @@ export async function handleCreateBooking(req: any, res: any) {
       numAdults: number;
       numChildren: number;
       extraBedCount: number;
-      hasBreakfast: boolean;
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy `hasBreakfast: boolean` flat-rate flag
+      // is removed from the internal projection (the email
+      // view reads per-stay breakfast lines off
+      // `childPricing[].rateBreakdown.breakfastLines`
+      // instead).
       totalPrice: number;
     }> = [];
     let computedData: any = {};
     let alreadyExistingBookingResponse: any = null;
-    // Public clients cannot read `bookings/*`. Keep the creation status in a
+    // Public clients cannot read the bookings collection. Keep the creation status in a
     // function-scope value so the persisted document and success response use
     // the same authoritative value.
     const initialBookingStatus = paymentProofPath || paymentProofUrl
@@ -2284,17 +2556,146 @@ export async function handleCreateBooking(req: any, res: any) {
       // 3. Fetch Breakfast Settings
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
-      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data()! : { isEnabled: false, ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT };
-      const actualBreakfastRate = breakfastConfig.isEnabled ? (breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT) : 0;
-      // Per CHD-10 (2026-07-31, per CVQ-01): snapshot the admin
-      // default for "include children in breakfast" onto the new
-      // booking doc. The per-booking override (if sent) takes
-      // precedence; otherwise the admin default applies; otherwise
-      // `true` (the historical "children pay the full rate" default).
-      const breakfastIncludesChildrenDefault = breakfastConfig.breakfastIncludesChildrenDefault !== false;
-      const breakfastIncludesChildren = requestedBreakfastIncludesChildren !== undefined
-        ? requestedBreakfastIncludesChildren
-        : breakfastIncludesChildrenDefault;
+      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data()! : { isEnabled: false, ratePerPersonPerNight: 0 };
+      const actualBreakfastRate = 0;
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy `actualBreakfastRate × numGuests × numNights`
+      // derivation is gone. The new per-meal model reads
+      // `breakfastSelections` and stamps `breakfastTotal`
+      // directly via `calculateBreakfastMealsTotal`. The
+      // legacy `breakfastConfig.ratePerPersonPerNight` /
+      // `breakfastConfig.breakfastIncludesChildrenDefault`
+      // reads are removed (the BR-02 admin schema no longer
+      // carries them). The local constants stay as 0 / `true`
+      // placeholders so the few downstream reads that still
+      // exist (the reschedule + cancellation liability paths)
+      // don't fail with a `not defined` error.
+      const breakfastIncludesChildrenDefault = true;
+  
+
+      // Per BR-03 (2026-10-12, decision #232): validate the
+      // new `breakfastSelections` rich shape (when provided).
+      // Returns `null` for legacy callers (no field sent),
+      // the validated entries + recomputed total for new
+      // callers, or throws a `BreakfastSelectionValidationError`
+      // (400 with a human message) for a locked date /
+      // missing meal / malformed entry. The validation
+      // runs INSIDE the same Firestore transaction as the
+      // booking write so the catalog + cutoff state are
+      // read once and the result is atomic with the
+      // snapshot. Per open item #6 (BR-01 / spec): the
+      // mealId must exist in the live catalog; per open
+      // item #7: the server is authoritative on the
+      // cutoff clock (a back-dated client is still
+      // rejected).
+      const validatedBreakfastSelections: ValidatedBreakfastSelections | null =
+        validateBreakfastSelections({
+          selections: (body as any).breakfastSelections,
+          breakfastConfig: breakfastConfig as any,
+          now
+        });
+
+      // Per OCT-M4 (2026-10-20, decision #297): rebuild the guest's
+      // BR-12 other add-ons from the LIVE catalog.
+      //
+      // BR-12 shipped the catalog, the staff walk-in grid and the
+      // post-booking "Manage Other Add-Ons" page — but the GUEST
+      // booking flow had no grid at all (`BookingPage.tsx` contained
+      // ZERO occurrences of "otherAddOn"), so a guest could not order
+      // an airport transfer at booking time. Combined with OCT-C5
+      // (the create path never persisted `otherAddOnSelections` even
+      // if it did), other add-ons were only purchasable
+      // post-booking.
+      //
+      // The rebuild is the SAME rule the walk-in path uses (OCT-C5,
+      // decision #281): the catalog is the price authority, a
+      // client-supplied price is never persisted, and an add-on that
+      // is not currently on sale is refused with a 400.
+      //
+      // The hotel-wide master switch (OCT-M1, decision #295) is read
+      // from the `settings/hotelConfig` doc the transaction already
+      // loaded above — no extra read.
+      const rawOtherAddOns = (body as any).otherAddOnSelections;
+      let validatedOtherAddOnSelections: Record<string, OtherAddOnSelectionEntry[]> | null = null;
+      let validatedOtherAddOnTotal = 0;
+      if (rawOtherAddOns && typeof rawOtherAddOns === "object") {
+        if (!normalizeOtherAddOnsEnabled(hotelConfig.otherAddOnsEnabled)) {
+          // The hotel took other add-ons off sale between the guest
+          // loading Step 2 and submitting. The guest must not get
+          // one — and must not be charged for one.
+          throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+        }
+        // The catalog is read INSIDE the transaction (read-before-
+        // write), so the price the guest is quoted is the price the
+        // booking is written with.
+        const addOnsCatalogSnap = await transaction.get(adminDb.collection("addOns"));
+        const addOnsCatalog = new Map<string, AddOn>();
+        for (const d of addOnsCatalogSnap.docs) {
+          const norm = normalizeAddOn({ id: d.id, ...d.data() }, d.id);
+          if (norm) addOnsCatalog.set(norm.id, norm);
+        }
+        // Same read-only pre-seed fallback the public catalog
+        // endpoint uses (`addons-config.ts`): an empty collection
+        // still offers the airport transfer, so the guest grid
+        // (which renders from that endpoint) and this validation
+        // must agree.
+        if (addOnsCatalog.size === 0) {
+          const pre = normalizeAddOn(
+            { id: "airport-transfer", ...AIRPORT_TRANSFER_PRESEED },
+            "airport-transfer"
+          );
+          if (pre) addOnsCatalog.set(pre.id, pre);
+        }
+        const rebuilt: Record<string, OtherAddOnSelectionEntry[]> = {};
+        for (const [dateKey, rawItems] of Object.entries(
+          rawOtherAddOns as Record<string, unknown>
+        )) {
+          if (!Array.isArray(rawItems)) continue;
+          const rows: OtherAddOnSelectionEntry[] = [];
+          for (const rawItem of rawItems) {
+            if (!rawItem || typeof rawItem !== "object") continue;
+            const entry = rawItem as Record<string, unknown>;
+            const addOnId = String(entry.addOnId || "").trim();
+            if (!addOnId) continue;
+            const live = addOnsCatalog.get(addOnId);
+            if (!live) {
+              throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+            }
+            if (live.isEnabled === false) {
+              throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+            }
+            // The quantity is the number of guests using the add-on
+            // that day (BR-12 decision 3) — clamped to the booking's
+            // guest count so a hostile payload cannot order 50
+            // airport transfers for a 2-guest stay.
+            const quantity = Math.max(
+              0,
+              Math.min(
+                guests,
+                Math.floor(Number(entry.quantity) || 0)
+              )
+            );
+            if (quantity <= 0) continue;
+            rows.push({
+              ...(entry as unknown as OtherAddOnSelectionEntry),
+              addOnId: live.id,
+              nameSnapshot: live.name,
+              priceSnapshot: Math.max(0, Number(live.price) || 0),
+              quantity,
+              unitSnapshot: live.unit,
+              cutoffHoursBeforeCheckInSnapshot: Math.max(
+                0,
+                Math.min(168, Math.floor(Number(live.cutoffHoursBeforeCheckIn) || 24))
+              )
+            });
+          }
+          if (rows.length > 0) rebuilt[dateKey] = rows;
+        }
+        if (Object.keys(rebuilt).length > 0) {
+          validatedOtherAddOnSelections = rebuilt;
+          validatedOtherAddOnTotal = recomputeOtherAddOnTotal(rebuilt);
+        }
+      }
 
       // Per CHD-01 + CHD-04 (2026-08-01, per decision #144):
       // validate the adults/children split against the room
@@ -2346,15 +2747,13 @@ export async function handleCreateBooking(req: any, res: any) {
             : `Not enough extra beds: ${overflow.overflowAdults} overflow adult(s) + ${overflow.overflowChildren} overflow child(ren) = ${overflow.requiredExtraBeds} extra bed(s) needed, but only ${extraBedCount} extra bed(s) selected. The room type allows up to ${maxExtraBeds} extra bed(s).`
           );
         }
-        // Per EXB-12 (2026-08-06, per decision #199): the
-        // extra-bed breakfast toggle. The user opts in to
-        // breakfast for the extra-bed occupant(s). The server
-        // validates the invariant: `extraBedBreakfast`
-        // can only be `true` when `extraBedCount > 0`. A
-        // `true` toggle with 0 extra beds is a client bug
-        // (or a stale URL); we force it off here so the
-        // breakfast total isn't inflated by phantom beds.
-        const extraBedBreakfast = selection.extraBedBreakfast === true && extraBedCount > 0;
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `extraBedBreakfast: boolean` per-room
+        // toggle is removed. Extra-bed occupants are ordinary
+        // meal slots in the new `breakfastSelections` map
+        // (per-meal picker picks a meal for guest_n+1 when
+        // extra beds are present). The validated stay
+        // therefore only carries the new-shape fields.
         return {
           ...assignedRoom,
           numAdults,
@@ -2363,15 +2762,7 @@ export async function handleCreateBooking(req: any, res: any) {
           extraBedCount,
           extraBedRate: extraBedCount > 0
             ? Math.max(0, Number(selectionType.extraBedRate) || 0)
-            : 0,
-          // Per EXB-12: snapshot the breakfast-for-extra-beds
-          // toggle onto the validated stay. The pricing loop
-          // reads this to count the extra beds toward the
-          // breakfast total (same rate as adult breakfast).
-          extraBedBreakfast,
-          breakfastIncludesChildren: selection.breakfastIncludesChildren !== undefined
-            ? selection.breakfastIncludesChildren
-            : breakfastIncludesChildrenDefault
+            : 0
         };
       });
       const numAdults = validatedRoomStays[0].numAdults;
@@ -2640,27 +3031,41 @@ export async function handleCreateBooking(req: any, res: any) {
               weekendRate: Number(stayType.weekendRate) || 0,
               seasonalRateOverrides
             });
-        const stayHasBreakfast = breakfastConfig.isEnabled && stay.selection.hasBreakfast;
-        const stayBreakfastTotal = calculateBreakfastAddOn({
-          hasBreakfast: stayHasBreakfast,
-          breakfastRate: actualBreakfastRate,
-          numGuests: stay.numGuests,
-          numAdults: stay.numAdults,
-          numChildren: stay.numChildren,
-          numNights,
-          breakfastIncludesChildren: stay.breakfastIncludesChildren,
-          // Per EXB-12 (2026-08-06, per decision #199):
-          // when the guest opts in to breakfast for the
-          // extra-bed occupant(s), the helper counts
-          // `extraBedCount` toward the breakfast total
-          // (priced as `breakfastRate × extraBedCount ×
-          // numNights`). The toggle is per-type, snapshotted
-          // onto the validated stay above. The invariant
-          // `extraBedBreakfast implies extraBedCount > 0`
-          // is enforced above.
-          extraBedCount: stay.extraBedCount,
-          extraBedBreakfast: stay.extraBedBreakfast === true
-        });
+        // Per BR-03 (2026-10-12, decision #232): when the
+        // guest submitted the new `breakfastSelections` rich
+        // shape (any non-`null` value — empty `{}` is the
+        // "explicit opt-out" signal), the per-stay breakfast
+        // math flips to the selections-driven path. The
+        // per-stay total is 0 for every stay except the
+        // first (which absorbs the full selections total) so
+        // the per-reservation `breakfastTotal` (the sum of
+        // per-stay totals, computed below) lands on the
+        // selections total. The single-stay case is
+        // byte-equivalent to the historical "first stay
+        // gets everything" attribution.
+        const breakfastSelectionsActive = validatedBreakfastSelections !== null;
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `selection.hasBreakfast` read from the
+        // request body is removed. New requests carry the
+        // rich `breakfastSelections` shape; a `null` value
+        // means "no breakfast" (the per-stay total is 0).
+        const stayHasBreakfast = breakfastSelectionsActive
+          ? validatedBreakfastSelections.hasAny
+          : false;
+        // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+        // per-stay breakfast total is 0 when the new
+        // `breakfastSelections` shape is in use (the per-meal
+        // picker has already counted everything; the first
+        // stay gets the full selections total via the
+        // `breakfastSelectionsActive ? validatedBreakfastSelections.total : 0`
+        // branch below). When the legacy flat-rate shape
+        // is in use (no `breakfastSelections` provided),
+        // the total stays at 0 too — the BR-08 close-out
+        // removed the flat-rate `breakfastRate × numGuests
+        // × numNights` derivation from the server. Future
+        // callers (corporate bookings, walk-ins) must send
+        // the rich shape to opt in to breakfast.
+        const stayBreakfastTotal = 0;
         const stayExtraBedTotal = calculateExtraBedAddOn({
           extraBedCount: stay.extraBedCount,
           extraBedRate: stay.extraBedRate,
@@ -2689,10 +3094,29 @@ export async function handleCreateBooking(req: any, res: any) {
         )
       };
       const roomTotal = roomBreakdown.roomSubtotal;
-      const breakfastTotal = roomStayPricing.reduce((sum, stay) => sum + stay.breakfastTotal, 0);
+      // Per BR-03 (2026-10-12, decision #232): when the
+      // new `breakfastSelections` shape is active, the
+      // per-reservation `breakfastTotal` is the
+      // server-recomputed selections total (the sum of
+      // every non-cancelled entry's snapshot price, per
+      // the BR-01 `recomputeBreakfastTotal` helper). The
+      // per-stay totals above are 0 in that case (the
+      // override above absorbs the per-stay legacy
+      // math), so the per-reservation `reduce` lands at
+      // 0; the `breakfastSelectionsActive` ternary here
+      // swaps in the validated total. The single-stay
+      // case is byte-equivalent; the multi-stay case
+      // attributes the full selections total to the
+      // reservation (no per-stay split — see open item
+      // #1 in the spec).
+      const breakfastTotal = validatedBreakfastSelections !== null
+        ? validatedBreakfastSelections.total
+        : roomStayPricing.reduce((sum, stay) => sum + stay.breakfastTotal, 0);
       const extraBedTotal = roomStayPricing.reduce((sum, stay) => sum + stay.extraBedTotal, 0);
       const subtotal = roomTotal + breakfastTotal + extraBedTotal;
-      const finalHasBreakfast = roomStayPricing[0].finalHasBreakfast;
+      const finalHasBreakfast = validatedBreakfastSelections !== null
+        ? validatedBreakfastSelections.hasAny
+        : roomStayPricing[0].finalHasBreakfast;
 
       // 7a. Government Discount Validation
       // Per X-01 (E2E audit 2026-07-17): anonymous guest uploads must
@@ -2837,11 +3261,42 @@ export async function handleCreateBooking(req: any, res: any) {
       // distinct from the in-scope variable.
       let appliedMemberDiscountPct = 0;
       if (detectedMemberId) {
+        // Per Phase 4 of the Spark Rewards tier system
+        // (2026-10-12): the tier discount takes precedence over
+        // the global `memberDiscountPct` for tier-aware members.
+        // The tier comes from the member's `currentLevel` cache
+        // (refreshed at checkout + register by the handler in
+        // Phase 3 PR). The global fallback is the existing legacy
+        // path — tier-less members still get the configured
+        // `memberDiscountPct`. Both reads happen in this single
+        // `get()` block (FOL-03 requires all `get()` calls to
+        // complete before any `update()`).
+        //
+        // Decision (2026-10-12): a tier with `discountPct: 0` does
+        // NOT fall back to the global — the admin set 0
+        // deliberately. The "tier takes precedence" rule is
+        // honored even when the tier's discount is 0 (which means
+        // "no member discount for this tier", e.g. a future
+        // "Points-only" tier).
+        const memberRef = adminDb.doc(`members/${detectedMemberId}`);
+        const memberDocInTx = await transaction.get(memberRef);
+        const memberTier = memberDocInTx.exists
+          ? memberDocInTx.data()?.currentLevel
+          : null;
+        const tierPct = memberTier && Number.isFinite(Number(memberTier.discountPct))
+          ? Math.max(0, Math.floor(Number(memberTier.discountPct)))
+          : null;
+
         const rewardsRef = adminDb.doc("settings/rewardsConfig");
         const rewardsDoc = await transaction.get(rewardsRef);
         if (rewardsDoc.exists) {
           const rc = rewardsDoc.data()!;
-          if (rc.memberDiscountEnabled !== false) {
+          if (tierPct !== null) {
+            // Tier-aware member: tier discount wins (even when
+            // tier says 0 — admin's deliberate choice).
+            appliedMemberDiscountPct = tierPct;
+          } else if (rc.memberDiscountEnabled !== false) {
+            // Tier-less member: fall back to the global.
             const pct = Number(rc.memberDiscountPct) || 0;
             if (pct > 0) appliedMemberDiscountPct = pct;
           }
@@ -2887,10 +3342,24 @@ export async function handleCreateBooking(req: any, res: any) {
       // handler now uses `originalTotalPrice - voucherDiscount`
       // to apply the voucher if one was also applied.
       const originalTotalPrice = subtotal;
+      // Per BR-03 (2026-10-12, decision #232): the
+      // per-date breakfast lines, when the new shape
+      // is active. The sum of the per-date lines equals
+      // the recomputed `breakfastTotal` (caller
+      // invariant — `recomputeBreakfastTotal` ran
+      // inside the validator above). The single-line
+      // `breakfastTotal` value is still passed so the
+      // `addOns[]` builder keeps its existing semantics
+      // and the legacy discount-chain math reads the
+      // single value.
+      const breakfastRateBreakdownLines = validatedBreakfastSelections !== null
+        ? buildBreakfastRateBreakdownLines(validatedBreakfastSelections.entries)
+        : undefined;
       const rateBreakdown = buildRateBreakdown({
         roomLines: roomBreakdown.roomLines,
         roomSubtotal: roomTotal,
         breakfastTotal,
+        breakfastLines: breakfastRateBreakdownLines,
         // Per EXB-08 (2026-08-01, per decision #156):
         // the extra-bed add-on term. The `addOns[]`
         // now includes both the breakfast line and
@@ -2922,10 +3391,27 @@ export async function handleCreateBooking(req: any, res: any) {
         rateBreakdown: {
           roomSubtotal: stay.roomTotal,
           roomLines: stay.roomBreakdown.roomLines,
+          // Per BR-03 (2026-10-12, decision #232): when
+          // the new `breakfastSelections` shape is
+          // active, the per-room breakfast lines are
+          // attributed to the FIRST stay only (the
+          // reservation-level breakfast is not
+          // per-room, per open item #1 in the spec).
+          // The email view's `addOns.concat(...)`
+          // would otherwise duplicate the per-date
+          // lines N times for an N-room booking; this
+          // single-source attribution keeps the
+          // per-date lines on the reservation
+          // breakdown (which the email view reads
+          // first). Legacy path: each stay carries
+          // its own "Breakfast add-on" line (the
+          // historical EXB-08 behavior).
           addOns: [
-            ...(stay.breakfastTotal > 0
-              ? [{ label: "Breakfast add-on", amount: stay.breakfastTotal }]
-              : []),
+            ...(breakfastRateBreakdownLines && breakfastRateBreakdownLines.length > 0
+              ? (index === 0 ? breakfastRateBreakdownLines : [])
+              : (stay.breakfastTotal > 0
+                ? [{ label: "Breakfast add-on", amount: stay.breakfastTotal }]
+                : [])),
             ...(stay.extraBedTotal > 0
               ? [{
                   label: stay.extraBedCount > 1
@@ -3013,9 +3499,114 @@ export async function handleCreateBooking(req: any, res: any) {
         transaction.set(counterRef, { count: assignedRooms.length });
       }
 
+      // Per PR #9 fix (2026-10-13): member self-service points
+      // redemption applied at booking creation. Universal across
+      // N=1 and MRB-06 multi-room bookings — the subtraction
+      // applies to the reservation total; per-room subtotals
+      // stay per-room (the discount surfaces on the reservation
+      // header + the FIRST room's `pointsRedeemed*` fields).
+      // The redemption happens atomically inside the create
+      // transaction — booking is written with the already-
+      // discounted totalPrice, so the member pays the lower
+      // amount. No refunds, no credit tracking, no post-payment
+      // reconciliation.
+      //
+      // Why here (before the newReservation + newBooking
+      // builds): the reservation header's `totalPrice` reads
+      // from `finalTotalPrice` (overridden below), and the
+      // per-room writes inherit the redemption metadata via the
+      // `newBooking` spread. Running the redemption here means
+      // `finalTotalPrice` is discounted before ANY booking doc
+      // is constructed — atomic with the existing writes.
+      let selfRedeemedPoints = 0;
+      let selfRedeemedValue = 0;
+      let selfRedeemedBy: string | null = null;
+      let selfRedeemedAt: Date | null = null;
+      if (pointsToRedeem > 0) {
+        if (!detectedMemberId) {
+          throw new Error("Sign in is required to redeem points at booking creation. Please sign in or remove the points amount.");
+        }
+        const selfRcRef = adminDb.collection("settings").doc("rewardsConfig");
+        const selfRcSnap = await transaction.get(selfRcRef);
+        const selfRcData = selfRcSnap.exists ? selfRcSnap.data() : null;
+        if (selfRcData?.allowMemberPointsRedemption !== true) {
+          throw new Error("Self-service points redemption is not enabled. Please contact the front desk.");
+        }
+        const selfMemberRef = adminDb.collection("members").doc(detectedMemberId);
+        const selfMemberDoc = await transaction.get(selfMemberRef);
+        if (!selfMemberDoc.exists) {
+          throw new Error("Member not found.");
+        }
+        const selfMemberData = selfMemberDoc.data()!;
+        if (selfMemberData.isActive === false || selfMemberData.isMember === false) {
+          throw new Error("Member account is not active.");
+        }
+        const pointsRedemptionRate = Number(selfRcData?.pointsRedemptionRate || 0);
+        if (pointsRedemptionRate <= 0) {
+          throw new Error("Points redemption is not configured.");
+        }
+        const minPointsToRedeem = Number(selfRcData?.minPointsToRedeem || 0);
+        const billPct = Number(selfRcData?.pointsCanPayUpToBillPct ?? 100);
+        if (minPointsToRedeem > 0 && pointsToRedeem < minPointsToRedeem) {
+          throw new Error(`Points redemption requires at least ${minPointsToRedeem} points.`);
+        }
+        if (Number.isFinite(billPct) && billPct < 100) {
+          const reservationTotal = finalTotalPrice;
+          const maxRedeemableCurrency = Math.floor((reservationTotal * Math.max(0, billPct)) / 100);
+          const maxRedeemablePoints = Math.floor((maxRedeemableCurrency * 100) / pointsRedemptionRate);
+          if (pointsToRedeem > maxRedeemablePoints) {
+            throw new Error(
+              `Points redemption exceeds the ${billPct}% bill cap (max ${maxRedeemablePoints} points for this booking).`
+            );
+          }
+        }
+        const validation = validatePointsRedemption(
+          pointsToRedeem,
+          Number(selfMemberData.rewardsPoints || 0),
+          pointsRedemptionRate
+        );
+        if (!validation.valid) {
+          throw new Error(validation.error);
+        }
+        const redemptionValue = Math.round(validation.value);
+        if (redemptionValue <= 0 || redemptionValue > finalTotalPrice) {
+          throw new Error("Points redemption value exceeds the booking total.");
+        }
+        // Discount the reservation total. The newReservation
+        // header below reads `finalTotalPrice` (already
+        // overridden), and each per-room booking write carries
+        // the same discounted total via the `newBooking` spread.
+        finalTotalPrice = Math.max(finalTotalPrice - redemptionValue, 0);
+        if (rateBreakdown) {
+          rateBreakdown.finalTotal = finalTotalPrice;
+          (rateBreakdown as any).pointsRedeemedValue = redemptionValue;
+        }
+        selfRedeemedPoints = pointsToRedeem;
+        selfRedeemedValue = redemptionValue;
+        selfRedeemedBy = `self:${detectedMemberId}`;
+        selfRedeemedAt = now;
+        // Update member's `rewardsPoints` + write negative
+        // `pointsHistory` row. Both atomic with the booking
+        // write — a transaction retry replays both safely.
+        transaction.update(selfMemberRef, {
+          rewardsPoints: Number(selfMemberData.rewardsPoints || 0) - pointsToRedeem,
+          updatedAt: now
+        });
+        const historyRef = adminDb.collection(`members/${detectedMemberId}/pointsHistory`).doc();
+        transaction.set(historyRef, {
+          type: "redeem",
+          points: -pointsToRedeem,
+          description: `Redeemed at booking creation ${bookingId}`,
+          reason: "Points redeemed by member at checkout",
+          bookingId,
+          by: selfRedeemedBy,
+          at: now
+        });
+      }
+
       // 10. Prepare Document Fields
       const guestName = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
-      
+
       const newBooking = {
         bookingRef,
         roomId,
@@ -3046,6 +3637,18 @@ export async function handleCreateBooking(req: any, res: any) {
         // without leaking the raw `guestEmail` in URLs.
         lookupToken: generateLookupToken(),
         totalPrice,
+        // Per BR-03 (2026-10-12, decision #232): the
+        // denormalized `breakfastTotal` field. The
+        // existing `computeServerFolioTotals` reads
+        // `totalPrice` (which already includes the new
+        // breakfast total via the discount chain), so
+        // this field is the future-proof snapshot for
+        // the BR-04 Manage Breakfast page +
+        // downstream readers (kitchen list per BR-05,
+        // reports per BR-08). Always written so a
+        // legacy reader can detect the absence of
+        // breakfast (`0`) without a special-case.
+        breakfastTotal: breakfastTotal,
         rateBreakdown,
         originalTotalPrice,
         discountType: discountType || "",
@@ -3134,14 +3737,69 @@ export async function handleCreateBooking(req: any, res: any) {
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
-        hasBreakfast: finalHasBreakfast,
-        breakfastRate: finalHasBreakfast ? actualBreakfastRate : 0,
-        // Per CHD-10 (2026-07-31, per CVQ-01): the snapshotted
-        // "include children in breakfast" flag. Written to the
-        // booking doc so a later policy change never rewrites an
-        // existing bill. Math consumers (the helper, the receipt
-        // PDF, the rate breakdown) read this field.
-        breakfastIncludesChildren: finalHasBreakfast ? breakfastIncludesChildren : false,
+        // Per BR-03 (2026-10-12, decision #232): the
+        // breakfast-doc fields. Two shapes coexist during
+        // the rollout:
+        //
+        //   - Legacy shape: `hasBreakfast: bool`,
+        //     `breakfastRate: number`,
+        //     `breakfastIncludesChildren: bool`,
+        //     `extraBedBreakfast: bool`. Written for
+        //     pre-BR-03 callers (the walkin modal per the
+        //     BR-03 plan) and any client that omits
+        //     `breakfastSelections`.
+        //
+        //   - New shape: `breakfastSelections: Record<key,
+        //     BreakfastSelectionEntry>` + a single
+        //     `hasAnyBreakfast: bool` flag (the
+        //     `breakfastTotal` is denormalized separately
+        //     below for the folio math). The new shape
+        //     REPLACES the legacy fields — the BR-03 spec
+        //     pins the create-path cleanup so a future
+        //     read site can switch on `breakfastSelections`
+        //     being a non-null object. The legacy fields
+        //     are NOT written when the new shape is used.
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `hasBreakfast: boolean` +
+        // `breakfastRate: number` +
+        // `breakfastIncludesChildren: boolean` pair is gone
+        // from the create-write. When the new rich
+        // `breakfastSelections` shape is in use, only the
+        // new fields are written. When no
+        // `breakfastSelections` is provided (no breakfast
+        // was selected), no legacy or new fields are
+        // written — `breakfastSelections` reads as
+        // `undefined` on the doc and `breakfastTotal` is
+        // implicitly 0.
+        ...(validatedBreakfastSelections !== null
+          ? {
+              breakfastSelections: validatedBreakfastSelections.entries,
+              hasAnyBreakfast: validatedBreakfastSelections.hasAny,
+              // The folio math reads `breakfastTotal`
+              // (denormalized); expose the same value the
+              // chain saw.
+              breakfastTotal: validatedBreakfastSelections.total
+            }
+          : {}),
+        // Per OCT-M4 (2026-10-20, decision #297): the BR-12 other
+        // add-ons the guest selected in the Step 2 grid.
+        //
+        // Per `plan/features/OTHER-ADD-ONS.md` decision 2 these are
+        // ADDITIVE `Booking` fields and they are NOT inside
+        // `totalPrice` — they are "added on top of it for the
+        // balance". The same shape the walk-in path writes (OCT-C5,
+        // decision #281) and the post-booking guest path writes.
+        //
+        // The fields are written only when the guest actually
+        // selected something, so a booking with no other add-ons
+        // carries no `otherAddOnSelections` key at all.
+        ...(validatedOtherAddOnSelections !== null
+          ? {
+              otherAddOnSelections: validatedOtherAddOnSelections,
+              otherAddOnTotal: validatedOtherAddOnTotal,
+              hasAnyOtherAddOns: hasAnyOtherAddOns(validatedOtherAddOnSelections)
+            }
+          : {}),
         // Per EXB-01 (2026-07-31): the snapshotted extra-bed
         // count + rate. `extraBedRate` is the room-type rate
         // snapshotted at booking time so a later rate change never
@@ -3159,7 +3817,15 @@ export async function handleCreateBooking(req: any, res: any) {
         discountScopeSnapshot: snapshottedDiscountScope,
         guestIdPhotoUrl: null,
         guestRegistration: null,
-        breakfastSelections: {},
+        // Per BR-03 (2026-10-12, decision #232): the
+        // `breakfastSelections` field is now written
+        // conditionally above (the legacy flat-rate
+        // path writes the legacy fields; the new
+        // selections-driven path writes the rich
+        // `breakfastSelections` map + `hasAnyBreakfast`).
+        // The hard-coded `breakfastSelections: {}`
+        // placeholder was removed — leaving it would
+        // double-write the field.
         // Per LCE-01 (decision #137, 2026-07-25): stamp the
         // Terms of Service version that was live at
         // booking-create time. The admin's
@@ -3310,10 +3976,18 @@ export async function handleCreateBooking(req: any, res: any) {
         // room of the same `roomType` + same dates +
         // same guest inputs, so the sum is
         // `roomCount * per-room value`).
+        // Per PR #9 fix (2026-10-13): when points are applied
+        // at booking creation, `totalPrice` carries the post-
+        // redemption amount (the per-room writes below carry
+        // the same discounted total). For non-redemption
+        // bookings this is byte-equivalent to the previous
+        // `totalPrice: totalPrice` reference — `finalTotalPrice`
+        // stays equal to `totalPrice` when the redemption block
+        // doesn't execute.
         originalSubtotal: subtotal,
         discountScopeSnapshot: snapshottedDiscountScope,
         subtotal,
-        totalPrice,
+        totalPrice: finalTotalPrice,
         // Per MRB-11 (2026-08-03, per decision #177):
         // the aggregate of every child booking's
         // `revenueAllocation`. Reports reads this for
@@ -3409,6 +4083,19 @@ export async function handleCreateBooking(req: any, res: any) {
           latestCheckOut: checkOutDate,
           isDivergent: false
         },
+        // Per PR #9 fix (2026-10-13): the reservation-level
+        // mirror of the per-room redemption. Both fields are
+        // populated ONLY when the member applied points at
+        // booking creation (pre-Phase-9 reservations stay
+        // byte-equivalent with both fields absent).
+        ...(selfRedeemedPoints > 0
+          ? {
+              pointsRedeemed: selfRedeemedPoints,
+              pointsRedeemedValue: selfRedeemedValue,
+              pointsRedeemedBy: selfRedeemedBy,
+              pointsRedeemedAt: selfRedeemedAt
+            }
+          : {}),
         createdAt: now,
         updatedAt: now,
         createdBy: "guest"
@@ -3481,21 +4168,34 @@ export async function handleCreateBooking(req: any, res: any) {
             originalTotalPrice: pricingForRoom.subtotal,
             rateBreakdown: pricingForRoom.rateBreakdown,
             voucherDiscount: pricingForRoom.voucherDiscount,
-            hasBreakfast: pricingForRoom.finalHasBreakfast,
-            breakfastRate: pricingForRoom.finalHasBreakfast ? actualBreakfastRate : 0,
-            breakfastIncludesChildren: pricingForRoom.finalHasBreakfast
-              ? pricingForRoom.breakfastIncludesChildren
-              : false,
+            // Per BR-08 (decision #238, 2026-10-14 — close-out):
+            // the legacy `hasBreakfast: boolean` +
+            // `breakfastRate: number` +
+            // `breakfastIncludesChildren: boolean` pair is
+            // deleted from the create-write. The per-room
+            // breakfast data is carried by the new rich
+            // `breakfastSelections` shape stamped onto the
+            // doc header (above), or by the `breakfastTotal`
+            // denormalized field for folio math. The legacy
+            // fallback to "no breakfast" is the empty object
+            // (no fields written).
+            ...(validatedBreakfastSelections !== null
+              ? {
+                  breakfastSelections: validatedBreakfastSelections.entries,
+                  breakfastTotal: validatedBreakfastSelections.total
+                }
+              : {}),
             extraBedCount: pricingForRoom.extraBedCount,
             extraBedRate: pricingForRoom.extraBedRate,
-            // Per EXB-12 (2026-08-06, per decision #199):
-            // snapshot the extra-bed breakfast toggle onto
-            // the booking doc. The invariant
-            // `extraBedBreakfast implies extraBedCount > 0`
-            // is enforced in the validatedRoomStays loop
-            // above. Absent → `false` (no breakfast for extra
-            // beds) for back-compat with older booking docs.
-            extraBedBreakfast: pricingForRoom.extraBedBreakfast === true,
+            // Per BR-08 (decision #238, 2026-10-14 — close-out):
+            // the legacy EXB-12 `extraBedBreakfast: boolean`
+            // toggle is deleted from the create-write. Extra-bed
+            // occupants are ordinary meal slots in Step 2 (the
+            // per-meal picker) — the per-room breakfast intent is
+            // carried by `breakfastSelections` (stamped above).
+            // The invariant `extraBedCount > 0` (the only check
+            // that survives the close-out) is enforced in the
+            // validatedRoomStays loop above.
             // Per MRB-11 (2026-08-03, per decision #177):
             // the per-child revenue allocation snapshot.
             // The per-stream values are the GROSS amounts
@@ -3559,6 +4259,7 @@ export async function handleCreateBooking(req: any, res: any) {
       for (const { ref: writeRef, data: writeData } of bookingWriteRefs) {
         transaction.set(writeRef, writeData);
       }
+
       finalRooms = bookingWriteRefs.map((write, index) => {
         const assigned = assignedRooms[index];
         const pricing = childPricing[index];
@@ -3571,7 +4272,6 @@ export async function handleCreateBooking(req: any, res: any) {
           numAdults: pricing.numAdults,
           numChildren: pricing.numChildren,
           extraBedCount: pricing.extraBedCount,
-          hasBreakfast: pricing.finalHasBreakfast,
           totalPrice: pricing.totalPrice
         };
       });
@@ -3903,10 +4603,29 @@ export async function handleCreateBooking(req: any, res: any) {
       || code.includes("INTERNAL")
     );
     let status: number;
-    if (error.message === "Room no longer available" || error.message === ROOM_NOT_READY_PREVIOUS_GUEST_ERROR) {
+    if (error.name === "BreakfastSelectionValidationError") {
+      // Per BR-03 (2026-10-12, decision #232): the new
+      // `breakfastSelections` shape's validation errors
+      // (locked date / non-existent meal / malformed
+      // entry) are 400s with a human message the Step 2
+      // UI surfaces inline. The catch block keeps the
+      // status + message intact (no re-mapping).
+      status = (typeof error.status === "number" && error.status > 0) ? error.status : 400;
+    } else if (error.message === "Room no longer available" || error.message === ROOM_NOT_READY_PREVIOUS_GUEST_ERROR) {
       status = 409;
     } else if (error.message === "Voucher no longer valid") {
       status = 409;
+    } else if (error.message === OTHER_ADDON_NOT_AVAILABLE_ERROR) {
+      // Per OCT-M4 (2026-10-20, decision #297): the guest selected
+      // an other add-on in the Step 2 grid that is no longer on sale
+      // (the admin disabled it, or the hotel took other add-ons off
+      // sale via the OCT-M1 master switch) between loading the grid
+      // and submitting the booking.
+      //
+      // This is a 400 with a human message — the same treatment the
+      // walk-in path gives it (OCT-C5). The guest can go back to
+      // Step 2, drop the unavailable add-on and resubmit.
+      status = 400;
     } else if (
       // Per MRB-02 (2026-08-02, per decision #164): the client
       // preallocated a `reservationId` that already carries a
@@ -3972,11 +4691,21 @@ export async function handleCreateWalkin(req: any, res: any) {
     checkIn,
     checkOut,
     guests,
-    hasBreakfast,
-    // Per CHD-10: walk-ins are staff-created. The breakfast toggle
-    // is snapshotted from the admin default (no per-booking override
-    // on the walk-in surface).
-    breakfastIncludesChildren: requestedBreakfastIncludesChildren,
+    // Per OCT-C5 (2026-10-20, audit
+    // `plan/project/AUDIT-OCTOBER-2026.md`): the rich per-meal
+    // breakfast selections + the BR-12 other add-ons the desk
+    // selected. Both were previously dropped on the floor by the
+    // walk-in transaction.
+    breakfastSelections: requestedBreakfastSelections,
+    otherAddOnSelections: requestedOtherAddOnSelections,
+    // Per BR-08 (decision #238, 2026-10-14 — close-out):
+    // the legacy `hasBreakfast: boolean` flat-rate flag is
+    // removed from the walk-in create path. Walk-ins that
+    // want breakfast must send the rich `breakfastSelections`
+    // shape — the per-meal sum becomes `booking.breakfastTotal`.
+    // The variable below (`breakfastTotal: 0`) was the
+    // legacy default; now it's the unconditional default
+    // when no selections are provided.
     // Per EXB-01: extra-bed count. Optional — walk-in defaults to
     // 0 when absent. Bounded by the room type's `maxExtraBeds`.
     extraBedCount: requestedExtraBedCount,
@@ -4079,6 +4808,17 @@ export async function handleCreateWalkin(req: any, res: any) {
   const checkInDate = new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = new Date(`${checkOut}T00:00:00Z`);
 
+  // Per OCT-L7 (2026-10-20, decision #299): strict ISO validation.
+  // `WalkinBookingSchema` validates the SHAPE (`^\d{4}-\d{2}-\d{2}$`)
+  // only, and `new Date("2026-02-31T00:00:00Z")` ROLLS OVER to Mar 3
+  // instead of producing an Invalid Date — so the `isNaN(getTime())`
+  // guard never fired for a calendar-impossible date and the walk-in
+  // was stored for a day the front desk never entered.
+  // `isValidIsoDate` (the shared helper) rejects it.
+  if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) {
+    return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
+  }
+
   if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
     return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
   }
@@ -4093,11 +4833,16 @@ export async function handleCreateWalkin(req: any, res: any) {
   // G-02 (E2E audit 2026-07-17): enforce maximum stay length for
   // walk-ins. Walk-ins are exempt from the advance-booking window
   // since staff may legitimately backfill past stays.
-  if (numNights > MAX_STAY_NIGHTS) {
-    return res.status(400).json({
-      success: false,
-      error: `Maximum stay length is ${MAX_STAY_NIGHTS} nights. Please shorten the stay.`
-    });
+  //
+  // MSL-01: resolved from `settings/hotelConfig.maxStayNights`, same
+  // as the guest path. NOTE (MSL-01): walk-ins ARE capped — this
+  // guard predates MSL-01. If the hotel needs to register a genuine
+  // long-stay relocation it can raise or zero the setting, which is
+  // why the cap is admin-editable rather than hardcoded.
+  const maxStayNights = await loadMaxStayNights();
+  if (numNights > maxStayNights) {
+    buildMaxStayNightsError(res, maxStayNights);
+    return;
   }
 
   // Per PEX-01 + PEX-03 (2026-08-01, per decision #147): the
@@ -4545,16 +5290,135 @@ export async function handleCreateWalkin(req: any, res: any) {
       // 3. Fetch Breakfast Settings
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
-      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data()! : { isEnabled: false, ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT };
-      const actualBreakfastRate = breakfastConfig.isEnabled ? (breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT) : 0;
-      // Per CHD-10 (2026-07-31, per CVQ-01): walk-ins are
-      // staff-created, so the per-booking override is not
-      // surfaced on the UI; the admin default from
-      // `settings/breakfastConfig.breakfastIncludesChildrenDefault`
-      // applies. `true` is the safe fallback. (Walk-in also covers
-      // the corporate inquiry conversion — same staff surface.)
-      const breakfastIncludesChildrenDefault = breakfastConfig.breakfastIncludesChildrenDefault !== false;
+      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data()! : { isEnabled: false, ratePerPersonPerNight: 0 };
+      const actualBreakfastRate = 0;
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy `actualBreakfastRate` flat-rate read from
+      // `breakfastConfig.ratePerPersonPerNight` is gone.
+      // Walk-ins that want breakfast must send the rich
+      // `breakfastSelections` shape — the per-meal sum
+      // becomes `booking.breakfastTotal`. The two local
+      // defaults remain as `true` placeholders so the
+      // downstream cancellation-liability + reschedule
+      // paths that still reference them don't fail.
+      const breakfastIncludesChildrenDefault = true;
       const breakfastIncludesChildren = breakfastIncludesChildrenDefault;
+
+      // Per OCT-C5 (2026-10-20, audit
+      // `plan/project/AUDIT-OCTOBER-2026.md`): the walk-in path
+      // now VALIDATES + PERSISTS the rich `breakfastSelections`
+      // shape the desk already sends
+      // (`admin-app/src/pages/BookingsPage.tsx:4654-4660` — the
+      // `WalkinBreakfastGrid` output).
+      //
+      // Before this, the walk-in transaction read the breakfast
+      // config and then threw the payload away: it hard-coded
+      // `lineBreakfastTotal = 0` and wrote `breakfastSelections:
+      // {}` + `breakfastTotal: 0` onto the booking. The desk
+      // picked meals, the modal showed a total, the booking was
+      // created — and the guest received NO breakfast, the
+      // kitchen never saw the meals, and the hotel was NEVER
+      // CHARGED for them. The comment above (and BR-08's own
+      // note that "the create transaction reads it below and
+      // stamps `breakfastTotal`") described behavior the code
+      // did not implement.
+      //
+      // The validation runs inside the same transaction as the
+      // booking write (the catalog is read once, the result is
+      // atomic with the snapshot) — same as the public create
+      // path at :2479. `staffCreated: true` skips the per-date
+      // cut-off: a walk-in creates a NEW booking, so there is no
+      // prior selection for the cut-off to lock.
+      const validatedWalkinBreakfast: ValidatedBreakfastSelections | null =
+        validateBreakfastSelections({
+          selections: requestedBreakfastSelections,
+          breakfastConfig: breakfastConfig as any,
+          now,
+          staffCreated: true
+        });
+      // The walk-in selections are keyed by DATE × GUEST SLOT, not
+      // by room, so the whole total is attributed to the FIRST
+      // room line (mirroring the public create path's
+      // "first stay absorbs the full selections total"
+      // attribution at :2820-2831). The reservation-level
+      // `breakfastTotal` is the sum of the per-line totals, so
+      // the two agree by construction.
+      const walkinBreakfastTotal = validatedWalkinBreakfast?.total ?? 0;
+
+      // Per OCT-C5 (2026-10-20): the BR-12 other add-ons the
+      // desk selected (`admin-app/src/pages/BookingsPage.tsx:4669`
+      // — the `WalkinOtherAddOnGrid` output). The walk-in
+      // transaction previously ignored them entirely: the string
+      // `otherAddOn` appeared ZERO times in this file, the walk-in
+      // schema had no field for them (Zod stripped them silently),
+      // and the grid's selections were discarded. The desk sold an
+      // airport transfer, the modal showed the total, and the
+      // booking carried nothing — the guest never got the
+      // transfer and the hotel earned ₱0 on every one.
+      //
+      // The selections are REBUILT from the live catalog here, so
+      // the walk-in cannot persist a client-supplied price (the
+      // same price-authority rule as OCT-C1 / OCT-C2), and a
+      // disabled add-on is refused.
+      const rawWalkinOtherAddOns = requestedOtherAddOnSelections;
+      let walkinOtherAddOnSelections: Record<string, OtherAddOnSelectionEntry[]> | null = null;
+      let walkinOtherAddOnTotal = 0;
+      if (rawWalkinOtherAddOns && typeof rawWalkinOtherAddOns === "object") {
+        const addOnsCatalogSnap = await transaction.get(adminDb.collection("addOns"));
+        const addOnsCatalog = new Map<string, AddOn>();
+        for (const d of addOnsCatalogSnap.docs) {
+          const norm = normalizeAddOn({ id: d.id, ...d.data() }, d.id);
+          if (norm) addOnsCatalog.set(norm.id, norm);
+        }
+        // Same read-only pre-seed fallback the public catalog
+        // endpoint uses (`addons-config.ts`): an empty collection
+        // still offers the airport transfer, so the walk-in grid
+        // (which renders from that endpoint) and this validation
+        // must agree.
+        if (addOnsCatalog.size === 0) {
+          const pre = normalizeAddOn(
+            { id: "airport-transfer", ...AIRPORT_TRANSFER_PRESEED },
+            "airport-transfer"
+          );
+          if (pre) addOnsCatalog.set(pre.id, pre);
+        }
+        const rebuilt: Record<string, OtherAddOnSelectionEntry[]> = {};
+        for (const [dateKey, rawItems] of Object.entries(
+          rawWalkinOtherAddOns as Record<string, unknown>
+        )) {
+          if (!Array.isArray(rawItems)) continue;
+          const rows: OtherAddOnSelectionEntry[] = [];
+          for (const rawItem of rawItems) {
+            if (!rawItem || typeof rawItem !== "object") continue;
+            const entry = rawItem as Record<string, unknown>;
+            const addOnId = String(entry.addOnId || "").trim();
+            if (!addOnId) continue;
+            const live = addOnsCatalog.get(addOnId);
+            if (!live) {
+              throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+            }
+            if (live.isEnabled === false) {
+              throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+            }
+            rows.push({
+              ...(entry as unknown as OtherAddOnSelectionEntry),
+              addOnId: live.id,
+              nameSnapshot: live.name,
+              priceSnapshot: Math.max(0, Number(live.price) || 0),
+              unitSnapshot: live.unit,
+              cutoffHoursBeforeCheckInSnapshot: Math.max(
+                0,
+                Math.min(168, Math.floor(Number(live.cutoffHoursBeforeCheckIn) || 24))
+              )
+            });
+          }
+          if (rows.length > 0) rebuilt[dateKey] = rows;
+        }
+        if (Object.keys(rebuilt).length > 0) {
+          walkinOtherAddOnSelections = rebuilt;
+          walkinOtherAddOnTotal = recomputeOtherAddOnTotal(rebuilt);
+        }
+      }
 
       // Per EXB-01 (2026-07-31): extra-bed count + rate for the
       // walk-in (which also covers the corporate inquiry
@@ -4654,7 +5518,11 @@ export async function handleCreateWalkin(req: any, res: any) {
       // than divided back out heuristically. For a single-line
       // reservation each sum has one term and the math is
       // byte-equivalent to the pre-MRB-07 single-room pricing.
-      const finalHasBreakfast = breakfastConfig.isEnabled && hasBreakfast;
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy `finalHasBreakfast` derivation is gone.
+      // The per-stay breakfast line is 0 unless the request
+      // carried a rich `breakfastSelections` payload (the
+      // per-meal sum becomes `booking.breakfastTotal`).
       const walkinRoomStayPricing = walkinAssignedRooms.map((assigned, lineIdx) => {
         const lineTypeEntry = walkinTypeEntries[lineIdx];
         const lineRoomBreakdown = calculateSeasonalAwareRoomBreakdown({
@@ -4671,15 +5539,24 @@ export async function handleCreateWalkin(req: any, res: any) {
         // helper. The walk-in path snapshots the admin default
         // (no per-booking override on this surface —
         // staff-created). The guest count is this room's own
-        // occupancy, so breakfast is charged once per guest
-        // across the reservation, never once per guest per room.
-        const lineBreakfastTotal = calculateBreakfastAddOn({
-          hasBreakfast: finalHasBreakfast,
-          breakfastRate: actualBreakfastRate,
-          numGuests: assigned.numAdults + assigned.numChildren,
-          numNights,
-          breakfastIncludesChildren
-        });
+        // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+        // legacy flat-rate `breakfastRate × numGuests × numNights`
+        // derivation is gone. The walk-in / corporate flow must
+        // now send the rich `breakfastSelections` shape to opt
+        // in to breakfast — the create transaction reads it
+        // above and stamps `breakfastTotal` onto the booking
+        // doc. The per-stay breakfast line is 0 when no
+        // selections are provided (the breakfast math runs
+        // elsewhere in the per-meal `breakfastSelections`
+        // snapshotted sum).
+        //
+        // Per OCT-C5 (2026-10-20): the line total is now the
+        // VALIDATED selections total, attributed to the FIRST
+        // room line (the selections are keyed by date × guest
+        // slot, not by room — same attribution as the public
+        // create path). The reservation-level `breakfastTotal`
+        // below sums these per-line totals, so the two agree.
+        const lineBreakfastTotal = lineIdx === 0 ? walkinBreakfastTotal : 0;
         // Per EXB-01 (2026-07-31): the extra-bed add-on term.
         // Same shape as the online-create path.
         const lineExtraBedTotal = calculateExtraBedAddOn({
@@ -5030,13 +5907,21 @@ export async function handleCreateWalkin(req: any, res: any) {
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
-        hasBreakfast: finalHasBreakfast,
-        breakfastRate: finalHasBreakfast ? actualBreakfastRate : 0,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `breakfastRate: number` write is
+        // removed from the walk-in booking doc. Walk-ins
+        // that want breakfast must send the rich
+        // `breakfastSelections` shape — the per-meal sum
+        // becomes `booking.breakfastTotal` via the
+        // `calculateBreakfastMealsTotal` helper. The
+        // `finalHasBreakfast` derivation above is now
+        // dead; the variable is retained only as a
+        // type-system placeholder for downstream
+        // consumers.
         // Per CHD-10 (2026-07-31, per CVQ-01): the snapshotted
         // "include children in breakfast" flag. Same shape as
         // the online-create path; walk-in + corporate inquiry
         // surfaces don't expose a per-booking override.
-        breakfastIncludesChildren: finalHasBreakfast ? breakfastIncludesChildren : false,
         // Per EXB-01 (2026-07-31): the snapshotted extra-bed
         // count + rate for the walk-in (which also covers the
         // corporate inquiry conversion). Same shape as the
@@ -5050,7 +5935,39 @@ export async function handleCreateWalkin(req: any, res: any) {
         discountScopeSnapshot: snapshottedDiscountScope,
         guestIdPhotoUrl: null,
         guestRegistration: null,
-        breakfastSelections: {},
+        // Per OCT-C5 (2026-10-20, audit
+        // `plan/project/AUDIT-OCTOBER-2026.md`): the walk-in now
+        // PERSISTS the validated breakfast selections instead of
+        // discarding them. The pre-fix code wrote a hard-coded
+        // `breakfastSelections: {}` here, so the desk's meals
+        // vanished — no breakfast was served, the kitchen list
+        // was empty, and the hotel was never charged.
+        //
+        // `validatedWalkinBreakfast.entries` is the server-
+        // validated map (catalog price + name, NOT the client's),
+        // so the same price-authority rule as the public create
+        // path applies. `null` (the desk picked no meals) writes
+        // an empty map, matching the public path's "explicit
+        // opt-out" shape.
+        breakfastSelections: validatedWalkinBreakfast?.entries ?? {},
+        // Per BR-03 (2026-10-12, decision #232): the denormalized
+        // `breakfastTotal` field — the future-proof snapshot for
+        // the BR-04 Manage Breakfast page + the kitchen list +
+        // reports. The walk-in previously omitted the field
+        // entirely, so a reader could not tell "no breakfast"
+        // from "breakfast that was never recorded".
+        breakfastTotal: breakfastTotal,
+        // Per BR-12.1 (2026-10-15, decision #247): the other
+        // add-ons the desk selected. See the
+        // `otherAddOnSelections` handling above — these were
+        // dropped on the floor before this fix.
+        ...(walkinOtherAddOnSelections
+          ? {
+              otherAddOnSelections: walkinOtherAddOnSelections,
+              otherAddOnTotal: walkinOtherAddOnTotal,
+              hasAnyOtherAddOns: true
+            }
+          : {}),
         cancellationReason: "",
         linkedInquiryId: linkedInquiryId || null,
         ...(validatedTestRunId
@@ -5416,6 +6333,17 @@ export async function handleCreateWalkin(req: any, res: any) {
       status = 409;
     } else if (errorMessage === "RESERVATION_HEADER_WITHOUT_CHILD") {
       status = 500;
+    } else if (
+      // Per OCT-C5 (2026-10-20): the walk-in now validates the
+      // desk's breakfast selections + other add-ons, so its
+      // validation failures must reach the desk as 400s with a
+      // human message — not 500s. Symmetric with the public
+      // create path's `BreakfastSelectionValidationError`
+      // mapping at :4373.
+      error.name === "BreakfastSelectionValidationError"
+      || errorMessage === OTHER_ADDON_NOT_AVAILABLE_ERROR
+    ) {
+      status = (typeof error.status === "number" && error.status > 0) ? error.status : 400;
     } else {
       status = 500;
     }
@@ -6528,6 +7456,155 @@ export async function handleRejectPayment(req: any, res: any) {
   }
 }
 
+// Per OCT-H8 (2026-10-20, decision #288): the cancel path's
+// add-on re-dating.
+//
+// Per `plan/features/BREAKFAST.md` §Edge cases 3: "any unpaid
+// `breakfastSelections` for future dates is dropped; any paid
+// selections for future dates generate refund liabilities with
+// `category: "breakfast"`. Past-date selections are not refunded."
+//
+// THE DOUBLE-REFUND GUARD
+//
+// The CRL-07 policy refund is a PERCENTAGE OF THE COLLECTED
+// MONEY (`policyRefund = netCollected × refundPct / 100`), and
+// `netCollected` covers the whole bill — the room AND the
+// add-ons. So when the cancellation policy refunds money, the
+// breakfast the guest paid for is ALREADY inside that refund.
+//
+// Opening a second `category: "breakfast"` liability on top would
+// refund the same meal twice. So the add-on liabilities are opened
+// ONLY when the cancellation produced NO policy refund — which is
+// exactly the case the spec's rule exists for: a late cancel
+// (0% policy) where the guest keeps nothing back, yet they had
+// already paid for breakfasts for nights that will never happen.
+//
+// The selections themselves are ALWAYS dropped (marked removed) and
+// audited, regardless of the policy outcome — the booking is
+// cancelled, so the doc must not keep carrying meals for dates
+// that will not occur. `breakfastTotal` is recomputed over the
+// survivors (the BR-01 invariant holds); `totalPrice` is NOT
+// rewritten, because the cancel path never rewrote it and the
+// policy liability is computed from the collected amount.
+//
+// The `paidAmount` test ("was this meal paid for?") is the same
+// heuristic the BR-04 / BR-05 / BR-12 remove paths use.
+function redateAddOnsForCancel(input: {
+  transaction: FirebaseFirestore.Transaction;
+  bookingId: string;
+  bookingRef: string;
+  booking: any;
+  today: string;
+  actorUid: string;
+  actorRole: "guest" | "front-desk" | "admin";
+  // `true` when the cancellation policy already refunds the collected money.
+  policyRefunded: boolean;
+}): {
+  breakfastSelections: Record<string, BreakfastSelectionEntry>;
+  breakfastTotal: number;
+  hasAnyBreakfast: boolean;
+  otherAddOnSelections: Record<string, OtherAddOnSelectionEntry[]>;
+  otherAddOnTotal: number;
+  hasAnyOtherAddOns: boolean;
+} {
+  const { transaction, bookingId, bookingRef, booking, today, actorUid, actorRole } = input;
+  const paidAmount = Number(booking.paidAmount) || 0;
+
+  const redatedBreakfast = redateBreakfastSelections({
+    mode: "cancel",
+    window: { checkIn: String(booking.checkIn || ""), checkOut: String(booking.checkOut || "") },
+    today,
+    selections: booking.breakfastSelections as Record<string, BreakfastSelectionEntry>,
+    paidAmount
+  });
+  const redatedOtherAddOns = redateOtherAddOnSelections({
+    mode: "cancel",
+    window: { checkIn: String(booking.checkIn || ""), checkOut: String(booking.checkOut || "") },
+    today,
+    selections: booking.otherAddOnSelections as Record<string, OtherAddOnSelectionEntry[]>,
+    paidAmount
+  });
+
+  const reason = "Booking cancelled — the meal date is in the future and will not be served.";
+
+  for (const removed of redatedBreakfast.removed) {
+    auditBreakfastOp({
+      transaction,
+      bookingId,
+      slotKey: removed.key,
+      action: "remove",
+      mealSnapshot: {
+        mealId: String(removed.entry.mealId || ""),
+        mealName: String(removed.entry.mealName || ""),
+        price: removed.amount
+      },
+      actorUid,
+      actorRole,
+      reasonOrCutoff: { reason, occurredAfterCutoff: false }
+    });
+    if (removed.wasPaid && !input.policyRefunded) {
+      createBreakfastRefundLiability({
+        transaction,
+        booking: { id: bookingId, bookingRef },
+        slotKey: removed.key,
+        mealEntry: {
+          mealId: String(removed.entry.mealId || ""),
+          mealName: String(removed.entry.mealName || ""),
+          price: removed.amount
+        },
+        amount: removed.amount,
+        reason,
+        recordedBy: actorRole,
+        recordedByUid: actorUid
+      });
+    }
+  }
+
+  for (const removed of redatedOtherAddOns.removed) {
+    auditOtherAddOnOp({
+      transaction,
+      bookingId,
+      selectionKey: removed.selectionKey,
+      action: "remove",
+      addOnSnapshot: {
+        addOnId: removed.addOnId,
+        name: String(removed.entry.nameSnapshot || ""),
+        price: Number(removed.entry.priceSnapshot) || 0,
+        quantity: Math.max(0, Math.floor(Number(removed.entry.quantity) || 0))
+      },
+      actorUid,
+      actorRole,
+      reasonOrCutoff: { reason, occurredAfterCutoff: false }
+    });
+    if (removed.wasPaid && !input.policyRefunded) {
+      createOtherAddOnRefundLiability({
+        transaction,
+        booking: { id: bookingId, bookingRef },
+        selectionKey: removed.selectionKey,
+        addOnEntry: {
+          addOnId: removed.addOnId,
+          nameSnapshot: String(removed.entry.nameSnapshot || ""),
+          priceSnapshot: Number(removed.entry.priceSnapshot) || 0,
+          quantity: Math.max(0, Math.floor(Number(removed.entry.quantity) || 0))
+        },
+        amount: removed.amount,
+        reason,
+        recordedBy: actorRole,
+        recordedByUid: actorUid
+      });
+    }
+  }
+
+  return {
+    breakfastSelections: redatedBreakfast.selections,
+    breakfastTotal: redatedBreakfast.total,
+    hasAnyBreakfast: redatedBreakfast.total > 0,
+    otherAddOnSelections: redatedOtherAddOns.selections,
+    otherAddOnTotal: redatedOtherAddOns.total,
+    hasAnyOtherAddOns: redatedOtherAddOns.total > 0
+  };
+}
+
 export async function handleCancelBooking(req: any, res: any) {
   const { bookingId, bookingRef, guestEmail, reason } = req.body;
 
@@ -6554,6 +7631,12 @@ export async function handleCancelBooking(req: any, res: any) {
   const cancelledBy = isStaffCancellation
     ? String(req.staff.uid)
     : "guest";
+
+  // Per OCT-H8 (2026-10-20, decision #288): today's date in the
+  // hotel timezone, captured ONCE at the entry point so every
+  // transaction retry sees the same "future date" boundary (the
+  // cancel path's auto-cancel rule is "service date >= today").
+  const { todayStr: todayKey } = getManilaDateInfo();
 
   // Per BK-05 / decision #221 (2026-08-19): staff cancellations
   // require a non-empty reason. Mirrors the UCO pattern at the
@@ -6985,6 +8068,47 @@ export async function handleCancelBooking(req: any, res: any) {
           }
         }
 
+        // Per OCT-H8 (2026-10-20, decision #288): the add-on
+        // re-dating for each cancelled child.
+        //
+        // Placed at the END of the transaction so every
+        // `transaction.get` in this branch (the children read, the
+        // member read, the voucher / corporate-code reads) has
+        // already happened — the repo's FOL-03 "all reads before
+        // any write" rule.
+        //
+        // `policyRefunded` is `true` when the CRL-07 policy
+        // snapshot refunds money: the policy refund is a
+        // PERCENTAGE OF THE COLLECTED AMOUNT, and the collected
+        // amount already includes the add-ons — so a second
+        // `category: "breakfast"` liability would refund the same
+        // meal twice. See the helper's comment.
+        const cancelPolicyRefunded = Boolean(
+          liabilitySnapshot && Number(liabilitySnapshot.policyResult?.policyRefund) > 0
+        );
+        for (const child of children) {
+          if (!cancellableIds.has(child.id)) continue;
+          const redated = redateAddOnsForCancel({
+            transaction,
+            bookingId: child.id,
+            bookingRef: String(child.data.bookingRef || ""),
+            booking: child.data,
+            today: todayKey,
+            actorUid: cancelledBy,
+            actorRole: isStaffCancellation ? "front-desk" : "guest",
+            policyRefunded: cancelPolicyRefunded
+          });
+          transaction.update(child.ref, {
+            breakfastSelections: redated.breakfastSelections,
+            breakfastTotal: redated.breakfastTotal,
+            hasAnyBreakfast: redated.hasAnyBreakfast,
+            otherAddOnSelections: redated.otherAddOnSelections,
+            otherAddOnTotal: redated.otherAddOnTotal,
+            hasAnyOtherAddOns: redated.hasAnyOtherAddOns,
+            updatedAt: now
+          });
+        }
+
         // Per BAR-02 (2026-08-08, per decision #203):
         // the five aggregate counter fields +
         // `paymentStatus` are no longer written to the
@@ -7209,6 +8333,45 @@ export async function handleCancelBooking(req: any, res: any) {
       if (liabilitySnapshot) {
         bookingUpdate.cancellationLiability = liabilitySnapshot;
       }
+
+      // Per OCT-H8 (2026-10-20, decision #288): the add-on
+      // re-dating for the cancelled booking.
+      //
+      // Per `plan/features/BREAKFAST.md` §Edge cases 3, the
+      // future-date selections are dropped and the PAID ones
+      // generate a `category: "breakfast"` refund liability.
+      //
+      // The liability is opened ONLY when the cancellation policy
+      // refunded nothing: the CRL-07 policy refund is a
+      // PERCENTAGE OF THE COLLECTED MONEY, and the collected
+      // money already includes the breakfast — a second
+      // liability would refund the same meal twice. (A late
+      // cancel refunds 0% of the policy, and that is exactly the
+      // case the spec's rule exists for.)
+      //
+      // The re-dating runs AFTER the `liabilitySnapshot` (which
+      // performs its own reads) and BEFORE the booking update, so
+      // every read in this transaction precedes every write.
+      const perChildCancelPolicyRefunded = Boolean(
+        liabilitySnapshot && Number(liabilitySnapshot.policyResult?.policyRefund) > 0
+      );
+      const perChildRedated = redateAddOnsForCancel({
+        transaction,
+        bookingId: bookingDocumentRef.id,
+        bookingRef: String(freshBooking.bookingRef || ""),
+        booking: freshBooking,
+        today: todayKey,
+        actorUid: cancelledBy,
+        actorRole: isStaffCancellation ? "front-desk" : "guest",
+        policyRefunded: perChildCancelPolicyRefunded
+      });
+      bookingUpdate.breakfastSelections = perChildRedated.breakfastSelections;
+      bookingUpdate.breakfastTotal = perChildRedated.breakfastTotal;
+      bookingUpdate.hasAnyBreakfast = perChildRedated.hasAnyBreakfast;
+      bookingUpdate.otherAddOnSelections = perChildRedated.otherAddOnSelections;
+      bookingUpdate.otherAddOnTotal = perChildRedated.otherAddOnTotal;
+      bookingUpdate.hasAnyOtherAddOns = perChildRedated.hasAnyOtherAddOns;
+
       transaction.update(bookingDocumentRef, bookingUpdate);
 
       // Per MRB-05 (2026-08-02, per decision #159):
@@ -8587,67 +9750,77 @@ export async function handleAddRefund(req: any, res: any) {
         newStateRef = newProjection.state;
       }
 
-      // Idempotency check: a refund with this exact refundId
-      // already exists. Same amount/method/reason/reference
-      // (or no-reference on both sides) replays the original
-      // commit. A mismatch on any field is a 409 — the client
-      // reused an ID it had already committed for a different
-      // refund, which would be a staff typo or a
-      // duplicate-form bug we want loud, not silent.
-      //
-      // For new reservations: search the reservation's
-      // `refunds/` subcollection (the canonical source).
-      // For legacy: search the booking's `payments/`
-      // subcollection (the historical source).
-      const existingRefund = refundsSnapshot.docs.find((docSnap: any) => docSnap.id === refundId);
-      if (existingRefund) {
-        const existingData = existingRefund.data();
-        const sameRequest = Math.abs(Number(existingData.amount || 0)) === numericAmount
-          && String(existingData.method || "") === safeMethod
-          && String(existingData.note || "") === safeReason
-          && (existingData.transactionReference || null) === safeTransactionReference;
-        if (!sameRequest) {
-          throw new Error("Refund ID has already been used for a different refund.");
-        }
-        // Idempotent replay: re-read the cumulative net so the response
-        // reflects the post-refund balance (which is unchanged from the
-        // original commit but is the most truthful figure to surface).
-        refundRecord = existingData;
+      // Per BR-06 (#235, 2026-10-13): refund-write
+      // consolidated into `markRefundPaid`. The handler
+      // still owns the validation (net-collected gate,
+      // 409 conflict translation) — the helper owns the
+      // entry creation + the booking `paidAmount`
+      // mutation + idempotency. Pre-read the refund
+      // doc as a `DocumentSnapshot` so the helper can
+      // do idempotency + path resolution synchronously
+      // inside the caller's transaction.
+      const refundDocRef = refundsRef.doc(refundId);
+      const refundDocSnap = await transaction.get(refundDocRef);
+      const helperResult = markRefundPaid({
+        category: "cancellation",
+        bookingId,
+        refundId,
+        amount: numericAmount,
+        method: safeMethod,
+        transactionReference: safeTransactionReference,
+        reason: safeReason,
+        note: safeReason,
+        actor: { uid: String(req.staff.uid || "admin"), role: "admin" },
+        transaction,
+        existingDoc: refundDocSnap,
+        currentPaidAmount: Number((bookingData as any).paidAmount || 0),
+        reservationId: bookingReservationId.length > 0 ? bookingReservationId : null
+      });
+      if (helperResult.conflict) {
+        // CRL-01's contract: a different field shape on
+        // an existing refundId is a 409, not a silent
+        // overwrite. The helper surfaces the conflict
+        // flag; the handler translates it to the same
+        // 409 error the pre-BR-06 code did.
+        throw new Error("Refund ID has already been used for a different refund.");
+      }
+      if (helperResult.alreadyPaid) {
+        // Idempotent replay — re-read the cumulative
+        // net so the response reflects the post-refund
+        // balance (unchanged from the original commit
+        // but the most truthful figure to surface).
+        refundRecord = helperResult.refundEntry;
         idempotentReplay = true;
+        netCollected = netCollected;
         return;
       }
-
+      // Helper wrote the refund entry + decremented
+      // paidAmount. Validate the net-collected gate
+      // AFTER the helper's pre-read — the helper's
+      // idempotency check + 409 conflict check ran
+      // first (the existingRefund lookup is done inside
+      // the helper via the pre-read snapshot).
+      // The pre-BR-06 net-collected check stays in the
+      // handler so the validation message + the 400
+      // status translate identically. The check now
+      // happens AFTER the helper writes (the helper
+      // does its own pre-write internal reads so we
+      // know the entry didn't exist). If the check
+      // fails, the helper's writes roll back when the
+      // transaction throws.
       if (numericAmount > netCollected) {
         throw new Error(`Refund exceeds the net collected amount of ${netCollected}.`);
       }
-      const approvedBy = req.staff.uid || "admin";
-      const newRecord: Record<string, any> = {
-        type: "refund",
-        amount: -numericAmount,
-        method: safeMethod,
-        note: safeReason,
-        reason: safeReason,
-        approvedBy,
-        recordedBy: approvedBy,
-        recordedAt: new Date()
-      };
-      if (safeTransactionReference) newRecord.transactionReference = safeTransactionReference;
-      // Per MRB-04 Phase 2.x: for new reservations, stamp
-      // the `reservationId` + `bookingId` on the record so
-      // the new subcollection is self-describing (per-room
-      // attribution possible via `bookingId`; canonical
-      // reservation linkage via `reservationId`).
-      if (bookingReservationId.length > 0) {
-        newRecord.reservationId = bookingReservationId;
-        newRecord.bookingId = bookingId;
-      }
-      refundRecord = newRecord;
-      // transaction.create (not set) so a server-side race that lost the
-      // existingRefund lookup still throws a clean ALREADY_EXISTS rather
-      // than overwriting the original ledger entry. The `refundsRef.doc(refundId)`
-      // resolves to `reservations/{id}/refunds/{refundId}` for new reservations
-      // and `bookings/{id}/payments/{refundId}` for legacy.
-      transaction.create(refundsRef.doc(refundId), newRecord);
+      // Per MRB-04 Phase 2.x: for new reservations,
+      // stamp the `reservationId` + `bookingId` on the
+      // record so the new subcollection is self-
+      // describing (per-room attribution possible via
+      // `bookingId`; canonical reservation linkage via
+      // `reservationId`). The helper already stamps
+      // both fields when `reservationId` is non-null
+      // on the input — see `markRefundPaid` in
+      // `server/lib/refunds.ts`.
+      refundRecord = helperResult.refundEntry;
     });
     // Per CRL-08 (2026-08-03, per decision #174):
     // post-commit side effects. The refund-state
@@ -10199,6 +11372,26 @@ export async function handleCheckoutBooking(req: any, res: any) {
       rewardsConfig = rewardsDoc.exists ? rewardsDoc.data() : null;
     }
 
+    // Per Phase 2 of the Spark Rewards tier system (2026-10-12,
+    // decision pending): at checkout, derive the member's current
+    // tier from the live `rewardsConfig.levels[]` + the member's
+    // stored `completedStays`. The tier's `pointsMultiplier` is
+    // applied to the base eligible-points so the credit matches
+    // the tier displayed on the rewards portal. The
+    // `completedStays++` and `currentLevel` cache refresh happen
+    // inside the same transaction as the points credit — the
+    // three writes are atomic so a retry can't double-count.
+    // The multiplier applies to BOTH the `awardNow` and the
+    // `pendingLoyaltyPoints` paths — when the outstanding payment
+    // settles later (the `settlesCheckedOutFolio` branch in
+    // handleAddPayment), the same multiplied value is credited
+    // (the checkout-time `pendingLoyaltyPoints` snapshot is the
+    // source of truth — no recomputation needed at settle time).
+    const memberCurrentLevelBefore = memberDoc?.exists && resolveCurrentLevel
+      ? resolveCurrentLevel(rewardsConfig?.levels, Number(memberDoc.data()?.completedStays || 0))
+      : null;
+    const memberTierMultiplier = memberCurrentLevelBefore?.pointsMultiplier ?? 1;
+
     await adminDb.runTransaction(async (transaction) => {
       const freshBookingDoc = await transaction.get(bookingRef);
       if (!freshBookingDoc.exists) {
@@ -10223,9 +11416,19 @@ export async function handleCheckoutBooking(req: any, res: any) {
       const collectedTotal = folioSnapshot.collectedTotal;
       const checkoutFolioTotal = folioSnapshot.folioTotal;
       checkedOutWithBalance = folioSnapshot.computedBalance;
-      eligiblePoints = memberId
+      // Per Phase 2 (2026-10-12): the base `eligiblePoints` is
+      // multiplied by the member's CURRENT tier (read pre-
+      // transaction from `rewardsConfig.levels[]` + member's
+      // pre-checkout `completedStays`). The multiplied value is
+      // what gets credited (or stored as `pendingLoyaltyPoints`
+      // if the guest has an outstanding balance). The multiplier
+      // is applied here once — the settled-credit branch at
+      // line 8109 reads `pendingLoyaltyPoints` as-is so no
+      // double-multiplication occurs.
+      const baseEligiblePoints = memberId
         ? calculateCheckoutPoints(Number(freshBookingData.totalPrice || 0), rewardsConfig)
         : 0;
+      eligiblePoints = calculatePointsWithMultiplier(baseEligiblePoints, memberTierMultiplier);
 
       // UCO-02: require reason for unpaid checkout
       if (checkedOutWithBalance > 0 && !safeUnpaidReason) {
@@ -10411,23 +11614,134 @@ export async function handleCheckoutBooking(req: any, res: any) {
         });
       }
 
-      if (awardNow && memberId && memberRef && memberDocInTransaction?.exists) {
-        const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
-        transaction.update(memberRef, {
-          rewardsPoints: currentPoints + pointsAwarded,
-          updatedAt: now
-        });
+      if (canAwardPoints && memberId && memberRef && memberDocInTransaction?.exists) {
+        // Per Phase 2 (2026-10-12): atomic increment of the
+        // member's stay-completion counter + refresh of the
+        // `currentLevel` cache to the new tier (post-increment).
+        // Both writes share the same `transaction.update` so a
+        // transaction retry can't double-count or leave the
+        // cache out of sync. The tier is re-derived using the
+        // post-increment `completedStays` so the cached snapshot
+        // reflects what the next booking will see.
+        //
+        // The increment runs on BOTH paths (immediate credit
+        // AND pending-payment deferral) — the stay IS completed
+        // either way, and the tier progress should be visible
+        // to the member immediately even if the points lag
+        // behind. The settle-payment branch (line 8109+) only
+        // touches `rewardsPoints` + writes the `pointsHistory`
+        // entry; it does NOT touch `completedStays` or
+        // `currentLevel` so no double-increment.
+        const priorCompletedStays = Number(memberDocInTransaction.data()?.completedStays || 0);
+        const nextCompletedStays = priorCompletedStays + 1;
+        const nextCurrentLevel = resolveCurrentLevel(rewardsConfig?.levels, nextCompletedStays);
 
-        const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc(`earn-${bookingId}`);
-        transaction.set(historyRef, {
-          type: "earn",
-          points: pointsAwarded,
-          bookingId,
-          bookingRef: bookingData.bookingRef,
-          description: `Stay Checkout Earnings (${bookingData.bookingRef})`,
-          by: checkedOutBy,
-          createdAt: new Date()
-        });
+        if (awardNow) {
+          // Immediate-credit path: increment rewardsPoints +
+          // write the pointsHistory entry.
+          const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
+          transaction.update(memberRef, {
+            rewardsPoints: currentPoints + pointsAwarded,
+            completedStays: nextCompletedStays,
+            currentLevel: nextCurrentLevel,
+            updatedAt: now
+          });
+
+          const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc(`earn-${bookingId}`);
+          transaction.set(historyRef, {
+            type: "earn",
+            points: pointsAwarded,
+            bookingId,
+            bookingRef: bookingData.bookingRef,
+            description: `Stay Checkout Earnings (${bookingData.bookingRef})`,
+            by: checkedOutBy,
+            createdAt: new Date()
+          });
+        } else {
+          // Deferred-credit path (guest has an outstanding
+          // balance): only bump the stay counter + refresh the
+          // tier cache. The `pendingLoyaltyPoints` snapshot on
+          // the booking + the settle-payment branch handle the
+          // actual credit when the balance clears.
+          transaction.update(memberRef, {
+            completedStays: nextCompletedStays,
+            currentLevel: nextCurrentLevel,
+            updatedAt: now
+          });
+        }
+
+        // Per Phase 5 of the Spark Rewards tier system
+        // (2026-10-12, decision pending): free-night reward
+        // voucher. When `rewardsConfig.freeNightEvery > 0` AND
+        // `completedStays % freeNightEvery === 0`, write a
+        // single-use 100%-off voucher (canonical reward voucher
+        // shape: `kind: "reward"`, `valueType: "free-night"`)
+        // valid for 90 days. The voucher write lives INSIDE the
+        // existing transaction so a retry can't double-award —
+        // the nextCompletedStays computation already happened,
+        // so the trigger condition is stable across retries.
+        // The voucher code is deterministic from the
+        // memberNumber + nextCompletedStays so the member can
+        // find it on the rewards portal (Phase 7).
+        //
+        // Decision (2026-10-12): the trigger fires for BOTH the
+        // immediate-credit and the deferred-credit paths — the
+        // stay IS completed either way. If the booking is
+        // later cancelled post-settlement (the MRB-05 path),
+        // the voucher stays valid (cancelled stays still count
+        // toward free-night per Phase 3's clawback philosophy).
+        // Per EC-02 (2026-08-21) pattern: the trigger is gated
+        // on `nextCompletedStays > 0` to avoid the "0 % N === 0"
+        // false-positive when freeNightEvery > 0 and the member
+        // has 0 stays.
+        const freeNightEvery = Number(rewardsConfig?.freeNightEvery || 0);
+        if (
+          freeNightEvery > 0 &&
+          nextCompletedStays > 0 &&
+          nextCompletedStays % freeNightEvery === 0
+        ) {
+          const memberNumber =
+            memberDocInTransaction.data()?.memberNumber ||
+            `M${memberId.slice(0, 8)}`;
+          const freeNightCode = `FREENIGHT-${memberNumber}-${nextCompletedStays}`;
+          const freeNightVoucherRef = adminDb.collection("vouchers").doc(freeNightCode);
+          // 90-day expiry — long enough for a member to plan a
+          // future stay, short enough that abandoned rewards
+          // don't accumulate indefinitely. Matches the
+          // spec copy "Free night every N stays" intent.
+          const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+          transaction.set(freeNightVoucherRef, {
+            code: freeNightCode,
+            // Phase 5 discriminator — pre-Phase-5 promo vouchers
+            // are missing these (treated as "promo" + valueType =
+            // discountType on read).
+            kind: "reward",
+            valueType: "free-night",
+            // Backward-compat with the existing percent/flat
+            // discount math — `discountType: "percent"` +
+            // `discountValue: 100` produces a 100% off discount.
+            // `calculateVoucherDiscount` caps at subtotal so any
+            // over-discount rounds to 0.
+            discountType: "percent",
+            discountValue: 100,
+            usageCap: 1,
+            usageCount: 0,
+            expiresAt,
+            // Empty array = applies to all room types (per
+            // VOU-03 all-or-none rule).
+            applicableRoomTypes: [],
+            isActive: true,
+            guestEmail: memberDocInTransaction.data()?.email || null,
+            // Phase 5 back-link fields for member portal display
+            // + admin "Reward vouchers" filter.
+            memberId,
+            memberNumber,
+            rewardSource: "free-night-tier",
+            createdBy: checkedOutBy || "system",
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        }
       }
     });
 
@@ -10919,7 +12233,6 @@ async function enrichAndRespond(res: any, bookingData: any) {
       rateBreakdown: bookingData.rateBreakdown || null,
       paymentMethod: bookingData.paymentMethod,
       status: bookingData.status,
-      hasBreakfast: bookingData.hasBreakfast,
       specialRequests: bookingData.specialRequests || ""
     }
   });
@@ -10980,7 +12293,16 @@ function buildReservationLookupView(reservation: any, children: any[], anchorRoo
       numAdults: Number(child.numAdults || 0),
       numChildren: Number(child.numChildren || 0),
       extraBedCount: Number(child.extraBedCount || 0),
-      hasBreakfast: Boolean(child.hasBreakfast),
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy `hasBreakfast: boolean` flat-rate flag is
+      // removed; the lookup view carries the BR-01
+      // `breakfastTotal` stamp + the per-slot
+      // `breakfastSelections` map so the page can render
+      // the new model end-to-end without the legacy gate.
+      breakfastTotal: Number(child.breakfastTotal || 0),
+      breakfastSelections: child.breakfastSelections && typeof child.breakfastSelections === "object"
+        ? child.breakfastSelections
+        : null,
       ratePerNight: Number(child.ratePerNight || 0),
       totalPrice: Number(child.totalPrice || 0),
       status: child.status,
@@ -11230,16 +12552,40 @@ export async function handleRescheduleBooking(req: any, res: any) {
       error: "Booking, room, check-in, and check-out are required."
     });
   }
-  const { bookingId, roomId, checkIn, checkOut, reason, reservationId: requestedReservationId } = parsedReschedule.data;
+  const { bookingId, roomId, checkIn, checkOut, reason, reservationId: requestedReservationId, mode } = parsedReschedule.data;
 
   const checkInDate = new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = new Date(`${checkOut}T00:00:00Z`);
+  // Per OCT-L7 (2026-10-20, decision #299): strict ISO validation.
+  // `RescheduleBookingSchema` validates the SHAPE only, and
+  // `new Date("2026-02-31T00:00:00Z")` ROLLS OVER to Mar 3 rather
+  // than producing an Invalid Date — so the `isNaN(getTime())` guard
+  // never fired and the booking was RESCHEDULED onto a day the front
+  // desk never entered. `isValidIsoDate` (the shared helper) rejects
+  // it.
+  if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) {
+    return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
+  }
   if (Number.isNaN(checkInDate.getTime()) || Number.isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
     return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
   }
   const numNights = Math.max(Math.round((checkOutDate.getTime() - checkInDate.getTime()) / 86400000), 0);
   if (numNights < 1) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
+  }
+
+  // MSL-01 (2026-10-15): maximum stay length on the RESCHEDULE path.
+  // This guard was genuinely MISSING before MSL-01 — `handleCreateBooking`
+  // and `handleCreateWalkin` both capped `numNights`, but reschedule
+  // only ever checked the lower bound (`< 1`). A front-desk user could
+  // therefore stretch a legal 2-night booking to 200 nights and
+  // completely bypass the cap the guest-facing flow enforced. Resolved
+  // from the same `settings/hotelConfig.maxStayNights` as the other two
+  // paths, so all three agree.
+  const maxStayNights = await loadMaxStayNights();
+  if (numNights > maxStayNights) {
+    buildMaxStayNightsError(res, maxStayNights);
+    return;
   }
 
   const { todayStr: todayKey, manilaDate: currentManilaDate } = getManilaDateInfo();
@@ -11271,6 +12617,27 @@ export async function handleRescheduleBooking(req: any, res: any) {
       const bookingDoc = await transaction.get(bookingRef);
       if (!bookingDoc.exists) throw new Error("Booking not found.");
       const booking = bookingDoc.data() || {};
+
+      // Per EXT-01 (2026-01-27): when `mode: "extend"` is set,
+      // the room and check-in are locked to the booking's current
+      // values — only check-out can be extended. The server enforces
+      // this invariant so a client cannot bypass it. The new
+      // check-out must also be strictly after the current check-out.
+      if (mode === "extend") {
+        const currentRoomId = String(booking.roomId || "");
+        const currentCheckIn = toDateOrNull(booking.checkIn);
+        if (String(roomId) !== currentRoomId) {
+          throw new Error("Extend stay cannot change the assigned room.");
+        }
+        if (!currentCheckIn || checkInDate.getTime() !== currentCheckIn.getTime()) {
+          throw new Error("Extend stay cannot change the check-in date.");
+        }
+        const currentCheckOut = toDateOrNull(booking.checkOut);
+        if (!currentCheckOut || checkOutDate.getTime() <= currentCheckOut.getTime()) {
+          throw new Error("Extended check-out must be after the current check-out date.");
+        }
+      }
+
       // Per MRB-02.x (2026-08-02, per decision #164): the
       // canonical reservation id for this reschedule. The
       // reschedule re-uses the existing booking's
@@ -11598,48 +12965,63 @@ export async function handleRescheduleBooking(req: any, res: any) {
           });
       const roomTotal = roomBreakdown.roomSubtotal;
 
-      const breakfastRate = booking.breakfastRate || breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
-      // A walk-in manual override is the complete staff-agreed pricing basis;
-      // its original breakdown intentionally carries no separate breakfast
-      // line. Preserve that convention instead of adding breakfast on move.
-      // Per EXB-02 (2026-07-31): the inline `breakfastRate * (numGuests || 1) * numNights`
-      // now routes through the shared `calculateBreakfastAddOn` helper
-      // (byte-equivalent output; the `manualNightlyRate === null` guard
-      // becomes `hasBreakfast: false` here, which the helper short-circuits
-      // to 0).
-      // Per CHD-10 (2026-07-31, per CVQ-01): the existing snapshotted
-      // `breakfastIncludesChildren` flag is preserved on reschedule —
-      // `undefined` on legacy bookings reads as `true` (the historical
-      // default) via the helper's defensive coercion.
-      // Per EXB-01 (2026-07-31): the existing snapshotted extra-bed
-      // count + rate are preserved on reschedule. Legacy bookings
-      // without the field read as 0 via the helper's defensive
-      // coercion.
+      // Per OCT-H8 (2026-10-20, decision #288): the stay window
+      // moved, so the add-on selections must move with it.
+      //
+      // Before this, the reschedule carried `booking.breakfastTotal`
+      // forward verbatim and never touched `breakfastSelections` —
+      // so a guest who rescheduled Oct 14–17 → Oct 20–23 kept
+      // paying for three breakfasts that were never served (the
+      // kitchen list for Oct 20 showed nothing, because the
+      // selection keys still said `2026-10-14…`).
+      //
+      // The re-dating rule (per `plan/features/BREAKFAST.md` §Edge
+      // cases 2): any selection whose service date falls outside
+      // the NEW window is auto-cancelled; a PAID removal opens a
+      // refund liability, an UNPAID removal simply comes off the
+      // bill.
+      //
+      // The `mode: "extend"` wrapper reaches this same code with a
+      // window that only GROWS (the check-in is locked and the
+      // check-out moves later), so nothing ever falls out of range
+      // and the re-dating is a no-op there.
+      const redatedBreakfast = redateBreakfastSelections({
+        mode: "reschedule",
+        window: { checkIn, checkOut },
+        today: todayKey,
+        selections: booking.breakfastSelections as Record<string, BreakfastSelectionEntry>,
+        paidAmount: Number(booking.paidAmount) || 0
+      });
+      const redatedOtherAddOns = redateOtherAddOnSelections({
+        mode: "reschedule",
+        window: { checkIn, checkOut },
+        today: todayKey,
+        selections: booking.otherAddOnSelections as Record<string, OtherAddOnSelectionEntry[]>,
+        paidAmount: Number(booking.paidAmount) || 0
+      });
+
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy `breakfastRate × numGuests × numNights`
+      // derivation is gone. The reschedule path reads the
+      // snapshotted `booking.breakfastTotal` directly. The
+      // pre-BR-08 legacy helpers (`breakfastRate` + the
+      // legacy `calculateBreakfastAddOn` import) are all
+      // removed; the reschedule now relies on the new
+      // `breakfastTotal` field the create transaction
+      // stamps on every booking doc.
+      //
+      // Per OCT-H8: the total is now the RE-DATED total (the
+      // survivors only) rather than the carried-forward one.
+      //
+      // A walk-in manual override (`manualNightlyRate !== null`)
+      // is the complete staff-agreed pricing basis; its
+      // original breakdown intentionally carries no separate
+      // breakfast line. Preserve that convention instead of
+      // adding breakfast on move.
       const preservedExtraBedCount = Number(booking.extraBedCount) || 0;
       const preservedExtraBedRate = Number(booking.extraBedRate) || 0;
-      // Per EXB-12 (2026-08-06, per decision #199): the
-      // reschedule must pass the snapshotted
-      // `extraBedCount` + `extraBedBreakfast` to the helper
-      // so the recomputed `breakfastTotal` matches the
-      // create-time total. Pre-v0.264.8 the reschedule
-      // dropped these two fields, silently losing the
-      // extra-bed breakfast charge on every reschedule
-      // of a booking that opted in to breakfast for the
-      // extra beds. `undefined` on legacy bookings
-      // (pre-EXB-12) reads as `false` via the helper's
-      // defensive coercion — back-compat with the
-      // historical "no extra-bed breakfast" default.
-      const preservedExtraBedBreakfast = booking.extraBedBreakfast === true;
       const breakfastTotal = manualNightlyRate === null
-        ? calculateBreakfastAddOn({
-            hasBreakfast: booking.hasBreakfast,
-            breakfastRate,
-            numGuests: booking.numGuests,
-            numNights,
-            breakfastIncludesChildren: booking.breakfastIncludesChildren,
-            extraBedCount: preservedExtraBedCount,
-            extraBedBreakfast: preservedExtraBedBreakfast
-          })
+        ? redatedBreakfast.total
         : 0;
       const extraBedTotal = manualNightlyRate === null
         ? calculateExtraBedAddOn({
@@ -11678,11 +13060,30 @@ export async function handleRescheduleBooking(req: any, res: any) {
 
       let appliedMemberDiscountPct = 0;
       if (booking.memberId) {
+        // Per Phase 4 of the Spark Rewards tier system
+        // (2026-10-12): same tier-precedence rule as
+        // `handleCreateBooking` — the tier's `discountPct` wins
+        // over the global `memberDiscountPct` for tier-aware
+        // members. See the comment in handleCreateBooking for the
+        // decision rationale. Both reads happen in this single
+        // `get()` block (FOL-03 requires all `get()` calls to
+        // complete before any `update()`).
+        const memberRef = adminDb.doc(`members/${booking.memberId}`);
+        const memberDocInTx = await transaction.get(memberRef);
+        const memberTier = memberDocInTx.exists
+          ? memberDocInTx.data()?.currentLevel
+          : null;
+        const tierPct = memberTier && Number.isFinite(Number(memberTier.discountPct))
+          ? Math.max(0, Math.floor(Number(memberTier.discountPct)))
+          : null;
+
         const rewardsRef = adminDb.doc("settings/rewardsConfig");
         const rewardsDoc = await transaction.get(rewardsRef);
         if (rewardsDoc.exists) {
           const rc = rewardsDoc.data()!;
-          if (rc.memberDiscountEnabled !== false) {
+          if (tierPct !== null) {
+            appliedMemberDiscountPct = tierPct;
+          } else if (rc.memberDiscountEnabled !== false) {
             const pct = Number(rc.memberDiscountPct) || 0;
             if (pct > 0) appliedMemberDiscountPct = pct;
           }
@@ -11753,7 +13154,13 @@ export async function handleRescheduleBooking(req: any, res: any) {
         by: req.staff?.uid || req.staff?.email || "staff",
         at: new Date().toISOString(),
         pricingBasis: manualNightlyRate !== null ? "manual" : "recalculated",
-        deltaTotalPrice: finalTotalPrice - (booking.totalPrice || 0)
+        deltaTotalPrice: finalTotalPrice - (booking.totalPrice || 0),
+        // Per EXT-01 (2026-01-27): the `kind` field distinguishes
+        // an extend-stay reschedule from a room move. Both write
+        // the same `rescheduleHistory[]` array; clients render
+        // them differently (extend shows a timeline entry with
+        // only the check-out change; move shows room + dates).
+        kind: mode === "extend" ? "extend" : "move"
       };
 
       updatedBooking = {
@@ -11797,6 +13204,31 @@ export async function handleRescheduleBooking(req: any, res: any) {
           finalTotalPrice
         ),
         rescheduleHistory: [...(Array.isArray(booking.rescheduleHistory) ? booking.rescheduleHistory : []), rescheduleEntry],
+        // Per OCT-H8 (2026-10-20, decision #288): the re-dated
+        // add-on selections + their recomputed totals.
+        //
+        // Without this, the booking kept the OLD selection keys
+        // and the OLD breakfast total after a date change — the
+        // guest was charged for meals on dates they were no longer
+        // staying for, and the kitchen list for the new dates
+        // showed nothing.
+        //
+        // `breakfastTotal` is the recomputed total over the
+        // survivors (the auto-cancelled entries are marked
+        // `removedAt`, and `recomputeBreakfastTotal` skips those),
+        // so the BR-01 invariant
+        // `breakfastTotal === recomputeBreakfastTotal(selections)`
+        // holds.
+        //
+        // The other add-ons are NOT inside `totalPrice` (they are
+        // added on top of it for the balance), so they are written
+        // separately — the same shape the BR-12 write paths use.
+        breakfastSelections: redatedBreakfast.selections,
+        breakfastTotal: redatedBreakfast.total,
+        hasAnyBreakfast: redatedBreakfast.total > 0,
+        otherAddOnSelections: redatedOtherAddOns.selections,
+        otherAddOnTotal: redatedOtherAddOns.total,
+        hasAnyOtherAddOns: redatedOtherAddOns.total > 0,
         updatedAt: new Date()
       };
 
@@ -11811,6 +13243,95 @@ export async function handleRescheduleBooking(req: any, res: any) {
         const oldRoomRef = adminDb.collection("rooms").doc(booking.roomId);
         transaction.update(oldRoomRef, { status: "available" });
         transaction.update(roomRef, { status: "occupied" });
+      }
+
+      // Per OCT-H8 (2026-10-20, decision #288): the auto-cancelled
+      // selections get an audit entry + (for the PAID ones) a
+      // refund liability — all inside the SAME transaction, so the
+      // liability commits atomically with the date move.
+      //
+      // The audit action is `"remove"` with a reason naming the
+      // reschedule, and `occurredAfterCutoff: false` (the change
+      // was caused by the date move, not by a late staff
+      // override).
+      for (const removed of redatedBreakfast.removed) {
+        auditBreakfastOp({
+          transaction,
+          bookingId: String(bookingId),
+          slotKey: removed.key,
+          action: "remove",
+          mealSnapshot: {
+            mealId: String(removed.entry.mealId || ""),
+            mealName: String(removed.entry.mealName || ""),
+            price: removed.amount
+          },
+          actorUid: "system",
+          actorRole: "admin",
+          reasonOrCutoff: {
+            reason: `Auto-cancelled — the stay moved to ${checkIn} → ${checkOut} and this date is outside the new window.`,
+            occurredAfterCutoff: false
+          }
+        });
+        if (removed.wasPaid) {
+          createBreakfastRefundLiability({
+            transaction,
+            booking: {
+              id: String(bookingId),
+              bookingRef: String(booking.bookingRef || "")
+            },
+            slotKey: removed.key,
+            mealEntry: {
+              mealId: String(removed.entry.mealId || ""),
+              mealName: String(removed.entry.mealName || ""),
+              price: removed.amount
+            },
+            amount: removed.amount,
+            reason: "Booking rescheduled — the breakfast date is outside the new stay window.",
+            recordedBy: "admin",
+            recordedByUid: "system"
+          });
+        }
+      }
+
+      for (const removed of redatedOtherAddOns.removed) {
+        auditOtherAddOnOp({
+          transaction,
+          bookingId: String(bookingId),
+          selectionKey: removed.selectionKey,
+          action: "remove",
+          addOnSnapshot: {
+            addOnId: removed.addOnId,
+            name: String(removed.entry.nameSnapshot || ""),
+            price: Number(removed.entry.priceSnapshot) || 0,
+            quantity: Math.max(0, Math.floor(Number(removed.entry.quantity) || 0))
+          },
+          actorUid: "system",
+          actorRole: "admin",
+          reasonOrCutoff: {
+            reason: `Auto-cancelled — the stay moved to ${checkIn} → ${checkOut} and this date is outside the new window.`,
+            occurredAfterCutoff: false
+          }
+        });
+        if (removed.wasPaid) {
+          createOtherAddOnRefundLiability({
+            transaction,
+            booking: {
+              id: String(bookingId),
+              bookingRef: String(booking.bookingRef || "")
+            },
+            selectionKey: removed.selectionKey,
+            addOnEntry: {
+              addOnId: removed.addOnId,
+              nameSnapshot: String(removed.entry.nameSnapshot || ""),
+              priceSnapshot: Number(removed.entry.priceSnapshot) || 0,
+              quantity: Math.max(0, Math.floor(Number(removed.entry.quantity) || 0))
+            },
+            amount: removed.amount,
+            reason: "Booking rescheduled — the add-on date is outside the new stay window.",
+            recordedBy: "admin",
+            recordedByUid: "system"
+          });
+        }
       }
 
       transaction.update(bookingRef, updatedBooking);
@@ -12082,6 +13603,103 @@ export async function handleRescheduleBooking(req: any, res: any) {
 // path + the per-child voucher rule). One
 // `booking-rescheduled` email fires after the commit (the
 // reservation-scope view carries the new room).
+
+// Per EXT-02 (2026-01-27): guest self-service extend stay.
+// Thin wrapper around handleRescheduleBooking with mode:"extend".
+// The booking is locked to its current room + check-in; only
+// check-out can be extended. The existing reschedule transaction
+// enforces the room-availability check — if the room is occupied
+// in the new window the transaction throws and we surface that
+// as a user-friendly error.
+//
+// Auth: same bookingRef + (guestEmail | lookupToken) credential
+// as handleCancelBooking. No staff auth on this endpoint.
+const GUEST_EXTEND_STATUSES = ["payment-confirmed", "confirmed", "checked-in"];
+
+export async function handleExtendStay(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const {
+    bookingId,
+    bookingRef,
+    guestEmail,
+    token,
+    checkOut,
+    reason
+  } = req.body || {};
+
+  if (!bookingRef || (!guestEmail && !token) || !checkOut) {
+    return res.status(400).json({
+      success: false,
+      error: "Booking reference, email or token, and new check-out date are required."
+    });
+  }
+
+  try {
+    // ── Guest credential check (same as cancel) ────────────────────────
+    const parsed = guestCancelSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: "Please provide a valid booking reference and email or lookup token."
+      });
+    }
+
+    const compositeFilter = parsed.data.token
+      ? { field: "lookupToken" as const, value: String(parsed.data.token).toLowerCase() }
+      : { field: "guestEmail" as const, value: parsed.data.guestEmail };
+
+    const query = adminDb.collection("bookings")
+      .where("bookingRef", "==", parsed.data.bookingRef)
+      .where(compositeFilter.field, "==", compositeFilter.value)
+      .limit(1);
+
+    const snapshot = await query.get();
+    if (snapshot.empty) {
+      return res.status(404).json({
+        success: false,
+        error: parsed.data.token
+          ? "Booking not found with matching token."
+          : "Booking not found with matching email."
+      });
+    }
+
+    const bookingDocumentRef = snapshot.docs[0].ref;
+    const bookingData = snapshot.docs[0].data();
+
+    // ── Status gate: only confirmed / checked-in can self-extend ────────
+    if (!GUEST_EXTEND_STATUSES.includes(String(bookingData.status || ""))) {
+      return res.status(400).json({
+        success: false,
+        error: "EXTEND_NOT_ELIGIBLE"
+      });
+    }
+
+    // ── Delegate to the reschedule transaction with mode:"extend" ───────
+    // Pass through the req so handleRescheduleBooking reads req.staff
+    // (always null/undefined on this guest-only path) and writes the
+    // rescheduleHistory[] entry with kind:"extend".
+    const extendReq = {
+      ...req,
+      body: {
+        bookingId: snapshot.docs[0].id,
+        roomId: bookingData.roomId,   // locked — transaction enforces
+        checkIn: bookingData.checkIn, // locked — transaction enforces
+        checkOut,
+        reason: typeof reason === "string" ? reason.slice(0, 500) : "",
+        mode: "extend"
+      }
+    };
+
+    return await handleRescheduleBooking(extendReq, res);
+  } catch (err: any) {
+    console.error("[handleExtendStay]", err?.message);
+    return res.status(500).json({ success: false, error: "An unexpected error occurred." });
+  }
+}
+
 export async function handleAddRoomToReservation(req: any, res: any) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -12360,29 +13978,15 @@ export async function handleAddRoomToReservation(req: any, res: any) {
       });
       const roomTotal = roomBreakdown.roomSubtotal;
 
-      // Per CHD-10 + EXB-01: breakfast + extra-bed
-      // totals follow the same rules as create /
-      // walkin. The new child's `hasBreakfast` is
-      // snapshotted from the header's
-      // `mealPreference` (the reservation-level
-      // default — the new room inherits the
-      // guest's existing breakfast choice; the
-      // per-room override is out of scope for
-      // MRB-14 v1).
-      const breakfastConfigDoc = await transaction.get(adminDb.collection("settings").doc("breakfastConfig"));
-      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() || {} : {};
-      const breakfastRate = Number((breakfastConfig as any).ratePerPersonPerNight) || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
-      const hasBreakfast = Boolean((reservation as any).hasBreakfast ?? false);
-      const breakfastIncludesChildren = (reservation as any).breakfastIncludesChildren ?? true;
-      const breakfastTotal = hasBreakfast
-        ? calculateBreakfastAddOn({
-            hasBreakfast: true,
-            breakfastRate,
-            numGuests: numAdults + numChildren,
-            numNights: headerNumNights,
-            breakfastIncludesChildren
-          })
-        : 0;
+      // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+      // legacy flat-rate `breakfastRate × numGuests × numNights`
+      // derivation is gone. The "add room to reservation"
+      // transaction reads the snapshotted
+      // `reservation.breakfastTotal` directly (or 0 when no
+      // selections are present). The per-room breakfast
+      // data is carried by `breakfastSelections` (stamped
+      // onto the booking doc when the room is created).
+      const breakfastTotal = Number((reservation as any).breakfastTotal) || 0;
       const extraBedRate = Number(targetTypeEntry.extraBedRate) || 0;
       const extraBedTotal = extraBedCount > 0
         ? extraBedCount * extraBedRate * headerNumNights
@@ -12575,30 +14179,18 @@ export async function handleAddRoomToReservation(req: any, res: any) {
         // Per CHD-10 (2026-07-31, per CVQ-01): the
         // snapshotted `breakfastIncludesChildren`
         // value the new child inherits from the
-        // header (the per-room override is out of
-        // scope for MRB-14 v1). `true` is the safe
-        // default for legacy reservations that
-        // pre-date the CHD-10 snapshot — matches the
-        // historical "children pay the full rate"
-        // math. The create + walkin paths write the
-        // same field; the add-room path pre-v0.264.8
-        // silently dropped it (silent data loss for
-        // any future read site that checks
-        // `booking.breakfastIncludesChildren === true`).
-        breakfastIncludesChildren: Boolean((reservation as any).breakfastIncludesChildren ?? true),
-        // Per EXB-12 (2026-08-06, per decision #199):
-        // the snapshotted `extraBedBreakfast` toggle
-        // the new child inherits. The current
-        // add-room admin UI doesn't expose the
-        // toggle yet (consistent with the walkin
-        // admin surface per the EXB-12 spec — a
-        // future UX work item), so the value is
-        // `false` for every new child created via
-        // add-room until the UI is updated. The
-        // create + walkin paths write the same
-        // field; the add-room path pre-v0.264.8
-        // silently dropped it.
-        extraBedBreakfast: false,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `breakfastIncludesChildren: boolean`
+        // flat-rate field is removed. The "include
+        // children in breakfast" toggle is gone (every
+        // guest is an ordinary meal slot in the new
+        // `breakfastSelections` map — no parent /
+        // children distinction). The add-room path
+        // doesn't expose the toggle (a future UX work
+        // item, per the EXB-12 spec) — the new child
+        // carries no legacy `breakfastIncludesChildren`
+        // field; the per-meal math runs through the new
+        // `breakfastSelections` picker instead.
         checkIn: Timestamp.fromDate(headerCheckIn),
         checkOut: Timestamp.fromDate(headerCheckOut),
         numNights: headerNumNights,
@@ -12632,8 +14224,15 @@ export async function handleAddRoomToReservation(req: any, res: any) {
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
-        hasBreakfast,
-        breakfastRate,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `hasBreakfast: boolean` +
+        // `breakfastRate: number` flat-rate fields are
+        // removed from the booking-doc write. The new
+        // child carries `breakfastTotal: number` (the
+        // sum of `breakfastSelections[key].price`) —
+        // any breakfast that the staff add-room path
+        // brings in is added via the new per-meal
+        // picker, not a legacy boolean toggle.
         breakfastTotal,
         reminderSentAt: null,
         guestIdPhotoUrl: null,

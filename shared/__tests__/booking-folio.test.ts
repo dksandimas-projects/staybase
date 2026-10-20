@@ -44,6 +44,9 @@ describe("computeBookingFolio — basic shape", () => {
       charges: [],
       chargesTotal: 0,
       paymentsTotal: 0,
+      // Per OCT-FOL-01 (2026-10-20, decision #298): the other-add-ons
+      // line. Zero for a booking with none.
+      otherAddOnTotal: 0,
       grandTotal: 4000, // booking.totalPrice
       balance: 4000 // grandTotal - 0
     });
@@ -181,9 +184,12 @@ describe("computeBookingFolio — the historical 8-call-site shape (the bug-clas
     const booking: FolioBooking = {
       ...baseBooking,
       totalPrice: 4500, // 2 nights × ₱2,000 + ₱500 breakfast
-      hasBreakfast: true,
-      breakfastRate: 250,
-      numGuests: 2
+      // BR-08: the breakfast data is now part of the booking
+      // doc (`booking.breakfastTotal`); the FolioBooking type
+      // intentionally keeps its surface minimal (just `id` +
+      // `totalPrice`) so the test fixture carries the breakfast
+      // data as an extra property via a cast.
+      ...({ breakfastTotal: 500, numGuests: 2 } as any)
     };
     const storeOrders: FolioStoreOrder[] = [
       { bookingId: "b1", paymentMethod: "add-to-bill", status: "delivered", isBilled: true, totalAmount: 300 },
@@ -206,6 +212,129 @@ describe("computeBookingFolio — the historical 8-call-site shape (the bug-clas
     expect(folio.grandTotal).toBe(4950);
     // balance = grandTotal - paymentsTotal = 4950 - 1800 = 3150
     expect(folio.balance).toBe(3150);
+  });
+});
+
+describe("computeBookingFolio — the BR-12 other add-ons (OCT-FOL-01, decision #298)", () => {
+  // The other add-ons are NOT inside `booking.totalPrice` — per
+  // `plan/features/OTHER-ADD-ONS.md` decision 2 they are "added on
+  // top of it for the balance". Before this fix the folio ignored
+  // them entirely, so a booking with a ₱2,000 airport transfer the
+  // guest had not paid for showed a ₱0 balance: the hotel was owed
+  // the money and every balance surface said the guest was settled.
+  //
+  // The guest's post-booking Manage page has always computed
+  // `totalPrice + otherAddOnTotal - paidAmount`
+  // (`guest-app/server/handlers/addons-manage.ts`) — this makes the
+  // admin + server folio agree with it.
+
+  it("the other add-ons join the grand total", () => {
+    const folio = computeBookingFolio({
+      booking: { id: "b1", totalPrice: 4000, otherAddOnTotal: 2000 },
+      storeOrders: []
+    });
+    expect(folio.otherAddOnTotal).toBe(2000);
+    expect(folio.grandTotal).toBe(6000);
+    expect(folio.balance).toBe(6000);
+  });
+
+  it("the balance is reduced by the payments (a guest who paid the room but not the transfer still owes it)", () => {
+    const folio = computeBookingFolio({
+      booking: { id: "b1", totalPrice: 4000, otherAddOnTotal: 2000 },
+      persistedPayments: [{ amount: 4000 }],
+      storeOrders: []
+    });
+    expect(folio.grandTotal).toBe(6000);
+    expect(folio.paymentsTotal).toBe(4000);
+    expect(folio.balance).toBe(2000);
+  });
+
+  it("a booking with no other add-ons is byte-identical to the pre-fix behaviour", () => {
+    const folio = computeBookingFolio({
+      booking: { id: "b1", totalPrice: 4000 },
+      storeOrders: []
+    });
+    expect(folio.otherAddOnTotal).toBe(0);
+    expect(folio.grandTotal).toBe(4000);
+    expect(folio.balance).toBe(4000);
+  });
+
+  it("a nullish otherAddOnTotal is treated as zero (defensive — matches the `Number(x) || 0` pattern)", () => {
+    const folio = computeBookingFolio({
+      booking: { id: "b1", totalPrice: 4000, otherAddOnTotal: null },
+      storeOrders: []
+    });
+    expect(folio.otherAddOnTotal).toBe(0);
+    expect(folio.grandTotal).toBe(4000);
+  });
+
+  it("a negative otherAddOnTotal is clamped to zero (never a credit against the bill)", () => {
+    const folio = computeBookingFolio({
+      booking: { id: "b1", totalPrice: 4000, otherAddOnTotal: -500 },
+      storeOrders: []
+    });
+    expect(folio.otherAddOnTotal).toBe(0);
+    expect(folio.grandTotal).toBe(4000);
+  });
+
+  it("the other add-ons sit alongside the store charges + incidental charges, not instead of them", () => {
+    const folio = computeBookingFolio({
+      booking: { id: "b1", totalPrice: 4000, otherAddOnTotal: 2000 },
+      selectedBookingCharges: [{ amount: 300 }],
+      storeOrders: [
+        {
+          bookingId: "b1",
+          paymentMethod: "add-to-bill",
+          status: "delivered",
+          isBilled: true,
+          totalAmount: 500
+        }
+      ]
+    });
+    expect(folio.grandTotal).toBe(4000 + 2000 + 300 + 500);
+  });
+});
+
+describe("computeServerFolioTotals — the BR-12 other add-ons (OCT-FOL-01, decision #298)", () => {
+  it("the other add-ons join the folio total", () => {
+    const result = computeServerFolioTotals({
+      totalPrice: 4000,
+      incidentalTotal: 200,
+      addToBillTotal: 500,
+      collectedTotal: 1500,
+      otherAddOnTotal: 2000
+    });
+    expect(result.folioTotal).toBe(6700);
+    expect(result.computedBalance).toBe(5200);
+  });
+
+  it("a booking with no other add-ons is byte-identical to the pre-fix behaviour", () => {
+    const result = computeServerFolioTotals({
+      totalPrice: 4000,
+      incidentalTotal: 200,
+      addToBillTotal: 500,
+      collectedTotal: 1500
+    });
+    expect(result.folioTotal).toBe(4700);
+    expect(result.computedBalance).toBe(3200);
+  });
+
+  it("the confirm-with-balance threshold now sees the real balance", () => {
+    // The threshold gate (`handleConfirmWithBalance`) compares the
+    // folio's computed balance against the hotel's approval
+    // threshold. Before the fix an unpaid ₱6,000 airport transfer
+    // on a ₱4,000 room left the balance at ₱4,000 — under the
+    // default ₱5,000 threshold — so the front desk could confirm
+    // the booking and walk away from money the hotel was owed.
+    const result = computeServerFolioTotals({
+      totalPrice: 4000,
+      incidentalTotal: 0,
+      addToBillTotal: 0,
+      collectedTotal: 0,
+      otherAddOnTotal: 6000
+    });
+    expect(result.computedBalance).toBe(10000);
+    expect(result.computedBalance > 5000).toBe(true);
   });
 });
 

@@ -131,7 +131,7 @@ Never reuse `bookingHolds` for this purpose: guest in-flow holds are intentional
 
 - The public availability query (`/api/rooms/availability`) continues to filter by `bookings/{id}.status in [occupying]` + `holdExpiresAt > now` (PEX-02). It does NOT add a `bookingHolds/{id}` filter — holds are not bookings, they're UX signals.
 - The create transaction continues to scan `bookings` for date-overlap conflicts. It does NOT scan `bookingHolds` — even if a hold exists for the same room + dates, the transaction only blocks on a real booking. The race "guest A is mid-form, guest B confirms first" is handled the same way it always was: A's confirm returns "Room no longer available".
-- The in-flow hold is honest about this in the copy: "We'll lock it in the moment you confirm — if another guest books first, we'll let you know and you can pick a new room." The banner does NOT promise "the room is reserved for you" — that would be a lie.
+- The in-flow hold is honest about this in the copy: "We'll lock it in the moment you confirm. If it goes through, you're set." The banner does NOT promise "the room is reserved for you" — that would be a lie. (The "If it goes through, you're set" half is the conditional escape hatch — see decision #270 for the HCT-01 copy-tighten history.)
 
 ---
 

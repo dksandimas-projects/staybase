@@ -23,7 +23,13 @@ interface StayRecord {
   numNights: number;
   totalPrice: number;
   status: string;
-  hasBreakfast: boolean;
+  // Per BR-08 (decision #238, 2026-10-14 — close-out):
+  // the legacy `hasBreakfast: boolean` flat-rate flag is
+  // removed from the Booking doc. The My Stays card
+  // derives the "+ Breakfast" pill from
+  // `breakfastSelections` (any non-removed entry) so
+  // it stays correct post-close-out.
+  breakfastSelections?: Record<string, unknown> | null;
   // Per Spark Rewards audit 2026-07-18 LOW-5: surface the
   // early check-in status on My Stays too (the spec lists
   // both My Stays and My Rewards as surfaces; only My
@@ -217,7 +223,10 @@ function StayCard({ stay }: { stay: StayRecord }) {
             {stay.checkIn} → {stay.checkOut}
           </span>
           <span>{stay.numNights} night{stay.numNights !== 1 ? "s" : ""}</span>
-          {stay.hasBreakfast && <span className="text-amber-600 font-semibold">+ Breakfast</span>}
+          {stay.breakfastSelections &&
+            Object.values(stay.breakfastSelections).some((entry: any) =>
+              entry && entry.removedAt == null
+            ) && <span className="text-amber-600 font-semibold">+ Breakfast</span>}
         </div>
         {earlyCheckIn && <EarlyCheckInStatusLine earlyCheckIn={earlyCheckIn} />}
       </div>

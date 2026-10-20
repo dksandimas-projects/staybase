@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Timestamp } from "firebase-admin/firestore";
 import { adminDb } from "../lib/firebase-admin";
 import { sendCorporateInquiryTrigger, sendBookingTrigger, sendCorporateInquiryConfirmationTrigger } from "./email";
-import { toDateOrNull, getManilaDateInfo, generateLookupToken, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
+import { toDateOrNull, getManilaDateInfo, generateLookupToken, isValidIsoDate } from "@spark-inn/shared";
 import config from "../../../hotel.config";
 
 // C-03 (E2E audit 2026-07-17): canonical structured date shape.
@@ -144,6 +144,17 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
   const checkInDate = new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = new Date(`${checkOut}T00:00:00Z`);
 
+  // Per OCT-L7 (2026-10-20, decision #299): strict ISO validation.
+  // The schema validates the field LENGTH only, and
+  // `new Date("2026-02-31T00:00:00Z")` ROLLS OVER to Mar 3 rather
+  // than producing an Invalid Date — so the `isNaN(getTime())` guard
+  // never fired and the inquiry's calendar-block overlap check ran
+  // against a day the client never asked for. `isValidIsoDate` (the
+  // shared helper) rejects it.
+  if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) {
+    return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
+  }
+
   if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
     return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
   }
@@ -257,13 +268,16 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
       // 4. Breakfast config
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
-      const breakfastConfig = breakfastConfigDoc.exists
-        ? breakfastConfigDoc.data()!
-        : { isEnabled: false, ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT };
-      const actualBreakfastRate = breakfastConfig.isEnabled
-        ? (breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT)
-        : 0;
-      const finalHasBreakfast = !!hasBreakfast && breakfastConfig.isEnabled;
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the corporate-inquiry conversion no longer carries
+      // an `hasBreakfast` flag — corporate groups negotiate
+      // catering separately. The `breakfastSelections` map
+      // defaults to `{}` (no breakfast); the booking doc
+      // carries `hasAnyBreakfast: false` + `breakfastTotal: 0`.
+      // The legacy `breakfastConfig.ratePerPersonPerNight`
+      // + `DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT` reads
+      // are removed.
+      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data()! : { isEnabled: false };
 
       // 5. Resolve negotiated rate
       // Order of precedence: explicit override > ratePerRoomType
@@ -350,6 +364,10 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
       finalBookingRef = bookingRef;
 
       // 7. Totals
+      // Per BR-08 (decision #238, 2026-10-14): corporate inquiry
+      // conversion no longer carries breakfast (groups negotiate
+      // catering separately). hasAnyBreakfast is always false.
+      const finalHasBreakfast = false;
       const roomTotal = ratePerNight * numNights;
       const breakfastTotal = finalHasBreakfast ? actualBreakfastRate * guests * numNights : 0;
       finalTotalPrice = roomTotal + breakfastTotal;
@@ -459,8 +477,17 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
-        hasBreakfast: finalHasBreakfast,
-        breakfastRate: finalHasBreakfast ? actualBreakfastRate : 0,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `hasBreakfast: boolean` +
+        // `breakfastRate: number` flat-rate fields are
+        // removed from the corporate-inquiry-conversion
+        // booking-doc write. The new conversion creates a
+        // breakfast-free booking by default
+        // (`breakfastTotal: 0` + `hasAnyBreakfast: false`).
+        // Catering is negotiated separately per the corporate
+        // group's contract; staff add breakfast later via the
+        // booking drawer's breakfast section.
+        breakfastTotal: 0,
         guestIdPhotoUrl: null,
         guestRegistration: null,
         breakfastSelections: {},

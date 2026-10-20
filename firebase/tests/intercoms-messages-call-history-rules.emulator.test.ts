@@ -77,10 +77,12 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await testEnv.clearFirestore();
-  // Seed a `intercoms/{roomId}` thread doc (the create rule on
-  // the parent collection is `allow read, create, update: if
-  // true;` so seeding with rules disabled is unnecessary, but
-  // we keep the test idempotent across runs).
+  // Per PR-AUDIT-B5 (2026-10-20): the `intercoms/{roomId}` parent rule is
+  // now `allow read, write: if isStaff()` — it was
+  // `allow read, create, update: if true` — so an unauthenticated client
+  // can no longer open a thread document. Nothing is seeded here (the
+  // create assertions below stand on their own), so the test stays
+  // idempotent across runs.
 });
 
 // Per decision #216: the FULL payload `AdminContext.recordCallHistory`

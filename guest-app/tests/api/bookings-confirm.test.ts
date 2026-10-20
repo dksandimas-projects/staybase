@@ -432,7 +432,6 @@ describe("walk-in booking creation booking-confirmed trigger", () => {
     checkIn: "2026-06-16",
     checkOut: "2026-06-18",
     guests: 2,
-    hasBreakfast: false,
     guestDetails: {
       firstName: "Maria",
       lastName: "Santos",

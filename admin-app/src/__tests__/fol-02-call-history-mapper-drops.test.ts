@@ -59,10 +59,19 @@ const firestoreRulesSrc = readFileSync(
 describe("AdminContext.tsx — FOL-02 mapper-hydration closure on the IntercomMessage snapshot (decision #214, 2026-08-19)", () => {
   // Anchor the slice to the intercom messages snapshot mapper so
   // a future refactor that moves the mapper body doesn't break
-  // the test for the wrong reason. The mapper is the .map() inside
-  // the intercoms/{room}/messages listener.
-  const mapperStart = adminSrc.indexOf("const messages: IntercomMessage[] = snapshot.docs.map");
-  const mapperEnd = adminSrc.indexOf("});", mapperStart);
+  // the test for the wrong reason. The mapper is the per-document
+  // `IntercomMessage` construction inside the intercoms/{room}/messages
+  // listener.
+  //
+  // Per PR-AUDIT-B3 (2026-10-20): the listener moved from one query
+  // per room to a single collection-group query over "messages"
+  // (the guest's thread now lives under `intercomSessions/{token}`,
+  // the desk's history under `intercoms/{room}/messages`), so the
+  // mapper is now a `const message: IntercomMessage = { … }` inside a
+  // `forEach` instead of a `.map()` callback. The hydration contract
+  // this file pins is unchanged — only the surrounding shape moved.
+  const mapperStart = adminSrc.indexOf("const message: IntercomMessage = {");
+  const mapperEnd = adminSrc.indexOf("(grouped[roomNumber] ||= []).push", mapperStart);
   const mapperBody = adminSrc.slice(mapperStart, mapperEnd);
 
   describe("FOL-02 per-field hydration pins (one test per contract field)", () => {

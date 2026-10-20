@@ -19,6 +19,7 @@ Each piece of information lives in exactly one MD. Reference it elsewhere — ne
 | "Never do this" rules | `plan/docs/GOTCHAS.md` |
 | API route surface | `plan/docs/API-ROUTES.md` |
 | Feature UI + logic checklists | Relevant `plan/features/*.md` |
+| Five-step guest booking mobile UX refresh | `plan/features/BOOKING-MOBILE-UX.md` |
 | Wireframe workflow, screen checklist, Stitch asset map | `plan/docs/WIREFRAME-WORKFLOW.md` |
 | IP ownership, ToS, GDPR, accessibility commitment, licensing, support terms | `plan/docs/LEGAL.md` |
 | Master TOC + read bundles + hard rules | `CLAUDE.md` |
@@ -231,7 +232,7 @@ Block specced → items ship (`⬜` → `✅`) → when every item is done, move
 
 ### Block code registry
 
-Keep codes unique. In use as of 2026-07-31 — open: `WRV` `WPM` `NBS` `DSC` `PEX` `CVQ` `CHD` `EXB` `PMH` `MRB` `RTS` `BDUX` `FSO` `ETR` `FLR` `PC` `CRL`. Archived: `GCR` `CWB` `LCE` `ECE` `GSD` `BSP` `MBP` `WSN` `HSD` `MBZ` `FIN` `FR` `FL` `PF` `QA` `NC` `AUD` `SA`.
+Keep codes unique. In use as of 2026-10-15 — open: `WRV` `WPM` `NBS` `DSC` `PEX` `CVQ` `CHD` `EXB` `PMH` `MRB` `RTS` `BDUX` `FSO` `ETR` `FLR` `PC` `CRL` `CRT` `MBUX`. **Shipped blocks still listed here:** `IMT` (guest hold extension — IMT-01..06 complete, decision #237) · `BR` (breakfast redesign — BR-01..08 complete 2026-10-14 at `2.0.0`, decision #238) · `SR` (special requests + bed setup — SR-01..05 complete 2026-10-12) · `EXT` (extend stay — EXT-01..03 complete 2026-10-14) · `CAL` (calendar bulk blocks + staff inventory hold — complete 2026-10-12, decision CAL-01) · `VAT` (admin VAT toggle — VAT-01 complete 2026-10-12) · `SET-SBG` (Settings sidebar grouping — SET-SBG-01 complete 2026-10-12). Archived: `GCR` `CWB` `LCE` `ECE` `GSD` `BSP` `MBP` `WSN` `HSD` `MBZ` `FIN` `FR` `FL` `PF` `QA` `NC` `AUD` `SA`.
 
 ---
 

@@ -35,13 +35,82 @@ const EXPECTED_GROUP_LABELS = [
 // no duplicates. Duplicates would mean a tab renders twice in the
 // sidebar (UX bug); a missing tab means the deep-link falls back
 // to "hotel" silently (the SETTINGS.md §Deep Linking invariant).
+//
+// Per OCT-M6 (2026-10-20, decision #293): this list is NO LONGER
+// the source of truth for the assertion. It used to be, and the
+// test built its `union` from this hardcoded copy — so the test
+// compared the hardcoded list with itself and could NEVER detect
+// a source-side omission (a new `VALID_TAB_IDS` entry with no
+// group, or a group tab that was deleted from the source). The
+// docstring claimed "Every TabId currently registered in
+// `VALID_TAB_IDS` must appear in exactly one group" while never
+// reading `VALID_TAB_IDS` at all.
+//
+// The test now parses BOTH arrays out of the source and asserts
+// the real invariant. `EXPECTED_GROUP_TABS` is kept only as a
+// human-readable map of the intended grouping (the labels are
+// asserted against the source), never as the assertion's input.
 const EXPECTED_GROUP_TABS: Record<string, string[]> = {
   Property: ["hotel", "roomtypes", "branding"],
   "Bookings & Revenue": ["preferences", "sources", "holds", "payment", "discounts"],
-  "Guest Experience": ["rewards", "breakfast", "store", "intercom"],
+  "Guest Experience": ["rewards", "breakfast", "addons", "store", "intercom"],
   "Marketing & Reach": ["website", "seo", "email"],
   Admin: ["staff", "legal", "environment"]
 };
+
+/**
+ * Parse the string literals out of a JS array-literal body.
+ * e.g. `"hotel", "payment", /* comment *\/ "seo"` → `["hotel", "payment", "seo"]`.
+ */
+function parseStringLiterals(body: string): string[] {
+  const withoutComments = body
+    .replace(/(^|[^:])\/\/.*$/gm, "$1")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+  const matches = withoutComments.match(/"([^"]*)"/g) || [];
+  return matches.map((literal) => literal.slice(1, -1));
+}
+
+/** The `VALID_TAB_IDS` whitelist, parsed from the source. */
+function readValidTabIds(): string[] {
+  const block = settingsPageSrc.match(
+    /const\s+VALID_TAB_IDS[^=]*=\s*\[([\s\S]*?)\n\];/
+  );
+  expect(block, "expected a VALID_TAB_IDS array literal in SettingsPage.tsx").toBeTruthy();
+  return parseStringLiterals(block![1]);
+}
+
+/** The `SETTINGS_GROUPS` array, parsed from the source. */
+function readSettingsGroups(): Array<{ id: string; label: string; tabs: string[] }> {
+  const block = settingsPageSrc.match(/const\s+SETTINGS_GROUPS[\s\S]*?\n\];/);
+  expect(block, "expected a SETTINGS_GROUPS array literal in SettingsPage.tsx").toBeTruthy();
+  const groups: Array<{ id: string; label: string; tabs: string[] }> = [];
+  const groupRe = /\{\s*id:\s*"([^"]+)"\s*,\s*label:\s*"([^"]+)"\s*,\s*tabs:\s*\[([^\]]*)\]/g;
+  let match: RegExpExecArray | null;
+  while ((match = groupRe.exec(block![0])) !== null) {
+    groups.push({
+      id: match[1],
+      label: match[2],
+      tabs: parseStringLiterals(match[3])
+    });
+  }
+  return groups;
+}
+
+/** The flat `tabs` metadata array (the one the render sites look up). */
+function readFlatTabIds(): string[] {
+  const block = settingsPageSrc.match(/const tabs = \[([\s\S]*?)\n  \];/);
+  expect(block, "expected the flat tabs array literal in SettingsPage.tsx").toBeTruthy();
+  const withoutComments = block![1]
+    .replace(/(^|[^:])\/\/.*$/gm, "$1")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+  const ids: string[] = [];
+  const idRe = /id:\s*"([^"]+)"/g;
+  let match: RegExpExecArray | null;
+  while ((match = idRe.exec(withoutComments)) !== null) {
+    ids.push(match[1]);
+  }
+  return ids;
+}
 
 describe("SET-SBG-01 — Settings sidebar grouping", () => {
   it("declares the SETTINGS_GROUPS constant with exactly 5 groups", () => {
@@ -54,22 +123,66 @@ describe("SET-SBG-01 — Settings sidebar grouping", () => {
   });
 
   it("covers every deep-linkable TabId exactly once across the groups", () => {
-    const groupsBlock = settingsPageSrc.match(/const\s+SETTINGS_GROUPS[\s\S]*?\n\];/);
-    expect(groupsBlock).toBeTruthy();
+    // Per OCT-M6 (2026-10-20, decision #293): the union is built
+    // from the SOURCE (`SETTINGS_GROUPS` + `VALID_TAB_IDS`), not
+    // from this file's hardcoded copy — so a new tab that is
+    // missing from a group (or a group entry that was deleted)
+    // now FAILS the test.
+    const groups = readSettingsGroups();
+    const validTabIds = readValidTabIds();
+
     const union: string[] = [];
-    for (const label of EXPECTED_GROUP_LABELS) {
-      const expectedTabs = EXPECTED_GROUP_TABS[label];
-      for (const tabId of expectedTabs) {
-        // Each tab id appears literally inside the groups array.
-        expect(groupsBlock![0], `group "${label}" missing tab "${tabId}"`).toMatch(
-          new RegExp(`"${tabId}"`)
-        );
-        union.push(tabId);
-      }
+    for (const group of groups) {
+      union.push(...group.tabs);
     }
+
+    // No duplicates — a duplicated tab renders twice in the
+    // sidebar.
     const unique = new Set(union);
     expect(unique.size, "duplicate tab id across groups").toBe(union.length);
-    expect(union.length, "group union must cover all 18 tabs").toBe(18);
+
+    // The union must cover the whitelist EXACTLY: no missing tab
+    // (the deep link falls back to "hotel" silently) and no extra
+    // tab (a group entry with no `VALID_TAB_IDS` entry can never
+    // be deep-linked).
+    const missing = validTabIds.filter((id) => !unique.has(id));
+    expect(missing, "tabs in VALID_TAB_IDS with no group").toEqual([]);
+    const extra = union.filter((id) => !validTabIds.includes(id));
+    expect(extra, "group tabs that are not in VALID_TAB_IDS").toEqual([]);
+
+    // The count is DERIVED, not hardcoded — the old assertion
+    // pinned "18" while the real number is 19 (BR-12.1 added
+    // "addons"). A hardcoded count goes stale on every new tab,
+    // which is exactly what happened.
+    expect(union.length, "group union must cover every valid tab id").toBe(validTabIds.length);
+  });
+
+  it("the intended grouping matches the source (labels + membership)", () => {
+    // The human-readable expectation is still asserted — but
+    // against the SOURCE this time, so it detects a source-side
+    // change (a moved tab, a renamed group) as well.
+    const groups = readSettingsGroups();
+    expect(groups.map((g) => g.label)).toEqual(EXPECTED_GROUP_LABELS);
+    for (const group of groups) {
+      expect(group.tabs, `group "${group.label}" membership`).toEqual(
+        EXPECTED_GROUP_TABS[group.label]
+      );
+    }
+  });
+
+  it("every grouped tab has a matching entry in the flat `tabs` metadata", () => {
+    // Per OCT-M6 (2026-10-20, decision #293): the render sites do
+    // `const tab = tabs.find((entry) => entry.id === tabId); if (!tab)
+    // return null;` — so a tab id present in a group but missing
+    // from the flat `tabs` array renders as NOTHING. That is
+    // exactly the bug that shipped once already: the `addons`
+    // tab was invisible in the sidebar (while the badge counter
+    // said "5") until the decision-#251 follow-up.
+    const flatTabIds = readFlatTabIds();
+    const groups = readSettingsGroups();
+    const grouped = groups.flatMap((g) => g.tabs);
+    const missing = grouped.filter((id) => !flatTabIds.includes(id));
+    expect(missing, "grouped tabs with no entry in the flat tabs array").toEqual([]);
   });
 
   it("persists the user's collapsed-group choice in localStorage under a versioned key", () => {

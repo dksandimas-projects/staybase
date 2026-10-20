@@ -29,6 +29,18 @@ vi.mock("../../server/lib/firebase-admin", () => {
         })
       };
     }
+    // Per Phase 6 (2026-10-13): the register handler reads
+    // `settings/rewardsConfig` pre-transaction (welcomePoints +
+    // currentLevel snapshot). The mock returns an empty doc by
+    // default — `welcomePoints` defaults to 0 (no welcome credit)
+    // so the existing tests' expectations stay valid.
+    if (collectionName === "settings") {
+      return {
+        doc: vi.fn().mockReturnValue({
+          get: vi.fn().mockResolvedValue({ exists: false, data: vi.fn() })
+        })
+      };
+    }
     return { doc: vi.fn() };
   });
 
@@ -194,7 +206,26 @@ describe("/api/members/register handler", () => {
           numNights: 2,
           totalPrice: 5000,
           status: "pending",
-          hasBreakfast: true,
+          // Per BR-08 (decision #238, 2026-10-14 — close-out):
+          // the legacy `hasBreakfast: boolean` is replaced by
+          // the new `breakfastSelections` map (a non-empty
+          // map of non-removed entries = a breakfast on file).
+          // The member-stays projection reads the new shape.
+          breakfastSelections: {
+            "2026-07-11-guest-1": {
+              mealId: "silog",
+              mealName: "Silog",
+              price: 250,
+              addedAt: "2026-07-09T00:00:00.000Z",
+              addedBy: "guest",
+              lastModifiedAt: "2026-07-09T00:00:00.000Z",
+              lastModifiedBy: "guest",
+              removedAt: null,
+              removedBy: null,
+              overrideCutoff: false,
+              overrideReason: null
+            }
+          },
           paymentProofUrl: "https://example.test/private-proof.jpg",
           remarks: "Internal staff note"
         })
@@ -228,7 +259,13 @@ describe("/api/members/register handler", () => {
       checkIn: "2026-07-10",
       checkOut: "2026-07-12",
       status: "pending",
-      hasBreakfast: true
+      breakfastSelections: {
+        "2026-07-11-guest-1": expect.objectContaining({
+          mealId: "silog",
+          mealName: "Silog",
+          price: 250
+        })
+      }
     });
     expect(payload.data.stays[0]).not.toHaveProperty("paymentProofUrl");
     expect(payload.data.stays[0]).not.toHaveProperty("remarks");

@@ -26,7 +26,6 @@ import {
   calculateVatBreakdown,
   computeBookingFolio,
   computeReservationAggregatePaymentStatus,
-  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   getBookingVatBreakdown,
   isPaymentVerified,
   requiredExtraBedsFor,
@@ -43,9 +42,33 @@ import {
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
+// Per BR-09 (2026-10-14): the admin walk-in modal +
+// calendar-create modal now render the same 5-step
+// stepper as the public booking flow. The shared
+// admin-app `StepIndicator` mirrors the guest-app
+// shape (number badge + label, current step is
+// bold) so the desk doesn't see a different visual
+// language from the public flow.
+import { StepIndicator } from "../components/StepIndicator";
 import { PaymentSuccessModal } from "../components/PaymentSuccessModal";
 import { ConfirmWithBalanceForm } from "../components/ConfirmWithBalanceForm";
 import { StatusBadge } from "../components/StatusBadge";
+// Per BR-05 (2026-10-13): the shared
+// `WalkinBreakfastGrid` powers both the walk-in modal
+// + the calendar-create modal's breakfast section —
+// identical per-date × per-guest grid in both spots.
+import { WalkinBreakfastGrid, type WalkinBreakfastSelections } from "../components/breakfast/WalkinBreakfastGrid";
+// Per BR-12.1 (2026-10-15, decision #247): the
+// per-day × per-add-on grid for other add-ons (airport
+// transfer + future seaport transfer). Mirrors
+// `WalkinBreakfastGrid` for breakfast — see Surface 3
+// in the BR-12.1 ticket.
+import { WalkinOtherAddOnGrid, type WalkinOtherAddOnSelections } from "../components/otherAddOns/WalkinOtherAddOnGrid";
+// Per BR-05: the new Breakfast tab inside the booking
+// drawer. Imported here so the booking drawer can
+// render the tab alongside the existing overview /
+// check-in / folio panels.
+import { BookingDrawerBreakfastTab, BookingDrawerOtherAddOnsTab } from "../components/BookingDrawerWorkspace";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { ConfirmForm } from "../components/ConfirmForm";
 import { ConfirmStatusModal } from "../components/ConfirmStatusModal";
@@ -57,6 +80,7 @@ import {
   BookingDrawerSectionPanel,
   BookingDrawerWorkspaceHeader,
   BookingSpecialRequestsEditor,
+  StayHistory,
   type BookingDrawerSection
 } from "../components/BookingDrawerWorkspace";
 import { BookingRegistrationForm } from "../components/BookingRegistrationForm";
@@ -242,8 +266,17 @@ function estimateNewTotalPrice(
 
   const roomTotal = roomBreakdown.roomSubtotal;
 
-  const bRate = booking.breakfastRate || breakfastConfig?.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
-  const breakfastTotal = manualNightlyRate === null && booking.hasBreakfast ? bRate * booking.numGuests * numNights : 0;
+  // Per BR-08 (decision #238, 2026-10-14): the per-meal
+  // `booking.breakfastTotal` (computed from
+  // `booking.breakfastSelections` via the BR-01
+  // `calculateBreakfastMealsTotal` helper) replaces the
+  // legacy flat-rate `booking.breakfastRate × numGuests ×
+  // numNights` toggle. The `manualNightlyRate === null`
+  // guard stays (it's an existing manual-rate edge case
+  // unrelated to breakfast).
+  const breakfastTotal = manualNightlyRate === null
+    ? Number(booking.breakfastTotal || 0)
+    : 0;
   const subtotal = roomTotal + breakfastTotal;
 
   let discountPct = booking.discountPct || 0;
@@ -633,6 +666,7 @@ export function BookingsPage() {
     rewardsConfig,
     members,
     rescheduleBooking,
+    extendStayBooking,
     vouchers,
     corporateCodes,
     paymentMethods,
@@ -1054,6 +1088,12 @@ export function BookingsPage() {
   const [moveReason, setMoveReason] = useState("");
   const [moveIsSubmitting, setMoveIsSubmitting] = useState(false);
 
+  // Extend Stay Form States (EXT-01)
+  const [showExtendForm, setShowExtendForm] = useState(false);
+  const [extendCheckOut, setExtendCheckOut] = useState("");
+  const [extendReason, setExtendReason] = useState("");
+  const [extendIsSubmitting, setExtendIsSubmitting] = useState(false);
+
   // Sync Move states when selectedBooking changes
   useEffect(() => {
     if (selectedBooking) {
@@ -1149,6 +1189,22 @@ export function BookingsPage() {
     }
   }, [roomTypes]);
 
+  // Per BR-09 (2026-10-14): the walk-in modal now uses
+  // the same 5-step model as the public booking flow.
+  // The state machine mirrors the spec:
+  //   1 (Rooms) → 2 (Add-ons) → 3 (Guest details)
+  //              → 4 (Review) → 5 (Confirmation)
+  // The Confirmation step is the post-submit close
+  // (the existing `handleWalkinSubmit` + toast), so
+  // we only need to model steps 1-4 here. The
+  // stepper + Continue/Back CTAs split the
+  // previously-single-form modal into discrete
+  // sections — the breakfast add-on (Step 2) is the
+  // new "Add-ons" surface, and the payment +
+  // discount + voucher + special-request + test-data
+  // fields collapse into Step 4 (Review).
+  const [walkinStep, setWalkinStep] = useState<1 | 2 | 3 | 4>(1);
+
   // Compatibility aliases for the primary room stay. The submit
   // handler, the price preview and the booking payload all describe the
   // reservation as a whole; these two keep the "primary room" reads
@@ -1219,6 +1275,13 @@ export function BookingsPage() {
       setActiveStaffHoldExpiresAt("");
       clearStaffHoldParams();
     }
+    // Per BR-09 (2026-10-14): reset the walk-in
+    // step state when the modal closes so a fresh
+    // open starts at Step 1 (Rooms). Without the
+    // reset the desk would re-enter at whatever
+    // step they left at, which corrupts the
+    // first-impression flow for new reservations.
+    setWalkinStep(1);
     setIsModalOpen(false);
   };
 
@@ -1273,7 +1336,25 @@ export function BookingsPage() {
   // (online / walk-in / corporate per NBS-06).
   const [walkinSource, setWalkinSource] = useState("walk-in");
   const [walkinPayment, setWalkinPayment] = useState("pay-at-hotel");
-  const [hasBreakfast, setHasBreakfast] = useState(false);
+  // Per BR-05 (2026-10-13, decision #234): the walk-in
+  // modal's "Include Daily Breakfast" toggle is gone.
+  // The new grid (`<WalkinBreakfastGrid>`) captures the
+  // per-date × per-guest meal selections + computes the
+  // `breakfastTotal`. We track the locked-date override
+  // reason in a separate `useState` so the toggle is
+  // always paired with a justification when the staff
+  // bypasses the cutoff window.
+  const [walkinBreakfast, setWalkinBreakfast] = useState<WalkinBreakfastSelections | null>(null);
+  const [walkinBreakfastOverrideReason, setWalkinBreakfastOverrideReason] = useState("");
+  // Per BR-12.1 (2026-10-15, decision #247): the
+  // walk-in modal Step 2's other-add-ons grid state.
+  // The grid (`<WalkinOtherAddOnGrid>`) feeds back the
+  // rich `otherAddOnSelections` map + denormalized
+  // `otherAddOnTotal` + `hasAnyOtherAddOns` flag — the
+  // create call writes them straight onto the booking
+  // doc. No override flow: write-time modals allow any
+  // edit (the front desk can always pick a locked date).
+  const [walkinOtherAddOns, setWalkinOtherAddOns] = useState<WalkinOtherAddOnSelections | null>(null);
   const [immediateCheckIn, setImmediateCheckIn] = useState(false);
   const [priceOverride, setPriceOverride] = useState("");
   const [walkinDiscountType, setWalkinDiscountType] = useState<"" | "senior" | "pwd">("");
@@ -1393,6 +1474,29 @@ export function BookingsPage() {
       .reduce((sum, booking) => sum + (Number(booking.totalPrice) || 0), 0);
     return childTotal || selectedBooking.totalPrice;
   }, [bookings, selectedBooking, selectedReservationTotal]);
+
+  // Per OCT-FOL-01 (2026-10-20, decision #298): the reservation's
+  // other-add-ons total is the SUM of its child bookings' — the same
+  // shape as `selectedFolioBaseTotal` above (the reservation header's
+  // `totalPrice` IS the sum of the children's `totalPrice`).
+  //
+  // The other add-ons are NOT inside `totalPrice` (BR-12 decision 2:
+  // "added on top of it for the balance"), so the folio needs the
+  // term separately. Without it a reservation with an unpaid airport
+  // transfer showed a ₱0 balance in the drawer.
+  const selectedFolioOtherAddOnTotal = useMemo(() => {
+    if (!selectedBooking) return 0;
+    if (!selectedBooking.reservationId) {
+      return Math.max(0, Number(selectedBooking.otherAddOnTotal) || 0);
+    }
+    const childTotal = bookings
+      .filter((booking) => booking.reservationId === selectedBooking.reservationId)
+      .reduce((sum, booking) => sum + Math.max(0, Number(booking.otherAddOnTotal) || 0), 0);
+    // Fall back to the selected booking's own value when the child
+    // list is empty (e.g. the children have not hydrated yet) so the
+    // number never disappears mid-load.
+    return childTotal || Math.max(0, Number(selectedBooking.otherAddOnTotal) || 0);
+  }, [bookings, selectedBooking]);
 
   useEffect(() => {
     if (!selectedBooking?.reservationId) {
@@ -1645,8 +1749,16 @@ export function BookingsPage() {
     return Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
   };
   const numNights = getNumNights();
-  const brekkieRate = breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
-  const totalPrice = roomChargeTotal + (hasBreakfast ? brekkieRate * numGuests * numNights : 0);
+  // Per BR-08 (decision #238, 2026-10-14): the walk-in
+  // breakfast add-on is the new rich-shape `breakfastTotal`
+  // (computed by `WalkinBreakfastGrid`) which replaces the
+  // legacy `ratePerPersonPerNight × numGuests * numNights`
+  // flat-rate + the `breakfastRate` / `hasBreakfast`
+  // fields written onto the booking doc. The legacy
+  // fields are removed by BR-08; the walk-in grid is the
+  // single source of truth for the add-on.
+  const breakfastAddOn = walkinBreakfast?.breakfastTotal || 0;
+  const totalPrice = roomChargeTotal + breakfastAddOn;
 
   // Table Columns Setup
   // Per MRB-07 (2026-08-02, per decision #159): the columns render three
@@ -1972,7 +2084,14 @@ export function BookingsPage() {
     const folioBookingIds = isSelected ? selectedFolioBookingIds : [booking.id];
     return computeBookingFolio({
       booking: isSelected
-        ? { ...booking, totalPrice: selectedFolioBaseTotal }
+        ? {
+            ...booking,
+            totalPrice: selectedFolioBaseTotal,
+            // Per OCT-FOL-01 (decision #298): the reservation's
+            // other-add-ons total replaces the child's, exactly like
+            // `totalPrice` above.
+            otherAddOnTotal: selectedFolioOtherAddOnTotal
+          }
         : booking,
       // Prefer the live (selected) payments when this is the
       // selected booking (optimistic-update path). Otherwise
@@ -1991,10 +2110,21 @@ export function BookingsPage() {
     // Payment state
     if (bPayState) {
       const totalPayments = folio.paymentsTotal;
+      // Per OCT-FOL-01 (2026-10-20, decision #298): the
+      // denominator is the FOLIO's grand total, not
+      // `booking.totalPrice`. The two disagreed even before this
+      // change (the folio includes store charges + incidental
+      // charges, `totalPrice` does not), and the other add-ons
+      // widened the gap: a booking with a ₱5,000 room + a ₱2,000
+      // airport transfer that the guest had not paid for was
+      // classified "paid" here while the drawer showed a ₱2,000
+      // balance. The filter must describe the same money state the
+      // drawer shows.
+      const folioBase = folio.grandTotal;
       if (bPayState === "unpaid" && totalPayments > 0) return false;
-      if (bPayState === "partial" && (totalPayments <= 0 || totalPayments >= booking.totalPrice)) return false;
-      if (bPayState === "paid" && totalPayments < booking.totalPrice) return false;
-      if (bPayState === "overpaid" && totalPayments <= booking.totalPrice) return false;
+      if (bPayState === "partial" && (totalPayments <= 0 || totalPayments >= folioBase)) return false;
+      if (bPayState === "paid" && totalPayments < folioBase) return false;
+      if (bPayState === "overpaid" && totalPayments <= folioBase) return false;
     }
     // Payment method
     if (bPaymentMethod && booking.paymentMethod !== bPaymentMethod) return false;
@@ -3197,8 +3327,17 @@ export function BookingsPage() {
     }
 
     // ── Breakfast Selections ──
-    if (b.hasBreakfast) {
-      const activeSilogItems = breakfastConfig.silogItems.filter(
+    // Per BR-08 (decision #238, 2026-10-14): the
+    // registration-form pre-fill reads the new rich
+    // `breakfastSelections: Record<key, BreakfastSelectionEntry>`
+    // shape (which carries `mealName` directly — no
+    // legacy `Record<key, string>` fallback). The
+    // catalog reads `meals[]` instead of the legacy
+    // `silogItems[]`. The trigger condition is now
+    // "any meal in `breakfastSelections`" instead of
+    // the legacy flat-rate `hasBreakfast: boolean`.
+    if (b.breakfastSelections && Object.keys(b.breakfastSelections).length > 0) {
+      const activeMeals = (breakfastConfig.meals || []).filter(
         (item: { id: string; name: string; isActive: boolean }) => item.isActive
       );
       const stayDates = getStayDates(b);
@@ -3207,24 +3346,25 @@ export function BookingsPage() {
       const breakfastTop = Math.min(Math.max(y + 3, 232), 276 - breakfastH);
       y = breakfastTop;
 
-      drawCompactSectionTitle("Breakfast Silog Selections", marginL, y, marginR - marginL);
+      drawCompactSectionTitle("Breakfast Meal Selections", marginL, y, marginR - marginL);
       y += 4.8;
       pdf.setFontSize(8);
       pdf.setTextColor(120, 120, 120);
       // Per the 2026-08-09 follow-up to the booking-drawer
-      // breakfast capture: when staff pre-select a silog per
+      // breakfast capture (BR-05 renewed this for the per-meal
+      // catalog): when staff pre-select a meal per
       // guest per day in the drawer, the matching checkbox in the
       // printed registration form is pre-filled (filled box +
       // white check + bold label) so the guest can see what was
       // already recorded and override at check-in if needed. The
-      // other silog options stay blank.
+      // other meal options stay blank.
       pdf.text("Pre-selected choices are marked; circle or check to change.", marginL, y);
       y += 5.5;
 
-      if (activeSilogItems.length === 0) {
+      if (activeMeals.length === 0) {
         pdf.setFontSize(8);
         pdf.setTextColor(150, 150, 150);
-        pdf.text("No active silog items configured.", marginL, y);
+        pdf.text("No active breakfast meals configured.", marginL, y);
         y += 4.5;
       } else {
         pdf.setFontSize(7);
@@ -3234,17 +3374,23 @@ export function BookingsPage() {
             : "";
           for (let g = 0; g < b.numGuests; g++) {
             const rowLabel = stayDates.length > 1 ? `Guest ${g + 1} (${shortDate}):` : `Guest ${g + 1}:`;
-            // The drawer's <select> stores the silog item name
-            // (not id) under `${date}-guest-${g + 1}`, so the
-            // pre-fill match is by name. Editing a silog name in
-            // Settings after capture would silently drop the
-            // pre-check for that booking — accepted trade-off,
-            // matching the drawer's persistence shape.
-            const selectedName = b.breakfastSelections?.[`${date}-guest-${g + 1}`];
+            // The new `breakfastSelections` shape stores
+            // a `{mealId, mealName, price, …}` object under
+            // `${date}-guest-${g + 1}` (BR-01). The pre-fill
+            // match uses `mealName` to stay backward-compatible
+            // with the legacy silog-names match used in earlier
+            // captures — a guest whose booking predates the
+            // BR-01 migration still gets the right checkbox.
+            const selectionEntry = b.breakfastSelections[`${date}-guest-${g + 1}`];
+            const selectedName = selectionEntry
+              ? (typeof selectionEntry === "string"
+                ? selectionEntry
+                : (selectionEntry as { mealName?: string }).mealName || null)
+              : null;
             pdf.setTextColor(...compactTextRgb);
             pdf.text(rowLabel, marginL, y);
             let optionX = marginL + 24;
-            for (const item of activeSilogItems) {
+            for (const item of activeMeals) {
               const optionLabel = fitText(item.name, 17);
               const isSelected = !!selectedName && item.name === selectedName;
               if (isSelected) {
@@ -3524,8 +3670,22 @@ export function BookingsPage() {
           value: isReservationReceipt ? "See room allocations" : `${formatAmount(b.ratePerNight)} / night`
         }
       ];
-      if (b.hasBreakfast && breakfastConfig.ratePerPersonPerNight) {
-        stayRows.push({ label: "Breakfast", value: `${formatAmount(breakfastConfig.ratePerPersonPerNight)} / guest / night` });
+      // Per BR-08 (decision #238, 2026-10-14): the per-room
+        // `breakfastSelections` rich shape + `breakfastTotal`
+        // replace the legacy flat-rate `hasBreakfast: boolean`
+        // + `breakfastConfig.ratePerPersonPerNight` toggle. The
+        // Pricing Breakdown section below already iterates
+        // `rateBreakdown.addOns[]` which carries the per-date
+        // breakfast lines stamped by BR-03's
+        // `buildBreakfastRateBreakdownLines` helper. The Stay
+        // card now shows the total breakfast count + total
+        // (instead of the old "X / guest / night" line).
+      if (b.breakfastTotal && Number(b.breakfastTotal) > 0) {
+        const selectionsCount = Object.keys(b.breakfastSelections || {}).length;
+        stayRows.push({
+          label: "Breakfast",
+          value: `${selectionsCount} meal${selectionsCount === 1 ? "" : "s"} · ${formatAmount(Number(b.breakfastTotal))} total`
+        });
       }
       const stayCardH = drawInfoCard("Stay", stayRows, marginL + cardW + cardGap, y, cardW);
       y += Math.max(guestCardH, stayCardH) + 4.5; // Tighter vertical gap
@@ -3729,7 +3889,19 @@ export function BookingsPage() {
       }
       y += 1;
 
-      if (receiptFolio.storeCharges.length > 0 || receiptFolio.charges.length > 0) {
+      // Per OCT-FOL-01 (2026-10-20, decision #298): the BR-12 other
+      // add-ons are NOT inside `totalPrice` (BR-12 decision 2), so
+      // they get their own line here — otherwise the receipt's
+      // "Folio total" would be higher than the sum of the itemised
+      // lines. The section also PRINTS when the booking has other
+      // add-ons but no store / incidental charges, so the transfer
+      // is itemised rather than silently folded into the total.
+      const receiptOtherAddOnTotal = receiptFolio.otherAddOnTotal ?? 0;
+      if (
+        receiptFolio.storeCharges.length > 0 ||
+        receiptFolio.charges.length > 0 ||
+        receiptOtherAddOnTotal > 0
+      ) {
         checkNewPage(12 + (receiptFolio.storeCharges.length + receiptFolio.charges.length) * 5);
         drawPdfSectionTitle(pdf, "Folio Charges", marginL, y, brandRgb);
         y += 4.5;
@@ -3747,6 +3919,9 @@ export function BookingsPage() {
             { muted: amount < 0 }
           );
         });
+        if (receiptOtherAddOnTotal > 0) {
+          drawAmountRow("Other add-ons", formatAmount(receiptOtherAddOnTotal));
+        }
         drawAmountRow("Folio total", formatAmount(receiptFolio.grandTotal), { bold: true });
         y += 2;
       }
@@ -4006,10 +4181,18 @@ export function BookingsPage() {
 
   const handleBreakfastSelection = (key: string, value: string) => {
     if (!selectedBooking) return;
+    // Per BR-05 (2026-10-13, decision #234): the
+    // drawer's per-date × per-guest breakfast grid lives
+    // in `BookingDrawerWorkspace.tsx` (the
+    // `<BookingDrawerBreakfastTab>`). The legacy
+    // `Record<string, string>` shape (kept for the
+    // printed registration form's checkbox-fill, per
+    // BR-04) is still the binding here. The drawer tab
+    // is the source of truth for the new shape.
     const selections = {
       ...(selectedBooking.breakfastSelections || {}),
       [key]: value
-    };
+    } as any;
     persistSelectedBooking({ breakfastSelections: selections });
   };
 
@@ -4104,6 +4287,46 @@ export function BookingsPage() {
       toast.error("Failed to move booking", err.message || "An unexpected error occurred.");
     } finally {
       setMoveIsSubmitting(false);
+    }
+  };
+
+  // EXT-01: extend stay handler
+  const handleExtendSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedBooking || !extendCheckOut) return;
+
+    setExtendIsSubmitting(true);
+    try {
+      const result = await extendStayBooking({
+        bookingId: selectedBooking.id,
+        checkOut: extendCheckOut,
+        reason: extendReason || "Extend stay"
+      });
+      if (result.success) {
+        toast.success("Stay extended", "The guest's check-out date has been updated.");
+        const newCheckOutISO = `${extendCheckOut}T00:00:00Z`;
+        const newNumNights = Math.max(
+          Math.round((new Date(newCheckOutISO).getTime() - new Date(`${selectedBooking.checkIn}T00:00:00Z`).getTime()) / 86400000),
+          1
+        );
+        setSelectedBooking((previous) => previous ? {
+          ...previous,
+          checkOut: extendCheckOut,
+          numNights: newNumNights,
+          totalPrice: result.data?.totalPrice ?? previous.totalPrice,
+          rateBreakdown: result.data?.rateBreakdown ?? previous.rateBreakdown,
+          originalTotalPrice: result.data?.originalTotalPrice ?? previous.originalTotalPrice,
+          voucherDiscount: result.data?.voucherDiscount ?? previous.voucherDiscount
+        } : null);
+        setShowExtendForm(false);
+      } else {
+        toast.error("Failed to extend stay", result.error || "Please try a different check-out date.");
+      }
+    } catch (err: any) {
+      console.error("Extend stay failed:", err);
+      toast.error("Failed to extend stay", err.message || "An unexpected error occurred.");
+    } finally {
+      setExtendIsSubmitting(false);
     }
   };
 
@@ -4465,8 +4688,47 @@ export function BookingsPage() {
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
-        hasBreakfast,
-        breakfastRate: hasBreakfast ? (breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT) : 0,
+        // Per BR-05 (2026-10-13, decision #234): the walk-in
+        // modal now writes the rich `breakfastSelections` shape
+        // (per-date × per-guest meal entries) + the
+        // server-recomputed `breakfastTotal` + the `hasAnyBreakfast`
+        // flag (matches the public Step 2 write path per BR-03).
+        // The legacy `hasBreakfast` boolean stays `true` when at
+        // least one meal is selected (the receipt PDF +
+        // registration-form clone still read it). The new
+        // `breakfastConfig.ratePerPersonPerNight` field stays
+        // populated so older dashboards that surface the line
+        // item "Breakfast — ₱X / guest / night" don't render empty.
+        // Per BR-08 (decision #238, 2026-10-14): the legacy
+        // flat-rate `hasBreakfast: boolean` + `breakfastRate: number`
+        // pair is gone — the rich shape
+        // `breakfastSelections: Record<key, BreakfastSelectionEntry>`
+        // + `breakfastTotal: number` is the single source of truth.
+        // The walk-in `WalkinBreakfastGrid` returns both fields; if
+        // the desk hasn't picked any meals, the spread is omitted
+        // so the doc carries no legacy empty keys.
+        ...(walkinBreakfast && walkinBreakfast.breakfastSelections
+          && Object.keys(walkinBreakfast.breakfastSelections).length > 0
+          ? {
+            breakfastSelections: walkinBreakfast.breakfastSelections,
+            breakfastTotal: walkinBreakfast.breakfastTotal
+          }
+          : {}),
+        // Per BR-12.1 (2026-10-15, decision #247): the
+        // walk-in modal Step 2's other-add-ons grid feeds
+        // the rich `otherAddOnSelections` map +
+        // `otherAddOnTotal` + `hasAnyOtherAddOns` flag
+        // through to the create call. When the desk hasn't
+        // picked any add-ons (or the catalog is empty /
+        // disabled), the spread is omitted so the doc
+        // carries no empty keys.
+        ...(walkinOtherAddOns && walkinOtherAddOns.hasAnyOtherAddOns
+          ? {
+            otherAddOnSelections: walkinOtherAddOns.otherAddOnSelections,
+            otherAddOnTotal: walkinOtherAddOns.otherAddOnTotal,
+            hasAnyOtherAddOns: true
+          }
+          : {}),
         guestIdPhotoUrl: null,
         handledBy: currentUser?.uid || "staff",
         cancellationReason: "",
@@ -4479,7 +4741,15 @@ export function BookingsPage() {
         setGuestEmail("");
         setGuestPhone("");
         setPriceOverride("");
-        setHasBreakfast(false);
+        // Per BR-05 / BR-08: reset the rich-shape breakfast
+        // state (the legacy `hasBreakfast` reset was
+        // retired with the close-out).
+        setWalkinBreakfast(null);
+        setWalkinBreakfastOverrideReason("");
+        // Per BR-12.1: clear the other-add-ons state
+        // alongside breakfast so a fresh modal open
+        // starts clean.
+        setWalkinOtherAddOns(null);
         setWalkinDiscountType("");
         setWalkinVoucherCode("");
         setWalkinSpecialRequests("");
@@ -4513,6 +4783,10 @@ export function BookingsPage() {
         setActiveStaffHoldId("");
         setActiveStaffHoldExpiresAt("");
         clearStaffHoldParams();
+        // Per BR-09 (2026-10-14): reset the step state
+        // on the create-success close path so the
+        // next "Create New Booking" opens at Step 1.
+        setWalkinStep(1);
         setIsModalOpen(false);
         toast.success(
           submittedRoomStays.length > 1 ? "Reservation created" : "Walk-in booking created",
@@ -5338,6 +5612,16 @@ export function BookingsPage() {
               onSectionChange={setActiveBookingSection}
               totalPaid={selectedBookingFolio?.paymentsTotal ?? 0}
               balance={selectedBookingFolio?.balance ?? selectedBooking.totalPrice}
+              // Per OCT-FOL-01 (2026-10-20, decision #298): the
+              // strip's "Total" metric is the folio's grand total —
+              // the base the balance is derived from. It used to
+              // read `booking.totalPrice`, which is not that base
+              // (the folio also carries the other add-ons + the
+              // extras, and for a multi-room reservation
+              // `totalPrice` is the child's while the balance is
+              // the reservation's), so Total / Paid / Balance did
+              // not reconcile.
+              folioTotal={selectedBookingFolio?.grandTotal ?? selectedFolioBaseTotal}
               missingCheckInItems={selectedBookingCheckInReadiness?.missingItems ?? []}
               paymentMethodLabel={selectedBooking.paymentMethod ? getOnsitePaymentMethodLabel(selectedBooking.paymentMethod) : ""}
               // Per FOL-02 (2026-08-06, decision #198): the
@@ -5534,6 +5818,127 @@ export function BookingsPage() {
                 </form>
               </div>
             )}
+
+            {/* EXT-01: Extend stay form */}
+            {selectedBooking && showExtendForm && (
+              <div className="space-y-3">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <BedDouble size={14} className="text-primary" aria-hidden="true" />
+                  Extend Stay Workstation
+                </h3>
+                <form onSubmit={handleExtendSubmit} className="rounded-lg border border-gray-200 bg-white p-5 space-y-4 text-xs">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {/* Current room (locked) */}
+                    <label className="flex flex-col gap-1.5 font-semibold text-gray-500">
+                      Current Room
+                      <input
+                        type="text"
+                        value={`Room ${selectedBooking.roomNumber} (${selectedBooking.roomType})`}
+                        readOnly
+                        className="min-h-[38px] rounded border border-gray-100 bg-gray-50 px-2 text-xs text-gray-500 cursor-not-allowed"
+                      />
+                    </label>
+
+                    {/* Current check-in (locked) */}
+                    <label className="flex flex-col gap-1.5 font-semibold text-gray-500">
+                      Check-In Date
+                      <input
+                        type="date"
+                        value={selectedBooking.checkIn}
+                        readOnly
+                        className="min-h-[38px] rounded border border-gray-100 bg-gray-50 px-2 text-xs text-gray-500 cursor-not-allowed"
+                      />
+                    </label>
+
+                    {/* New check-out (editable) */}
+                    <label className="flex flex-col gap-1.5 font-semibold text-gray-500">
+                      New Check-Out Date
+                      <input
+                        type="date"
+                        required
+                        min={(() => {
+                          // min = day after current check-out
+                          const d = new Date(`${selectedBooking.checkOut}T00:00:00Z`);
+                          d.setDate(d.getDate() + 1);
+                          return d.toISOString().slice(0, 10);
+                        })()}
+                        value={extendCheckOut}
+                        onChange={(e) => setExtendCheckOut(e.target.value)}
+                        className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
+                      />
+                    </label>
+                  </div>
+
+                  <label className="flex flex-col gap-1.5 font-semibold text-gray-500">
+                    Reason for Extending
+                    <input
+                      type="text"
+                      value={extendReason}
+                      onChange={(e) => setExtendReason(e.target.value)}
+                      placeholder="e.g. Guest requested 1 more night"
+                      className="min-h-[38px] rounded border border-gray-200 px-3 text-xs text-gray-800"
+                    />
+                  </label>
+
+                  {/* Nights delta */}
+                  {extendCheckOut && (() => {
+                    const currentCO = new Date(`${selectedBooking.checkOut}T00:00:00Z`);
+                    const newCO = new Date(`${extendCheckOut}T00:00:00Z`);
+                    const extraNights = Math.round((newCO.getTime() - currentCO.getTime()) / 86400000);
+                    if (extraNights <= 0) return null;
+                    return (
+                      <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-[10px] leading-relaxed text-primary-dark">
+                        <p className="font-bold">Extension adds {extraNights} night{extraNights === 1 ? "" : "s"}</p>
+                        <p className="mt-1 opacity-80">The guest will be charged for the additional night{extraNights === 1 ? "" : "s"} at the current rate. Any rate recalculation happens automatically.</p>
+                      </div>
+                    );
+                  })()}
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowExtendForm(false)}
+                      className="inline-flex min-h-[38px] items-center justify-center rounded-lg border border-gray-200 px-4 font-semibold text-gray-700 hover:bg-gray-50 active:scale-95"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={extendIsSubmitting || !extendCheckOut}
+                      className="inline-flex min-h-[38px] items-center justify-center rounded-lg bg-primary px-4 font-semibold text-white hover:bg-primary-dark disabled:opacity-50 active:scale-95"
+                    >
+                      {extendIsSubmitting ? "Extending..." : "Confirm Extension"}
+                    </button>
+                  </div>
+
+                  {/* Per EXT-01: if the guest wants to move rooms AND extend,
+                      prefill the move form's check-out with the extend date. */}
+                  {extendCheckOut && (
+                    <div className="text-center">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowExtendForm(false);
+                          setMoveCheckOut(extendCheckOut);
+                          setMoveReason("Move + extend");
+                          setShowMoveForm(true);
+                        }}
+                        className="text-[10px] text-primary underline hover:text-primary-dark"
+                      >
+                        Need a different room? Move + extend instead
+                      </button>
+                    </div>
+                  )}
+                </form>
+              </div>
+            )}
+
+            {/* Per EXT-01 (2026-01-27): the Stay History timeline
+                renders the booking's `rescheduleHistory[]` inside the
+                "Activity & More" section, after the action forms. */}
+            {selectedBooking && (selectedBooking.rescheduleHistory?.length ?? 0) > 0 && (
+              <StayHistory entries={selectedBooking.rescheduleHistory ?? []} />
+            )}
             </BookingDrawerSectionPanel>
 
             {/* Financial totals */}
@@ -5628,6 +6033,22 @@ export function BookingsPage() {
                     <span>Room and booked add-ons</span>
                     <span className="font-semibold text-gray-900">{formatPrice(selectedFolioBaseTotal)}</span>
                   </div>
+                  {/* Per OCT-FOL-01 (2026-10-20, decision #298): the
+                      BR-12 other add-ons are NOT inside
+                      `totalPrice` (BR-12 decision 2 — "added on top
+                      of it for the balance"), so they need their own
+                      line for the breakdown to add up to the folio
+                      total. Without it the desk saw a folio total
+                      that was ₱2,000 higher than the sum of the
+                      lines above it. */}
+                  {(selectedBookingFolio?.otherAddOnTotal ?? 0) > 0 ? (
+                    <div className="flex items-center justify-between gap-4">
+                      <span>Other add-ons</span>
+                      <span className="font-semibold text-gray-900">
+                        {formatPrice(selectedBookingFolio?.otherAddOnTotal ?? 0)}
+                      </span>
+                    </div>
+                  ) : null}
                   <div className="flex items-center justify-between gap-4">
                     <span>Store charges billed to room</span>
                     <span className="font-semibold text-gray-900">{formatPrice(selectedBookingFolio?.storeTotal ?? 0)}</span>
@@ -5768,7 +6189,7 @@ export function BookingsPage() {
 
             {/* Breakfast selections */}
             <BookingDrawerSectionPanel section="check-in" activeSection={activeBookingSection}>
-            {selectedBooking.hasBreakfast && (selectedBooking.status === "confirmed" || selectedBooking.status === "checked-in") && (() => {
+            {(selectedBooking.breakfastSelections && Object.keys(selectedBooking.breakfastSelections).length > 0) && (selectedBooking.status === "confirmed" || selectedBooking.status === "checked-in") && (() => {
               const breakfastKeys = Object.keys(selectedBooking.breakfastSelections ?? {});
               const recordedCount = breakfastKeys.filter((key) => selectedBooking.breakfastSelections?.[key]).length;
               const totalSlots = selectedBooking.numGuests * getStayDates(selectedBooking).length;
@@ -5815,12 +6236,29 @@ export function BookingsPage() {
                                 return (
                                   <td key={key} className="px-2 py-2">
                                     <select
-                                      value={selectedBooking.breakfastSelections?.[key] ?? ""}
+                                      // Per BR-08 (decision #238, 2026-10-14):
+                                      // this booking-drawer breakfast surface
+                                      // is a STUB retained for the registration
+                                      // form pre-fill — the real per-meal
+                                      // capture lives in the drawer's Breakfast
+                                      // tab (BR-05). The select reads the new
+                                      // `breakfastSelections: Record<key,
+                                      // BreakfastSelectionEntry>` shape and
+                                      // falls back to the legacy string value
+                                      // for pre-BR-01 bookings. The catalog
+                                      // is the new `meals[]` instead of the
+                                      // legacy `silogItems[]`.
+                                      value={(
+                                        selectedBooking.breakfastSelections?.[key]
+                                          && typeof selectedBooking.breakfastSelections[key] === "object"
+                                          ? (selectedBooking.breakfastSelections[key] as any).mealName || ""
+                                          : (selectedBooking.breakfastSelections?.[key] as unknown as string) || ""
+                                      )}
                                       onChange={(event) => handleBreakfastSelection(key, event.target.value)}
                                       className="min-h-[34px] w-full rounded border border-gray-200 bg-white px-2 text-[10px] font-semibold text-gray-700"
                                     >
                                       <option value="">Select meal</option>
-                                      {breakfastConfig.silogItems
+                                      {(breakfastConfig.meals || [])
                                         .filter((item: { id: string; name: string; isActive: boolean }) => item.isActive)
                                         .map((item: { id: string; name: string; isActive: boolean }) => (
                                           <option key={item.id} value={item.name}>{item.name}</option>
@@ -6693,6 +7131,29 @@ export function BookingsPage() {
             )}
             </BookingDrawerSectionPanel>
 
+            {/* Per BR-05 (2026-10-13, decision #234): the staff
+                booking-drawer breakfast tab. The panel wrapper
+                (BookingDrawerSectionPanel) is a thin `hidden`
+                utility — the section model + tab list lives in
+                `BookingDrawerWorkspace.tsx §sections` and the
+                tab's primary panel is the main `primary` panel
+                set above. The Breakfast tab is a second `primary`
+                panel so the tab's selection drives visibility
+                (matching the Overview / Check-in / Folio panel
+                shape). */}
+            <BookingDrawerSectionPanel section="breakfast" activeSection={activeBookingSection} primary>
+              <BookingDrawerBreakfastTab booking={selectedBooking} />
+            </BookingDrawerSectionPanel>
+
+            {/* Per BR-12 (2026-10-14, decision #245 reserved):
+                the staff "Other Add-Ons" tab. Read view of the
+                per-day × per-add-on selection map + served
+                badges + a total summary. Edit support ships in
+                the BR-13 refactor. */}
+            <BookingDrawerSectionPanel section="addons" activeSection={activeBookingSection} primary>
+              <BookingDrawerOtherAddOnsTab booking={selectedBooking} />
+            </BookingDrawerSectionPanel>
+
             {/* Secondary and destructive booking actions */}
             <BookingDrawerSectionPanel section="more" activeSection={activeBookingSection} primary className="border-t border-gray-150 pt-4">
               {/* Per CWB-04 / decision #122 (2026-07-23):
@@ -6727,6 +7188,32 @@ export function BookingsPage() {
                 >
                   <Move size={15} className="text-primary" aria-hidden="true" />
                   Move / upgrade room
+                  {renderActionScope("room")}
+                </button>
+              )}
+
+              {/* Per EXT-01 (2026-01-27): the "Extend stay" action.
+                  Only shown for eligible statuses (not pending/payment-uploaded).
+                  The form locks the room + check-in to the booking's current
+                  values and only accepts a new, later check-out date. */}
+              {RESCHEDULABLE_STATUSES.includes(selectedBooking.status) && !showExtendForm && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Default extend check-out to the day after current check-out
+                    const currentCO = selectedBooking.checkOut;
+                    if (currentCO) {
+                      const d = new Date(`${currentCO}T00:00:00Z`);
+                      d.setDate(d.getDate() + 1);
+                      setExtendCheckOut(d.toISOString().slice(0, 10));
+                    }
+                    setExtendReason("");
+                    setShowExtendForm(true);
+                  }}
+                  className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-gray-250 bg-white px-4 text-xs font-bold text-gray-700 transition hover:bg-gray-50"
+                >
+                  <BedDouble size={15} className="text-primary" aria-hidden="true" />
+                  Extend stay
                   {renderActionScope("room")}
                 </button>
               )}
@@ -7218,6 +7705,34 @@ export function BookingsPage() {
       >
         <form onSubmit={handleWalkinSubmit} id="walkin-form" className="space-y-4 text-sm">
           <span className="sr-only">Confirm Reservation</span>
+          {/* Per BR-09 (2026-10-14): the walk-in modal
+              renders the same 5-step stepper as the public
+              booking flow. The stepper sits at the top of
+              the form (under the staff-hold banner so a
+              live hold is still the highest-priority
+              signal). The desk uses the same step labels
+              the guest sees on `/book` — the desk is
+              rarely confused by the public flow but the
+              parity keeps the booking-shape stable. */}
+          {(() => {
+            const walkinSteps = ["Rooms", "Add-ons", "Guest details", "Review", "Confirmation"];
+            return (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <StepIndicator steps={walkinSteps} currentStep={walkinStep} />
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-primary">
+                    Step {walkinStep} of 5
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    {walkinStep === 1 && "Pick the rooms, dates, and occupancy."}
+                    {walkinStep === 2 && "Configure breakfast per guest per day (optional)."}
+                    {walkinStep === 3 && "Capture guest contact info."}
+                    {walkinStep === 4 && "Source, payment, discounts, special requests."}
+                  </p>
+                </div>
+              </div>
+            );
+          })()}
           {activeStaffHoldId && (
             <div className={`rounded-xl border p-4 ${staffHoldSecondsRemaining > 0 ? "border-blue-200 bg-blue-50" : "border-red-200 bg-red-50"}`}>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -7565,27 +8080,69 @@ export function BookingsPage() {
             </button>
           </div>
 
-          <div className="space-y-2 pt-1">
-            <label className="flex items-start gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={hasBreakfast}
-                onChange={(e) => setHasBreakfast(e.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary-light"
+          {/* Per BR-09 (2026-10-14): the breakfast
+              per-date × per-guest meal grid moves into
+              the new "Add-ons" step (Step 2 in the
+              walk-in modal's 5-step model). The
+              immediate-check-in checkbox stays glued
+              to the grid because both surface
+              per-arrival logistics — splitting them
+              across steps would force the desk to
+              bounce back and forth. The grid is the
+              same `<WalkinBreakfastGrid>` component
+              used pre-BR-09; the BR-05 booking-drawer
+              tests still pass because the file still
+              references both the import and the
+              `breakfastSelections` shape. */}
+          {walkinStep === 2 ? (
+            <div className="space-y-3 pt-1" data-testid="walkin-addons-section">
+              {/* Per BR-05 (2026-10-13, decision #234): the
+                  legacy `Include Daily Breakfast` flat-rate
+                  toggle is replaced by the per-date × per-guest
+                  meal grid below. The grid (a) feeds the rich
+                  `breakfastSelections` shape into the booking
+                  create call, and (b) surfaces the cutoff
+                  warning + override-reason input when the desk
+                  selects a meal for a locked date. */}
+              <WalkinBreakfastGrid
+                checkIn={checkInDate}
+                checkOut={checkOutDate}
+                numGuests={numGuests}
+                staffUid={currentUser?.uid || "staff"}
+                overrideReason={walkinBreakfastOverrideReason}
+                onOverrideReasonChange={setWalkinBreakfastOverrideReason}
+                onChange={setWalkinBreakfast}
+                timezone={config.timezone}
               />
-              <span>Include Daily Breakfast (+₱{breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT}/guest/night)</span>
-            </label>
 
-            <label className="flex items-start gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={immediateCheckIn}
-                onChange={(e) => setImmediateCheckIn(e.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary-light"
+              {/* Per BR-12.1 (2026-10-15, decision #247):
+                  the parallel "Other add-ons" grid for the
+                  walk-in modal Step 2. Renders below the
+                  breakfast grid; both share the Step 2
+                  "Add-ons" step. The grid feeds the rich
+                  `otherAddOnSelections` + `otherAddOnTotal` +
+                  `hasAnyOtherAddOns` to the create call —
+                  when null/empty the create call omits the
+                  fields so the booking stays slim. */}
+              <WalkinOtherAddOnGrid
+                checkIn={checkInDate}
+                checkOut={checkOutDate}
+                numGuests={numGuests}
+                staffUid={currentUser?.uid || "staff"}
+                onChange={setWalkinOtherAddOns}
               />
-              <span>Check-In Guest Immediately</span>
-            </label>
-          </div>
+
+              <label className="flex items-start gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={immediateCheckIn}
+                  onChange={(e) => setImmediateCheckIn(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary-light"
+                />
+                <span>Check-In Guest Immediately</span>
+              </label>
+            </div>
+          ) : null}
 
           <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
             Source
@@ -7693,16 +8250,98 @@ export function BookingsPage() {
               <span>Accommodation Cost{walkinRoomStays.length > 1 ? " (all rooms)" : ""}:</span>
               <span>{formatPrice(roomChargeTotal)}</span>
             </div>
-            {hasBreakfast && (
+            {walkinBreakfast && walkinBreakfast.breakfastSelections && Object.keys(walkinBreakfast.breakfastSelections).length > 0 && (
               <div className="flex justify-between text-gray-500">
                 <span>Breakfast Surcharges:</span>
-                <span>{formatPrice(brekkieRate * numGuests * numNights)}</span>
+                <span>{formatPrice(walkinBreakfast.breakfastTotal)}</span>
               </div>
             )}
             <div className="flex justify-between border-t border-gray-150 pt-2 text-sm font-bold text-primary-dark">
               <span>Final Total Price:</span>
               <span>{formatPrice(priceOverride !== "" ? Number(priceOverride) : totalPrice)}</span>
             </div>
+          </div>
+          {/* Per BR-09 (2026-10-14): the in-form
+              Continue/Back nav. The footer "Cancel" +
+              "Confirm Reservation" CTAs (in the modal's
+              `footer` prop) remain the create-call
+              surface — those CTAs are the actual
+              Step 5 (Confirmation) handoff. The nav
+              here just gates which sections of the
+              form are visible per step. Step 1 → 4
+              uses the per-step CTA; on Step 4 the
+              nav collapses so the desk can use the
+              primary "Confirm Reservation" footer
+              CTA without competing for attention. */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3">
+            <button
+              type="button"
+              onClick={() => setWalkinStep((current) => (current > 1 ? ((current - 1) as 1 | 2 | 3 | 4) : current))}
+              disabled={walkinStep === 1}
+              className="min-h-[40px] rounded-lg border border-gray-300 px-4 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Back
+            </button>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+              {walkinStep === 1 && "Step 1 — Rooms"}
+              {walkinStep === 2 && "Step 2 — Add-ons"}
+              {walkinStep === 3 && "Step 3 — Guest details"}
+              {walkinStep === 4 && "Step 4 — Review (use footer to confirm)"}
+            </p>
+            {walkinStep < 4 ? (
+              // Per BR-10 (decision #244 reserved, 2026-10-14 —
+              // Phase 14): the walk-in modal's Add-ons step
+              // (step 2) renders TWO parallel CTAs that both
+              // call the IDENTICAL `setWalkinStep` advance
+              // callback. They differ only in visual style +
+              // label, mirroring the public + corporate
+              // booking flows:
+              //   - **Primary**  "Continue to guest details"
+              //     — mirrored from the pre-BR-10 single
+              //     button.
+              //   - **Ghost**    "No add-ons, continue"
+              //     — the skip affordance for staff who
+              //     don't want to spend any time on the
+              //     per-date breakfast picker (the grid is
+              //     rendered one tab over; the staff member
+              //     hasn't actively skipped it).
+              // The BR-10 invariant is "both buttons call
+              // the same nextStep function" — both
+              // onClick handlers below reference the
+              // exact same `setWalkinStep((current) =>
+              // (current < 4 ? ((current + 1) as ...) :
+              // current))` arrow. The `WalkinBreakfastGrid`
+              // still runs the cut-off check per-date, so
+              // a past-cutoff date locks the dropdown and
+              // requires a selection OR an explicit
+              // `cutoffsEnabled = false` admin toggle to
+              // advance.
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setWalkinStep((current) => (current < 4 ? ((current + 1) as 1 | 2 | 3 | 4) : current))}
+                  className="min-h-[40px] rounded-lg bg-primary px-4 text-xs font-semibold text-white transition hover:bg-primary-dark"
+                >
+                  {walkinStep === 1 && "Continue to add-ons"}
+                  {walkinStep === 2 && "Continue to guest details"}
+                  {walkinStep === 3 && "Continue to review"}
+                </button>
+                {walkinStep === 2 && (
+                  <button
+                    type="button"
+                    onClick={() => setWalkinStep((current) => (current < 4 ? ((current + 1) as 1 | 2 | 3 | 4) : current))}
+                    data-testid="walkin-addons-skip-addons"
+                    className="min-h-[40px] rounded-lg border border-gray-300 bg-transparent px-4 text-xs font-semibold text-gray-500 transition hover:bg-gray-50"
+                  >
+                    No add-ons, continue
+                  </button>
+                )}
+              </div>
+            ) : (
+              <span className="min-h-[40px] inline-flex items-center rounded-lg border border-gray-200 px-4 text-xs font-semibold text-gray-500">
+                Place booking ↓
+              </span>
+            )}
           </div>
         </form>
       </Modal>
@@ -7789,7 +8428,9 @@ export function BookingsPage() {
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Breakfast</p>
                 <p className="font-semibold text-gray-900">
-                  {selectedBooking.hasBreakfast ? "Included" : "Not included"}
+                  {(selectedBooking.breakfastSelections && Object.keys(selectedBooking.breakfastSelections).length > 0)
+                    ? `${Object.keys(selectedBooking.breakfastSelections).length} meal${Object.keys(selectedBooking.breakfastSelections).length === 1 ? "" : "s"}`
+                    : "Not included"}
                 </p>
               </div>
             </div>

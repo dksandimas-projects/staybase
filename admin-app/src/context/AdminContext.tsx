@@ -28,6 +28,8 @@ import {
   DEFAULT_CORPORATE_PAGE_CONTENT,
   DEFAULT_ROOM_TYPES,
   MAX_PAYMENT_METHOD_QR_BYTES,
+  MAX_BREAKFAST_MEAL_IMAGE_BYTES,
+  BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES,
   MAX_ROOM_TYPE_PHOTOS,
   Notification,
   type NotificationType,
@@ -80,7 +82,22 @@ import {
   getEffectiveVatRate,
   normalizeVatConfig,
   type VatConfig,
-  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
+  // Per OCT-M1 (2026-10-20, decision #295): the hotel-wide
+  // "Add-ons enabled" master switch. Shared with the server so the
+  // stored value and the value the public catalog endpoint reads can
+  // never disagree on what "off" means.
+  normalizeOtherAddOnsEnabled,
+  // Per MSL-01 (2026-10-15): the stay-length cap. Stored RESOLVED
+  // (`Infinity` when the admin chose "no limit"), so every admin
+  // read gets a safe number. The Settings editor maps `Infinity` back
+  // to a literal `0` for display.
+  resolveMaxStayNights,
+  DEFAULT_MAX_STAY_NIGHTS,
+  // Per BR-08 (decision #238, 2026-10-14 — close-out):
+  // `DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT` import
+  // removed — the constant was deleted from
+  // `shared/constants/index.ts`. The admin uses the
+  // per-meal catalog (`breakfastConfig.meals[]`) now.
   type BookingRateBreakdown,
   type BookingSourceConfig,
   type DiscountScope,
@@ -92,7 +109,38 @@ import {
   type RoomTypeEntry,
   type SeasonalRateOverride,
   type TestRun,
-  type TestRunStatus
+  type TestRunStatus,
+  // Per BR-05 (2026-10-13): the admin booking drawer's
+  // Breakfast tab reads the rich per-slot shapes from
+  // the booking doc. The old `Record<string, string>`
+  // legacy shape is preserved as a sibling field so
+  // older bookings still hydrate + the drawer graceful-
+  // degrades (renders empty selection rows for legacy
+  // bookings with the old string-id map).
+  type BreakfastSelectionEntry,
+  type BreakfastServedEntry,
+  type OtherAddOnSelectionEntry,
+  // Per OCT-H4 (2026-10-20, decision #285): the MRB-11 revenue
+  // allocation snapshot shape, so the admin mapper can hydrate the
+  // stored allocation instead of letting the folio fall back to
+  // the legacy proportional heuristic.
+  type BookingRevenueAllocation,
+  // Per OCT-H4 (2026-10-20, decision #285): the SERVER-side
+  // recompute helpers, so the admin mapper derives the same
+  // breakfast / add-on totals and mirrors the server writes
+  // rather than inventing a second set of rules.
+  recomputeBreakfastTotal,
+  recomputeOtherAddOnTotal,
+  hasAnyOtherAddOns,
+  // Per OCT-H5 (2026-10-20, decision #283): the deep strip of
+  // `undefined`-valued keys applied to every settings write. The
+  // Firestore SDK rejects `undefined` outright
+  // (`Unsupported field value: undefined`) and the admin app does
+  // not set `ignoreUndefinedProperties`, so one stray
+  // `undefined`-valued key inside a settings payload made EVERY
+  // save of that section fail. See
+  // `shared/utils/firestorePayload.ts`.
+  stripUndefinedValues
 } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
@@ -204,6 +252,26 @@ export interface OnsitePayment {
   approvedBy: string | null;
   recordedBy: string;
   recordedAt: string;
+  /**
+   * Per BR-01 / decision #231 (2026-10-12, breakfast redesign): the
+   * lifecycle this payment belongs to. Existing refund subcollection
+   * writes carry `null` (legacy cancellation refunds); the read
+   * helper `getOnsitePaymentCategory(p)` defaults `null` to
+   * `"cancellation"` for back-compat. New breakfast-driven refunds
+   * carry `"breakfast"` + a populated `breakfastRefundContext`.
+   * `"payment"` is the guest-payment side (a positive amount) and
+   * carries `null` for `category` since the concept doesn't apply.
+   */
+  category?: "cancellation" | "breakfast" | null;
+  /**
+   * Per BR-01: required when `category === "breakfast"`, null
+   * otherwise. Snapshots the meal + slot + price at the moment the
+   * refund was opened so a later menu change doesn't rewrite the
+   * audit history. Shape is defined in
+   * `shared/types/index.ts` (re-exported as
+   * `import("@spark-inn/shared").BreakfastRefundContext`).
+   */
+  breakfastRefundContext?: import("@spark-inn/shared").BreakfastRefundContext | null;
 }
 
 export type IncidentalChargeCategory = "late-checkout" | "early-checkin" | "extra-person" | "damage" | "laundry" | "other";
@@ -330,8 +398,15 @@ export interface Booking {
   confirmedWithBalanceBy?: string | null;
   unpaidCheckoutReason?: string | null;
   unpaidCheckoutApprovedBy?: string | null;
-  hasBreakfast: boolean;
-  breakfastRate: number;
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy flat-rate `hasBreakfast: boolean` +
+  // `breakfastRate: number` pair is deleted from the
+  // admin-side `Booking` interface. The new meal-based
+  // model reads `breakfastSelections: Record<key,
+  // BreakfastSelectionEntry>` + `breakfastTotal: number`
+  // instead — every read site (Reports, the booking
+  // drawer, the dashboard, the bookings table) was
+  // migrated in BR-08.
   // Per Phase 12 — Dashboard Payment Rejection & Reference
   // Verification (2026-07-15): stamped by the
   // `/api/bookings/reject-payment` handler.
@@ -416,8 +491,61 @@ export interface Booking {
   };
   isTestData?: boolean;
   testRunId?: string | null;
-  breakfastSelections?: Record<string, string>;
-  breakfastServed?: Record<string, boolean>;
+  // Per BR-05 (2026-10-13, decision #234): the new
+  // rich `breakfastSelections` shape carries the meal
+  // triple per slot (BR-01 §BreakfastSelectionEntry).
+  // Legacy bookings written before BR-01 still hydrate
+  // as `Record<string, string>` (the old string-id map);
+  // the staff drawer renders empty selections for those
+  // legacy rows + offers a "Refresh selections" surface
+  // to migrate them. The richer type lives here so the
+  // drawer component imports the canonical shape.
+  breakfastSelections?: Record<string, string> | Record<string, BreakfastSelectionEntry>;
+  // Per BR-01 + BR-05: the per-slot served map. Same
+  // legacy-vs-rich story as `breakfastSelections`.
+  breakfastServed?: Record<string, boolean> | Record<string, BreakfastServedEntry>;
+  // Per BR-05: the per-booking breakfast liability
+  // surface (entries from `bookings/{id}/refunds/`
+  // where `category === "breakfast"`). The staff tab
+  // renders the pending ones + a "Mark as paid" action.
+  refunds?: Array<Record<string, any>>;
+  // Per BR-05: the server-side recomputed breakfast
+  // total (the BR-01 `recomputeBreakfastTotal` sum) —
+  // the drawer header shows it alongside the slot count.
+  breakfastTotal?: number;
+  // Per BR-12 (Phase 14 — Other Add-Ons, decision #245
+  // reserved, 2026-10-14): the admin-side view of the
+  // per-day × per-add-on selection map. Mirrors the
+  // shared `Booking.otherAddOnSelections` shape exactly —
+  // the admin drawer is a read site, the writes are
+  // through the new `handleStaffUpdateAddOns` /
+  // `handleMarkServedAddOns` endpoints. `hasAnyOtherAddOns`
+  // is the O(1) read mirror of
+  // `recomputeOtherAddOnTotal(selections) > 0`.
+  otherAddOnSelections?: Record<string, OtherAddOnSelectionEntry[]>;
+  otherAddOnTotal?: number;
+  hasAnyOtherAddOns?: boolean;
+  /** Per BR-12: the served map keyed by `yyyy-mm-dd-{addOnId}`. */
+  otherAddOnServed?: Record<string, { servedAt: any; servedBy: string }>;
+  // Per OCT-H4 (2026-10-20, decision #285): the O(1) read mirror
+  // of "does this booking carry any breakfast". Declared on the
+  // shared `Booking` type and written server-side alongside
+  // `breakfastTotal`, but the admin mapper never read it, so the
+  // Reports breakfast sub-tab and the drawer's "has breakfast"
+  // read saw `false` for every booking.
+  hasAnyBreakfast?: boolean;
+  // Per OCT-H4 (2026-10-20, decision #285): the MRB-11 revenue
+  // allocation snapshot (roomNet / breakfastNet / addOnNet /
+  // deductionNet / totalNet). Without it the folio's revenue-stream
+  // split falls back to the legacy proportional heuristic with
+  // `breakfastGross = 0`, so the room KPI silently absorbs the
+  // breakfast revenue. `null` for pre-MRB-11 bookings — which is
+  // exactly what the shared helper's legacy path expects.
+  revenueAllocation?: BookingRevenueAllocation | null;
+  // Per BR-05: the timestamp + uid of the last meal /
+  // served update so the header can display "Last edit".
+  updatedBy?: string | null;
+  paidAmount?: number;
   // Per EC-02 (2026-08-21): `confirmedTime` is the staff-approved
   // override of the guest's `requestedTime` — when staff
   // approves the request at the guest's original time, the
@@ -483,6 +611,17 @@ export interface Voucher {
   // voucher-issued email is fired (server-rendered, with the
   // code in a large monospace block).
   guestEmail: string | null;
+  // Per Phase 5 of the Spark Rewards tier system (2026-10-12,
+  // decision pending): reward voucher discriminator + Phase 2
+  // back-link fields. Pre-Phase-5 promo vouchers are missing
+  // these (treated as `kind: "promo"`, `valueType:
+  // discountType` on read) — non-breaking for existing
+  // deployments.
+  kind?: "promo" | "reward";
+  valueType?: "percent" | "flat" | "free-night";
+  memberId?: string | null;
+  memberNumber?: string | null;
+  rewardSource?: "free-night-tier" | "welcome" | null;
 }
 
 export interface CorporateCode {
@@ -532,6 +671,13 @@ export interface IntercomMessage {
   orderRef?: string;
   isEarlyCheckInRequest?: boolean;
   currentStayId?: string;
+  // Per PR-AUDIT-B3 (2026-10-20): the capability token of the session
+  // collection this message lives in, when it is a session-scoped
+  // message (`intercomSessions/{sessionToken}/messages/{id}`). The
+  // desk needs it to mark the message read in the SAME collection the
+  // guest's live listener is reading from — a legacy
+  // `intercoms/{room}/messages/{id}` message has no token.
+  sessionToken?: string;
   // Per `feat/call-history-messages`. Defined in the canonical
   // type at `@spark-inn/shared` (`shared/types/index.ts`) — these
   // fields are mirrored here only because the AdminContext uses a
@@ -559,6 +705,11 @@ export interface IntercomThread {
   resolved: boolean;
   updatedAt: string;
   currentStayId?: string;
+  // Per PR-AUDIT-B3 (2026-10-20): the capability token the server
+  // issued for this room's current stay. The guest's chat thread and
+  // call session live under paths that contain this token, so the
+  // desk needs it to read the guest's thread and to reply into it.
+  currentStayToken?: string;
 }
 
 // Per decision #206 (2026-08-19): when two front-desk staff race to
@@ -581,6 +732,11 @@ export interface IncomingCall {
   status: "ringing" | "active" | "ended";
   offer?: RTCSessionDescriptionInit;
   acceptedBy?: CallAcceptedBy | null;
+  // Per PR-AUDIT-B4 (2026-10-20): the capability token that scopes
+  // the call session. The call document lives at
+  // `callSessions/{sessionToken}`, so the desk addresses the same
+  // document the guest wrote.
+  sessionToken?: string;
 }
 
 export interface StoreOrderItem {
@@ -684,7 +840,74 @@ export interface AdminContextType {
   resolveEarlyCheckin: (bookingId: string, status: "approved" | "declined", staffNote?: string, confirmedTime?: string) => Promise<{ success: boolean; error?: string }>;
   grantEarlyCheckin: (bookingId: string, confirmedTime: string, staffNote?: string) => Promise<{ success: boolean; error?: string }>;
   rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> }>;
+  // Per EXT-01 (2026-01-27): the extend-stay path locks roomId + checkIn to the booking's current values.
+  extendStayBooking: (input: { bookingId: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> }>;
   addOnsitePayment: (bookingId: string, paymentId: string, amount: number, method: string, note: string, transactionReference?: string) => Promise<{ success: boolean; error?: string }>;
+  // Per BR-05 (2026-10-13, decision #234): the staff
+  // breakfast admin-context wrappers. Each wraps the
+  // corresponding staff-token-gated server endpoint,
+  // mirrors the `addOnsitePayment` `{ success, error }`
+  // return shape, and pulls the staff token from
+  // `auth.currentUser?.getIdToken(true)` so the call
+  // site stays a one-liner. The shapes match the BR-04
+  // + BR-05 spec additions to `OnsitePayment` so the
+  // follow-up refund flow (BR-06) can read the entries
+  // back without further admin-context shape changes.
+  staffUpdateBreakfast: (input: {
+    bookingId: string;
+    add: Array<{ slotKey: string; mealId: string; mealName: string; price: number }>;
+    change: Array<{ slotKey: string; mealId: string; mealName: string; price: number }>;
+    remove: Array<{ slotKey: string }>;
+    overrideCutoff: boolean;
+    overrideReason: string | null;
+  }) => Promise<{ success: boolean; error?: string; data?: any }>;
+  markBreakfastServed: (input: {
+    bookingId: string;
+    slotKey: string;
+    action: "serve" | "unserve";
+    reason: string | null;
+  }) => Promise<{ success: boolean; error?: string; data?: any }>;
+  markBreakfastRefundPaid: (input: {
+    bookingId: string;
+    refundId: string;
+    method: string;
+    transactionReference?: string | null;
+    note?: string | null;
+  }) => Promise<{ success: boolean; error?: string; data?: any }>;
+  // Per BR-12.1 (2026-10-15, decision #247 reserved):
+  // the staff "other add-ons" admin-context wrapper.
+  // Calls `/api/bookings/addons/staff-update` with the
+  // staff's Bearer token. Mirrors `staffUpdateBreakfast`
+  // shape (success/error + server data) so the
+  // caller's toast + state-update flows stay uniform
+  // with the rest of the admin booking-drawer.
+  staffUpdateOtherAddOns: (input: {
+    bookingId: string;
+    add: Array<{
+      selectionKey: string;
+      addOnId: string;
+      quantity: number;
+      priceSnapshot: number;
+      nameSnapshot: string;
+      unitSnapshot: "per-person" | "per-stay";
+      cutoffHoursBeforeCheckInSnapshot: number;
+    }>;
+    change: Array<{
+      selectionKey: string;
+      addOnId: string;
+      quantity: number;
+      priceSnapshot: number;
+      nameSnapshot: string;
+      unitSnapshot: "per-person" | "per-stay";
+      cutoffHoursBeforeCheckInSnapshot: number;
+    }>;
+    remove: Array<{ selectionKey: string }>;
+    overrideReason: string | null;
+  }) => Promise<{ success: boolean; error?: string; data?: any }>;
+  markOtherAddOnServed: (input: {
+    bookingId: string;
+    selectionKey: string;
+  }) => Promise<{ success: boolean; error?: string; data?: any }>;
   // Per fix/walkin-split-name (2026-07-25): the walk-in modal
   // mirrors the guest `/book` page and collects `firstName` +
   // `lastName` as separate fields. The server combines them
@@ -771,13 +994,19 @@ export interface AdminContextType {
   corporateInquiries: CorporateInquiry[];
   updateInquiryStatus: (inquiryId: string, status: CorporateInquiry["status"]) => Promise<void>;
   addInquiryNote: (inquiryId: string, text: string) => Promise<void>;
+  // Per BR-08 (decision #238, 2026-10-14 — close-out):
+  // the corporate-inquiry conversion no longer carries an
+  // `hasBreakfast` toggle. Corporate groups negotiate their
+  // own catering separately from the room rate; the server
+  // `convert-inquiry` endpoint accepts no breakfast flag
+  // (the booking is created with `breakfastTotal: 0` and
+  // `hasAnyBreakfast: false`).
   convertInquiryToBooking: (input: {
     inquiryId: string;
     roomId: string;
     checkIn: string;
     checkOut: string;
     guests: number;
-    hasBreakfast: boolean;
     paymentMethod: string;
     ratePerNightOverride?: number | null;
   }) => Promise<{ success: boolean; error?: string; bookingId?: string; bookingRef?: string; totalPrice?: number }>;
@@ -981,6 +1210,21 @@ export interface AdminContextType {
     file: File
   ) => Promise<{ success: boolean; error?: string; url?: string }>;
   resetPaymentMethodQr: (method: string) => Promise<{ success: boolean; error?: string }>;
+
+  // Per MBUX-04 (decision #256, 2026-10-15) — optional breakfast
+  // meal thumbnails managed from Settings -> Dining. Both return the
+  // new absolute URL / nothing rather than writing Firestore
+  // themselves: the caller merges `imageUrl` into the meal row and
+  // saves through the normal `handleSaveBreakfast` path, so the
+  // Zod schema validates the row like any other edit.
+  uploadBreakfastMealImage: (
+    mealId: string,
+    file: File
+  ) => Promise<{ success: boolean; error?: string; url?: string }>;
+  removeBreakfastMealImage: (
+    mealId: string,
+    previousUrl: string
+  ) => Promise<{ success: boolean; error?: string }>;
 
   // Audio Notifications & Intercom Counts
   unreadIntercomCount: number;
@@ -1575,6 +1819,52 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             return "";
           };
 
+          // Per OCT-H4 (2026-10-20, decision #285): the BR-01
+          // breakfast money fields + the BR-12 Other Add-Ons map,
+          // its denormalized total and the O(1) mirrors — computed
+          // ONCE so the mapper can use them in the object literal
+          // below.
+          //
+          // The mirrors are DERIVED when the doc does not carry the
+          // explicit flag (a booking written before the field
+          // existed, or a hand-edited doc), so a read site never
+          // reports "no breakfast" / "no add-ons" for a booking that
+          // has them. The derivation reuses the SERVER's own
+          // helpers (`recomputeBreakfastTotal`,
+          // `recomputeOtherAddOnTotal`, `hasAnyOtherAddOns`) so
+          // the admin read and the server write can never disagree.
+          const breakfastSelectionsHydrated: Record<string, BreakfastSelectionEntry> =
+            (data.breakfastSelections as Record<string, BreakfastSelectionEntry>) || {};
+          const breakfastTotalHydrated = Number(
+            data.breakfastTotal ?? recomputeBreakfastTotal(breakfastSelectionsHydrated)
+          );
+          const hasAnyBreakfastHydrated =
+            data.hasAnyBreakfast === true ||
+            (data.hasAnyBreakfast === undefined &&
+              Object.values(breakfastSelectionsHydrated).some(
+                (entry) => entry && (entry.removedAt === null || entry.removedAt === undefined)
+              ));
+
+          const otherAddOnSelectionsHydrated: Record<string, OtherAddOnSelectionEntry[]> =
+            data.otherAddOnSelections
+              ? Object.fromEntries(
+                  Object.entries(data.otherAddOnSelections as Record<string, unknown>).map(
+                    ([date, entries]) => [
+                      date,
+                      (Array.isArray(entries) ? entries : []) as OtherAddOnSelectionEntry[]
+                    ]
+                  )
+                )
+              : {};
+          const otherAddOnTotalHydrated = Number(
+            data.otherAddOnTotal ?? recomputeOtherAddOnTotal(otherAddOnSelectionsHydrated)
+          );
+          const hasAnyOtherAddOnsHydrated =
+            data.hasAnyOtherAddOns === true ||
+            (data.hasAnyOtherAddOns === undefined &&
+              (otherAddOnTotalHydrated > 0 ||
+                hasAnyOtherAddOns(otherAddOnSelectionsHydrated)));
+
           bookingsData.push({
             id: docSnap.id,
             bookingRef: data.bookingRef || "",
@@ -1671,8 +1961,14 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             pointsRedeemedValue: data.pointsRedeemedValue || 0,
             pointsRedeemedBy: data.pointsRedeemedBy || null,
             pointsRedeemedAt: data.pointsRedeemedAt || null,
-            hasBreakfast: !!data.hasBreakfast,
-            breakfastRate: data.breakfastRate || 0,
+            // Per BR-08 (decision #238, 2026-10-14 — close-out):
+            // the legacy `hasBreakfast: boolean` +
+            // `breakfastRate: number` pair is removed from
+            // the hydration path. The new meal-based model
+            // hydrates `breakfastSelections: Record<key,
+            // BreakfastSelectionEntry>` + `breakfastTotal:
+            // number` directly from the booking doc (no
+            // client-side recomputation).
             reminderSentAt: data.reminderSentAt ? parseDateTimeString(data.reminderSentAt) : null,
             guestIdPhotoUrl: data.guestIdPhotoUrl || null,
             handledBy: data.handledBy || "",
@@ -1817,7 +2113,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
               : [],
             createdAt: parseDateTimeString(data.createdAt),
             guestRegistration: data.guestRegistration || null,
-            breakfastSelections: data.breakfastSelections || {},
+            breakfastSelections: breakfastSelectionsHydrated,
             // Per BSP-01 (fix/breakfast-served-persistence, 2026-07-25):
             // hydrate `breakfastServed` from the snapshot so the dashboard's
             // "Mark Served" toggle survives real-time refresh and is visible
@@ -1826,7 +2122,87 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             // successfully to Firestore (and the security rule allows it)
             // but read back as `undefined`, so the dashboard re-rendered the
             // row as unserved after every snapshot update.
+            //
+            // Per OCT-H4 (2026-10-20, decision #285): the two
+            // breakfast maps are now ADJACENT — the BSP-01 parity
+            // guard asserts that the mapper reads both, and
+            // keeping them side by side is what makes that
+            // invariant legible (and testable) at a glance.
             breakfastServed: data.breakfastServed || {},
+            // Per OCT-H4 (2026-10-20, decision #285): the BR-01 /
+            // BR-05 breakfast money fields. The admin `Booking` type
+            // declared `breakfastTotal` but the mapper never read it
+            // from the snapshot — the exact bug class the mapper's
+            // own `reservationId` comment (FOL-02, MRB-01) documents
+            // for those four fields, reintroduced for the October
+            // add-on fields.
+            //
+            // Consequences of the gap (all read-side misreporting —
+            // the write path is field-scoped, so nothing was
+            // destroyed):
+            //   1. `ReportsPage.tsx:1528` / `:1914` / `:2258` read
+            //      `booking.breakfastTotal` → `0`, so "total
+            //      breakfast revenue" showed ₱0 (and the CSV export
+            //      carried ₱0) while "Top meals" — computed from the
+            //      per-entry `price` — showed real money. The report
+            //      contradicted itself.
+            //   2. `bookingFolio.ts:814-821` could not see the
+            //      stored `revenueAllocation`, so the revenue-stream
+            //      split fell back to the legacy proportional
+            //      heuristic with `breakfastGross = 0` and the room
+            //      KPI silently absorbed the breakfast revenue.
+            //
+            // `breakfastTotal` is the server-recomputed BR-01 sum
+            // (the source of truth is the helper, not a client
+            // recomputation), and `hasAnyBreakfast` is its O(1)
+            // mirror. `0` / `false` for legacy bookings that never
+            // had breakfast.
+            breakfastTotal: breakfastTotalHydrated,
+            hasAnyBreakfast: hasAnyBreakfastHydrated,
+            // Per OCT-H4 (2026-10-20, decision #285): the MRB-11
+            // revenue allocation snapshot. `null` for pre-MRB-11
+            // bookings — which is exactly what
+            // `getBookingRevenueStreams` expects to trigger its
+            // legacy-heuristic fallback (and tag the export row
+            // `allocation: "legacy-heuristic"`). The four nets are
+            // coerced with `Number()` so a hand-edited doc cannot
+            // poison the folio math with a string.
+            revenueAllocation: data.revenueAllocation
+              ? {
+                  roomNet: Number(data.revenueAllocation.roomNet || 0),
+                  breakfastNet: Number(data.revenueAllocation.breakfastNet || 0),
+                  addOnNet: Number(data.revenueAllocation.addOnNet || 0),
+                  deductionNet: Number(data.revenueAllocation.deductionNet || 0),
+                  totalNet: Number(data.revenueAllocation.totalNet || 0)
+                }
+              : null,
+            // Per OCT-H4 (2026-10-20, decision #285): the BR-12
+            // Other Add-Ons map + its denormalized total + the O(1)
+            // `hasAnyOtherAddOns` mirror.
+            //
+            // Consequences of the gap: `ReportsPage.tsx:843`
+            // filtered `b.hasAnyOtherAddOns === true` to build the
+            // whole BR-12.1 Add-Ons sub-tab (selections, revenue,
+            // top add-ons, booking count, bar chart) — with the
+            // field always `false`, the sub-tab showed ZERO for
+            // every booking. And
+            // `BookingDrawerWorkspace.tsx:2051` read
+            // `booking.otherAddOnSelections || {}` → the drawer's
+            // Other Add-Ons tab showed "no add-ons" (and "Total: ₱0"
+            // at `:2303`) for a booking that had them.
+            //
+            // The entries are the BR-12 per-date × per-add-on
+            // arrays. They are hydrated verbatim (the entries carry
+            // their own snapshot fields); only the map's presence is
+            // normalized to `{}` so a legacy booking reads as "no
+            // add-ons" instead of `undefined`.
+            otherAddOnSelections: otherAddOnSelectionsHydrated,
+            otherAddOnTotal: otherAddOnTotalHydrated,
+            hasAnyOtherAddOns: hasAnyOtherAddOnsHydrated,
+            // Per BR-12: the per-add-on served map, keyed by
+            // `yyyy-mm-dd-{addOnId}`. Hydrated so the drawer's
+            // served state survives a snapshot echo.
+            otherAddOnServed: data.otherAddOnServed || {},
             // Per EC-01 (2026-08-21, fix shipped 2026-08-21):
             // hydrate `earlyCheckIn` from the snapshot. Same shape
             // of bug as FOL-02 (decision #198) — the admin
@@ -2334,6 +2710,40 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     }
   };
 
+  // Per EXT-01 (2026-01-27): the extend-stay path re-uses the
+  // reschedule endpoint with `mode: "extend"`. The room and
+  // check-in are locked to the booking's current values; only
+  // the check-out can be extended. The server enforces the lock.
+  const extendStayBooking = async (input: { bookingId: string; checkOut: string; reason?: string }) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/reschedule`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({
+          bookingId: input.bookingId,
+          // Locked to current room + check-in by the server (mode: "extend")
+          roomId: "__EXTEND_LOCKED__",
+          checkIn: "__EXTEND_LOCKED__",
+          checkOut: input.checkOut,
+          reason: input.reason || "Extend stay",
+          mode: "extend"
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to extend stay." };
+      }
+      return { success: true, data: data.data };
+    } catch (err: any) {
+      console.error("extendStayBooking failed:", err);
+      return { success: false, error: err.message || "An unexpected error occurred." };
+    }
+  };
+
   const createRoomBlock = async (input: { roomId: string; startDate: string; endDate: string; reason: string; notes?: string }) => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
@@ -2650,6 +3060,239 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     }
   };
 
+  // Per BR-05 (2026-10-13, decision #234): the
+  // staff breakfast admin-context wrapper. Calls
+  // `/api/bookings/breakfast/staff-update` with the
+  // staff's Bearer token. Mirrors the `addOnsitePayment`
+  // shape (success/error + server data) so the
+  // caller's toast + state-update flows stay uniform
+  // with the rest of the admin booking-drawer.
+  const staffUpdateBreakfast = async (input: {
+    bookingId: string;
+    add: Array<{ slotKey: string; mealId: string; mealName: string; price: number }>;
+    change: Array<{ slotKey: string; mealId: string; mealName: string; price: number }>;
+    remove: Array<{ slotKey: string }>;
+    overrideCutoff: boolean;
+    overrideReason: string | null;
+  }) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(
+        `${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/breakfast/staff-update`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            // Per `getApiBaseUrl` convention: the
+            // staff-update endpoint is the gated path
+            // that needs the staff's Firebase ID
+            // token. The `Bearer` prefix matches the
+            // existing `authenticateStaff` reader.
+            "Authorization": token ? `Bearer ${token}` : "",
+            // Per `plan/docs/SECURITY.md`: Cloudflare
+            // Turnstile at the route's public edge
+            // produces a server-validated token that
+            // the client must echo on every mutation.
+            // The apiRouter's `verifyTurnstile` reads
+            // it from `req.body.turnstileToken`.
+            "X-Spark-Inn-Turnstile": "client-echo"
+          },
+          body: JSON.stringify({
+            ...input,
+            turnstileToken: undefined
+          })
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return {
+          success: false,
+          error: data.error || "Failed to update breakfast selections"
+        };
+      }
+      return { success: true, data: data.data || null };
+    } catch (err: any) {
+      console.error("Error updating breakfast selections:", err);
+      return { success: false, error: err?.message || String(err) };
+    }
+  };
+
+  // Per BR-05: the staff mark-served wrapper.
+  // Calls `/api/bookings/breakfast/mark-served`.
+  const markBreakfastServed = async (input: {
+    bookingId: string;
+    slotKey: string;
+    action: "serve" | "unserve";
+    reason: string | null;
+  }) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(
+        `${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/breakfast/mark-served`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": token ? `Bearer ${token}` : ""
+          },
+          body: JSON.stringify(input)
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return {
+          success: false,
+          error: data.error || "Failed to update kitchen visibility"
+        };
+      }
+      return { success: true, data: data.data || null };
+    } catch (err: any) {
+      console.error("Error marking breakfast served:", err);
+      return { success: false, error: err?.message || String(err) };
+    }
+  };
+
+  // Per BR-05: the staff refund-liability "Mark as paid"
+  // wrapper. Calls
+  // `/api/bookings/breakfast/mark-refund-paid`. Reuses
+  // the same `{ success, error, data }` shape as
+  // `addOnsitePayment`. The function intentionally
+  // doesn't fall back to `handleAddRefund` — the
+  // BR-05 spec keeps breakfast refunds on a separate
+  // endpoint so the kitchen list's "Refund activity"
+  // feed (BR-07) can subscribe to one stream.
+  const markBreakfastRefundPaid = async (input: {
+    bookingId: string;
+    refundId: string;
+    method: string;
+    transactionReference?: string | null;
+    note?: string | null;
+  }) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(
+        `${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/breakfast/mark-refund-paid`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": token ? `Bearer ${token}` : ""
+          },
+          body: JSON.stringify(input)
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return {
+          success: false,
+          error: data.error || "Failed to mark refund as paid"
+        };
+      }
+      return { success: true, data: data.data || null };
+    } catch (err: any) {
+      console.error("Error marking breakfast refund as paid:", err);
+      return { success: false, error: err?.message || String(err) };
+    }
+  };
+
+  // Per BR-12.1 (2026-10-15, decision #247 reserved):
+  // the staff other-add-ons admin-context wrapper.
+  // Calls `/api/bookings/addons/staff-update` with the
+  // staff's Bearer token. Mirrors `staffUpdateBreakfast`
+  // exactly (success/error + server data). The
+  // `overrideReason` field is required when the
+  // selection is past its per-add-on cutoff.
+  const staffUpdateOtherAddOns = async (input: {
+    bookingId: string;
+    add: Array<{
+      selectionKey: string;
+      addOnId: string;
+      quantity: number;
+      priceSnapshot: number;
+      nameSnapshot: string;
+      unitSnapshot: "per-person" | "per-stay";
+      cutoffHoursBeforeCheckInSnapshot: number;
+    }>;
+    change: Array<{
+      selectionKey: string;
+      addOnId: string;
+      quantity: number;
+      priceSnapshot: number;
+      nameSnapshot: string;
+      unitSnapshot: "per-person" | "per-stay";
+      cutoffHoursBeforeCheckInSnapshot: number;
+    }>;
+    remove: Array<{ selectionKey: string }>;
+    overrideReason: string | null;
+  }) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(
+        `${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/addons/staff-update`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": token ? `Bearer ${token}` : "",
+            "X-Spark-Inn-Turnstile": "client-echo"
+          },
+          body: JSON.stringify({
+            ...input,
+            turnstileToken: undefined
+          })
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return {
+          success: false,
+          error: data.error || "Failed to update other add-on selections"
+        };
+      }
+      return { success: true, data: data.data || data };
+    } catch (err: any) {
+      console.error("Error updating other add-on selections:", err);
+      return { success: false, error: err?.message || String(err) };
+    }
+  };
+
+  // Per BR-12.1: the staff mark-served wrapper for
+  // other add-ons. Calls
+  // `/api/bookings/addons/mark-served`. The selection
+  // key is `${date}-${addOnId}` (composite of the
+  // per-day × per-add-on slot). Single-action per
+  // call — the drawer submits one selection at a time.
+  const markOtherAddOnServed = async (input: {
+    bookingId: string;
+    selectionKey: string;
+  }) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(
+        `${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/addons/mark-served`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": token ? `Bearer ${token}` : ""
+          },
+          body: JSON.stringify(input)
+        }
+      );
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return {
+          success: false,
+          error: data.error || "Failed to mark other add-on as served"
+        };
+      }
+      return { success: true, data: data.data || null };
+    } catch (err: any) {
+      console.error("Error marking other add-on as served:", err);
+      return { success: false, error: err?.message || String(err) };
+    }
+  };
+
   const addWalkinBooking = async (
     input: Omit<Booking, "id" | "bookingRef" | "createdAt" | "guestName"> & {
       firstName: string;
@@ -2751,7 +3394,14 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           numAdults: input.numAdults,
           numChildren: input.numChildren,
           extraBedCount: input.extraBedCount,
-          hasBreakfast: input.hasBreakfast,
+          // Per BR-08 (decision #238, 2026-10-14 — close-out):
+          // the legacy `hasBreakfast: boolean` is gone. The
+          // walk-in modal's `WalkinBreakfastGrid` captures the
+          // rich `breakfastSelections: Record<key,
+          // BreakfastSelectionEntry>` shape directly when the
+          // desk picks a meal — the `input.hasBreakfast` flag
+          // (a boolean for the legacy flat-rate flow) is no
+          // longer written.
           guestDetails: {
             firstName: trimmedFirst,
             lastName: trimmedLast,
@@ -3014,6 +3664,15 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             createdBy: data.createdBy || "",
             createdAt: data.createdAt ? (typeof data.createdAt.toDate === "function" ? data.createdAt.toDate().toISOString() : String(data.createdAt)) : "",
             guestEmail: data.guestEmail || null,
+            // Per Phase 5 (2026-10-12): reward voucher fields.
+            // Pre-Phase-5 promo vouchers are missing these —
+            // treat as the legacy "promo" kind with valueType
+            // matching their discountType.
+            kind: data.kind || "promo",
+            valueType: data.valueType || data.discountType || "flat",
+            memberId: data.memberId || null,
+            memberNumber: data.memberNumber || null,
+            rewardSource: data.rewardSource || null,
           });
         });
 
@@ -3314,13 +3973,16 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     checkIn: string;
     checkOut: string;
     guests: number;
-    hasBreakfast: boolean;
     paymentMethod: string;
     ratePerNightOverride?: number | null;
   }): Promise<{ success: boolean; error?: string; bookingId?: string; bookingRef?: string; totalPrice?: number }> => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
       const bookingId = doc(collection(db, "bookings")).id;
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the body no longer carries `hasBreakfast`. Corporate
+      // groups negotiate catering separately; the conversion
+      // creates a breakfast-free booking by default.
       const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/corporate/convert-inquiry`, {
         method: "POST",
         headers: {
@@ -3334,7 +3996,6 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           checkIn: input.checkIn,
           checkOut: input.checkOut,
           guests: input.guests,
-          hasBreakfast: input.hasBreakfast,
           paymentMethod: input.paymentMethod,
           ratePerNightOverride: input.ratePerNightOverride ?? null
         })
@@ -3791,7 +4452,8 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             guestName: data.guestName || "",
             resolved: !!data.resolved,
             updatedAt: formatIntercomTimestamp(data.updatedAt),
-            currentStayId: data.currentStayId || undefined
+            currentStayId: data.currentStayId || undefined,
+            currentStayToken: data.currentStayToken || undefined
           };
         });
         setIntercomThreads(threads);
@@ -3809,24 +4471,47 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       setIntercoms({});
       return;
     }
-    const roomNumbers = rooms.map((room) => room.roomNumber).filter(Boolean);
-    if (roomNumbers.length === 0) {
-      setIntercoms({});
-      return;
-    }
+    // Per PR-AUDIT-B3 (2026-10-20): a guest's chat thread now lives
+    // under `intercomSessions/{sessionToken}/messages` (the path
+    // carries the capability token the server issued at verification),
+    // while the desk's existing history lives under the legacy
+    // `intercoms/{roomNumber}/messages`. A single COLLECTION-GROUP
+    // query spans both, so the desk sees the whole thread regardless
+    // of which path a given message was written to.
+    //
+    // No `orderBy` is applied on purpose: an ordered collection-group
+    // query needs a dedicated collection-group index, and the desk
+    // sorts a 14-room hotel's threads in memory without noticing.
+    // (The guest's own query is a single-collection query, which the
+    // automatic single-field index covers.)
+    const messagesQuery = query(collectionGroup(db, "messages"));
 
-    const unsubscribes = roomNumbers.map((roomNumber) => {
-      const messagesQuery = query(
-        collection(db, "intercoms", roomNumber, "messages"),
-        orderBy("timestamp", "asc")
-      );
-
-      return onSnapshot(
-        messagesQuery,
-        (snapshot) => {
-          const messages: IntercomMessage[] = snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            return {
+    const unsubscribe = onSnapshot(
+      messagesQuery,
+      (snapshot) => {
+        // Group by room. Session-scoped documents carry `roomNumber`;
+        // legacy documents do not, so fall back to the path
+        // (`intercoms/{roomNumber}/messages/{messageId}`).
+        const grouped: Record<string, { raw: number; message: IntercomMessage }[]> = {};
+        snapshot.docs.forEach((docSnap) => {
+          const data = docSnap.data();
+          // Session-scoped documents carry `roomNumber`; legacy
+          // documents do not, so fall back to the path
+          // (`intercoms/{roomNumber}/messages/{messageId}`).
+          const legacyRoomId = docSnap.ref.parent?.parent?.id || "";
+          const roomNumber = String(data.roomNumber || legacyRoomId || "");
+          // Per PR-AUDIT-B3 (2026-10-20): a session-scoped message lives
+          // at `intercomSessions/{sessionToken}/messages/{id}`; the
+          // collection name is two levels up from the document. The desk
+          // needs the token to mark the message read in the same
+          // collection the guest is reading.
+          const isSessionScoped = docSnap.ref.parent?.parent?.parent?.id === "intercomSessions";
+          const sessionToken = isSessionScoped ? docSnap.ref.parent?.parent?.id || undefined : undefined;
+          if (!roomNumber) return;
+          const rawTimestamp = data.timestamp?.toMillis
+            ? data.timestamp.toMillis()
+            : (data.timestamp?.seconds ? data.timestamp.seconds * 1000 : 0);
+          const message: IntercomMessage = {
               id: docSnap.id,
               text: data.text || "",
               sender: data.sender || "guest",
@@ -3857,41 +4542,54 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
                 ? new Date(data.callStartedAt.toMillis()).toISOString()
                 : undefined,
               callDuration: typeof data.callDuration === "number" ? data.callDuration : undefined,
-              callAnsweredByName: typeof data.callAnsweredByName === "string"
-                ? data.callAnsweredByName
-                : null
-            };
-          });
+            callAnsweredByName: typeof data.callAnsweredByName === "string"
+              ? data.callAnsweredByName
+              : null,
+            // Per PR-AUDIT-B3 (2026-10-20): carry the session token so
+            // `markChatAsRead` can update the SAME collection the guest
+            // is reading from.
+            sessionToken
+          };
+          (grouped[roomNumber] ||= []).push({ raw: rawTimestamp, message });
+        });
 
-          setIntercoms((prev) => {
-            if (isLoadedRef.current) {
-              const prevMsgs = prev[roomNumber] || [];
-              const prevIds = new Set(prevMsgs.map((m) => m.id));
-              const hasNewGuestMsg = messages.some((m) => 
-                m.sender === "guest" && !m.isRead && !prevIds.has(m.id)
+        const byRoom: Record<string, IntercomMessage[]> = {};
+        Object.entries(grouped).forEach(([roomNumber, entries]) => {
+          byRoom[roomNumber] = entries
+            .sort((a, b) => a.raw - b.raw)
+            .map((entry) => entry.message);
+        });
+
+        setIntercoms((prev) => {
+          if (isLoadedRef.current) {
+            const hasNewGuestMsg = Object.entries(byRoom).some(([roomNumber, messages]) => {
+              const prevIds = new Set((prev[roomNumber] || []).map((m) => m.id));
+              return messages.some(
+                (m) => m.sender === "guest" && !m.isRead && !prevIds.has(m.id)
               );
-              if (hasNewGuestMsg) {
-                playSynthNotification("message");
-              }
+            });
+            if (hasNewGuestMsg) {
+              playSynthNotification("message");
             }
+          }
 
-            if (messages.length === 0) {
-              const { [roomNumber]: _removed, ...rest } = prev;
-              return rest;
-            }
-            return { ...prev, [roomNumber]: messages };
+          const next = { ...prev };
+          Object.keys(next).forEach((roomNumber) => {
+            if (!byRoom[roomNumber]) delete next[roomNumber];
           });
-        },
-        (error) => {
-          console.error(`Error listening to intercom messages for room ${roomNumber}:`, error);
-        }
-      );
-    });
+          Object.entries(byRoom).forEach(([roomNumber, messages]) => {
+            next[roomNumber] = messages;
+          });
+          return next;
+        });
+      },
+      (error) => {
+        console.error("Error listening to intercom messages:", error);
+      }
+    );
 
-    return () => {
-      unsubscribes.forEach((unsubscribe) => unsubscribe());
-    };
-  }, [rooms, currentUser]);
+    return unsubscribe;
+  }, [currentUser]);
 
   const sendIntercomMessage = async (roomId: string, text: string, sender: "guest" | "front-desk" = "front-desk") => {
     try {
@@ -3903,7 +4601,18 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         updatedAt: serverTimestamp()
       }, { merge: true });
 
-      await addDoc(collection(db, "intercoms", roomId, "messages"), {
+      // Per PR-AUDIT-B3 (2026-10-20): the reply must land in the
+      // SESSION-scoped collection so the guest — who now reads only
+      // `intercomSessions/{sessionToken}/messages` — actually sees it.
+      // When no token exists (the guest has not verified since the
+      // capability rollout) the reply falls back to the legacy path:
+      // the desk keeps the history, and the guest cannot read it.
+      const sessionToken = intercomThreads[roomId]?.currentStayToken;
+      const messagesCollection = sessionToken
+        ? collection(db, "intercomSessions", sessionToken, "messages")
+        : collection(db, "intercoms", roomId, "messages");
+
+      await addDoc(messagesCollection, {
         text,
         sender,
         guestName: sender === "guest" ? "Guest" : "Front Desk",
@@ -3912,7 +4621,8 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         isQuickRequest: false,
         isStoreOrder: false,
         isEarlyCheckInRequest: false,
-        currentStayId: intercomThreads[roomId]?.currentStayId || null
+        currentStayId: intercomThreads[roomId]?.currentStayId || null,
+        roomNumber: roomId
       });
     } catch (error) {
       console.error("Error sending intercom message:", error);
@@ -4030,7 +4740,15 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         updatedAt: serverTimestamp()
       }, { merge: true });
 
-      await addDoc(collection(db, "intercoms", roomId, "messages"), {
+      // Per PR-AUDIT-B3 (2026-10-20): same session-scoped target as
+      // the desk's normal reply — the guest reads only the session
+      // collection.
+      const sessionToken = intercomThreads[roomId]?.currentStayToken;
+      const messagesCollection = sessionToken
+        ? collection(db, "intercomSessions", sessionToken, "messages")
+        : collection(db, "intercoms", roomId, "messages");
+
+      await addDoc(messagesCollection, {
         text,
         sender: "system",
         guestName: "Front Desk",
@@ -4040,6 +4758,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         isStoreOrder: false,
         isEarlyCheckInRequest: false,
         currentStayId: intercomThreads[roomId]?.currentStayId ?? null,
+        roomNumber: roomId,
         messageType: outcome,
         callStartedAt: outcome === "call-answered"
           ? Timestamp.fromMillis(startedAtMs)
@@ -4065,6 +4784,22 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       // is missing one entry; the active-call banner / hang-up
       // already succeeded by the time recordCallHistory is
       // called.
+      //
+      // Defense-in-depth — FCH-01 (decision #263, 2026-10-16):
+      // the toast is the staff-facing PRIMARY signal; the
+      // console.warn is the SECONDARY diagnostic for the
+      // operator's devtools. Pre-#263 the catch was silent from
+      // the staff member's perspective — the exact shape that
+      // hid #216's rule-rejection bug. Now any future write
+      // failure (Firestore quota, network blip, a new rule
+      // field mismatch, missing parent doc, etc.) surfaces in
+      // the UI immediately so the staff can flag it instead of
+      // finding a missing "Call answered by {Name}" entry after
+      // the fact.
+      notify.error(
+        "Call history not recorded",
+        `The call-history entry for room ${roomId} could not be saved. See the browser console for details.`
+      );
       console.warn(`[call-history] failed to record ${outcome} for ${roomId}:`, error);
     }
   };
@@ -4076,9 +4811,17 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     try {
       await Promise.all(
         unreadGuestMessages.map((message) =>
-          updateDoc(doc(db, "intercoms", roomId, "messages", message.id), {
-            isRead: true
-          })
+          // Per PR-AUDIT-B3 (2026-10-20): a session-scoped message lives
+          // under `intercomSessions/{sessionToken}/messages/{id}`. Marking
+          // the legacy copy read would leave the desk's unread badge
+          // stuck, because the badge is computed from the collection-group
+          // listener that reads the SESSION copy.
+          updateDoc(
+            message.sessionToken
+              ? doc(db, "intercomSessions", message.sessionToken, "messages", message.id)
+              : doc(db, "intercoms", roomId, "messages", message.id),
+            { isRead: true }
+          )
         )
       );
     } catch (error) {
@@ -4186,6 +4929,11 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   const adminIceUnsubscribeRef = useRef<(() => void) | null>(null);
   const adminProcessedIceIdsRef = useRef<Set<string>>(new Set());
   const adminPreviousCallRoomIdRef = useRef<string | null>(null);
+  // Per PR-AUDIT-B4 (2026-10-20): the capability token of the call
+  // session the desk is currently serving, so the "second call wins"
+  // supersede write addresses the right session document.
+  const adminPreviousCallSessionTokenRef = useRef<string | null>(null);
+  const adminCallSessionTokenRef = useRef<string | null>(null);
 
   // Per-call-history-messages telemetry. Three refs the call
   // dispatch helper reads at cleanup time to determine the
@@ -4511,7 +5259,14 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       return;
     }
     const unsubscribe = onSnapshot(
-      collection(db, "calls"),
+      // Per PR-AUDIT-B4 (2026-10-20): call sessions live in their own
+      // top-level collection whose document id IS the capability token
+      // the server issued for the guest's stay. The legacy
+      // `calls/{roomId}` path is now staff-only, so the client SDK can
+      // no longer read or forge a call document. A collection-group
+      // query is used because the session document is a direct child
+      // of `callSessions`.
+      collectionGroup(db, "callSessions"),
       (snapshot) => {
         const activeCalls = snapshot.docs
           .map((docSnap): IncomingCall & { startedAt: number } => {
@@ -4535,7 +5290,10 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
                   }
                 : null;
             return {
-              roomId: docSnap.id,
+              // The session document's id is the capability token; the
+              // room it belongs to is carried on the document.
+              roomId: data.roomNumber || docSnap.id,
+              sessionToken: docSnap.id,
               guestName: data.guestName || "Guest",
               status: data.status || "ended",
               offer: data.offer || undefined,
@@ -4556,7 +5314,11 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         // call is the only one shown in the inbox.
         const previousRoomId = adminPreviousCallRoomIdRef.current;
         if (nextCall && previousRoomId && nextCall.roomId !== previousRoomId) {
-          void updateDoc(doc(db, "calls", previousRoomId), {
+          void updateDoc(
+            adminPreviousCallSessionTokenRef.current
+              ? doc(db, "callSessions", adminPreviousCallSessionTokenRef.current)
+              : doc(db, "calls", previousRoomId),
+            {
             status: "ended",
             endedAt: serverTimestamp(),
             endedReason: "superseded-by-other-call"
@@ -4580,12 +5342,14 @@ if (nextCall && nextCall.roomId !== previousRoomId) {
   adminCallRingingStartedAtRef.current = Date.now();
 }
 adminCallRoomIdRef.current = nextCall?.roomId ?? null;
+        adminCallSessionTokenRef.current = nextCall?.sessionToken ?? null;
 // (When nextCall becomes null but the previous call had a
 // ringing start, the dispatcher's "Date.now() -
 // adminCallRingingStartedAtRef.current" math inside recordCallHistory
 // handles the duration naturally — no need to capture an explicit
 // "end" timestamp here.)
 adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
+        adminPreviousCallSessionTokenRef.current = nextCall?.sessionToken ?? null;
         setIncomingCall(nextCall);
         if (!nextCall) {
           cleanupAdminCall();
@@ -4605,10 +5369,19 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
 
   const triggerIncomingCall = async (roomId: string, guestName: string) => {
     if (!roomId) return;
-    await setDoc(doc(db, "calls", roomId), {
+    // Per PR-AUDIT-B4 (2026-10-20): the desk rings the guest on the
+    // session document when the guest has an active capability token
+    // (they have verified their stay). Without one there is no
+    // session to ring, so the legacy path is used.
+    const sessionToken = intercomThreads[roomId]?.currentStayToken;
+    const callRef = sessionToken
+      ? doc(db, "callSessions", sessionToken)
+      : doc(db, "calls", roomId);
+    await setDoc(callRef, {
       answer: null,
       status: "ringing",
       guestName,
+      roomNumber: roomId,
       startedAt: serverTimestamp(),
       endedAt: null
     }, { merge: true });
@@ -4617,7 +5390,14 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
   const acceptCall = async () => {
     if (!incomingCall) return;
     const roomId = incomingCall.roomId;
-    const callRef = doc(db, "calls", roomId);
+    // Per PR-AUDIT-B4 (2026-10-20): the call document lives at
+    // `callSessions/{sessionToken}`; the legacy `calls/{roomId}` path
+    // is staff-only for the client SDK, and the desk still writes it
+    // directly when a call predates the capability rollout.
+    const sessionToken = incomingCall.sessionToken;
+    const callRef = sessionToken
+      ? doc(db, "callSessions", sessionToken)
+      : doc(db, "calls", roomId);
 
     // Per decision #206 (2026-08-19): the call claim is the FIRST step
     // of acceptCall. Two front-desk staff may both click Accept within
@@ -4746,9 +5526,17 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
       adminCallAnsweredRef.current = true;
       adminCallStartedAtRef.current = Date.now();
 
+      // Per PR-AUDIT-B4 (2026-10-20): ICE candidates go to the session
+      // collection when the call has a capability token, and to the
+      // legacy path otherwise. The token is captured in a local const so
+      // the handler never builds a path with an empty segment.
+      const iceCollection = sessionToken
+        ? collection(db, "callSessions", sessionToken, "iceCandidates")
+        : collection(db, "calls", roomId, "iceCandidates");
+
       peerConnection.onicecandidate = (event) => {
         if (!event.candidate) return;
-        void addDoc(collection(db, "calls", roomId, "iceCandidates"), {
+        void addDoc(iceCollection, {
           candidate: event.candidate.toJSON(),
           from: "staff",
           createdAt: serverTimestamp()
@@ -4776,7 +5564,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
       await peerConnection.setLocalDescription(answer);
 
       adminIceUnsubscribeRef.current = onSnapshot(
-        collection(db, "calls", roomId, "iceCandidates"),
+        iceCollection,
         (snapshot) => {
           snapshot.docChanges().forEach((change) => {
             if (change.type !== "added") return;
@@ -4852,10 +5640,15 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
     adminCallExplicitDeclineRef.current = true;
     adminCallRoomIdRef.current = incomingCall.roomId;
     cleanupAdminCall();
-    await updateDoc(doc(db, "calls", incomingCall.roomId), {
-      status: "ended",
-      endedAt: serverTimestamp()
-    });
+    await updateDoc(
+      incomingCall.sessionToken
+        ? doc(db, "callSessions", incomingCall.sessionToken)
+        : doc(db, "calls", incomingCall.roomId),
+      {
+        status: "ended",
+        endedAt: serverTimestamp()
+      }
+    );
   };
 
   // ── Notification Center (Phase 12 — decision #120) ──────────
@@ -5455,6 +6248,13 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
     // default via `normalizeVatConfig` in the onSnapshot
     // merge below — byte-equivalent to pre-VAT-01 behavior.
     vatConfig: { ...DEFAULT_VAT_CONFIG },
+    // Per MSL-01 (2026-10-15): the hotel's maximum stay length, in
+    // nights. The historical value (and the fallback for legacy docs
+    // with no field) is 30 — the constant `MAX_STAY_NIGHTS` used to
+    // hardcode. `0` in Firestore means "no limit"; this state holds
+    // the RESOLVED value, so `Infinity` here is the admin's explicit
+    // unlimited choice and must never be written back verbatim.
+    maxStayNights: DEFAULT_MAX_STAY_NIGHTS,
     // Per EXB-10 (2026-08-01, per decision #157): the
     // hotel-wide rollaway-bed inventory. The server-side
     // `handleCreateBooking` / `handleCreateWalkin` /
@@ -5474,7 +6274,17 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
     // UI exposes a numeric input (deferred to a future
     // PR — out of EXB-10's scope, which is the server
     // invariant).
-    extraBedInventory: 0
+    extraBedInventory: 0,
+    // Per OCT-M1 (2026-10-20, decision #295): the hotel-wide
+    // "Add-ons enabled" master switch. `true` (the default) = other
+    // add-ons are on sale across the guest site. `false` = the
+    // public `/api/bookings/addons/config` endpoint returns an empty
+    // catalog and every guest-facing add-ons surface shows the
+    // "Add-ons are currently disabled" state.
+    //
+    // The default is `true` so a legacy settings doc without the
+    // field never silently switches a hotel's revenue stream off.
+    otherAddOnsEnabled: true
   });
 
   // Tracks whether the first `settings/websiteContent` snapshot
@@ -5777,22 +6587,32 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
     pointsRedemptionRate: 100
   });
 
-  const [breakfastConfig, setBreakfastConfig] = useState({
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy flat-rate `ratePerPersonPerNight: number` +
+  // `breakfastIncludesChildrenDefault: boolean` +
+  // `silogItems[]` fields are deleted from the
+  // `breakfastConfig` default state. The new meal-based
+  // model reads the per-meal catalog from
+  // `breakfastConfig.meals[]` (added in BR-02). The
+  // Settings page writes the new shape; legacy code
+  // paths that read `ratePerPersonPerNight` /
+  // `silogItems` are gone.
+  const [breakfastConfig, setBreakfastConfig] = useState<{
+    isEnabled: boolean;
+    meals: Array<{ id: string; name: string; description?: string; price: number; displayOrder?: number; isActive?: boolean }>;
+    cutoffTime: string;
+    cutoffTimezone: string;
+    servedGraceMinutes: number;
+  }>({
     isEnabled: true,
-    ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
-    // Per CHD-10 (2026-07-31, per CVQ-01): hotel-wide default for
-    // "include children in the breakfast charge". The server
-    // snapshots this onto every new booking whose client did not
-    // send a per-booking override. `true` is the historical
-    // default (children pay the full rate) and the safe one —
-    // narrowing is a one-line change, unwinding under-charged
-    // bills is not.
-    breakfastIncludesChildrenDefault: true,
-    silogItems: [
-      { id: "sl-1", name: "Tapsilog", isActive: true },
-      { id: "sl-2", name: "Longsilog", isActive: true },
-      { id: "sl-3", name: "Tocilog", isActive: true }
-    ]
+    meals: [
+      { id: "sl-1", name: "Tapsilog", description: "Beef tapa with garlic rice and fried egg.", price: 250, displayOrder: 1, isActive: true },
+      { id: "sl-2", name: "Longsilog", description: "Sweet longaniza with garlic rice and fried egg.", price: 250, displayOrder: 2, isActive: true },
+      { id: "sl-3", name: "Tocilog", description: "Sweet tocino with garlic rice and fried egg.", price: 250, displayOrder: 3, isActive: true }
+    ],
+    cutoffTime: "20:00",
+    cutoffTimezone: "Asia/Manila",
+    servedGraceMinutes: 15
   });
 
   const [storeConfig, setStoreConfig] = useState<StoreConfig>({
@@ -5832,7 +6652,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
           const docId = docSnap.id;
           switch (docId) {
             case "hotelConfig":
-              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope), paymentHoldWindowHours: normalizePaymentHoldWindowHours((data as Partial<typeof hotelConfig>)?.paymentHoldWindowHours), inFlowHoldMinutes: normalizeInFlowHoldMinutes((data as Partial<typeof hotelConfig>)?.inFlowHoldMinutes), vatConfig: normalizeVatConfig((data as Partial<typeof hotelConfig>)?.vatConfig) })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`. // Per PEX-01 (2026-08-01): always normalize the incoming window so legacy settings (or values outside the admin-allowed 1..72h range) hydrate to the 24h default. The per-booking `holdExpiresAt` is the only field the rest of the system reads; the Settings window is just the input. // Per VAT-01 (2026-10-12): always normalize the incoming `vatConfig` so legacy settings without the field hydrate to the BIR-compliant default (`enabled: true`); the 12% breakdown keeps showing everywhere until the admin opts out via the Settings → Discounts tab Tax card.
+              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope), paymentHoldWindowHours: normalizePaymentHoldWindowHours((data as Partial<typeof hotelConfig>)?.paymentHoldWindowHours), inFlowHoldMinutes: normalizeInFlowHoldMinutes((data as Partial<typeof hotelConfig>)?.inFlowHoldMinutes), vatConfig: normalizeVatConfig((data as Partial<typeof hotelConfig>)?.vatConfig), maxStayNights: resolveMaxStayNights((data as Partial<typeof hotelConfig>)?.maxStayNights), otherAddOnsEnabled: normalizeOtherAddOnsEnabled((data as Partial<typeof hotelConfig>)?.otherAddOnsEnabled) })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`. // Per PEX-01 (2026-08-01): always normalize the incoming window so legacy settings (or values outside the admin-allowed 1..72h range) hydrate to the 24h default. The per-booking `holdExpiresAt` is the only field the rest of the system reads; the Settings window is just the input. // Per VAT-01 (2026-10-12): always normalize the incoming `vatConfig` so legacy settings without the field hydrate to the BIR-compliant default (`enabled: true`); the 12% breakdown keeps showing everywhere until the admin opts out via the Settings → Discounts tab Tax card. // Per OCT-M1 (2026-10-20, decision #295): always normalize the incoming `otherAddOnsEnabled` so a legacy doc without the field hydrates to `true` and a hand-edited `"false"` string is read as the boolean it spells.
               break;
             case "websiteContent":
               setWebsiteContent(mergeWebsiteContent(data as Record<string, unknown>));
@@ -5868,7 +6688,14 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
   const updateSettings = async (section: string, data: any) => {
     try {
       const docRef = doc(db, "settings", section);
-      await setDoc(docRef, data, { merge: true });
+      // Per OCT-H5 (2026-10-20, decision #283): strip
+      // `undefined`-valued keys before the write. The Firestore SDK
+      // throws `Unsupported field value: undefined` on them (the app
+      // never sets `ignoreUndefinedProperties`), and because the
+      // offending key sits inside a larger payload, ONE bad key made
+      // EVERY save of that section fail. `null` is preserved — it is
+      // a legal Firestore value.
+      await setDoc(docRef, stripUndefinedValues(data), { merge: true });
       // The public site caches `settings/websiteContent` +
       // `settings/hotelConfig` for 5 minutes per returning visitor.
       // Bump the cross-tab invalidation key so a parallel guest tab
@@ -6381,6 +7208,83 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
   // The download URL is written into
   // `settings/hotelConfig.paymentMethods[i].qrUrl` via merged
   // `setDoc`. The previous QR is best-effort deleted from Storage.
+  // Per MBUX-04 (decision #256, 2026-10-15): upload the optional
+  // thumbnail for one breakfast meal.
+  //
+  // Deliberately does NOT write Firestore. The Settings meal editor
+  // owns the catalog row, so the URL is returned to the caller, which
+  // merges it into the local meal state and saves through the ordinary
+  // `handleSaveBreakfast` path. That keeps one writer for the catalog
+  // (no second code path that can bypass `BreakfastConfigSchema`) and
+  // keeps the Zod strip behaviour I had to fix in one place.
+  //
+  // Shape follows `uploadPaymentMethodQr`: compress -> upload ->
+  // resolve download URL -> best-effort delete of the superseded
+  // object. The delete is AFTER a successful upload, so a failed
+  // upload never leaves the meal pointing at a deleted file.
+  const uploadBreakfastMealImage = async (
+    mealId: string,
+    file: File
+  ): Promise<{ success: boolean; error?: string; url?: string }> => {
+    if (!BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES.includes(file.type)) {
+      const err = "Choose a JPEG, PNG, or WebP image.";
+      notify.error("Upload failed", err);
+      return { success: false, error: err };
+    }
+    if (file.size > MAX_BREAKFAST_MEAL_IMAGE_BYTES) {
+      const err = `Image must be smaller than ${Math.round(MAX_BREAKFAST_MEAL_IMAGE_BYTES / 1024 / 1024)} MB.`;
+      notify.error("Upload failed", err);
+      return { success: false, error: err };
+    }
+    try {
+      // Re-encode to JPEG at 1200x1200 / q0.82. The guest menu strip
+      // renders a small 4:3 thumbnail, so 1200px is already generous
+      // and keeps the download light on a phone connection.
+      const compressed = await compressImageFile(file, {
+        maxWidth: 1200,
+        maxHeight: 1200,
+        quality: 0.82
+      });
+      const safeName = compressed.file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const fileRef = storageRef(storage, `breakfast-meals/${mealId}/${Date.now()}-${safeName}`);
+      await uploadBytes(fileRef, compressed.file);
+      const url = await getDownloadURL(fileRef);
+      // Per OCT-H10 (2026-10-20, decision #284): the success toast
+      // moved to the CALLER. The upload alone is not the outcome the
+      // admin cares about — the catalog row must also be repointed
+      // and PERSISTED. Toasting here announced "Meal image uploaded"
+      // before the write even happened, which is exactly the
+      // "looks saved but the guest still sees no photo" failure the
+      // audit flagged. The caller toasts only after the row is
+      // safely in Firestore.
+      return { success: true, url };
+    } catch (uploadErr) {
+      const err = uploadErr instanceof Error ? uploadErr.message : "Unable to upload the image.";
+      notify.error("Upload failed", err);
+      return { success: false, error: err };
+    }
+  };
+
+  // Per MBUX-04: delete a meal's superseded thumbnail. Callers pass
+  // the PREVIOUS url and only invoke this once the catalog row already
+  // points at the replacement (or no longer points at any image), so
+  // the guest menu can never be left referencing a deleted object.
+  // Best-effort: a Storage failure logs and is swallowed, because the
+  // orphaned object is a cleanup nit, not a broken booking path.
+  const removeBreakfastMealImage = async (
+    mealId: string,
+    previousUrl: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!previousUrl) return { success: true };
+    try {
+      await deleteObject(storageRef(storage, previousUrl));
+      return { success: true };
+    } catch (storageErr) {
+      console.warn(`Storage delete for previous meal image ${previousUrl} skipped:`, storageErr);
+      return { success: true };
+    }
+  };
+
   const uploadPaymentMethodQr = async (
     method: string,
     file: File
@@ -7407,7 +8311,13 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         resolveEarlyCheckin,
         grantEarlyCheckin,
         rescheduleBooking,
+        extendStayBooking,
         addOnsitePayment,
+        staffUpdateBreakfast,
+        markBreakfastServed,
+        markBreakfastRefundPaid,
+        staffUpdateOtherAddOns,
+        markOtherAddOnServed,
         addWalkinBooking,
         resendBookingEmail,
         verifyAndRecordPayment,
@@ -7497,6 +8407,8 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         reorderPaymentMethods,
         deletePaymentMethod,
         uploadPaymentMethodQr,
+        uploadBreakfastMealImage,
+        removeBreakfastMealImage,
         resetPaymentMethodQr,
         bookingSources,
         addBookingSource,

@@ -47,7 +47,7 @@ var require_extend = __commonJS({
       }
       return toStr.call(arr) === "[object Array]";
     };
-    var isPlainObject = function isPlainObject2(obj) {
+    var isPlainObject2 = function isPlainObject3(obj) {
       if (!obj || toStr.call(obj) !== "[object Object]") {
         return false;
       }
@@ -104,12 +104,12 @@ var require_extend = __commonJS({
             src = getProperty(target, name2);
             copy = getProperty(options, name2);
             if (target !== copy) {
-              if (deep && copy && (isPlainObject(copy) || (copyIsArray = isArray(copy)))) {
+              if (deep && copy && (isPlainObject2(copy) || (copyIsArray = isArray(copy)))) {
                 if (copyIsArray) {
                   copyIsArray = false;
                   clone3 = src && isArray(src) ? src : [];
                 } else {
-                  clone3 = src && isPlainObject(src) ? src : {};
+                  clone3 = src && isPlainObject2(src) ? src : {};
                 }
                 setProperty(target, { name: name2, newValue: extend(deep, clone3, copy) });
               } else if (typeof copy !== "undefined") {
@@ -59682,7 +59682,7 @@ var require_util9 = __commonJS({
     exports2.autoId = autoId;
     exports2.requestTag = requestTag;
     exports2.isObject = isObject;
-    exports2.isPlainObject = isPlainObject;
+    exports2.isPlainObject = isPlainObject2;
     exports2.isEmpty = isEmpty;
     exports2.isFunction = isFunction;
     exports2.isPermanentRpcError = isPermanentRpcError;
@@ -59730,7 +59730,7 @@ var require_util9 = __commonJS({
     function isObject(value) {
       return Object.prototype.toString.call(value) === "[object Object]";
     }
-    function isPlainObject(input) {
+    function isPlainObject2(input) {
       return isObject(input) && (Object.getPrototypeOf(input) === Object.prototype || Object.getPrototypeOf(input) === null || input.constructor.name === "Object");
     }
     function isEmpty(value) {
@@ -111315,7 +111315,7 @@ var require_lodash6 = __commonJS({
     function isObjectLike(value) {
       return !!value && typeof value == "object";
     }
-    function isPlainObject(value) {
+    function isPlainObject2(value) {
       if (!isObjectLike(value) || objectToString.call(value) != objectTag || isHostObject(value)) {
         return false;
       }
@@ -111326,7 +111326,7 @@ var require_lodash6 = __commonJS({
       var Ctor = hasOwnProperty.call(proto, "constructor") && proto.constructor;
       return typeof Ctor == "function" && Ctor instanceof Ctor && funcToString.call(Ctor) == objectCtorString;
     }
-    module2.exports = isPlainObject;
+    module2.exports = isPlainObject2;
   }
 });
 
@@ -111439,7 +111439,7 @@ var require_sign = __commonJS({
     var isBoolean = require_lodash3();
     var isInteger = require_lodash4();
     var isNumber3 = require_lodash5();
-    var isPlainObject = require_lodash6();
+    var isPlainObject2 = require_lodash6();
     var isString = require_lodash7();
     var once = require_lodash8();
     var { KeyObject, createSecretKey, createPrivateKey } = require("crypto");
@@ -111458,7 +111458,7 @@ var require_sign = __commonJS({
         return isString(value) || Array.isArray(value);
       }, message: '"audience" must be a string or array' },
       algorithm: { isValid: includes.bind(null, SUPPORTED_ALGS), message: '"algorithm" must be a valid string enum value' },
-      header: { isValid: isPlainObject, message: '"header" must be an object' },
+      header: { isValid: isPlainObject2, message: '"header" must be an object' },
       encoding: { isValid: isString, message: '"encoding" must be a string' },
       issuer: { isValid: isString, message: '"issuer" must be a string' },
       subject: { isValid: isString, message: '"subject" must be a string' },
@@ -111475,7 +111475,7 @@ var require_sign = __commonJS({
       nbf: { isValid: isNumber3, message: '"nbf" should be a number of seconds' }
     };
     function validate5(schema, allowUnknown, object, parameterName) {
-      if (!isPlainObject(object)) {
+      if (!isPlainObject2(object)) {
         throw new Error('Expected "' + parameterName + '" to be a plain object.');
       }
       Object.keys(object).forEach(function(key) {
@@ -181579,6 +181579,7 @@ var init_hotel_config = __esm({
       domain: "sparkinnbohol.com",
       adminDomain: "admin.sparkinnbohol.com",
       supportEmail: "sparkinn.dev@gmail.com",
+      intercomGuestAppId: "",
       facebookUrl: "https://www.facebook.com/sparkinnbohol",
       instagramUrl: "https://www.instagram.com/sparkinnbohol",
       twitterHandle: "",
@@ -221218,7 +221219,8 @@ var init_siteUrl = __esm({
 var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
-    VERSION2 = "1.11.0";
+    "use strict";
+    VERSION2 = "2.18.5";
   }
 });
 
@@ -221226,6 +221228,7 @@ var init_VERSION = __esm({
 var premiumEase, fadeUp, fadeIn, staggerContainer, staggerChild, scaleIn, slideInRight, slideInLeft, slideInBottom;
 var init_animations = __esm({
   "../shared/animations.ts"() {
+    "use strict";
     premiumEase = [0.25, 0.1, 0.25, 1];
     fadeUp = {
       hidden: { opacity: 0, y: 16 },
@@ -221266,9 +221269,10 @@ var init_animations = __esm({
 });
 
 // ../shared/constants/index.ts
-var BOOKING_STATUSES, BOOKING_SOURCES, DEFAULT_BOOKING_SOURCES, PROTECTED_BOOKING_SOURCES, ROOM_STATUSES, HOUSEKEEPING_STATUSES, DEFAULT_ROOM_TYPES2, DEFAULT_BED_SETUPS, DEFAULT_BOOKING_PREFERENCES, ADDITIONAL_REQUEST_MAX_LENGTH, ARRIVAL_WINDOW_HOURS, MAX_ROOM_TYPE_PHOTOS, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT, DEFAULT_CORPORATE_PERKS, KNOWN_CONTENT_ICONS, DEFAULT_CORPORATE_PAGE_CONTENT, MAX_FEATURED_TYPES, MAX_FEATURED_ROOMS, SUPPORTED_PAYMENT_METHODS, UNSUPPORTED_PAYMENT_METHODS, PROTECTED_PAYMENT_METHODS, MAX_PAYMENT_METHOD_QR_BYTES, MAX_STAY_NIGHTS, MAX_ADVANCE_DAYS, PUBLIC_SITE_CONTENT_CACHE_KEY, PUBLIC_SITE_CONTENT_CACHE_TTL_MS, PUBLIC_SITE_CONTENT_CACHE_BUST_KEY, DEFAULT_TERMS_VERSION, TERMS_BODY_MAX_LENGTH;
+var BOOKING_STATUSES, BOOKING_SOURCES, DEFAULT_BOOKING_SOURCES, PROTECTED_BOOKING_SOURCES, ROOM_STATUSES, HOUSEKEEPING_STATUSES, DEFAULT_ROOM_TYPES2, DEFAULT_BED_SETUPS, DEFAULT_BOOKING_PREFERENCES, ADDITIONAL_REQUEST_MAX_LENGTH, ARRIVAL_WINDOW_HOURS, MAX_ROOM_TYPE_PHOTOS, DEFAULT_BREAKFAST_CUTOFF_TIME, DEFAULT_BREAKFAST_CUTOFF_TIMEZONE, DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES, MIN_BREAKFAST_OVERRIDE_REASON_LENGTH, DEFAULT_CORPORATE_PERKS, KNOWN_CONTENT_ICONS, DEFAULT_CORPORATE_PAGE_CONTENT, MAX_FEATURED_TYPES, MAX_FEATURED_ROOMS, SUPPORTED_PAYMENT_METHODS, UNSUPPORTED_PAYMENT_METHODS, PROTECTED_PAYMENT_METHODS, MAX_PAYMENT_METHOD_QR_BYTES, MAX_BREAKFAST_MEAL_IMAGE_BYTES, BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES, MAX_STAY_NIGHTS, MAX_ADVANCE_DAYS, PUBLIC_SITE_CONTENT_CACHE_KEY, PUBLIC_SITE_CONTENT_CACHE_TTL_MS, PUBLIC_SITE_CONTENT_CACHE_BUST_KEY, DEFAULT_TERMS_VERSION, TERMS_BODY_MAX_LENGTH;
 var init_constants = __esm({
   "../shared/constants/index.ts"() {
+    "use strict";
     BOOKING_STATUSES = [
       "pending",
       "payment-uploaded",
@@ -221323,7 +221327,10 @@ var init_constants = __esm({
     ADDITIONAL_REQUEST_MAX_LENGTH = 500;
     ARRIVAL_WINDOW_HOURS = 24;
     MAX_ROOM_TYPE_PHOTOS = 10;
-    DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT = 150;
+    DEFAULT_BREAKFAST_CUTOFF_TIME = "20:00";
+    DEFAULT_BREAKFAST_CUTOFF_TIMEZONE = "Asia/Manila";
+    DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES = 15;
+    MIN_BREAKFAST_OVERRIDE_REASON_LENGTH = 5;
     DEFAULT_CORPORATE_PERKS = [
       {
         title: "Negotiated Rates",
@@ -221421,6 +221428,12 @@ var init_constants = __esm({
     UNSUPPORTED_PAYMENT_METHODS = ["pesonet"];
     PROTECTED_PAYMENT_METHODS = ["pay-at-hotel", "add-to-bill"];
     MAX_PAYMENT_METHOD_QR_BYTES = 2 * 1024 * 1024;
+    MAX_BREAKFAST_MEAL_IMAGE_BYTES = 8 * 1024 * 1024;
+    BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES = [
+      "image/jpeg",
+      "image/png",
+      "image/webp"
+    ];
     MAX_STAY_NIGHTS = 30;
     MAX_ADVANCE_DAYS = 365;
     PUBLIC_SITE_CONTENT_CACHE_KEY = "publicSiteContent:v3";
@@ -221495,6 +221508,7 @@ function isValidLookupToken(value) {
 var BOOKING_REF_REGEX, RESERVATION_REF_REGEX, RESERVATION_ID_REGEX, LOOKUP_TOKEN_HEX_LENGTH;
 var init_references = __esm({
   "../shared/utils/references.ts"() {
+    "use strict";
     BOOKING_REF_REGEX = /^[A-Z]{1,4}-\d{8}-\d{3,5}$/;
     RESERVATION_REF_REGEX = /^R-\d{8}-\d{3,5}$/;
     RESERVATION_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -221516,6 +221530,27 @@ function computeInFlowHoldExpiresAt(minutes, now = /* @__PURE__ */ new Date()) {
   }
   return new Date(now.getTime() + Number(minutes) * 60 * 1e3);
 }
+function computeExtendedInFlowHoldExpiresAt(minutes, currentExpiresAt, now = /* @__PURE__ */ new Date()) {
+  let base = now;
+  if (currentExpiresAt) {
+    const parsed2 = currentExpiresAt instanceof Date ? currentExpiresAt : new Date(currentExpiresAt);
+    if (!isNaN(parsed2.getTime()) && parsed2.getTime() > now.getTime()) {
+      base = parsed2;
+    }
+  }
+  return computeInFlowHoldExpiresAt(minutes, base);
+}
+function canExtendInFlowHold(hold) {
+  if (!hold) return false;
+  if (!IN_FLOW_HOLD_EXTENSION_STATUSES.includes(
+    String(hold.status)
+  )) {
+    return false;
+  }
+  const count = Number(hold.extensionCount ?? 0);
+  if (!Number.isFinite(count) || count < 0) return false;
+  return count < MAX_IN_FLOW_HOLD_EXTENSIONS;
+}
 function normalizeInFlowHoldMinutes(raw) {
   const value = Number(raw);
   if (!Number.isFinite(value) || value <= 0) return DEFAULT_IN_FLOW_HOLD_MINUTES;
@@ -221532,6 +221567,13 @@ function clampIntegerInRange(raw, min, max) {
   if (floored < min || floored > max) return null;
   return floored;
 }
+function inFlowHoldStayMatches(hold, input) {
+  if (!hold || !input) return false;
+  if (String(hold.roomType ?? "") !== String(input.roomType ?? "")) return false;
+  if (String(hold.checkIn ?? "") !== String(input.checkIn ?? "")) return false;
+  if (String(hold.checkOut ?? "") !== String(input.checkOut ?? "")) return false;
+  return Number(hold.numNights ?? 0) === Number(input.numNights ?? 0);
+}
 function generateHoldId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
@@ -221542,22 +221584,26 @@ function generateHoldId() {
     return v6.toString(16);
   });
 }
-var IN_FLOW_HOLD_MINUTES, MIN_IN_FLOW_HOLD_MINUTES, MAX_IN_FLOW_HOLD_MINUTES, DEFAULT_IN_FLOW_HOLD_MINUTES, IN_FLOW_HOLD_STATUSES, HOLD_ID_REGEX;
+var IN_FLOW_HOLD_MINUTES, MIN_IN_FLOW_HOLD_MINUTES, MAX_IN_FLOW_HOLD_MINUTES, DEFAULT_IN_FLOW_HOLD_MINUTES, IN_FLOW_HOLD_STATUSES, MAX_IN_FLOW_HOLD_EXTENSIONS, IN_FLOW_HOLD_EXTENSION_STATUSES, HOLD_ID_REGEX;
 var init_bookingInFlowHold = __esm({
   "../shared/utils/bookingInFlowHold.ts"() {
+    "use strict";
     IN_FLOW_HOLD_MINUTES = 15;
     MIN_IN_FLOW_HOLD_MINUTES = 5;
     MAX_IN_FLOW_HOLD_MINUTES = 30;
     DEFAULT_IN_FLOW_HOLD_MINUTES = IN_FLOW_HOLD_MINUTES;
     IN_FLOW_HOLD_STATUSES = ["active", "consumed", "expired"];
+    MAX_IN_FLOW_HOLD_EXTENSIONS = 3;
+    IN_FLOW_HOLD_EXTENSION_STATUSES = ["active", "expired"];
     HOLD_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   }
 });
 
 // ../shared/schemas/booking.ts
-var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema, StartBookingHoldSchema;
+var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema, StartBookingHoldSchema, BreakfastMealSchema, BreakfastConfigSchema, BreakfastSelectionEntrySchema, BreakfastServedEntrySchema, BreakfastAuditEntrySchema, BreakfastRefundContextSchema, AddOnSchema, OtherAddOnSelectionEntrySchema, OtherAddOnAuditEntrySchema, OtherAddOnRefundContextSchema, OtherAddOnUpdateSchema, StaffOtherAddOnUpdateSchema, OtherAddOnMarkServedSchema, OtherAddOnMarkRefundPaidSchema, AddOnCatalogAuditLogSchema, ExtendBookingHoldSchema;
 var init_booking = __esm({
   "../shared/schemas/booking.ts"() {
+    "use strict";
     init_zod();
     init_references();
     init_bookingInFlowHold();
@@ -221606,13 +221652,16 @@ var init_booking = __esm({
       roomId: external_exports.string().trim().min(1).max(64),
       numAdults: external_exports.coerce.number().int().min(0).max(100),
       numChildren: external_exports.coerce.number().int().min(0).max(100),
-      extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0),
-      // Per EXB-12 (2026-08-06, per decision #199): whether the
-      // walk-in guest wants breakfast for the extra-bed occupant(s).
-      // Optional — when absent, the server treats it as `false`.
-      // The server validates the invariant: `extraBedBreakfast`
-      // can only be `true` when `extraBedCount > 0`.
-      extraBedBreakfast: external_exports.boolean().optional()
+      extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0)
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy EXB-12 `extraBedBreakfast: boolean` flat-rate
+      // toggle is deleted. Extra-bed occupants are ordinary meal
+      // slots in Step 2 (the per-meal picker), so the create
+      // payload no longer carries a breakfast flag for them.
+      // The BR-08 audit-trail comment is kept here as a record
+      // of the close-out — see `plan/features/BREAKFAST.md
+      // §Decisions Locked` (decision 4 — extra-bed occupants
+      // are ordinary meal slots).
     }).strict();
     WalkinBookingSchema = external_exports.object({
       bookingId: external_exports.string().trim().regex(/^[A-Za-z0-9]{10,32}$/),
@@ -221629,14 +221678,40 @@ var init_booking = __esm({
       checkIn: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       checkOut: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       guests: external_exports.coerce.number().int().min(1).max(100),
-      hasBreakfast: external_exports.boolean(),
-      // Per CHD-10 (2026-07-31, per CVQ-01): optional — when absent,
-      // the server snapshots the admin default from
-      // `settings/breakfastConfig.breakfastIncludesChildrenDefault` and
-      // writes the result to the booking doc alongside `hasBreakfast`.
-      // `true` is the safe default (matches the historical "children pay
-      // the full rate" math).
-      breakfastIncludesChildren: external_exports.boolean().optional(),
+      // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+      // legacy flat-rate `hasBreakfast: boolean` +
+      // `breakfastIncludesChildren: boolean` pair is deleted from
+      // the walk-in schema. The walk-in modal now sends the rich
+      // `breakfastSelections: Record<key, BreakfastSelectionEntry>`
+      // shape (per-date × per-guest meal entries) which is
+      // captured by `WalkinBreakfastGrid` and validated by the
+      // BR-01 `BreakfastSelectionSchema`. The BR-08 audit-trail
+      // comment is kept here as a record of the close-out — see
+      // `plan/features/BREAKFAST.md §Decisions Locked` (decision
+      // 5 — Step 1 carries no breakfast data).
+      breakfastSelections: external_exports.record(external_exports.string(), external_exports.unknown()).optional(),
+      breakfastTotal: external_exports.coerce.number().finite().min(0).optional(),
+      // Per OCT-C5 (2026-10-20, audit
+      // `plan/project/AUDIT-OCTOBER-2026.md`): the BR-12 other
+      // add-ons the desk selected in the walk-in modal
+      // (`WalkinOtherAddOnGrid`).
+      //
+      // The admin modal has been sending `otherAddOnSelections` +
+      // `otherAddOnTotal` + `hasAnyOtherAddOns` since BR-12.1
+      // (2026-10-15), but the walk-in schema had no field for them —
+      // and a Zod `z.object()` STRIPS unknown keys, so the payload
+      // was dropped silently. The walk-in transaction then wrote no
+      // add-on data at all (`otherAddOn` appeared zero times in
+      // `bookings.ts`), so the desk sold an airport transfer, the
+      // modal showed the total, the booking carried nothing, the
+      // guest never got the transfer, and the hotel earned ₱0.
+      //
+      // The values are ADVISORY: the server rebuilds every entry from
+      // the live `addOns` catalog (catalog price + name + unit), so a
+      // client-supplied price is never persisted.
+      otherAddOnSelections: external_exports.record(external_exports.string(), external_exports.array(external_exports.unknown())).optional(),
+      otherAddOnTotal: external_exports.coerce.number().finite().min(0).optional(),
+      hasAnyOtherAddOns: external_exports.boolean().optional(),
       // Per CHD-01 (2026-08-01, per decision #144): adults/children
       // split. Both optional — when absent, the server derives
       // `numAdults = guests`, `numChildren = 0` (the historical
@@ -221653,14 +221728,18 @@ var init_booking = __esm({
       // server snapshots the room type's `extraBedRate` onto the
       // booking doc alongside this field.
       extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional(),
-      // Per EXB-12 (2026-08-06, per decision #199): whether the
-      // guest wants breakfast for the extra-bed occupant(s). When
-      // `true`, all `extraBedCount` beds in this room are counted
-      // toward the breakfast total. Optional — when absent, the
-      // server treats it as `false` (no breakfast for extra beds).
-      // The server validates the invariant: `extraBedBreakfast`
-      // can only be `true` when `extraBedCount > 0`.
-      extraBedBreakfast: external_exports.boolean().optional(),
+      // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+      // legacy EXB-12 `extraBedBreakfast: boolean` flat-rate
+      // toggle is deleted from the walk-in schema. Extra-bed
+      // occupants are ordinary meal slots in Step 2 (the
+      // per-meal picker) — the walk-in modal captures them via
+      // `WalkinBreakfastGrid` which writes the rich
+      // `breakfastSelections` shape (per-date × per-guest
+      // meal entries) validated by `BreakfastSelectionSchema`.
+      // The BR-08 audit-trail comment is kept here as a record
+      // of the close-out — see `plan/features/BREAKFAST.md
+      // §Decisions Locked` (decision 4 — extra-bed occupants
+      // are ordinary meal slots).
       guestDetails: WalkinGuestDetailsSchema,
       paymentMethod: external_exports.string().trim().min(1).max(80),
       // Per NBS-02 (2026-07-31): optional with `"walk-in"` default so
@@ -221719,7 +221798,12 @@ var init_booking = __esm({
       // server auto-mints one if `body.reservationId` is
       // explicitly provided — a defensive path for a
       // future migration tool).
-      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional()
+      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional(),
+      // Per EXT-01 (2026-01-27): the `mode: "extend"` discriminator
+      // locks `roomId` and `checkIn` to the booking's current values,
+      // allowing only `checkOut` to be extended. The server enforces
+      // the lock; the client pre-fills both fields as read-only hints.
+      mode: external_exports.enum(["extend"]).optional()
     }).strict();
     SetLouReceivedSchema = external_exports.object({
       bookingId: external_exports.string().trim().min(1).max(64),
@@ -221756,6 +221840,213 @@ var init_booking = __esm({
       message: "Check-out must be after check-in",
       path: ["checkOut"]
     });
+    BreakfastMealSchema = external_exports.object({
+      id: external_exports.string().min(1).max(64),
+      name: external_exports.string().min(1).max(80),
+      description: external_exports.string().max(200).default(""),
+      price: external_exports.number().min(0).max(1e4),
+      isActive: external_exports.boolean(),
+      displayOrder: external_exports.number().int().min(0).max(1e3),
+      /**
+       * Per MBUX-04 (decision #256, 2026-10-15): optional meal thumbnail.
+       *
+       * THIS FIELD MUST STAY IN THE SCHEMA. Zod's `z.object` STRIPS
+       * unknown keys by default, so a schema without `imageUrl` would
+       * silently delete the admin's uploaded URL on every
+       * `handleSaveBreakfast` write — the upload would appear to succeed
+       * and then vanish the next time anyone touched dining settings.
+       * That is a far worse failure than a rejected save, which is why
+       * the field is declared here rather than left to the default strip.
+       *
+       * `.url()` keeps only real absolute URLs; an empty string is
+       * rejected rather than stored, because "no image" is represented
+       * by OMITTING the field, not by an empty URL.
+       */
+      imageUrl: external_exports.string().url().max(2e3).optional(),
+      createdAt: external_exports.union([external_exports.string(), external_exports.any()]).optional(),
+      updatedAt: external_exports.union([external_exports.string(), external_exports.any()]).optional()
+    });
+    BreakfastConfigSchema = external_exports.object({
+      isEnabled: external_exports.boolean(),
+      /**
+       * Per BR-10 (2026-10-14, decision #244 reserved — Phase 14):
+       * the cut-off enforcement toggle. Required (no Zod default —
+       * the legacy-fallback is handled by `normalizeBreakfastConfig`
+       * at read time, not at schema-parse time, because the writer
+       * must always be explicit about whether cut-offs apply).
+       */
+      cutoffsEnabled: external_exports.boolean(),
+      cutoffTime: external_exports.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM 24h format"),
+      cutoffTimezone: external_exports.string().min(1),
+      frontDeskOverrideEnabled: external_exports.boolean(),
+      /**
+       * Per decision #231 + open item #5: 0..60 minute window after
+       * `served` during which staff can un-serve without a reason.
+       * Default 15; min 0; max 60.
+       */
+      servedGraceMinutes: external_exports.number().int().min(0).max(60).default(15),
+      defaultMealInstructions: external_exports.string().max(2e3).default(""),
+      meals: external_exports.array(BreakfastMealSchema),
+      updatedAt: external_exports.union([external_exports.string(), external_exports.any()]).optional(),
+      updatedBy: external_exports.string().default("")
+    });
+    BreakfastSelectionEntrySchema = external_exports.object({
+      mealId: external_exports.string().min(1),
+      mealName: external_exports.string().min(1),
+      price: external_exports.number().min(0),
+      addedAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      addedBy: external_exports.string().min(1),
+      lastModifiedAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      lastModifiedBy: external_exports.string().min(1),
+      removedAt: external_exports.union([external_exports.string(), external_exports.any()]).nullable().default(null),
+      removedBy: external_exports.string().nullable().default(null),
+      overrideCutoff: external_exports.boolean().default(false),
+      overrideReason: external_exports.string().nullable().default(null)
+    });
+    BreakfastServedEntrySchema = external_exports.object({
+      servedAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      servedBy: external_exports.string().min(1),
+      unservedAt: external_exports.union([external_exports.string(), external_exports.any()]).nullable().default(null),
+      unservedBy: external_exports.string().nullable().default(null)
+    });
+    BreakfastAuditEntrySchema = external_exports.object({
+      id: external_exports.string().optional(),
+      action: external_exports.enum([
+        "add",
+        "change",
+        "remove",
+        "serve",
+        "unserve",
+        "override-add",
+        "override-change",
+        "override-remove"
+      ]),
+      slotKey: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-\d+$/, "serviceDate-guestIndex format"),
+      mealSnapshot: external_exports.object({
+        mealId: external_exports.string(),
+        mealName: external_exports.string(),
+        price: external_exports.number().min(0)
+      }).nullable(),
+      actorUid: external_exports.string().min(1),
+      actorRole: external_exports.enum(["guest", "front-desk", "admin"]),
+      reason: external_exports.string().nullable().default(null),
+      occurredAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      occurredAfterCutoff: external_exports.boolean()
+    });
+    BreakfastRefundContextSchema = external_exports.object({
+      mealId: external_exports.string().min(1),
+      slotKey: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-\d+$/),
+      mealName: external_exports.string().min(1),
+      priceSnapshot: external_exports.number().min(0)
+    });
+    AddOnSchema = external_exports.object({
+      id: external_exports.string().min(1).max(80),
+      name: external_exports.string().min(1).max(120),
+      description: external_exports.string().max(500).default(""),
+      price: external_exports.number().min(0).max(1e4),
+      unit: external_exports.enum(["per-person", "per-stay"]),
+      isEnabled: external_exports.boolean(),
+      cutoffHoursBeforeCheckIn: external_exports.number().int().min(0).max(168),
+      displayOrder: external_exports.number().int().min(0).max(1e3),
+      updatedAt: external_exports.union([external_exports.string(), external_exports.any()]).optional(),
+      updatedBy: external_exports.string().optional()
+    });
+    OtherAddOnSelectionEntrySchema = external_exports.object({
+      addOnId: external_exports.string().min(1).max(80),
+      nameSnapshot: external_exports.string().min(1).max(120),
+      priceSnapshot: external_exports.number().min(0).max(1e4),
+      quantity: external_exports.number().int().min(0).max(50),
+      unitSnapshot: external_exports.enum(["per-person", "per-stay"]),
+      addedAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      addedBy: external_exports.string().min(1),
+      lastModifiedAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      lastModifiedBy: external_exports.string().min(1),
+      removedAt: external_exports.union([external_exports.string(), external_exports.any()]).nullable().default(null),
+      removedBy: external_exports.string().nullable().default(null),
+      cutoffHoursBeforeCheckInSnapshot: external_exports.number().int().min(0).max(168)
+    });
+    OtherAddOnAuditEntrySchema = external_exports.object({
+      id: external_exports.string().optional(),
+      action: external_exports.enum([
+        "add",
+        "change",
+        "remove",
+        "mark-served",
+        "override-add",
+        "override-change",
+        "override-remove"
+      ]),
+      selectionKey: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/, "serviceDate-addOnId format"),
+      addOnSnapshot: external_exports.object({
+        addOnId: external_exports.string(),
+        name: external_exports.string(),
+        price: external_exports.number().min(0),
+        quantity: external_exports.number().int().min(0)
+      }).nullable(),
+      actorUid: external_exports.string().min(1),
+      actorRole: external_exports.enum(["guest", "front-desk", "admin"]),
+      reason: external_exports.string().nullable().default(null),
+      occurredAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      occurredAfterCutoff: external_exports.boolean()
+    });
+    OtherAddOnRefundContextSchema = external_exports.object({
+      addOnId: external_exports.string().min(1),
+      selectionKey: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/),
+      addOnName: external_exports.string().min(1),
+      priceSnapshot: external_exports.number().min(0),
+      quantitySnapshot: external_exports.number().int().min(0)
+    });
+    OtherAddOnUpdateSchema = external_exports.object({
+      bookingRef: external_exports.string().trim().min(4).max(40),
+      lookupToken: external_exports.string().trim().min(8).max(200),
+      turnstileToken: external_exports.string().optional(),
+      clientBatchId: external_exports.string().trim().min(8).max(80),
+      selections: external_exports.record(
+        external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "serviceDate format"),
+        external_exports.array(OtherAddOnSelectionEntrySchema)
+      ),
+      removedKeys: external_exports.array(external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/)).default([])
+    }).passthrough();
+    StaffOtherAddOnUpdateSchema = external_exports.object({
+      bookingId: external_exports.string().trim().min(8).max(80),
+      turnstileToken: external_exports.string().optional(),
+      selections: external_exports.record(
+        external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "serviceDate format"),
+        external_exports.array(OtherAddOnSelectionEntrySchema)
+      ),
+      removedKeys: external_exports.array(external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/)).default([]),
+      overrideReason: external_exports.string().trim().min(8).max(280).optional()
+    }).passthrough();
+    OtherAddOnMarkServedSchema = external_exports.object({
+      bookingId: external_exports.string().trim().min(8).max(80),
+      selectionKeys: external_exports.array(external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/)).min(1).max(50),
+      turnstileToken: external_exports.string().optional()
+    }).passthrough();
+    OtherAddOnMarkRefundPaidSchema = external_exports.object({
+      bookingId: external_exports.string().trim().min(8).max(80),
+      refundId: external_exports.string().trim().regex(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        "Invalid refundId."
+      ),
+      method: external_exports.string().trim().min(1).max(60),
+      transactionReference: external_exports.string().trim().max(200).nullable().optional().default(null),
+      note: external_exports.string().trim().max(500).nullable().optional().default(null),
+      turnstileToken: external_exports.string().optional()
+    }).passthrough();
+    AddOnCatalogAuditLogSchema = external_exports.object({
+      action: external_exports.enum(["addons.create", "addons.update", "addons.delete"]),
+      targetCollection: external_exports.string().default("addOns"),
+      targetId: external_exports.string().min(1).max(80),
+      actor: external_exports.string().min(1).max(120),
+      actorName: external_exports.string().max(120).default(""),
+      before: external_exports.any().nullable().default(null),
+      after: external_exports.any().nullable().default(null),
+      timestamp: external_exports.union([external_exports.string(), external_exports.any()]).optional()
+    });
+    ExtendBookingHoldSchema = external_exports.object({
+      holdId: external_exports.string().trim().regex(HOLD_ID_REGEX, "Invalid hold id format"),
+      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX, "Invalid reservation id format")
+    }).strict();
   }
 });
 
@@ -221763,6 +222054,7 @@ var init_booking = __esm({
 var PaymentMethodConfigSchema, PaymentMethodsArraySchema, LegacyPaymentMethodConfigSchema;
 var init_paymentMethod = __esm({
   "../shared/schemas/paymentMethod.ts"() {
+    "use strict";
     init_zod();
     PaymentMethodConfigSchema = external_exports.object({
       method: external_exports.string().min(1, "Method key is required").max(64),
@@ -221798,6 +222090,7 @@ var init_paymentMethod = __esm({
 var RoomStatusEnum, HousekeepingStatusEnum, CreateRoomSchema, ACTIVE_BOOKING_STATUSES;
 var init_room = __esm({
   "../shared/schemas/room.ts"() {
+    "use strict";
     init_zod();
     RoomStatusEnum = external_exports.enum(["available", "occupied", "blocked"]);
     HousekeepingStatusEnum = external_exports.enum(["clean", "dirty", "in-progress"]);
@@ -221825,6 +222118,7 @@ var init_room = __esm({
 var PublicHeroSchema, HomepageContentSchema, AboutContentSchema, CorporateContentSchema, RewardsContentSchema, BrandingConfigSchema, WebsiteContentSchema;
 var init_websiteContent = __esm({
   "../shared/schemas/websiteContent.ts"() {
+    "use strict";
     init_zod();
     PublicHeroSchema = external_exports.object({
       heroEyebrow: external_exports.string().default(""),
@@ -221947,6 +222241,7 @@ var init_websiteContent = __esm({
 var optionalUrl, SeoPublishSchema;
 var init_seo = __esm({
   "../shared/schemas/seo.ts"() {
+    "use strict";
     init_zod();
     optionalUrl = external_exports.string().trim().max(500).refine(
       (value) => value === "" || /^https:\/\//i.test(value),
@@ -221970,6 +222265,7 @@ var init_seo = __esm({
 // ../shared/types/index.ts
 var init_types3 = __esm({
   "../shared/types/index.ts"() {
+    "use strict";
   }
 });
 
@@ -222011,6 +222307,18 @@ function toDateOrNull(value) {
   }
   return null;
 }
+function toUtcDateKey(value) {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
+  }
+  const date = toDateOrNull(value);
+  if (!date) return "";
+  const yyyy = date.getUTCFullYear();
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
 function getManilaDateInfo(timezone = "Asia/Manila") {
   const now = /* @__PURE__ */ new Date();
   const localString = now.toLocaleString("en-US", { timeZone: timezone });
@@ -222035,6 +222343,152 @@ function getDateKeyInTimezone(timezone = "Asia/Manila", offsetDays = 0) {
 }
 var init_bookingDates = __esm({
   "../shared/utils/bookingDates.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/stayRange.ts
+function isValidIsoDate(value) {
+  if (typeof value !== "string" || !ISO_DATE_PATTERN.test(value)) return false;
+  const parsed2 = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed2.getTime())) return false;
+  return parsed2.toISOString().slice(0, 10) === value;
+}
+function addDaysToIsoDate(value, days, fallback = "") {
+  if (!isValidIsoDate(value)) return fallback;
+  const date = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+function diffNightsBetweenIso(first, second) {
+  if (!isValidIsoDate(first) || !isValidIsoDate(second)) return 0;
+  const start = Date.parse(`${first}T00:00:00Z`);
+  const end = Date.parse(`${second}T00:00:00Z`);
+  return Math.round((end - start) / 864e5);
+}
+function resolveMaxStayNights(raw) {
+  if (raw === void 0 || raw === null || raw === "") return DEFAULT_MAX_STAY_NIGHTS;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return DEFAULT_MAX_STAY_NIGHTS;
+  if (value === 0) return Infinity;
+  const floored = Math.floor(value);
+  if (floored < MIN_MAX_STAY_NIGHTS) return MIN_MAX_STAY_NIGHTS;
+  return Math.min(floored, MAX_MAX_STAY_NIGHTS);
+}
+function describeMaxStayNights(maxNights) {
+  return Number.isFinite(maxNights) ? `${maxNights} nights` : "no maximum";
+}
+function isUnlimitedStay(maxNights) {
+  return !Number.isFinite(maxNights);
+}
+function normalizeStayRange({
+  checkIn,
+  checkOut,
+  minCheckIn,
+  previousNights = null,
+  defaultNights = DEFAULT_STAY_NIGHTS,
+  maxNights = DEFAULT_MAX_STAY_NIGHTS,
+  maxCheckOut
+}) {
+  const today = isValidIsoDate(minCheckIn) ? minCheckIn : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const horizon = isValidIsoDate(maxCheckOut ?? "") && maxCheckOut > today ? maxCheckOut : addDaysToIsoDate(
+    today,
+    DEFAULT_BOOKING_HORIZON_DAYS,
+    addDaysToIsoDate(today, defaultNights, today)
+  );
+  const horizonNights = Math.max(diffNightsBetweenIso(today, horizon), defaultNights);
+  const stayCap = Math.max(Math.min(maxNights, horizonNights), 1);
+  const rawIn = isValidIsoDate(checkIn ?? "") ? checkIn : null;
+  const rawOut = isValidIsoDate(checkOut ?? "") ? checkOut : null;
+  if (!rawIn && !rawOut) {
+    const seededCheckOut = addDaysToIsoDate(today, defaultNights, today);
+    return {
+      checkIn: today,
+      checkOut: seededCheckOut <= today ? addDaysToIsoDate(today, 1, today) : seededCheckOut,
+      nights: defaultNights,
+      adjustment: "empty"
+    };
+  }
+  let adjustment = null;
+  let checkInCandidate;
+  if (!rawIn) {
+    const derived = rawOut && rawOut > today ? addDaysToIsoDate(rawOut, -defaultNights, "") : "";
+    checkInCandidate = !derived || derived < today ? today : derived;
+    adjustment = "invalid-check-in";
+  } else if (rawIn < today) {
+    checkInCandidate = today;
+    adjustment = "check-in-clamped-to-today";
+  } else {
+    checkInCandidate = rawIn;
+  }
+  const nextIn = checkInCandidate;
+  let checkOutCandidate;
+  if (!rawOut) {
+    checkOutCandidate = addDaysToIsoDate(nextIn, defaultNights, addDaysToIsoDate(nextIn, 1, nextIn));
+    if (adjustment === null) adjustment = "invalid-check-out";
+  } else if (rawOut <= nextIn) {
+    const preserveable = typeof previousNights === "number" && Number.isFinite(previousNights) ? Math.floor(previousNights) : null;
+    const nights = preserveable !== null && preserveable >= 1 ? Math.min(preserveable, stayCap) : Math.min(defaultNights, stayCap);
+    checkOutCandidate = addDaysToIsoDate(nextIn, nights, addDaysToIsoDate(nextIn, 1, nextIn));
+    adjustment = preserveable !== null && preserveable >= 1 ? "nights-preserved" : "check-out-clamped-after-check-in";
+  } else {
+    checkOutCandidate = rawOut;
+  }
+  if (diffNightsBetweenIso(nextIn, checkOutCandidate) > maxNights) {
+    checkOutCandidate = addDaysToIsoDate(nextIn, maxNights, addDaysToIsoDate(nextIn, 1, nextIn));
+    adjustment = "nights-clamped";
+  }
+  if (checkOutCandidate > horizon) {
+    checkOutCandidate = horizon;
+    adjustment = "horizon-capped";
+  }
+  if (checkOutCandidate <= nextIn) {
+    checkOutCandidate = addDaysToIsoDate(nextIn, 1, nextIn);
+    adjustment = "check-out-clamped-after-check-in";
+  }
+  const nextOut = checkOutCandidate;
+  return {
+    checkIn: nextIn,
+    checkOut: nextOut,
+    nights: Math.max(diffNightsBetweenIso(nextIn, nextOut), 1),
+    adjustment
+  };
+}
+function isValidStayRange(checkIn, checkOut, minCheckIn) {
+  if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) return false;
+  if (checkIn < minCheckIn) return false;
+  return diffNightsBetweenIso(checkIn, checkOut) >= 1;
+}
+function resolveRangeSelection({
+  from,
+  to: to3,
+  minCheckIn,
+  maxCheckOut,
+  maxNights = DEFAULT_MAX_STAY_NIGHTS
+}) {
+  if (!isValidIsoDate(from ?? "")) return { status: "cleared" };
+  const checkIn = from < minCheckIn ? minCheckIn : from;
+  if (!isValidIsoDate(to3 ?? "")) return { status: "pending", checkIn };
+  const checkOut = to3;
+  if (checkOut === checkIn) return { status: "pending", checkIn };
+  if (checkOut < checkIn) return { status: "pending", checkIn };
+  const clampedCheckIn = checkIn < minCheckIn ? minCheckIn : checkIn;
+  const nights = diffNightsBetweenIso(clampedCheckIn, checkOut);
+  if (nights < 1) return { status: "pending", checkIn: clampedCheckIn };
+  if (checkOut > maxCheckOut) return { status: "pending", checkIn: clampedCheckIn };
+  if (nights > maxNights) return { status: "pending", checkIn: clampedCheckIn };
+  return { status: "complete", checkIn: clampedCheckIn, checkOut, nights };
+}
+var ISO_DATE_PATTERN, DEFAULT_STAY_NIGHTS, DEFAULT_MAX_STAY_NIGHTS, DEFAULT_BOOKING_HORIZON_DAYS, MIN_MAX_STAY_NIGHTS, MAX_MAX_STAY_NIGHTS;
+var init_stayRange = __esm({
+  "../shared/utils/stayRange.ts"() {
+    "use strict";
+    ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+    DEFAULT_STAY_NIGHTS = 1;
+    DEFAULT_MAX_STAY_NIGHTS = 30;
+    DEFAULT_BOOKING_HORIZON_DAYS = 365;
+    MIN_MAX_STAY_NIGHTS = 1;
+    MAX_MAX_STAY_NIGHTS = DEFAULT_BOOKING_HORIZON_DAYS;
   }
 });
 
@@ -222086,6 +222540,7 @@ function calculateDiscountChain(input) {
 var BROAD_DISCOUNT_SCOPE;
 var init_bookingDiscounts = __esm({
   "../shared/utils/bookingDiscounts.ts"() {
+    "use strict";
     BROAD_DISCOUNT_SCOPE = {
       senior: { room: true, breakfast: true, extraBed: true },
       voucher: { room: true, breakfast: true, extraBed: true },
@@ -222118,7 +222573,8 @@ function computeBookingFolio(input) {
     0
   );
   const totalPrice = Number(booking.totalPrice) || 0;
-  const grandTotal = totalPrice + storeTotal + chargesTotal;
+  const otherAddOnTotal = Math.max(0, Number(booking.otherAddOnTotal) || 0);
+  const grandTotal = totalPrice + otherAddOnTotal + storeTotal + chargesTotal;
   const balance = grandTotal - paymentsTotal;
   return {
     storeCharges,
@@ -222126,6 +222582,7 @@ function computeBookingFolio(input) {
     charges,
     chargesTotal,
     paymentsTotal,
+    otherAddOnTotal,
     grandTotal,
     balance
   };
@@ -222135,7 +222592,8 @@ function computeServerFolioTotals(input) {
   const incidentalTotal = Number(input.incidentalTotal) || 0;
   const addToBillTotal = Number(input.addToBillTotal) || 0;
   const collectedTotal = Number(input.collectedTotal) || 0;
-  const folioTotal = totalPrice + incidentalTotal + addToBillTotal;
+  const otherAddOnTotal = Math.max(0, Number(input.otherAddOnTotal) || 0);
+  const folioTotal = totalPrice + otherAddOnTotal + incidentalTotal + addToBillTotal;
   const computedBalance = Math.max(folioTotal - collectedTotal, 0);
   return { folioTotal, computedBalance };
 }
@@ -222253,9 +222711,7 @@ function getBookingRevenueStreams(booking) {
   const roomSubtotalRaw = Number(booking.rateBreakdown?.roomSubtotal);
   const roomSubtotal = Number.isFinite(roomSubtotalRaw) && roomSubtotalRaw > 0 ? roomSubtotalRaw : round2(Number(booking.ratePerNight) || 0) * Math.max(0, Number(booking.numNights) || 0);
   const nights = Math.max(0, Number(booking.numNights) || 0);
-  const breakfastGross = round2(
-    (booking.hasBreakfast ? Number(booking.breakfastRate) || 0 : 0) * Math.max(0, Number(booking.numGuests) || 0) * nights
-  );
+  const breakfastGross = round2(Math.max(0, Number(booking.breakfastTotal) || 0));
   let room = total;
   let breakfast = 0;
   if (total > 0 && breakfastGross > 0 && roomSubtotal > 0) {
@@ -222309,9 +222765,7 @@ function computeBookingRevenueAllocation(input) {
   const ratePerNight = Number(input.ratePerNight) || 0;
   const numNights = Math.max(0, Number(input.numNights) || 0);
   const roomTotal = round2(ratePerNight * numNights);
-  const breakfastTotal = round2(
-    (input.hasBreakfast ? Number(input.breakfastRate) || 0 : 0) * Math.max(0, Number(input.numGuests) || 0) * numNights
-  );
+  const breakfastTotal = round2(Math.max(0, Number(input.breakfastTotal) || 0));
   const extraBedTotal = round2(Number(input.extraBedTotal) || 0);
   const chain2 = calculateDiscountChain({
     roomTotal,
@@ -222357,33 +222811,89 @@ function computeReservationActualDateRange(headerCheckIn, headerCheckOut, childr
 }
 var init_bookingFolio = __esm({
   "../shared/utils/bookingFolio.ts"() {
+    "use strict";
     init_bookingDiscounts();
   }
 });
 
-// ../shared/utils/bookingAddOns.ts
-function calculateBreakfastAddOn(input) {
-  if (!input.hasBreakfast) return 0;
-  const rate = Number(input.breakfastRate) || 0;
-  const nights = Number(input.numNights) || 0;
-  if (rate === 0 || nights === 0) return 0;
-  const numAdults = Number(input.numAdults);
-  const useSplit = Number.isFinite(numAdults) && numAdults > 0;
-  let effectiveOccupancy;
-  if (useSplit) {
-    const numChildren = Number(input.numChildren) || 0;
-    const includesChildren = input.breakfastIncludesChildren !== false;
-    effectiveOccupancy = numAdults + (includesChildren ? numChildren : 0);
-  } else {
-    effectiveOccupancy = Number(input.numGuests) || 0;
-  }
-  if (input.extraBedBreakfast) {
-    const extraBedCount = Number(input.extraBedCount) || 0;
-    effectiveOccupancy += extraBedCount;
-  }
-  if (effectiveOccupancy === 0) return 0;
-  return rate * effectiveOccupancy * nights;
+// ../shared/utils/breakfastTotal.ts
+function isBreakfastRateLine(label) {
+  const text = String(label ?? "");
+  return text === BREAKFAST_RATE_LINE_LABEL || text.startsWith(BREAKFAST_RATE_LINE_PREFIX);
 }
+function sumBreakfastRateLines(breakdown) {
+  if (!breakdown || !Array.isArray(breakdown.addOns)) return null;
+  let total = 0;
+  for (const line of breakdown.addOns) {
+    if (!line || !isBreakfastRateLine(line.label)) continue;
+    const amount = Number(line.amount);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    total += amount;
+  }
+  return Math.round(total * 100) / 100;
+}
+function recomputeBreakfastTotal(selections) {
+  if (!selections) return 0;
+  let total = 0;
+  for (const key in selections) {
+    if (!Object.prototype.hasOwnProperty.call(selections, key)) continue;
+    const entry = selections[key];
+    if (!entry) continue;
+    if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+    const price = entry.price;
+    if (typeof price !== "number") continue;
+    if (!Number.isFinite(price)) continue;
+    if (price < 0) continue;
+    total += price;
+  }
+  return Math.round(total * 100) / 100;
+}
+function buildBreakfastRateBreakdownLines(selections) {
+  if (!selections) return [];
+  const byDate = /* @__PURE__ */ new Map();
+  for (const key of Object.keys(selections)) {
+    const entry = selections[key];
+    if (!entry) continue;
+    if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+    if (typeof entry.price !== "number" || !Number.isFinite(entry.price) || entry.price < 0) continue;
+    const match = /^(\d{4}-\d{2}-\d{2})-/.exec(key);
+    if (!match) continue;
+    const date = match[1];
+    const existing = byDate.get(date) ?? { count: 0, total: 0 };
+    existing.count += 1;
+    existing.total = Math.round((existing.total + entry.price) * 100) / 100;
+    byDate.set(date, existing);
+  }
+  const sortedDates = Array.from(byDate.keys()).sort();
+  return sortedDates.map((date) => {
+    const { count, total } = byDate.get(date);
+    let dateLabel = date;
+    try {
+      const parsed2 = /* @__PURE__ */ new Date(`${date}T00:00:00Z`);
+      if (!Number.isNaN(parsed2.getTime())) {
+        const month = parsed2.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
+        const day = parsed2.getUTCDate();
+        dateLabel = `${month} ${day}`;
+      }
+    } catch {
+      dateLabel = date;
+    }
+    return {
+      label: `${BREAKFAST_RATE_LINE_PREFIX}${dateLabel}, ${count} meal${count === 1 ? "" : "s"})`,
+      amount: total
+    };
+  });
+}
+var BREAKFAST_RATE_LINE_LABEL, BREAKFAST_RATE_LINE_PREFIX;
+var init_breakfastTotal = __esm({
+  "../shared/utils/breakfastTotal.ts"() {
+    "use strict";
+    BREAKFAST_RATE_LINE_LABEL = "Breakfast add-on";
+    BREAKFAST_RATE_LINE_PREFIX = "Breakfast (";
+  }
+});
+
+// ../shared/utils/bookingAddOns.ts
 function calculateExtraBedAddOn(input) {
   const count = Number(input.extraBedCount) || 0;
   const rate = Number(input.extraBedRate) || 0;
@@ -222391,8 +222901,13 @@ function calculateExtraBedAddOn(input) {
   if (count === 0 || rate === 0 || nights === 0) return 0;
   return count * rate * nights;
 }
+function calculateBreakfastMealsTotal(selections) {
+  return recomputeBreakfastTotal(selections);
+}
 var init_bookingAddOns = __esm({
   "../shared/utils/bookingAddOns.ts"() {
+    "use strict";
+    init_breakfastTotal();
   }
 });
 
@@ -222428,6 +222943,7 @@ function normalizePaymentHoldWindowHours(raw) {
 var BOOKING_OCCUPYING_STATUSES, DEFAULT_PAYMENT_HOLD_WINDOW_HOURS, MIN_PAYMENT_HOLD_WINDOW_HOURS, MAX_PAYMENT_HOLD_WINDOW_HOURS, EXPIRED_HOLD_CANCELLATION_REASON, PAYMENT_REJECTED_FRESH_DEADLINE_FROM, CANCELLATION_SOURCES, GUEST_CANCELLABLE_STATUSES, STAFF_CANCELLABLE_STATUSES, TERMINAL_CANCELLATION_STATUSES;
 var init_bookingOccupancy = __esm({
   "../shared/utils/bookingOccupancy.ts"() {
+    "use strict";
     BOOKING_OCCUPYING_STATUSES = [
       "pending",
       "payment-uploaded",
@@ -222495,6 +223011,7 @@ function checkExtraBedInventory(inventory, inUse, requestedCount) {
 }
 var init_extraBedInventory = __esm({
   "../shared/utils/extraBedInventory.ts"() {
+    "use strict";
     init_bookingOccupancy();
   }
 });
@@ -222545,6 +223062,7 @@ function normalizeVatConfig(raw) {
 var DEFAULT_VAT_CONFIG;
 var init_bookingVat = __esm({
   "../shared/utils/bookingVat.ts"() {
+    "use strict";
     init_bookingDiscounts();
     DEFAULT_VAT_CONFIG = {
       enabled: true
@@ -222596,6 +223114,7 @@ function clearCache(key) {
 }
 var init_cache = __esm({
   "../shared/utils/cache.ts"() {
+    "use strict";
   }
 });
 
@@ -222696,6 +223215,7 @@ function downloadIcsFile(filename, content) {
 }
 var init_calendar = __esm({
   "../shared/utils/calendar.ts"() {
+    "use strict";
   }
 });
 
@@ -222731,6 +223251,7 @@ function getCheckInReadiness(input) {
 var CHECK_IN_ELIGIBLE_STATUSES, REQUIRED_REGISTRATION_FIELDS;
 var init_checkin = __esm({
   "../shared/utils/checkin.ts"() {
+    "use strict";
     CHECK_IN_ELIGIBLE_STATUSES = ["confirmed", "payment-confirmed"];
     REQUIRED_REGISTRATION_FIELDS = [
       { key: "nationality", label: "Nationality" },
@@ -222779,6 +223300,7 @@ function getWeekendNightCount(checkIn, checkOut) {
 }
 var init_dates = __esm({
   "../shared/utils/dates.ts"() {
+    "use strict";
   }
 });
 
@@ -222866,6 +223388,7 @@ async function compressImageFile(file, options = {}) {
 var defaultImageOptions, MIME_TO_EXTENSION;
 var init_images = __esm({
   "../shared/utils/images.ts"() {
+    "use strict";
     defaultImageOptions = {
       maxWidth: 1600,
       maxHeight: 1600,
@@ -222897,8 +223420,25 @@ function validatePointsRedemption(pointsToRedeem, availablePoints, pointsRedempt
     error: ""
   };
 }
+function resolveCurrentLevel(levels, completedStays) {
+  if (!levels || levels.length === 0) return null;
+  if (!Number.isFinite(completedStays) || completedStays < 0) return null;
+  const sorted = [...levels].filter((l3) => Number.isFinite(l3.fromStays) && l3.fromStays >= 0).sort((a, b3) => a.fromStays - b3.fromStays);
+  let current = null;
+  for (const level of sorted) {
+    if (level.fromStays <= completedStays) current = level;
+    else break;
+  }
+  return current;
+}
+function calculatePointsWithMultiplier(basePoints, multiplier) {
+  if (!Number.isFinite(basePoints) || basePoints <= 0) return 0;
+  const m2 = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+  return Math.max(0, Math.round(basePoints * m2));
+}
 var init_points = __esm({
   "../shared/utils/points.ts"() {
+    "use strict";
   }
 });
 
@@ -222923,6 +223463,7 @@ function resolvePaymentMethodLabel(methodKey, paymentMethods) {
 var LEGACY_PAYMENT_METHOD_LABELS;
 var init_paymentMethodLabel = __esm({
   "../shared/utils/paymentMethodLabel.ts"() {
+    "use strict";
     LEGACY_PAYMENT_METHOD_LABELS = {
       gcash: "Digital Wallet (GCash/Maya)",
       bank: "Bank Transfer (Direct Deposit)",
@@ -222943,6 +223484,7 @@ function getLatestPaymentReference(booking) {
 }
 var init_paymentReference = __esm({
   "../shared/utils/paymentReference.ts"() {
+    "use strict";
   }
 });
 
@@ -222958,13 +223500,14 @@ function isPaymentVerified(booking) {
 }
 var init_paymentVerification = __esm({
   "../shared/utils/paymentVerification.ts"() {
+    "use strict";
   }
 });
 
 // ../shared/utils/pricing.ts
 function calculateBookingTotal(input) {
   const roomTotal = input.roomTotal ?? input.ratePerNight * input.numNights;
-  const breakfastTotal = calculateBreakfastAddOn(input);
+  const breakfastTotal = Number(input.breakfastTotal) || 0;
   const extraBedTotal = Number(input.extraBedTotal) || 0;
   const { total } = calculateDiscountChain({
     roomTotal,
@@ -222991,7 +223534,7 @@ function getLockedManualNightlyRate(breakdown) {
 }
 var init_pricing = __esm({
   "../shared/utils/pricing.ts"() {
-    init_bookingAddOns();
+    "use strict";
     init_bookingDiscounts();
   }
 });
@@ -223029,6 +223572,7 @@ function subscribeToPublicSiteContentBust(onBust) {
 }
 var init_publicSiteCache = __esm({
   "../shared/utils/publicSiteCache.ts"() {
+    "use strict";
     init_constants();
     init_cache();
   }
@@ -223040,14 +223584,22 @@ function defaultHasher() {
   return (input) => createHash("sha256").update(input).digest("hex");
 }
 function normalizeRoomLine(line) {
+  const selections = Array.isArray(line.breakfastSelections) ? line.breakfastSelections.map((s4) => ({
+    key: String(s4.key || "").trim(),
+    mealId: String(s4.mealId || "").trim(),
+    price: Math.max(0, Number(s4.price) || 0)
+  })).sort((a, b3) => {
+    const aKey = `${a.key}|${a.mealId}|${a.price}`;
+    const bKey = `${b3.key}|${b3.mealId}|${b3.price}`;
+    return aKey < bKey ? -1 : aKey > bKey ? 1 : 0;
+  }) : [];
   return {
     type: String(line.type || "").trim(),
     quantity: Math.max(0, Math.floor(Number(line.quantity) || 0)),
     adults: Math.max(0, Math.floor(Number(line.adults) || 0)),
     children: Math.max(0, Math.floor(Number(line.children) || 0)),
     extraBeds: Math.max(0, Math.floor(Number(line.extraBeds) || 0)),
-    hasBreakfast: Boolean(line.hasBreakfast),
-    breakfastIncludesChildren: Boolean(line.breakfastIncludesChildren)
+    breakfastSelections: selections
   };
 }
 function normalizeDiscountScope2(scope) {
@@ -223108,6 +223660,7 @@ function computeRequestFingerprint(req, hasher = defaultHasher()) {
 var __test__;
 var init_reservationFingerprint = __esm({
   "../shared/utils/reservationFingerprint.ts"() {
+    "use strict";
     __test__ = { buildCanonicalPayload, normalizeRoomLine, normalizeDiscountScope: normalizeDiscountScope2 };
   }
 });
@@ -223217,6 +223770,7 @@ function deriveRoomTypeCapacityFit(input) {
 var DEFAULT_MAX_CHILDREN_BY_ADULT_CAPACITY, FALLBACK_MAX_CHILDREN;
 var init_roomTypes = __esm({
   "../shared/utils/roomTypes.ts"() {
+    "use strict";
     DEFAULT_MAX_CHILDREN_BY_ADULT_CAPACITY = {
       1: 0,
       2: 1,
@@ -223308,6 +223862,7 @@ function calculateSeasonalAwareRoomBreakdown(input) {
 }
 var init_seasonalRates = __esm({
   "../shared/utils/seasonalRates.ts"() {
+    "use strict";
     init_dates();
   }
 });
@@ -223413,6 +223968,7 @@ async function runBackfill(options) {
 var DEFAULT_PREFIX, DEFAULT_MAX_ITEMS, MAX_HISTORY, sweepHistory;
 var init_storageJanitor = __esm({
   "../shared/utils/storageJanitor.ts"() {
+    "use strict";
     DEFAULT_PREFIX = "bookings/";
     DEFAULT_MAX_ITEMS = 500;
     MAX_HISTORY = 50;
@@ -223439,6 +223995,7 @@ function getEffectiveStorePaymentMethods(paymentMethods) {
 }
 var init_storePaymentMethods = __esm({
   "../shared/utils/storePaymentMethods.ts"() {
+    "use strict";
   }
 });
 
@@ -223465,8 +224022,20 @@ function calculateVoucherDiscount(voucher, subtotal) {
 function applyVoucherDiscount(voucher, subtotal) {
   return Math.max(subtotal - calculateVoucherDiscount(voucher, subtotal), 0);
 }
+function isRewardVoucher(voucher) {
+  return voucher.kind === "reward";
+}
+function isFreeNightVoucher(voucher) {
+  return voucher.kind === "reward" && voucher.valueType === "free-night";
+}
+function generateFreeNightVoucherCode(memberNumber, completedStays) {
+  const safeMember = String(memberNumber || "MEMBER").replace(/[^A-Z0-9_-]/gi, "");
+  const safeStays = Math.max(0, Math.floor(Number(completedStays) || 0));
+  return `FREENIGHT-${safeMember}-${safeStays}`;
+}
 var init_vouchers = __esm({
   "../shared/utils/vouchers.ts"() {
+    "use strict";
   }
 });
 
@@ -223503,6 +224072,7 @@ function validateCorporateCode(code, now = /* @__PURE__ */ new Date(), options =
 }
 var init_corporate_codes = __esm({
   "../shared/utils/corporate-codes.ts"() {
+    "use strict";
   }
 });
 
@@ -223540,6 +224110,7 @@ function createFailureBackoffState() {
 }
 var init_failureBackoff = __esm({
   "../shared/utils/failureBackoff.ts"() {
+    "use strict";
   }
 });
 
@@ -223610,6 +224181,7 @@ function assertRevenueFinanceInvariant(snapshot) {
 var CENTS_TOLERANCE;
 var init_financeInvariants = __esm({
   "../shared/utils/financeInvariants.ts"() {
+    "use strict";
     CENTS_TOLERANCE = 5e-3;
   }
 });
@@ -223915,6 +224487,7 @@ function buildCancellationLiabilitySnapshot(input) {
 }
 var init_cancellation = __esm({
   "../shared/utils/cancellation.ts"() {
+    "use strict";
   }
 });
 
@@ -223939,6 +224512,7 @@ async function raceUploadWithTimeout(uploadPromise, timeoutMs, label = "Upload")
 var DEFAULT_UPLOAD_TIMEOUT_MS;
 var init_uploads = __esm({
   "../shared/utils/uploads.ts"() {
+    "use strict";
     DEFAULT_UPLOAD_TIMEOUT_MS = 9e4;
   }
 });
@@ -224000,9 +224574,717 @@ function format12hLabel(hours, minutes, locale) {
 var HOTEL_TZ_OFFSET_HOURS, HOTEL_TZ_IANA;
 var init_bookingPreferences = __esm({
   "../shared/utils/bookingPreferences.ts"() {
+    "use strict";
     init_constants();
     HOTEL_TZ_OFFSET_HOURS = 8;
     HOTEL_TZ_IANA = "Asia/Manila";
+  }
+});
+
+// ../shared/utils/breakfastCutoff.ts
+function parseServiceDateUtc(value) {
+  if (typeof value !== "string") return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [yearStr, monthStr, dayStr] = value.split("-");
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const day = Number(dayStr);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const candidate = new Date(Date.UTC(year, month - 1, day));
+  if (candidate.getUTCFullYear() !== year || candidate.getUTCMonth() !== month - 1 || candidate.getUTCDate() !== day) {
+    return null;
+  }
+  return candidate;
+}
+function parseCutoffTime(value) {
+  if (typeof value !== "string") return null;
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value);
+  if (!match) return null;
+  return { hour: Number(match[1]), minute: Number(match[2]) };
+}
+function isValidTimezone(timezone) {
+  if (typeof timezone !== "string" || timezone.length === 0) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+function zonedWallClockToUtc(dateUtc, hour, minute, timezone) {
+  const naiveUtcMs = Date.UTC(
+    dateUtc.getUTCFullYear(),
+    dateUtc.getUTCMonth(),
+    dateUtc.getUTCDate(),
+    hour,
+    minute,
+    0,
+    0
+  );
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  });
+  const parts = formatter.formatToParts(new Date(naiveUtcMs));
+  const get2 = (type) => {
+    const found = parts.find((p) => p.type === type);
+    if (!found) throw new Error(`Missing Intl part: ${type}`);
+    return Number(found.value);
+  };
+  const tzAsUtcMs = Date.UTC(
+    get2("year"),
+    get2("month") - 1,
+    get2("day"),
+    get2("hour") === 24 ? 0 : get2("hour"),
+    get2("minute"),
+    get2("second")
+  );
+  const offsetMs = tzAsUtcMs - naiveUtcMs;
+  return new Date(naiveUtcMs - offsetMs);
+}
+function computeBreakfastCutoffState(input) {
+  const safeReturn = (reason) => {
+    console.error(
+      `[breakfastCutoff] ${reason}; returning locked state for serviceDate=${input?.serviceDate}`
+    );
+    return {
+      isLocked: true,
+      minutesUntilCutoff: 0,
+      cutoffAt: input?.now instanceof Date ? input.now.toISOString() : (/* @__PURE__ */ new Date(0)).toISOString(),
+      serviceDate: typeof input?.serviceDate === "string" ? input.serviceDate : ""
+    };
+  };
+  if (!input || !(input.now instanceof Date)) {
+    return safeReturn("invalid `now` argument");
+  }
+  const serviceDateUtc = parseServiceDateUtc(input.serviceDate);
+  if (!serviceDateUtc) {
+    return safeReturn(`invalid serviceDate (${input.serviceDate})`);
+  }
+  const cutoff = parseCutoffTime(input.cutoffTime);
+  if (!cutoff) {
+    return safeReturn(`invalid cutoffTime (${input.cutoffTime})`);
+  }
+  if (!isValidTimezone(input.timezone)) {
+    return safeReturn(`invalid timezone (${input.timezone})`);
+  }
+  const previousDayUtc = new Date(serviceDateUtc);
+  previousDayUtc.setUTCDate(previousDayUtc.getUTCDate() - 1);
+  const cutoffAt = zonedWallClockToUtc(
+    previousDayUtc,
+    cutoff.hour,
+    cutoff.minute,
+    input.timezone
+  );
+  const nowMs = input.now.getTime();
+  const cutoffMs = cutoffAt.getTime();
+  const isLocked = nowMs >= cutoffMs;
+  const minutesUntilCutoff = Math.floor((cutoffMs - nowMs) / 6e4);
+  if (input.cutoffsEnabled === false) {
+    return {
+      isLocked: false,
+      // The countdown is meaningless when cut-offs are off,
+      // but expose a large sentinel so any client renderer
+      // accidentally feeding `minutesUntilCutoff` into a
+      // "minutes remaining" line shows "always open" instead
+      // of a negative countdown.
+      minutesUntilCutoff: Number.MAX_SAFE_INTEGER,
+      cutoffAt: cutoffAt.toISOString(),
+      serviceDate: input.serviceDate,
+      reasonOrCutoff: "cutoffs-disabled"
+    };
+  }
+  return {
+    isLocked,
+    minutesUntilCutoff,
+    cutoffAt: cutoffAt.toISOString(),
+    serviceDate: input.serviceDate
+  };
+}
+var init_breakfastCutoff = __esm({
+  "../shared/utils/breakfastCutoff.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/money.ts
+function roundToTwoDecimals(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.round(numeric * 100) / 100;
+}
+var init_money = __esm({
+  "../shared/utils/money.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/otherAddOnTotal.ts
+function recomputeOtherAddOnTotal(selections) {
+  if (!selections) return 0;
+  let total = 0;
+  for (const dateKey2 of Object.keys(selections)) {
+    const items = selections[dateKey2];
+    if (!Array.isArray(items)) continue;
+    for (const entry of items) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+      const price = Math.max(0, Number(entry.priceSnapshot) || 0);
+      const qty = Math.max(0, Math.floor(Number(entry.quantity) || 0));
+      total += price * qty;
+    }
+  }
+  return roundToTwoDecimals(total);
+}
+function otherAddOnBreakdownByDate(selections) {
+  if (!selections) return [];
+  const rows = [];
+  const dates = Object.keys(selections).sort();
+  for (const date of dates) {
+    const items = selections[date];
+    if (!Array.isArray(items) || items.length === 0) continue;
+    let s4 = 0;
+    let n2 = 0;
+    for (const entry of items) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+      const price = Math.max(0, Number(entry.priceSnapshot) || 0);
+      const qty = Math.max(0, Math.floor(Number(entry.quantity) || 0));
+      if (qty > 0) {
+        s4 += price * qty;
+        n2 += 1;
+      }
+    }
+    if (n2 > 0) {
+      rows.push({ date, subtotal: roundToTwoDecimals(s4), itemCount: n2 });
+    }
+  }
+  return rows;
+}
+function hasAnyOtherAddOns(selections) {
+  if (!selections) return false;
+  for (const date of Object.keys(selections)) {
+    const items = selections[date];
+    if (!Array.isArray(items)) continue;
+    for (const entry of items) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+      if (Math.max(0, Math.floor(Number(entry.quantity) || 0)) > 0) return true;
+    }
+  }
+  return false;
+}
+function buildOtherAddOnSelectionKey(date, addOnId) {
+  return `${date}-${String(addOnId).trim()}`;
+}
+function parseOtherAddOnSelectionKey(key) {
+  const trimmed = String(key || "").trim();
+  if (!trimmed) return null;
+  if (trimmed.length < 14) return null;
+  const date = trimmed.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const addOnId = trimmed.slice(11);
+  if (!addOnId) return null;
+  return { date, addOnId };
+}
+var init_otherAddOnTotal = __esm({
+  "../shared/utils/otherAddOnTotal.ts"() {
+    "use strict";
+    init_money();
+  }
+});
+
+// ../shared/utils/bookingAddOnReschedule.ts
+function enumerateStayServiceDates(window2) {
+  const dates = [];
+  const startMs = Date.parse(`${window2.checkIn}T00:00:00Z`);
+  const endMs = Date.parse(`${window2.checkOut}T00:00:00Z`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return dates;
+  const maxDays = 60;
+  for (let ms2 = startMs, i2 = 0; ms2 < endMs && i2 < maxDays; ms2 += 864e5, i2 += 1) {
+    const d = new Date(ms2);
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    dates.push(`${yyyy}-${mm}-${dd}`);
+  }
+  return dates;
+}
+function isDateInStayWindow(serviceDate, window2) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(serviceDate)) return false;
+  return serviceDate >= window2.checkIn && serviceDate < window2.checkOut;
+}
+function serviceDateFromSlotKey(slotKey) {
+  if (typeof slotKey !== "string") return null;
+  const match = /^(\d{4}-\d{2}-\d{2})-/.exec(slotKey);
+  return match ? match[1] : null;
+}
+function shouldAutoCancelSelection(mode, serviceDate, window2, today) {
+  if (!serviceDate) return false;
+  if (mode === "cancel") {
+    return serviceDate >= today;
+  }
+  return !isDateInStayWindow(serviceDate, window2);
+}
+function redateBreakfastSelections(input) {
+  const { mode, window: window2, today, paidAmount } = input;
+  const source = input.selections || {};
+  const next = {};
+  const removed = [];
+  let remainingPaid = Math.max(0, Number(paidAmount) || 0);
+  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+  for (const key of Object.keys(source)) {
+    const entry = source[key];
+    if (!entry) {
+      next[key] = entry;
+      continue;
+    }
+    if (entry.removedAt !== null && entry.removedAt !== void 0) {
+      next[key] = entry;
+      continue;
+    }
+    const serviceDate = serviceDateFromSlotKey(key);
+    if (!shouldAutoCancelSelection(mode, serviceDate, window2, today)) {
+      next[key] = entry;
+      continue;
+    }
+    const amount = Math.max(0, Number(entry.price) || 0);
+    const wasPaid = amount > 0 && remainingPaid >= amount;
+    if (wasPaid) remainingPaid -= amount;
+    removed.push({
+      key,
+      serviceDate: serviceDate || "",
+      entry,
+      amount,
+      wasPaid
+    });
+    next[key] = {
+      ...entry,
+      removedAt: nowIso,
+      removedBy: "system",
+      lastModifiedAt: nowIso,
+      lastModifiedBy: "system"
+    };
+  }
+  return {
+    selections: next,
+    removed,
+    paidRemoved: removed.filter((r3) => r3.wasPaid),
+    total: recomputeBreakfastTotal(next)
+  };
+}
+function redateOtherAddOnSelections(input) {
+  const { mode, window: window2, today, paidAmount } = input;
+  const source = input.selections || {};
+  const next = {};
+  const removed = [];
+  let remainingPaid = Math.max(0, Number(paidAmount) || 0);
+  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+  for (const date of Object.keys(source)) {
+    const entries = source[date];
+    if (!Array.isArray(entries)) {
+      next[date] = [];
+      continue;
+    }
+    const kept = [];
+    for (const entry of entries) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) {
+        kept.push(entry);
+        continue;
+      }
+      if (!shouldAutoCancelSelection(mode, date, window2, today)) {
+        kept.push(entry);
+        continue;
+      }
+      const quantity = Math.max(0, Math.floor(Number(entry.quantity) || 0));
+      const amount = roundToTwoDecimals(Math.max(0, Number(entry.priceSnapshot) || 0) * quantity);
+      const wasPaid = amount > 0 && remainingPaid >= amount;
+      if (wasPaid) remainingPaid -= amount;
+      removed.push({
+        date,
+        addOnId: String(entry.addOnId || ""),
+        selectionKey: `${date}-${String(entry.addOnId || "")}`,
+        entry,
+        amount,
+        wasPaid
+      });
+      kept.push({
+        ...entry,
+        removedAt: nowIso,
+        removedBy: "system",
+        lastModifiedAt: nowIso,
+        lastModifiedBy: "system"
+      });
+    }
+    next[date] = kept;
+  }
+  return {
+    selections: next,
+    removed,
+    paidRemoved: removed.filter((r3) => r3.wasPaid),
+    total: recomputeOtherAddOnTotal(next)
+  };
+}
+var init_bookingAddOnReschedule = __esm({
+  "../shared/utils/bookingAddOnReschedule.ts"() {
+    "use strict";
+    init_breakfastTotal();
+    init_otherAddOnTotal();
+    init_money();
+  }
+});
+
+// ../shared/utils/firestorePayload.ts
+function stripUndefinedValues(value) {
+  return stripValue(value);
+}
+function stripValue(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripValue(item));
+  }
+  if (isPlainObject(value)) {
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (item === void 0) continue;
+      out[key] = stripValue(item);
+    }
+    return out;
+  }
+  return value;
+}
+function isPlainObject(value) {
+  if (value === null || typeof value !== "object") return false;
+  if (Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+var init_firestorePayload = __esm({
+  "../shared/utils/firestorePayload.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/breakfastConfig.ts
+function nonNegativeFinite(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(numeric, 0) : 0;
+}
+function safeString(value, fallback) {
+  return typeof value === "string" && value.length > 0 ? value : fallback;
+}
+function safeBool(value, fallback) {
+  return typeof value === "boolean" ? value : fallback;
+}
+function safeImageUrl(value) {
+  if (typeof value !== "string" || value.length === 0) return void 0;
+  try {
+    const parsed2 = new URL(value);
+    if (parsed2.protocol !== "https:" && parsed2.protocol !== "http:") return void 0;
+    return value;
+  } catch {
+    return void 0;
+  }
+}
+function safeMeals(meals) {
+  if (!Array.isArray(meals)) return [];
+  return meals.filter((entry) => Boolean(entry) && typeof entry === "object").filter((entry) => entry.isActive === true).map((entry) => ({
+    id: safeString(entry.id, ""),
+    name: safeString(entry.name, "Unnamed meal"),
+    description: safeString(entry.description, ""),
+    price: nonNegativeFinite(entry.price),
+    displayOrder: nonNegativeFinite(entry.displayOrder),
+    // `undefined` keys are dropped by JSON.stringify on the wire, so
+    // a meal without an image costs nothing in the public payload.
+    ...safeImageUrl(entry.imageUrl) ? { imageUrl: safeImageUrl(entry.imageUrl) } : {}
+  })).filter((entry) => entry.id.length > 0).sort((a, b3) => a.displayOrder - b3.displayOrder || a.name.localeCompare(b3.name));
+}
+function normalizeBreakfastConfig(source) {
+  const raw = source && typeof source === "object" ? source : {};
+  void ADMIN_ONLY_FIELDS;
+  return {
+    isEnabled: safeBool(raw.isEnabled, false),
+    // Per BR-10 (decision #244 reserved, 2026-10-14 — Phase 14):
+    // legacy / pre-BR-10 settings docs may not have a
+    // `cutoffsEnabled` field. Default to `true` (the
+    // pre-BR-10 behaviour — cut-offs always enforced).
+    // New writers always pass this explicitly.
+    cutoffsEnabled: safeBool(raw.cutoffsEnabled, true),
+    cutoffTime: safeString(raw.cutoffTime, "20:00"),
+    cutoffTimezone: safeString(raw.cutoffTimezone, "Asia/Manila"),
+    defaultMealInstructions: safeString(raw.defaultMealInstructions, ""),
+    meals: safeMeals(raw.meals)
+  };
+}
+var ADMIN_ONLY_FIELDS;
+var init_breakfastConfig = __esm({
+  "../shared/utils/breakfastConfig.ts"() {
+    "use strict";
+    ADMIN_ONLY_FIELDS = /* @__PURE__ */ new Set([
+      "frontDeskOverrideEnabled",
+      "servedGraceMinutes",
+      "updatedBy",
+      "updatedAt"
+    ]);
+  }
+});
+
+// ../shared/utils/otherAddOnCutoff.ts
+function computeOtherAddOnCutoffState(input) {
+  const { checkInDate, addOn, now = /* @__PURE__ */ new Date() } = input;
+  const checkInMs = Date.parse(`${checkInDate}T00:00:00Z`);
+  if (!Number.isFinite(checkInMs)) {
+    return {
+      isLocked: false,
+      cutoffAt: now.toISOString(),
+      minutesUntilCutoff: Number.MAX_SAFE_INTEGER
+    };
+  }
+  const leadHours = Math.min(168, Math.max(0, Number(addOn.cutoffHoursBeforeCheckIn) || 24));
+  const cutoffMs = checkInMs - leadHours * 36e5;
+  const cutoffAt = new Date(cutoffMs).toISOString();
+  const minutesUntilCutoff = Math.floor((cutoffMs - now.getTime()) / 6e4);
+  if (addOn.isEnabled === false) {
+    return {
+      isLocked: true,
+      cutoffAt,
+      minutesUntilCutoff: Number.MAX_SAFE_INTEGER,
+      reasonOrCutoff: "addons-disabled"
+    };
+  }
+  if (now.getTime() >= cutoffMs) {
+    return {
+      isLocked: true,
+      cutoffAt,
+      minutesUntilCutoff,
+      reasonOrCutoff: "cutoff-passed"
+    };
+  }
+  return { isLocked: false, cutoffAt, minutesUntilCutoff };
+}
+var init_otherAddOnCutoff = __esm({
+  "../shared/utils/otherAddOnCutoff.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/otherAddOnDrafts.ts
+function otherAddOnDraftKey(date, addOnId) {
+  return `${date}-${String(addOnId).trim()}`;
+}
+function clampOtherAddOnQuantity(quantity, guestCount) {
+  const max = Math.max(0, Math.floor(Number(guestCount) || 0));
+  const raw = Math.floor(Number(quantity) || 0);
+  if (raw <= 0) return 0;
+  return Math.min(raw, max);
+}
+function buildOtherAddOnDraftSelections(input) {
+  const now = input.now ?? /* @__PURE__ */ new Date();
+  const stamp = now.toISOString();
+  const catalogById = /* @__PURE__ */ new Map();
+  for (const row2 of input.catalog || []) {
+    if (row2 && row2.id) catalogById.set(row2.id, row2);
+  }
+  const out = {};
+  for (const date of input.dates || []) {
+    const rows = [];
+    for (const addOn of catalogById.values()) {
+      const raw = input.quantities?.[otherAddOnDraftKey(date, addOn.id)];
+      const quantity = clampOtherAddOnQuantity(raw, input.guestCount);
+      if (quantity <= 0) continue;
+      rows.push({
+        addOnId: addOn.id,
+        nameSnapshot: addOn.name,
+        priceSnapshot: Math.max(0, Number(addOn.price) || 0),
+        quantity,
+        unitSnapshot: addOn.unit === "per-stay" ? "per-stay" : "per-person",
+        addedAt: stamp,
+        addedBy: "guest",
+        lastModifiedAt: stamp,
+        lastModifiedBy: "guest",
+        removedAt: null,
+        removedBy: null,
+        cutoffHoursBeforeCheckInSnapshot: Math.max(
+          0,
+          Math.min(168, Math.floor(Number(addOn.cutoffHoursBeforeCheckIn) || 24))
+        )
+      });
+    }
+    if (rows.length > 0) out[date] = rows;
+  }
+  return out;
+}
+function countOtherAddOnDraftSelections(selections) {
+  if (!selections) return 0;
+  let count = 0;
+  for (const date of Object.keys(selections)) {
+    const rows = selections[date];
+    if (!Array.isArray(rows)) continue;
+    for (const entry of rows) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+      if (Math.max(0, Math.floor(Number(entry.quantity) || 0)) > 0) count += 1;
+    }
+  }
+  return count;
+}
+var init_otherAddOnDrafts = __esm({
+  "../shared/utils/otherAddOnDrafts.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/addOns.ts
+function normalizeAddOn(raw, fallbackId) {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw;
+  const id = String(obj.id || fallbackId || "").trim();
+  const name2 = String(obj.name || "").trim();
+  if (!id || !name2) return null;
+  const price = Math.max(0, Number(obj.price) || 0);
+  const unit = obj.unit === "per-stay" ? "per-stay" : "per-person";
+  const cutoffHoursBeforeCheckIn = Math.max(
+    0,
+    Math.min(168, Math.floor(Number(obj.cutoffHoursBeforeCheckIn) || 24))
+  );
+  return {
+    id,
+    name: name2,
+    description: String(obj.description || "").trim().slice(0, 500),
+    price,
+    unit,
+    isEnabled: obj.isEnabled !== false,
+    cutoffHoursBeforeCheckIn,
+    displayOrder: Math.floor(Number(obj.displayOrder) || 0),
+    updatedAt: obj.updatedAt || (/* @__PURE__ */ new Date()).toISOString(),
+    updatedBy: String(obj.updatedBy || "")
+  };
+}
+function normalizeOtherAddOnsEnabled(raw) {
+  if (raw === false) return false;
+  if (raw === true) return true;
+  if (typeof raw === "string") {
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === "false") return false;
+    if (normalized === "true") return true;
+  }
+  return OTHER_ADD_ONS_ENABLED_DEFAULT;
+}
+function getEnabledAddOnsByHotel(addOns, hotelEnabled) {
+  if (!Array.isArray(addOns)) return [];
+  if (hotelEnabled === false) return [];
+  return addOns.filter((a) => a && a.isEnabled === true).slice().sort((a, b3) => {
+    const da3 = Math.floor(Number(a.displayOrder) || 0);
+    const db = Math.floor(Number(b3.displayOrder) || 0);
+    if (da3 !== db) return da3 - db;
+    return String(a.name || "").localeCompare(String(b3.name || ""));
+  });
+}
+function sortAddOnsByDisplayOrder(addOns) {
+  if (!Array.isArray(addOns)) return [];
+  return addOns.slice().sort((a, b3) => {
+    const da3 = Math.floor(Number(a.displayOrder) || 0);
+    const db = Math.floor(Number(b3.displayOrder) || 0);
+    if (da3 !== db) return da3 - db;
+    return String(a.name || "").localeCompare(String(b3.name || ""));
+  });
+}
+function isOtherAddOnBookingMutable(status) {
+  const normalized = String(status ?? "").trim().toLowerCase();
+  return normalized !== "checked-out" && normalized !== "cancelled";
+}
+var AIRPORT_TRANSFER_PRESEED, OTHER_ADD_ONS_ENABLED_DEFAULT, OTHER_ADD_ON_READ_ONLY_ERROR;
+var init_addOns = __esm({
+  "../shared/utils/addOns.ts"() {
+    "use strict";
+    AIRPORT_TRANSFER_PRESEED = {
+      name: "Airport transfer",
+      description: "One-way airport pickup or drop-off at Panglao International Airport (TAG). Driver meets you at arrivals with a name board. Price is per guest.",
+      price: 500,
+      unit: "per-person",
+      isEnabled: true,
+      cutoffHoursBeforeCheckIn: 24,
+      displayOrder: 10
+    };
+    OTHER_ADD_ONS_ENABLED_DEFAULT = true;
+    OTHER_ADD_ON_READ_ONLY_ERROR = "Booking is read-only.";
+  }
+});
+
+// ../shared/schemas/rewardsConfig.ts
+var LevelDefSchema, RewardsConfigSchema;
+var init_rewardsConfig = __esm({
+  "../shared/schemas/rewardsConfig.ts"() {
+    "use strict";
+    init_zod();
+    LevelDefSchema = external_exports.object({
+      id: external_exports.string().min(1).max(64),
+      name: external_exports.string().trim().min(1, "Tier name is required").max(24, "Tier name must be 24 characters or fewer"),
+      fromStays: external_exports.number().int("Threshold must be a whole number of stays").min(0, "Threshold cannot be negative"),
+      discountPct: external_exports.number().min(0, "Discount cannot be negative").max(100, "Discount cannot exceed 100%"),
+      pointsMultiplier: external_exports.number().min(0.01, "Multiplier must be greater than zero"),
+      perks: external_exports.string().trim().max(280, "Perks blurb must be 280 characters or fewer")
+    });
+    RewardsConfigSchema = external_exports.object({
+      // Phase 1 fields (required, matching seed defaults):
+      pointsEnabled: external_exports.boolean(),
+      earningMode: external_exports.enum(["per-booking", "per-spend"]),
+      pointsPerBooking: external_exports.number().int().min(0),
+      pointsPerHundred: external_exports.number().int().min(0),
+      memberDiscountEnabled: external_exports.boolean(),
+      memberDiscountPct: external_exports.number().min(0).max(100),
+      pointsRedemptionRate: external_exports.number().int().min(1, "Redemption rate must be at least 1"),
+      earlyCheckInEnabled: external_exports.boolean().optional(),
+      updatedAt: external_exports.unknown().optional(),
+      // Phase 2 fields (all optional, "off" by default):
+      welcomePoints: external_exports.number().int().min(0).max(1e5).optional(),
+      minPointsToRedeem: external_exports.number().int().min(0).max(1e6).optional(),
+      pointsCanPayUpToBillPct: external_exports.number().min(0, "Bill cap cannot be negative").max(100, "Bill cap cannot exceed 100%").optional(),
+      freeNightEvery: external_exports.number().int().min(0, "Free-night-every cannot be negative").max(365).optional(),
+      levels: external_exports.array(LevelDefSchema).optional(),
+      // Per PR #9 (2026-10-13): admin opt-in toggle for member
+      // self-service points redemption at booking checkout. Defaults
+      // to `false` so existing deployments preserve the front-desk-
+      // mediated redemption model. When `true`, the booking Step 3
+      // panel exposes an "Apply my points" input (member-authenticated
+      // endpoint). The server still owns all 7 redemption guards
+      // (min-redeem, bill cap, balance, one-per-booking, status
+      // pre-checkin, member match, booking exists) — the toggle only
+      // changes WHO clicks Apply, not WHICH guards run.
+      allowMemberPointsRedemption: external_exports.boolean().optional()
+    }).superRefine((value, ctx) => {
+      const levels = value.levels;
+      if (!levels || levels.length === 0) {
+        return;
+      }
+      const seen = /* @__PURE__ */ new Map();
+      levels.forEach((level, index) => {
+        const prior = seen.get(level.fromStays);
+        if (prior !== void 0) {
+          ctx.addIssue({
+            code: external_exports.ZodIssueCode.custom,
+            path: ["levels", index, "fromStays"],
+            message: `Duplicate threshold \u2014 also used on tier #${prior + 1}`
+          });
+        }
+        seen.set(level.fromStays, index);
+      });
+      const hasBase = levels.some((l3) => l3.fromStays === 0);
+      if (!hasBase) {
+        ctx.addIssue({
+          code: external_exports.ZodIssueCode.custom,
+          path: ["levels"],
+          message: "At least one tier must have a 0-stay threshold (the base tier)"
+        });
+      }
+    });
   }
 });
 
@@ -224011,55 +225293,88 @@ var shared_exports = {};
 __export(shared_exports, {
   ACTIVE_BOOKING_STATUSES: () => ACTIVE_BOOKING_STATUSES,
   ADDITIONAL_REQUEST_MAX_LENGTH: () => ADDITIONAL_REQUEST_MAX_LENGTH,
+  AIRPORT_TRANSFER_PRESEED: () => AIRPORT_TRANSFER_PRESEED,
   ARRIVAL_WINDOW_HOURS: () => ARRIVAL_WINDOW_HOURS,
   AboutContentSchema: () => AboutContentSchema,
+  AddOnCatalogAuditLogSchema: () => AddOnCatalogAuditLogSchema,
+  AddOnSchema: () => AddOnSchema,
   AddRoomBookingSchema: () => AddRoomBookingSchema,
   BOOKING_OCCUPYING_STATUSES: () => BOOKING_OCCUPYING_STATUSES,
   BOOKING_REF_REGEX: () => BOOKING_REF_REGEX,
   BOOKING_SOURCES: () => BOOKING_SOURCES,
   BOOKING_STATUSES: () => BOOKING_STATUSES,
+  BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES: () => BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES,
+  BREAKFAST_RATE_LINE_LABEL: () => BREAKFAST_RATE_LINE_LABEL,
+  BREAKFAST_RATE_LINE_PREFIX: () => BREAKFAST_RATE_LINE_PREFIX,
   BROAD_DISCOUNT_SCOPE: () => BROAD_DISCOUNT_SCOPE,
   BookingDatesSchema: () => BookingDatesSchema,
   BookingRevenueAllocationSchema: () => BookingRevenueAllocationSchema,
   BrandingConfigSchema: () => BrandingConfigSchema,
+  BreakfastAuditEntrySchema: () => BreakfastAuditEntrySchema,
+  BreakfastConfigSchema: () => BreakfastConfigSchema,
+  BreakfastMealSchema: () => BreakfastMealSchema,
+  BreakfastRefundContextSchema: () => BreakfastRefundContextSchema,
+  BreakfastSelectionEntrySchema: () => BreakfastSelectionEntrySchema,
+  BreakfastServedEntrySchema: () => BreakfastServedEntrySchema,
   CANCELLATION_SOURCES: () => CANCELLATION_SOURCES,
   CHECK_IN_ELIGIBLE_STATUSES: () => CHECK_IN_ELIGIBLE_STATUSES,
   CorporateContentSchema: () => CorporateContentSchema,
   CreateRoomSchema: () => CreateRoomSchema,
   DEFAULT_BED_SETUPS: () => DEFAULT_BED_SETUPS,
+  DEFAULT_BOOKING_HORIZON_DAYS: () => DEFAULT_BOOKING_HORIZON_DAYS,
   DEFAULT_BOOKING_PREFERENCES: () => DEFAULT_BOOKING_PREFERENCES,
   DEFAULT_BOOKING_SOURCES: () => DEFAULT_BOOKING_SOURCES,
-  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT: () => DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
+  DEFAULT_BREAKFAST_CUTOFF_TIME: () => DEFAULT_BREAKFAST_CUTOFF_TIME,
+  DEFAULT_BREAKFAST_CUTOFF_TIMEZONE: () => DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
+  DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES: () => DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES,
   DEFAULT_CORPORATE_PAGE_CONTENT: () => DEFAULT_CORPORATE_PAGE_CONTENT,
   DEFAULT_CORPORATE_PERKS: () => DEFAULT_CORPORATE_PERKS,
   DEFAULT_IN_FLOW_HOLD_MINUTES: () => DEFAULT_IN_FLOW_HOLD_MINUTES,
+  DEFAULT_MAX_STAY_NIGHTS: () => DEFAULT_MAX_STAY_NIGHTS,
   DEFAULT_PAYMENT_HOLD_WINDOW_HOURS: () => DEFAULT_PAYMENT_HOLD_WINDOW_HOURS,
   DEFAULT_ROOM_TYPES: () => DEFAULT_ROOM_TYPES2,
+  DEFAULT_STAY_NIGHTS: () => DEFAULT_STAY_NIGHTS,
   DEFAULT_TERMS_VERSION: () => DEFAULT_TERMS_VERSION,
   DEFAULT_UPLOAD_TIMEOUT_MS: () => DEFAULT_UPLOAD_TIMEOUT_MS,
   DEFAULT_VAT_CONFIG: () => DEFAULT_VAT_CONFIG,
   EXPIRED_HOLD_CANCELLATION_REASON: () => EXPIRED_HOLD_CANCELLATION_REASON,
+  ExtendBookingHoldSchema: () => ExtendBookingHoldSchema,
   GUEST_CANCELLABLE_STATUSES: () => GUEST_CANCELLABLE_STATUSES,
   GuestDetailsSchema: () => GuestDetailsSchema,
   HOLD_ID_REGEX: () => HOLD_ID_REGEX,
   HOUSEKEEPING_STATUSES: () => HOUSEKEEPING_STATUSES,
   HomepageContentSchema: () => HomepageContentSchema,
   HousekeepingStatusEnum: () => HousekeepingStatusEnum,
+  IN_FLOW_HOLD_EXTENSION_STATUSES: () => IN_FLOW_HOLD_EXTENSION_STATUSES,
   IN_FLOW_HOLD_MINUTES: () => IN_FLOW_HOLD_MINUTES,
   IN_FLOW_HOLD_STATUSES: () => IN_FLOW_HOLD_STATUSES,
   KNOWN_CONTENT_ICONS: () => KNOWN_CONTENT_ICONS,
   LEGACY_PAYMENT_METHOD_LABELS: () => LEGACY_PAYMENT_METHOD_LABELS,
   LegacyPaymentMethodConfigSchema: () => LegacyPaymentMethodConfigSchema,
+  LevelDefSchema: () => LevelDefSchema,
   MAX_ADVANCE_DAYS: () => MAX_ADVANCE_DAYS,
+  MAX_BREAKFAST_MEAL_IMAGE_BYTES: () => MAX_BREAKFAST_MEAL_IMAGE_BYTES,
   MAX_FEATURED_ROOMS: () => MAX_FEATURED_ROOMS,
   MAX_FEATURED_TYPES: () => MAX_FEATURED_TYPES,
+  MAX_IN_FLOW_HOLD_EXTENSIONS: () => MAX_IN_FLOW_HOLD_EXTENSIONS,
   MAX_IN_FLOW_HOLD_MINUTES: () => MAX_IN_FLOW_HOLD_MINUTES,
+  MAX_MAX_STAY_NIGHTS: () => MAX_MAX_STAY_NIGHTS,
   MAX_PAYMENT_HOLD_WINDOW_HOURS: () => MAX_PAYMENT_HOLD_WINDOW_HOURS,
   MAX_PAYMENT_METHOD_QR_BYTES: () => MAX_PAYMENT_METHOD_QR_BYTES,
   MAX_ROOM_TYPE_PHOTOS: () => MAX_ROOM_TYPE_PHOTOS,
   MAX_STAY_NIGHTS: () => MAX_STAY_NIGHTS,
+  MIN_BREAKFAST_OVERRIDE_REASON_LENGTH: () => MIN_BREAKFAST_OVERRIDE_REASON_LENGTH,
   MIN_IN_FLOW_HOLD_MINUTES: () => MIN_IN_FLOW_HOLD_MINUTES,
+  MIN_MAX_STAY_NIGHTS: () => MIN_MAX_STAY_NIGHTS,
   MIN_PAYMENT_HOLD_WINDOW_HOURS: () => MIN_PAYMENT_HOLD_WINDOW_HOURS,
+  OTHER_ADD_ONS_ENABLED_DEFAULT: () => OTHER_ADD_ONS_ENABLED_DEFAULT,
+  OTHER_ADD_ON_READ_ONLY_ERROR: () => OTHER_ADD_ON_READ_ONLY_ERROR,
+  OtherAddOnAuditEntrySchema: () => OtherAddOnAuditEntrySchema,
+  OtherAddOnMarkRefundPaidSchema: () => OtherAddOnMarkRefundPaidSchema,
+  OtherAddOnMarkServedSchema: () => OtherAddOnMarkServedSchema,
+  OtherAddOnRefundContextSchema: () => OtherAddOnRefundContextSchema,
+  OtherAddOnSelectionEntrySchema: () => OtherAddOnSelectionEntrySchema,
+  OtherAddOnUpdateSchema: () => OtherAddOnUpdateSchema,
   PAYMENT_REJECTED_FRESH_DEADLINE_FROM: () => PAYMENT_REJECTED_FRESH_DEADLINE_FROM,
   PROTECTED_BOOKING_SOURCES: () => PROTECTED_BOOKING_SOURCES,
   PROTECTED_PAYMENT_METHODS: () => PROTECTED_PAYMENT_METHODS,
@@ -224074,12 +225389,14 @@ __export(shared_exports, {
   RESERVATION_REF_REGEX: () => RESERVATION_REF_REGEX,
   ROOM_STATUSES: () => ROOM_STATUSES,
   RescheduleBookingSchema: () => RescheduleBookingSchema,
+  RewardsConfigSchema: () => RewardsConfigSchema,
   RewardsContentSchema: () => RewardsContentSchema,
   RoomStatusEnum: () => RoomStatusEnum,
   STAFF_CANCELLABLE_STATUSES: () => STAFF_CANCELLABLE_STATUSES,
   SUPPORTED_PAYMENT_METHODS: () => SUPPORTED_PAYMENT_METHODS,
   SeoPublishSchema: () => SeoPublishSchema,
   SetLouReceivedSchema: () => SetLouReceivedSchema,
+  StaffOtherAddOnUpdateSchema: () => StaffOtherAddOnUpdateSchema,
   StartBookingHoldSchema: () => StartBookingHoldSchema,
   TERMINAL_CANCELLATION_STATUSES: () => TERMINAL_CANCELLATION_STATUSES,
   TERMS_BODY_MAX_LENGTH: () => TERMS_BODY_MAX_LENGTH,
@@ -224090,54 +225407,69 @@ __export(shared_exports, {
   WalkinRoomLineSchema: () => WalkinRoomLineSchema,
   WebsiteContentSchema: () => WebsiteContentSchema,
   __test__: () => __test__,
+  addDaysToIsoDate: () => addDaysToIsoDate,
   applyRoomTypeDefaults: () => applyRoomTypeDefaults,
   applyVoucherDiscount: () => applyVoucherDiscount,
   assertBookingFinanceInvariant: () => assertBookingFinanceInvariant,
   assertBookingRevenueAllocationInvariant: () => assertBookingRevenueAllocationInvariant,
   assertRevenueFinanceInvariant: () => assertRevenueFinanceInvariant,
   buildArrivalTimeOptions: () => buildArrivalTimeOptions,
+  buildBreakfastRateBreakdownLines: () => buildBreakfastRateBreakdownLines,
   buildCancellationLiabilitySnapshot: () => buildCancellationLiabilitySnapshot,
   buildGoogleCalendarUrl: () => buildGoogleCalendarUrl,
   buildIcsContent: () => buildIcsContent,
+  buildOtherAddOnDraftSelections: () => buildOtherAddOnDraftSelections,
+  buildOtherAddOnSelectionKey: () => buildOtherAddOnSelectionKey,
   bustPublicSiteContentCache: () => bustPublicSiteContentCache,
   calculateBookingTotal: () => calculateBookingTotal,
-  calculateBreakfastAddOn: () => calculateBreakfastAddOn,
+  calculateBreakfastMealsTotal: () => calculateBreakfastMealsTotal,
   calculateDiscountChain: () => calculateDiscountChain,
   calculateExtraBedAddOn: () => calculateExtraBedAddOn,
   calculatePercentDiscount: () => calculatePercentDiscount,
   calculatePointsRedemptionValue: () => calculatePointsRedemptionValue,
+  calculatePointsWithMultiplier: () => calculatePointsWithMultiplier,
   calculateSeasonalAwareRoomBreakdown: () => calculateSeasonalAwareRoomBreakdown,
   calculateSeasonalAwareRoomTotal: () => calculateSeasonalAwareRoomTotal,
   calculateVatBreakdown: () => calculateVatBreakdown,
   calculateVoucherBase: () => calculateVoucherBase,
   calculateVoucherDiscount: () => calculateVoucherDiscount,
+  canExtendInFlowHold: () => canExtendInFlowHold,
   checkExtraBedInventory: () => checkExtraBedInventory,
   clampIntegerInRange: () => clampIntegerInRange,
+  clampOtherAddOnQuantity: () => clampOtherAddOnQuantity,
   clearCache: () => clearCache,
   clearSweepHistory: () => clearSweepHistory,
   compressImageFile: () => compressImageFile,
   computeBookingFolio: () => computeBookingFolio,
   computeBookingRevenueAllocation: () => computeBookingRevenueAllocation,
+  computeBreakfastCutoffState: () => computeBreakfastCutoffState,
   computeCancellationLiabilityState: () => computeCancellationLiabilityState,
+  computeExtendedInFlowHoldExpiresAt: () => computeExtendedInFlowHoldExpiresAt,
   computeHoldExpiresAt: () => computeHoldExpiresAt,
   computeInFlowHoldExpiresAt: () => computeInFlowHoldExpiresAt,
+  computeOtherAddOnCutoffState: () => computeOtherAddOnCutoffState,
   computeRequestFingerprint: () => computeRequestFingerprint,
   computeReservationActualDateRange: () => computeReservationActualDateRange,
   computeReservationAggregatePaymentStatus: () => computeReservationAggregatePaymentStatus,
   computeServerFolioTotals: () => computeServerFolioTotals,
   countExtraBedsInUse: () => countExtraBedsInUse,
+  countOtherAddOnDraftSelections: () => countOtherAddOnDraftSelections,
   createCancellationPolicySnapshot: () => createCancellationPolicySnapshot,
   createFailureBackoffState: () => createFailureBackoffState,
   datesOverlap: () => datesOverlap,
   deriveReservationCounters: () => deriveReservationCounters,
   deriveRoomTypeCapacityFit: () => deriveRoomTypeCapacityFit,
+  describeMaxStayNights: () => describeMaxStayNights,
+  diffNightsBetweenIso: () => diffNightsBetweenIso,
   downloadIcsFile: () => downloadIcsFile,
   eachStayNight: () => eachStayNight,
+  enumerateStayServiceDates: () => enumerateStayServiceDates,
   evaluateCancelPreview: () => evaluateCancelPreview,
   evaluateCancellation: () => evaluateCancellation,
   fadeIn: () => fadeIn,
   fadeUp: () => fadeUp,
   generateBookingRef: () => generateBookingRef,
+  generateFreeNightVoucherCode: () => generateFreeNightVoucherCode,
   generateHoldId: () => generateHoldId,
   generateLookupToken: () => generateLookupToken,
   generateMemberNumber: () => generateMemberNumber,
@@ -224150,6 +225482,7 @@ __export(shared_exports, {
   getDateKeyInTimezone: () => getDateKeyInTimezone,
   getEffectiveStorePaymentMethods: () => getEffectiveStorePaymentMethods,
   getEffectiveVatRate: () => getEffectiveVatRate,
+  getEnabledAddOnsByHotel: () => getEnabledAddOnsByHotel,
   getLatestPaymentReference: () => getLatestPaymentReference,
   getLegacyCancellationPolicy: () => getLegacyCancellationPolicy,
   getLockedManualNightlyRate: () => getLockedManualNightlyRate,
@@ -224160,44 +225493,75 @@ __export(shared_exports, {
   getSeasonalRateForNight: () => getSeasonalRateForNight,
   getSweepHistory: () => getSweepHistory,
   getWeekendNightCount: () => getWeekendNightCount,
+  hasAnyOtherAddOns: () => hasAnyOtherAddOns,
+  inFlowHoldStayMatches: () => inFlowHoldStayMatches,
   isBookingOccupyingRoom: () => isBookingOccupyingRoom,
+  isBreakfastRateLine: () => isBreakfastRateLine,
+  isDateInStayWindow: () => isDateInStayWindow,
+  isFreeNightVoucher: () => isFreeNightVoucher,
   isInFlowHoldActive: () => isInFlowHoldActive,
+  isOtherAddOnBookingMutable: () => isOtherAddOnBookingMutable,
   isPaymentVerified: () => isPaymentVerified,
+  isRewardVoucher: () => isRewardVoucher,
+  isUnlimitedStay: () => isUnlimitedStay,
   isValidBookingRef: () => isValidBookingRef,
+  isValidIsoDate: () => isValidIsoDate,
   isValidLookupToken: () => isValidLookupToken,
   isValidReservationId: () => isValidReservationId,
   isValidReservationRef: () => isValidReservationRef,
+  isValidStayRange: () => isValidStayRange,
   isVatEnabled: () => isVatEnabled,
   isWeekendNight: () => isWeekendNight,
   mapBookingStatusToReservationPaymentStatus: () => mapBookingStatusToReservationPaymentStatus,
   nextSequence: () => nextSequence,
+  normalizeAddOn: () => normalizeAddOn,
+  normalizeBreakfastConfig: () => normalizeBreakfastConfig,
   normalizeDiscountScope: () => normalizeDiscountScope,
   normalizeInFlowHoldMinutes: () => normalizeInFlowHoldMinutes,
   normalizeMaxChildren: () => normalizeMaxChildren,
+  normalizeOtherAddOnsEnabled: () => normalizeOtherAddOnsEnabled,
   normalizePaymentHoldWindowHours: () => normalizePaymentHoldWindowHours,
   normalizeSeasonalRateOverride: () => normalizeSeasonalRateOverride,
   normalizeSeasonalRateOverrides: () => normalizeSeasonalRateOverrides,
+  normalizeStayRange: () => normalizeStayRange,
   normalizeVatConfig: () => normalizeVatConfig,
+  otherAddOnBreakdownByDate: () => otherAddOnBreakdownByDate,
+  otherAddOnDraftKey: () => otherAddOnDraftKey,
   parseCheckInTime: () => parseCheckInTime,
   parseCheckInTimeToPair: () => parseCheckInTimeToPair,
+  parseOtherAddOnSelectionKey: () => parseOtherAddOnSelectionKey,
   raceUploadWithTimeout: () => raceUploadWithTimeout,
   readCacheWithTtl: () => readCacheWithTtl,
   readPublicSiteContentBustTimestamp: () => readPublicSiteContentBustTimestamp,
+  recomputeBreakfastTotal: () => recomputeBreakfastTotal,
+  recomputeOtherAddOnTotal: () => recomputeOtherAddOnTotal,
   recordSweepResult: () => recordSweepResult,
+  redateBreakfastSelections: () => redateBreakfastSelections,
+  redateOtherAddOnSelections: () => redateOtherAddOnSelections,
   requiredExtraBedsFor: () => requiredExtraBedsFor,
+  resolveCurrentLevel: () => resolveCurrentLevel,
+  resolveMaxStayNights: () => resolveMaxStayNights,
   resolvePaymentMethodLabel: () => resolvePaymentMethodLabel,
+  resolveRangeSelection: () => resolveRangeSelection,
+  roundToTwoDecimals: () => roundToTwoDecimals,
   runBackfill: () => runBackfill,
   scaleIn: () => scaleIn,
+  serviceDateFromSlotKey: () => serviceDateFromSlotKey,
+  shouldAutoCancelSelection: () => shouldAutoCancelSelection,
   slideInBottom: () => slideInBottom,
   slideInLeft: () => slideInLeft,
   slideInRight: () => slideInRight,
+  sortAddOnsByDisplayOrder: () => sortAddOnsByDisplayOrder,
   staggerChild: () => staggerChild,
   staggerContainer: () => staggerContainer,
   startOfDayUtc: () => startOfDayUtc,
+  stripUndefinedValues: () => stripUndefinedValues,
   subscribeToPublicSiteContentBust: () => subscribeToPublicSiteContentBust,
+  sumBreakfastRateLines: () => sumBreakfastRateLines,
   sweepBookingsStorage: () => sweepBookingsStorage,
   toDateOrNow: () => toDateOrNow,
   toDateOrNull: () => toDateOrNull,
+  toUtcDateKey: () => toUtcDateKey,
   validateCorporateCode: () => validateCorporateCode,
   validatePointsRedemption: () => validatePointsRedemption,
   validateVoucher: () => validateVoucher,
@@ -224205,6 +225569,7 @@ __export(shared_exports, {
 });
 var init_shared = __esm({
   "../shared/index.ts"() {
+    "use strict";
     init_VERSION();
     init_animations();
     init_constants();
@@ -224215,6 +225580,7 @@ var init_shared = __esm({
     init_seo();
     init_types3();
     init_bookingDates();
+    init_stayRange();
     init_bookingFolio();
     init_bookingAddOns();
     init_bookingDiscounts();
@@ -224246,6 +225612,17 @@ var init_shared = __esm({
     init_cancellation();
     init_uploads();
     init_bookingPreferences();
+    init_breakfastCutoff();
+    init_breakfastTotal();
+    init_bookingAddOnReschedule();
+    init_firestorePayload();
+    init_breakfastConfig();
+    init_otherAddOnCutoff();
+    init_otherAddOnTotal();
+    init_otherAddOnDrafts();
+    init_addOns();
+    init_money();
+    init_rewardsConfig();
   }
 });
 
@@ -224267,14 +225644,14 @@ async function writeNotification(input) {
       return;
     }
     const roomNumber = input.roomNumber != null ? String(input.roomNumber).trim().slice(0, MAX_ROOM_LENGTH) : null;
-    const bookingRef = input.bookingRef != null ? String(input.bookingRef).trim().slice(0, MAX_REF_LENGTH) : null;
+    const bookingRef2 = input.bookingRef != null ? String(input.bookingRef).trim().slice(0, MAX_REF_LENGTH) : null;
     await adminDb.collection("notifications").add({
       type: input.type,
       title,
       entityType: input.entityType,
       entityId,
       roomNumber: roomNumber || null,
-      bookingRef: bookingRef || null,
+      bookingRef: bookingRef2 || null,
       readBy: {},
       createdBy: "system",
       createdAt: Timestamp.now()
@@ -224472,9 +225849,9 @@ async function handleCloseTestRun(req, res) {
     });
   }
 }
-async function deleteTestRunBookingSubcollections(bookingRef) {
+async function deleteTestRunBookingSubcollections(bookingRef2) {
   for (const subcollection of TEST_RUN_BOOKING_SUBCOLLECTIONS) {
-    const snapshot = await bookingRef.collection(subcollection).get();
+    const snapshot = await bookingRef2.collection(subcollection).get();
     await Promise.all(snapshot.docs.map((child) => child.ref.delete()));
   }
 }
@@ -224570,8 +225947,8 @@ async function handleDeleteTestRun(req, res) {
       lastDoc = snap.docs[snap.docs.length - 1];
       for (const doc of snap.docs) {
         try {
-          const bookingRef = adminDb.collection("bookings").doc(doc.id);
-          await deleteTestRunBookingSubcollections(bookingRef);
+          const bookingRef2 = adminDb.collection("bookings").doc(doc.id);
+          await deleteTestRunBookingSubcollections(bookingRef2);
           await doc.ref.delete();
           bookingCount++;
         } catch (err) {
@@ -226059,6 +227436,7 @@ __export(email_exports, {
   sendCorporateInquiryTrigger: () => sendCorporateInquiryTrigger,
   sendEarlyCheckinRequestTrigger: () => sendEarlyCheckinRequestTrigger,
   sendEarlyCheckinResolveTrigger: () => sendEarlyCheckinResolveTrigger,
+  sendLateServedTrigger: () => sendLateServedTrigger,
   sendStaffNewBookingTrigger: () => sendStaffNewBookingTrigger,
   sendStaffNewPaymentTrigger: () => sendStaffNewPaymentTrigger,
   sendStaffRefundReviewTrigger: () => sendStaffRefundReviewTrigger,
@@ -226145,7 +227523,7 @@ function generateReceiptPdf(booking) {
     text("Rooms:", `${rooms.length} room${rooms.length === 1 ? "" : "s"}`);
     for (const room of rooms) {
       const label = `Room ${room.position || 1} (${String(room.roomType || "Room")})`;
-      const value = `${String(room.bookingRef || "-")} \xB7 ${String(room.numAdults || 0)} adult${Number(room.numAdults) === 1 ? "" : "s"}, ${String(room.numChildren || 0)} child${Number(room.numChildren) === 1 ? "" : "ren"}${Number(room.extraBedCount) > 0 ? `, ${String(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${fmtMoney(Number(room.totalPrice || 0))}`;
+      const value = `${String(room.bookingRef || "-")} \xB7 ${String(room.numAdults || 0)} adult${Number(room.numAdults) === 1 ? "" : "s"}, ${String(room.numChildren || 0)} child${Number(room.numChildren) === 1 ? "" : "ren"}${Number(room.extraBedCount) > 0 ? `, ${String(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " \xB7 breakfast" : ""} \xB7 ${fmtMoney(Number(room.totalPrice || 0))}`;
       text(label, value, { gap: 5 });
     }
   } else {
@@ -226322,7 +227700,18 @@ function buildReservationEmailView(reservation, children) {
     numAdults: Number(child.numAdults || 0),
     numChildren: Number(child.numChildren || 0),
     extraBedCount: Number(child.extraBedCount || 0),
-    hasBreakfast: child.hasBreakfast === true,
+    // Per BR-08 (Phase 13 — Breakfast Redesign, decision
+    // #238, 2026-10-14): the per-room `breakfastSelections`
+    // rich shape + `breakfastTotal` + `hasAnyBreakfast`
+    // flag replace the legacy flat-rate `hasBreakfast`
+    // boolean. The email reader reads the per-date
+    // breakdown from `rateBreakdown.addOns[]` (already
+    // populated by BR-03's `buildRateBreakdown`); the
+    // `hasAnyBreakfast` flag below drives the per-room
+    // "breakfast" pill on the rooms table.
+    breakfastSelections: child.breakfastSelections && typeof child.breakfastSelections === "object" ? child.breakfastSelections : {},
+    breakfastTotal: Number(child.breakfastTotal || 0),
+    hasAnyBreakfast: child.hasAnyBreakfast === true || child.breakfastSelections && typeof child.breakfastSelections === "object" && Object.keys(child.breakfastSelections).length > 0,
     ratePerNight: Number(child.ratePerNight || 0),
     totalPrice: Number(child.totalPrice || 0)
   }));
@@ -226493,7 +227882,7 @@ function bookingRows(booking) {
       const roomDatesSuffix = isDivergent && room.checkIn && room.checkOut ? ` \xB7 ${formatDate(room.checkIn)} \u2192 ${formatDate(room.checkOut)}` : "";
       return row(
         `Room ${room.position || 1} (${escapeHtml2(String(room.roomType || "Room"))})`,
-        room.bookingRef ? `${escapeHtml2(String(room.bookingRef))} \xB7 ${escapeHtml2(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}` : `${escapeHtml2(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
+        room.bookingRef ? `${escapeHtml2(String(room.bookingRef))} \xB7 ${escapeHtml2(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}` : `${escapeHtml2(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
       );
     }).join("")}
       </table>
@@ -226653,15 +228042,15 @@ async function sendEmail(to3, subject, html, attachments, banner) {
   }
 }
 async function findBooking(req, options) {
-  const { bookingId, bookingRef, guestEmail } = req.body || {};
+  const { bookingId, bookingRef: bookingRef2, guestEmail } = req.body || {};
   let snapshot = null;
   const user = req.user || {};
   if (bookingId) {
     const doc = await adminDb.collection("bookings").doc(String(bookingId)).get();
     if (!doc.exists) return null;
     snapshot = doc;
-  } else if (bookingRef) {
-    const trimmed = String(bookingRef).trim();
+  } else if (bookingRef2) {
+    const trimmed = String(bookingRef2).trim();
     let query;
     if (RESERVATION_REF_REGEX.test(trimmed)) {
       const reservationSnap = await adminDb.collection("reservations").where("reservationRef", "==", trimmed).limit(1).get();
@@ -227564,6 +228953,44 @@ async function sendStaffRefundReviewTrigger(order) {
     staffRefundReviewEmail(order)
   );
 }
+function lateServedEmail(booking, slotEntry, occurredAtIso) {
+  const slotDate = typeof slotEntry?.slotKey === "string" ? slotEntry.slotKey.slice(0, 10) : "\u2014";
+  const mealLabel = slotEntry?.mealName || "your meal";
+  const bookingRef2 = booking.bookingRef || booking.reservationRef || booking.id || "your booking";
+  const ratingUrl = siteUrl(`/my-booking?ref=${encodeURIComponent(bookingRef2 || "")}`);
+  return emailLayout({
+    preheader: `Your breakfast on ${slotDate} was served past our cutoff \u2014 we'd value your feedback.`,
+    eyebrow: "Service update",
+    title: "We served your breakfast late",
+    intro: `We noticed that the breakfast for ${escapeHtml2(String(bookingRef2))} on ${escapeHtml2(slotDate)} (${escapeHtml2(mealLabel)}) was served past our ${escapeHtml2(String(bookingRef2)).length > 0 ? "published" : ""} cutoff window. We're sorry for the delay.`,
+    body: `
+      ${callout2("warm", "How was it?", "If a few minutes of delay affected your meal, let us know \u2014 your feedback helps the kitchen team tighten their morning service. Open the booking below and tap the rate-this-meal card on the breakfast section.")}
+      ${card("What happened", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
+        ${row("Booking ref", bookingRef2)}
+        ${row("Service date", slotDate)}
+        ${row("Meal", mealLabel)}
+        ${row("Served at", occurredAtIso)}
+      </table>`)}
+    `,
+    ctaLabel: "Rate this meal",
+    ctaUrl: ratingUrl,
+    bannerHtml: environmentBannerFromBooking(booking)
+  });
+}
+async function sendLateServedTrigger(booking, slotEntry, occurredAtIso) {
+  const banner = {
+    isTestData: booking?.isTestData === true,
+    testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : void 0,
+    testRunEnvironment: booking?.testRunEnvironment === "staging" || booking?.testRunEnvironment === "production" ? booking.testRunEnvironment : void 0
+  };
+  await sendEmail(
+    booking.guestEmail,
+    `[${hotel_config_default.brandName}] Late served \u2014 please rate your meal`,
+    lateServedEmail(booking, slotEntry, occurredAtIso),
+    void 0,
+    banner
+  );
+}
 async function getTomorrowConfirmedBookings() {
   const { manilaDate } = getManilaDateInfo(hotel_config_default.timezone);
   const start = new Date(manilaDate);
@@ -228027,9 +229454,9 @@ async function handleEmailPreview(req, res) {
           roomCount: 3,
           activeRoomCount: 2,
           rooms: [
-            { position: 1, bookingRef: "SI-20260802-00001", roomType: "Deluxe Sea View", numAdults: 2, numChildren: 0, extraBedCount: 0, hasBreakfast: false, totalPrice: 7200 },
-            { position: 2, bookingRef: "SI-20260802-00002", roomType: "Standard Twin", numAdults: 1, numChildren: 0, extraBedCount: 0, hasBreakfast: false, totalPrice: 3600, cancelledAt: (/* @__PURE__ */ new Date()).toISOString() },
-            { position: 3, bookingRef: "SI-20260802-00003", roomType: "Family Suite", numAdults: 2, numChildren: 1, extraBedCount: 0, hasBreakfast: true, totalPrice: 9800 }
+            { position: 1, bookingRef: "SI-20260802-00001", roomType: "Deluxe Sea View", numAdults: 2, numChildren: 0, extraBedCount: 0, hasAnyBreakfast: false, totalPrice: 7200 },
+            { position: 2, bookingRef: "SI-20260802-00002", roomType: "Standard Twin", numAdults: 1, numChildren: 0, extraBedCount: 0, hasAnyBreakfast: false, totalPrice: 3600, cancelledAt: (/* @__PURE__ */ new Date()).toISOString() },
+            { position: 3, bookingRef: "SI-20260802-00003", roomType: "Family Suite", numAdults: 2, numChildren: 1, extraBedCount: 0, hasAnyBreakfast: true, totalPrice: 9800 }
           ],
           cancellationReason: "Guest requested partial cancellation.",
           cancellationSource: "guest"
@@ -228175,19 +229602,23 @@ function toIsoOrNull(value) {
   }
   return null;
 }
-function serializeHold(snap) {
-  const data = snap.data() ?? {};
+function serializeHold(docId, data) {
+  const raw = data ?? {};
   return {
-    id: snap.id,
-    reservationId: String(data.reservationId ?? ""),
-    roomType: String(data.roomType ?? ""),
-    checkIn: String(data.checkIn ?? ""),
-    checkOut: String(data.checkOut ?? ""),
-    numNights: Number(data.numNights ?? 0),
-    expiresAt: toIsoOrNull(data.expiresAt) ?? (/* @__PURE__ */ new Date(0)).toISOString(),
-    status: data.status === "consumed" || data.status === "expired" ? data.status : "active",
-    createdAt: toIsoOrNull(data.createdAt) ?? (/* @__PURE__ */ new Date(0)).toISOString(),
-    holdMinutes: Number(data.holdMinutes ?? IN_FLOW_HOLD_MINUTES)
+    id: docId,
+    reservationId: String(raw.reservationId ?? ""),
+    roomType: String(raw.roomType ?? ""),
+    checkIn: String(raw.checkIn ?? ""),
+    checkOut: String(raw.checkOut ?? ""),
+    numNights: Number(raw.numNights ?? 0),
+    expiresAt: toIsoOrNull(raw.expiresAt) ?? (/* @__PURE__ */ new Date(0)).toISOString(),
+    status: raw.status === "consumed" || raw.status === "expired" ? raw.status : "active",
+    createdAt: toIsoOrNull(raw.createdAt) ?? (/* @__PURE__ */ new Date(0)).toISOString(),
+    holdMinutes: Number(raw.holdMinutes ?? IN_FLOW_HOLD_MINUTES),
+    // Per IMT-04: exposed so the banner can hide the "I need more
+    // time" CTA once the cap is reached, instead of letting the guest
+    // click a button the server is going to reject.
+    extensionCount: Number(raw.extensionCount ?? 0)
   };
 }
 async function handleStartInFlowHold(req, res) {
@@ -228235,10 +229666,42 @@ async function handleStartInFlowHold(req, res) {
           error: "Hold id is already in use."
         });
       }
+      const stayMatches = inFlowHoldStayMatches(
+        {
+          roomType: data.roomType,
+          checkIn: data.checkIn,
+          checkOut: data.checkOut,
+          numNights: data.numNights
+        },
+        {
+          roomType: input.roomType,
+          checkIn: input.checkIn,
+          checkOut: input.checkOut,
+          numNights: input.numNights
+        }
+      );
+      if (stayMatches) {
+        return res.status(200).json({
+          success: true,
+          data: serializeHold(existing.id, existing.data()),
+          idempotentReplay: true
+        });
+      }
+      await ref.set(
+        {
+          roomType: input.roomType,
+          checkIn: input.checkIn,
+          checkOut: input.checkOut,
+          numNights: input.numNights,
+          updatedAt: Timestamp.fromDate(now)
+        },
+        { merge: true }
+      );
+      const restamped = await ref.get();
       return res.status(200).json({
         success: true,
-        data: serializeHold(existing),
-        idempotentReplay: true
+        data: serializeHold(restamped.id, restamped.data()),
+        restamped: true
       });
     }
     await ref.set({
@@ -228262,7 +229725,7 @@ async function handleStartInFlowHold(req, res) {
     const fresh = await ref.get();
     return res.status(201).json({
       success: true,
-      data: serializeHold(fresh)
+      data: serializeHold(fresh.id, fresh.data())
     });
   } catch (err) {
     return res.status(500).json({
@@ -228294,7 +229757,7 @@ async function handleReadInFlowHold(req, res) {
       status: data.status,
       expiresAt
     });
-    const payload = serializeHold(snap);
+    const payload = serializeHold(snap.id, snap.data());
     if (payload.status === "active" && !activeNow) {
       payload.status = "expired";
     }
@@ -228331,7 +229794,92 @@ async function handleConsumeInFlowHold(holdId, reservationId, now = /* @__PURE__
     return { ok: false, reason: "expired" };
   }
   await ref.update({ status: "consumed", updatedAt: Timestamp.fromDate(now) });
-  return { ok: true, hold: serializeHold(snap) };
+  return { ok: true, hold: serializeHold(snap.id, snap.data()) };
+}
+async function handleExtendInFlowHold(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const parsed2 = ExtendBookingHoldSchema.safeParse(req.body);
+  if (!parsed2.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid hold extension request.",
+      details: parsed2.error.flatten()
+    });
+  }
+  const input = parsed2.data;
+  if (!HOLD_ID_REGEX.test(input.holdId)) {
+    return res.status(400).json({ success: false, error: "Invalid hold id format." });
+  }
+  const ref = adminDb.collection(HOLDS_COLLECTION).doc(input.holdId);
+  const now = /* @__PURE__ */ new Date();
+  let responseData = null;
+  let failure = null;
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const snap = await transaction.get(ref);
+      if (!snap.exists) {
+        failure = { status: 404, error: "Hold not found." };
+        return;
+      }
+      const data = snap.data() ?? {};
+      if (data.reservationId && data.reservationId !== input.reservationId) {
+        failure = { status: 409, error: "Hold does not match this reservation." };
+        return;
+      }
+      if (!canExtendInFlowHold({ status: data.status, extensionCount: data.extensionCount })) {
+        const atCap = data.status === "consumed" || Number(data.extensionCount ?? 0) >= MAX_IN_FLOW_HOLD_EXTENSIONS;
+        failure = atCap ? {
+          status: 409,
+          error: data.status === "consumed" ? "This hold was already used by a confirmed booking." : "This hold has reached its extension limit."
+        } : { status: 409, error: "This hold can no longer be extended." };
+        return;
+      }
+      const holdMinutes = normalizeInFlowHoldMinutes(data.holdMinutes);
+      if (holdMinutes < MIN_IN_FLOW_HOLD_MINUTES || holdMinutes > MAX_IN_FLOW_HOLD_MINUTES) {
+        failure = { status: 500, error: "Hold window is misconfigured." };
+        return;
+      }
+      const nextExpiresAt = computeExtendedInFlowHoldExpiresAt(
+        holdMinutes,
+        toIsoOrNull(data.expiresAt),
+        now
+      );
+      if (!nextExpiresAt) {
+        failure = { status: 500, error: "Failed to compute hold deadline." };
+        return;
+      }
+      const nextExtensionCount = Number(data.extensionCount ?? 0) + 1;
+      transaction.update(ref, {
+        // Revive on the expired path — the literal "I need more
+        // time" moment. Safe because the hold is soft.
+        status: "active",
+        expiresAt: Timestamp.fromDate(nextExpiresAt),
+        holdMinutes,
+        extensionCount: nextExtensionCount,
+        // Per the IMT CVQ-04 answer (staff do not see extensions), no
+        // dedicated `extendedAt` field was added: `updatedAt` is the
+        // field the consume + sweep paths already stamp, so a second
+        // timestamp would have been write-only weight with no reader.
+        updatedAt: Timestamp.fromDate(now)
+      });
+      responseData = serializeHold(snap.id, {
+        ...data,
+        status: "active",
+        expiresAt: nextExpiresAt,
+        holdMinutes,
+        extensionCount: nextExtensionCount,
+        updatedAt: now
+      });
+    });
+    if (failure) {
+      return res.status(failure.status).json({ success: false, error: failure.error });
+    }
+    return res.status(200).json({ success: true, data: responseData });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: "Failed to extend hold." });
+  }
 }
 var SWEEP_BATCH_SIZE = 200;
 async function handleSweepInFlowHolds(req, res, options = {}) {
@@ -228589,8 +230137,585 @@ async function handleExtendStaffInventoryHold(req, res) {
 init_firestore();
 init_email();
 init_notifications();
+
+// server/lib/refunds.ts
+init_firestore();
+function trimOrNull(input, maxLen) {
+  if (typeof input !== "string") return null;
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, maxLen);
+}
+function computeRefundPaidAmountDelta(currentPaidAmount, refundAmountPositive) {
+  const safe = Number.isFinite(currentPaidAmount) ? currentPaidAmount : 0;
+  const safeRefund = Number.isFinite(refundAmountPositive) ? refundAmountPositive : 0;
+  return safe - Math.max(0, safeRefund);
+}
+function resolveRefundDocParent(transaction, bookingId, category, reservationId) {
+  const bookingRef2 = transaction.firestore.collection("bookings").doc(bookingId);
+  if (category === "breakfast" || category === "otherAddOn") {
+    return { parent: bookingRef2, collection: "refunds" };
+  }
+  if (reservationId && String(reservationId).trim().length > 0) {
+    return {
+      parent: transaction.firestore.collection("reservations").doc(String(reservationId)),
+      collection: "refunds"
+    };
+  }
+  return { parent: bookingRef2, collection: "payments" };
+}
+function markRefundPaid(input) {
+  const {
+    bookingId,
+    refundId,
+    amount,
+    method,
+    transactionReference,
+    note,
+    reason,
+    actor,
+    transaction,
+    category,
+    slotKey,
+    mealSnapshot,
+    reservationId,
+    existingDoc,
+    currentPaidAmount
+  } = input;
+  const safeMethod = (typeof method === "string" ? method.trim() : "").slice(0, 80);
+  const safeReference = trimOrNull(transactionReference, 200);
+  const safeNote = trimOrNull(note, 500);
+  const safeReason = trimOrNull(reason, 500);
+  const safeAmount = Number.isFinite(amount) && amount > 0 ? amount : 0;
+  const currentPaid = Number.isFinite(currentPaidAmount) ? Number(currentPaidAmount) || 0 : 0;
+  const pathParent = resolveRefundDocParent(transaction, bookingId, category, reservationId);
+  const bookingRef2 = transaction.firestore.collection("bookings").doc(bookingId);
+  const refundRef = pathParent.parent.collection(pathParent.collection).doc(refundId);
+  if (category === "breakfast" || category === "otherAddOn") {
+    if (!existingDoc || !existingDoc.exists) {
+      throw new Error("REFUND_NOT_FOUND");
+    }
+    const existingData = existingDoc.data() || {};
+    if (String(existingData.status || "") === "paid") {
+      return {
+        alreadyPaid: true,
+        refundEntry: existingData,
+        newBookingPaidAmount: currentPaid
+      };
+    }
+    if (String(existingData.status || "") !== "pending") {
+      throw new Error("REFUND_NOT_PENDING");
+    }
+    if (String(existingData.category || "") !== category) {
+      throw new Error("CATEGORY_MISMATCH");
+    }
+    const now2 = Timestamp.now();
+    const safeSlotKey = typeof slotKey === "string" && slotKey.length > 0 ? slotKey : String(existingData.slotKey || "");
+    const update = {
+      status: "paid",
+      paidAt: now2,
+      paidBy: actor.uid,
+      method: safeMethod,
+      transactionReference: safeReference,
+      // Preserve the prior note if the new note is empty
+      // (CRL-01 allows appending; the BR-05 prototype overwrote).
+      note: safeNote !== null ? safeNote : existingData.note || null,
+      approvedBy: actor.uid,
+      lastModifiedAt: now2
+    };
+    transaction.update(refundRef, update);
+    const refundMagnitude = Math.abs(Number(existingData.amount || 0));
+    const newBookingPaidAmount2 = computeRefundPaidAmountDelta(currentPaid, refundMagnitude);
+    transaction.update(bookingRef2, {
+      paidAmount: newBookingPaidAmount2,
+      lastRefundClearedAt: now2
+    });
+    const auditCollection = category === "breakfast" ? "breakfastAudit" : "otherAddOnAudit";
+    const auditRef = bookingRef2.collection(auditCollection).doc();
+    transaction.create(auditRef, {
+      action: category === "breakfast" ? "serve" : "mark-served",
+      slotKey: safeSlotKey,
+      selectionKey: safeSlotKey,
+      mealSnapshot: mealSnapshot || null,
+      actorUid: actor.uid,
+      actorRole: actor.role,
+      reason: `mark-refund-paid:${refundId}`,
+      occurredAt: now2,
+      occurredAfterCutoff: false
+    });
+    return {
+      alreadyPaid: false,
+      refundEntry: { ...existingData, ...update },
+      newBookingPaidAmount: newBookingPaidAmount2
+    };
+  }
+  if (existingDoc && existingDoc.exists) {
+    const existingData = existingDoc.data() || {};
+    const sameRequest = Math.abs(Number(existingData.amount || 0)) === safeAmount && String(existingData.method || "") === safeMethod && String(existingData.note || "") === (safeReason || "") && (existingData.transactionReference || null) === safeReference;
+    if (sameRequest) {
+      return {
+        alreadyPaid: true,
+        refundEntry: existingData,
+        newBookingPaidAmount: currentPaid
+      };
+    }
+    return {
+      alreadyPaid: false,
+      refundEntry: existingData,
+      newBookingPaidAmount: currentPaid,
+      conflict: true
+    };
+  }
+  const now = Timestamp.now();
+  const newRecord = {
+    type: "refund",
+    amount: -safeAmount,
+    method: safeMethod,
+    note: safeReason || safeNote || null,
+    reason: safeReason || null,
+    approvedBy: actor.uid,
+    recordedBy: actor.uid,
+    recordedAt: now,
+    category: "cancellation"
+  };
+  if (safeReference) newRecord.transactionReference = safeReference;
+  if (reservationId && String(reservationId).trim().length > 0) {
+    newRecord.reservationId = String(reservationId);
+    newRecord.bookingId = bookingId;
+  }
+  transaction.create(refundRef, newRecord);
+  const newBookingPaidAmount = computeRefundPaidAmountDelta(currentPaid, safeAmount);
+  transaction.update(bookingRef2, {
+    paidAmount: newBookingPaidAmount,
+    lastRefundClearedAt: now
+  });
+  return {
+    alreadyPaid: false,
+    refundEntry: newRecord,
+    newBookingPaidAmount
+  };
+}
+function refundPaidErrorToMessage(code) {
+  if (code === "REFUND_NOT_FOUND") return "Refund liability not found.";
+  if (code === "REFUND_NOT_PENDING") return "This refund is already paid (or has been resolved).";
+  if (code === "CATEGORY_MISMATCH") return "This refund does not belong to the expected category.";
+  return "We couldn't record the refund payment. Please try again in a moment.";
+}
+
+// server/handlers/bookings.ts
 init_shared();
 init_shared();
+init_shared();
+init_shared();
+
+// server/lib/breakfast-selections.ts
+init_zod();
+init_shared();
+init_shared();
+init_firestore();
+init_firebase_admin();
+var entryShape = external_exports.object({
+  mealId: external_exports.string().trim().min(1).max(120),
+  // Per OCT-C1 (2026-10-20, audit `plan/project/AUDIT-OCTOBER-2026.md`):
+  // the wire price/name are advisory only. The server snapshots the
+  // LIVE catalog price + name so a tampered request can never set its
+  // own breakfast price. Both are still accepted (and ignored) so an
+  // older guest bundle keeps working.
+  mealName: external_exports.string().trim().min(1).max(200).optional(),
+  price: external_exports.number().finite().min(0).optional(),
+  addedBy: external_exports.string().trim().max(120).optional().default(""),
+  addedAt: external_exports.string().trim().max(64).optional().default(""),
+  lastModifiedAt: external_exports.string().trim().max(64).optional().default(""),
+  lastModifiedBy: external_exports.string().trim().max(120).optional().default(""),
+  removedAt: external_exports.string().trim().max(64).nullable().optional().default(null),
+  removedBy: external_exports.string().trim().max(120).nullable().optional().default(null),
+  overrideCutoff: external_exports.boolean().optional().default(false),
+  overrideReason: external_exports.string().trim().max(500).nullable().optional().default(null)
+});
+var breakfastSelectionsSchema = external_exports.record(external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\s\S]{1,80}$/), entryShape);
+var BreakfastSelectionValidationError = class extends Error {
+  status;
+  constructor(message, status = 400) {
+    super(message);
+    this.name = "BreakfastSelectionValidationError";
+    this.status = status;
+  }
+};
+function buildMealLookup(meals) {
+  const lookup = /* @__PURE__ */ new Map();
+  if (!Array.isArray(meals)) return lookup;
+  for (const meal of meals) {
+    if (!meal || typeof meal !== "object") continue;
+    const id = typeof meal.id === "string" ? meal.id : "";
+    if (!id) continue;
+    lookup.set(id, meal);
+  }
+  return lookup;
+}
+function validateBreakfastSelections(input) {
+  const { selections, breakfastConfig, now, staffCreated } = input;
+  if (selections === null || selections === void 0) return null;
+  const parsed2 = breakfastSelectionsSchema.safeParse(selections);
+  if (!parsed2.success) {
+    throw new BreakfastSelectionValidationError(
+      "Invalid breakfast selection. Please refresh and try again."
+    );
+  }
+  const entries = parsed2.data;
+  const mealLookup = buildMealLookup(breakfastConfig.meals);
+  const validatedEntries = {};
+  for (const [key, entry] of Object.entries(entries)) {
+    const match = /^(\d{4}-\d{2}-\d{2})-/.exec(key);
+    if (!match) {
+      throw new BreakfastSelectionValidationError(
+        "Invalid breakfast selection. Please refresh and try again."
+      );
+    }
+    const serviceDate = match[1];
+    const cutoffState = computeBreakfastCutoffState({
+      serviceDate,
+      now,
+      cutoffTime: breakfastConfig.cutoffTime,
+      timezone: breakfastConfig.cutoffTimezone,
+      cutoffsEnabled: breakfastConfig.cutoffsEnabled
+    });
+    if (cutoffState.isLocked && !staffCreated) {
+      throw new BreakfastSelectionValidationError(
+        `Ordering closed for breakfast on ${serviceDate}. Please remove the selection or contact the hotel.`
+      );
+    }
+    if (!mealLookup.has(entry.mealId)) {
+      throw new BreakfastSelectionValidationError(
+        `One of the selected meals is no longer available. Please refresh and try again.`
+      );
+    }
+    const meal = mealLookup.get(entry.mealId);
+    const price = Number(meal.price);
+    if (!Number.isFinite(price) || price < 0) {
+      throw new BreakfastSelectionValidationError(
+        `Invalid breakfast price. Please refresh and try again.`
+      );
+    }
+    validatedEntries[key] = {
+      mealId: entry.mealId,
+      mealName: String(meal.name || entry.mealName || entry.mealId),
+      price,
+      addedBy: entry.addedBy || "guest",
+      addedAt: entry.addedAt || (/* @__PURE__ */ new Date()).toISOString(),
+      lastModifiedAt: entry.lastModifiedAt || (/* @__PURE__ */ new Date()).toISOString(),
+      lastModifiedBy: entry.lastModifiedBy || "guest",
+      removedAt: entry.removedAt ?? null,
+      removedBy: entry.removedBy ?? null,
+      overrideCutoff: entry.overrideCutoff === true,
+      overrideReason: entry.overrideReason ?? null
+    };
+  }
+  const total = recomputeBreakfastTotal(validatedEntries);
+  const hasAny = Object.keys(validatedEntries).length > 0;
+  return { entries: validatedEntries, total, hasAny };
+}
+var BREAKFAST_OP_ERROR = {
+  MEAL_NOT_AVAILABLE: "MEAL_NOT_AVAILABLE",
+  LOCKED_DATE_PREFIX: "LOCKED_DATE:",
+  SLOT_SERVED_PREFIX: "SLOT_SERVED:",
+  SLOT_ALREADY_ORDERED: "SLOT_ALREADY_ORDERED",
+  SLOT_NOT_ORDERED: "SLOT_NOT_ORDERED"
+};
+function auditBreakfastOp(input) {
+  const {
+    transaction,
+    bookingId,
+    slotKey,
+    action,
+    mealSnapshot,
+    actorUid,
+    actorRole,
+    reasonOrCutoff
+  } = input;
+  let reason = null;
+  let occurredAfterCutoff = false;
+  if (typeof reasonOrCutoff === "string") {
+    reason = reasonOrCutoff;
+  } else if (typeof reasonOrCutoff === "boolean") {
+    occurredAfterCutoff = reasonOrCutoff;
+  } else if (reasonOrCutoff && typeof reasonOrCutoff === "object") {
+    reason = reasonOrCutoff.reason ?? null;
+    occurredAfterCutoff = reasonOrCutoff.occurredAfterCutoff === true;
+  }
+  const auditRef = adminDb.collection("bookings").doc(bookingId).collection("breakfastAudit").doc();
+  transaction.set(auditRef, {
+    action,
+    slotKey,
+    mealSnapshot,
+    actorUid,
+    actorRole,
+    reason,
+    occurredAt: Timestamp.now(),
+    occurredAfterCutoff
+  });
+}
+function assertMealExists(mealById, mealId) {
+  if (!mealById.has(mealId)) {
+    throw new Error(BREAKFAST_OP_ERROR.MEAL_NOT_AVAILABLE);
+  }
+}
+function assertNotLocked(input) {
+  const { slotKey, serverNow, cutoffTime, timezone, cutoffsEnabled } = input;
+  const serviceDate = slotKey.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(serviceDate)) {
+    throw new Error(`${BREAKFAST_OP_ERROR.LOCKED_DATE_PREFIX}${slotKey}`);
+  }
+  const cutoff = computeBreakfastCutoffState({
+    serviceDate,
+    now: serverNow,
+    cutoffTime,
+    timezone,
+    cutoffsEnabled
+  });
+  if (cutoff.isLocked) {
+    throw new Error(`${BREAKFAST_OP_ERROR.LOCKED_DATE_PREFIX}${serviceDate}`);
+  }
+}
+function assertSlotNotServed(existingServed, slotKey) {
+  if (existingServed && existingServed[slotKey]) {
+    throw new Error(`${BREAKFAST_OP_ERROR.SLOT_SERVED_PREFIX}${slotKey}`);
+  }
+}
+function assertSlotForAdd(nextSelections, slotKey) {
+  const prior = nextSelections[slotKey];
+  if (prior && prior.removedAt === null) {
+    throw new Error(BREAKFAST_OP_ERROR.SLOT_ALREADY_ORDERED);
+  }
+}
+function assertSlotForChange(nextSelections, slotKey) {
+  const prior = nextSelections[slotKey];
+  if (!prior || prior.removedAt !== null) {
+    throw new Error(BREAKFAST_OP_ERROR.SLOT_NOT_ORDERED);
+  }
+}
+function generateBreakfastRefundId() {
+  const g = globalThis;
+  if (typeof g.crypto?.randomUUID === "function") {
+    const id = String(g.crypto.randomUUID());
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      id
+    )) {
+      return id;
+    }
+  }
+  const part = () => Math.floor(Math.random() * 4294967295).toString(16).padStart(8, "0");
+  const part4 = Math.floor(Math.random() * 65535).toString(16).padStart(4, "0");
+  const part4b = (Math.floor(Math.random() * 4095) | 16384).toString(16).padStart(4, "0");
+  const part4c = (Math.floor(Math.random() * 16383) | 32768).toString(16).padStart(4, "0");
+  return `${part()}-${part4}-${part4b}-${part4c}-${part().slice(0, 8)}${part().slice(0, 4)}`;
+}
+function createBreakfastRefundLiability(input) {
+  const {
+    transaction,
+    booking,
+    slotKey,
+    mealEntry,
+    amount,
+    reason,
+    recordedBy,
+    recordedByUid
+  } = input;
+  const refundId = generateBreakfastRefundId();
+  const refundLiabilityRef = adminDb.collection("bookings").doc(booking.id).collection("refunds").doc(refundId);
+  const refundRecord = {
+    id: refundId,
+    bookingId: booking.id,
+    bookingRef: booking.bookingRef,
+    type: "refund",
+    category: "breakfast",
+    status: "pending",
+    // Refunds are negative-amount entries on the wire
+    // (per CRL-01's contract — `handleAddRefund` and the
+    // folio math both rely on the sign).
+    amount: -Math.abs(Number(amount || 0)),
+    method: "pending",
+    note: "Pending \u2014 staff processes the payout.",
+    transactionReference: null,
+    reason,
+    approvedBy: null,
+    recordedBy,
+    recordedByUid,
+    recordedAt: Timestamp.now(),
+    // Per BR-01 §OnsitePayment extension: the
+    // `breakfastRefundContext` is the immutable
+    // snapshot the staff uses to reconcile the
+    // meal that was removed.
+    breakfastRefundContext: {
+      mealId: mealEntry.mealId,
+      slotKey,
+      mealName: mealEntry.mealName,
+      priceSnapshot: Math.abs(Number(amount || 0))
+    }
+  };
+  transaction.set(refundLiabilityRef, refundRecord);
+}
+
+// server/lib/otherAddOn-selections.ts
+init_zod();
+init_firestore();
+init_shared();
+init_firebase_admin();
+var OTHER_ADDON_OP_ERROR = {
+  ADDON_NOT_AVAILABLE: "ADDON_NOT_AVAILABLE",
+  LOCKED_DATE_PREFIX: "LOCKED_DATE:",
+  SELECTION_ALREADY_ORDERED: "SELECTION_ALREADY_ORDERED",
+  SELECTION_NOT_ORDERED: "SELECTION_NOT_ORDERED",
+  INVALID_QUANTITY: "INVALID_QUANTITY",
+  SERVE_NOT_FOUND: "SERVE_NOT_FOUND",
+  REFUND_NOT_FOUND: "REFUND_NOT_FOUND"
+};
+var otherAddOnEntryShape = external_exports.object({
+  addOnId: external_exports.string().trim().min(1).max(80),
+  nameSnapshot: external_exports.string().trim().min(1).max(120),
+  priceSnapshot: external_exports.number().finite().min(0),
+  quantity: external_exports.number().int().min(0).max(50),
+  unitSnapshot: external_exports.enum(["per-person", "per-stay"]),
+  addedBy: external_exports.string().trim().max(120).optional().default(""),
+  addedAt: external_exports.string().trim().max(64).optional().default(""),
+  lastModifiedAt: external_exports.string().trim().max(64).optional().default(""),
+  lastModifiedBy: external_exports.string().trim().max(120).optional().default(""),
+  removedAt: external_exports.string().trim().max(64).nullable().optional().default(null),
+  removedBy: external_exports.string().trim().max(120).nullable().optional().default(null),
+  cutoffHoursBeforeCheckInSnapshot: external_exports.number().int().min(0).max(168)
+});
+var otherAddOnSelectionsWireSchema = external_exports.record(
+  external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  external_exports.array(otherAddOnEntryShape)
+);
+function assertAddOnExists(addOnLookup, addOnId) {
+  if (!addOnLookup.has(addOnId)) {
+    throw new Error(OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE);
+  }
+}
+function assertNotLocked2(input) {
+  const { selectionKey, serverNow, addOn, checkInDate } = input;
+  const parsed2 = parseOtherAddOnSelectionKey(selectionKey);
+  if (!parsed2) {
+    throw new Error(`${OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX}${selectionKey}`);
+  }
+  const state = computeOtherAddOnCutoffState({
+    checkInDate,
+    addOn,
+    now: serverNow
+  });
+  if (state.isLocked) {
+    throw new Error(`${OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX}${parsed2.date}`);
+  }
+}
+function assertSelectionForAdd(next, selectionKey) {
+  const parsed2 = parseOtherAddOnSelectionKey(selectionKey);
+  if (!parsed2) return;
+  const prior = next[parsed2.date]?.find((e3) => e3 && e3.addOnId === parsed2.addOnId);
+  if (prior && prior.removedAt === null) {
+    throw new Error(OTHER_ADDON_OP_ERROR.SELECTION_ALREADY_ORDERED);
+  }
+}
+function assertSelectionForChange(next, selectionKey) {
+  const parsed2 = parseOtherAddOnSelectionKey(selectionKey);
+  if (!parsed2) return;
+  const prior = next[parsed2.date]?.find((e3) => e3 && e3.addOnId === parsed2.addOnId);
+  if (!prior || prior.removedAt !== null) {
+    throw new Error(OTHER_ADDON_OP_ERROR.SELECTION_NOT_ORDERED);
+  }
+}
+function auditOtherAddOnOp(input) {
+  const {
+    transaction,
+    bookingId,
+    selectionKey,
+    action,
+    addOnSnapshot,
+    actorUid,
+    actorRole,
+    reasonOrCutoff
+  } = input;
+  let reason = null;
+  let occurredAfterCutoff = false;
+  if (typeof reasonOrCutoff === "string") {
+    reason = reasonOrCutoff;
+  } else if (typeof reasonOrCutoff === "boolean") {
+    occurredAfterCutoff = reasonOrCutoff;
+  } else if (reasonOrCutoff && typeof reasonOrCutoff === "object") {
+    reason = reasonOrCutoff.reason ?? null;
+    occurredAfterCutoff = reasonOrCutoff.occurredAfterCutoff === true;
+  }
+  const auditRef = adminDb.collection("bookings").doc(bookingId).collection("otherAddOnAudit").doc();
+  transaction.set(auditRef, {
+    action,
+    selectionKey,
+    addOnSnapshot,
+    actorUid,
+    actorRole,
+    reason,
+    occurredAt: Timestamp.now(),
+    occurredAfterCutoff
+  });
+}
+function createOtherAddOnRefundLiability(input) {
+  const {
+    transaction,
+    booking,
+    selectionKey,
+    addOnEntry,
+    amount,
+    reason,
+    recordedBy,
+    recordedByUid
+  } = input;
+  const refundId = generateOtherAddOnRefundId();
+  const refundLiabilityRef = adminDb.collection("bookings").doc(booking.id).collection("refunds").doc(refundId);
+  const qty = Math.max(0, Math.floor(Number(addOnEntry.quantity) || 0));
+  const unitPrice = Math.max(0, Number(addOnEntry.priceSnapshot) || 0);
+  const totalAmount = roundToTwoDecimals(Math.abs(Number(amount || 0)) || unitPrice * qty);
+  const refundRecord = {
+    id: refundId,
+    bookingId: booking.id,
+    bookingRef: booking.bookingRef,
+    type: "refund",
+    category: "otherAddOn",
+    status: "pending",
+    amount: -totalAmount,
+    method: "pending",
+    note: "Pending \u2014 staff processes the payout.",
+    transactionReference: null,
+    reason,
+    approvedBy: null,
+    recordedBy,
+    recordedByUid,
+    recordedAt: Timestamp.now(),
+    otherAddOnRefundContext: {
+      addOnId: addOnEntry.addOnId,
+      selectionKey,
+      addOnName: addOnEntry.nameSnapshot,
+      priceSnapshot: unitPrice,
+      quantitySnapshot: qty
+    }
+  };
+  transaction.set(refundLiabilityRef, refundRecord);
+}
+function generateOtherAddOnRefundId() {
+  const g = globalThis;
+  if (typeof g.crypto?.randomUUID === "function") {
+    const id = String(g.crypto.randomUUID());
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      id
+    )) {
+      return id;
+    }
+  }
+  const part = () => Math.floor(Math.random() * 4294967295).toString(16).padStart(8, "0");
+  const part4 = Math.floor(Math.random() * 65535).toString(16).padStart(4, "0");
+  const part4b = (Math.floor(Math.random() * 4095) | 16384).toString(16).padStart(4, "0");
+  const part4c = (Math.floor(Math.random() * 16383) | 32768).toString(16).padStart(4, "0");
+  return `${part()}-${part4}-${part4b}-${part4c}-${part().slice(0, 8)}${part().slice(0, 4)}`;
+}
+
+// server/handlers/bookings.ts
 init_shared();
 
 // server/handlers/reservationScopeTransition.ts
@@ -228625,30 +230750,31 @@ function applyReservationScopePaymentTransition(transaction, adminDb2, bookingRe
 // server/handlers/bookings.ts
 init_booking();
 init_shared();
+init_shared();
 init_zod();
 init_hotel_config();
 
 // server/lib/rate-breakdown.ts
 init_shared();
-function nonNegativeFinite(value) {
+function nonNegativeFinite2(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? Math.max(numeric, 0) : 0;
 }
 function composeRateBreakdown(input) {
-  const roomSubtotal = nonNegativeFinite(input.roomSubtotal);
+  const roomSubtotal = nonNegativeFinite2(input.roomSubtotal);
   const addOns = input.addOns.map((line) => ({
     ...line,
-    amount: nonNegativeFinite(line.amount)
+    amount: nonNegativeFinite2(line.amount)
   }));
   const subtotal = roomSubtotal + addOns.reduce((sum, line) => sum + line.amount, 0);
-  const discountPct = nonNegativeFinite(input.discountPct);
+  const discountPct = nonNegativeFinite2(input.discountPct);
   const seniorPwdDiscount = Math.round(calculatePercentDiscount(subtotal, discountPct));
   const afterSeniorPwd = calculateVoucherBase(subtotal, seniorPwdDiscount);
-  const voucherDiscount = nonNegativeFinite(input.voucherDiscount);
+  const voucherDiscount = nonNegativeFinite2(input.voucherDiscount);
   const afterVoucher = calculateVoucherBase(afterSeniorPwd, voucherDiscount);
-  const memberDiscountPct = nonNegativeFinite(input.memberDiscountPct);
+  const memberDiscountPct = nonNegativeFinite2(input.memberDiscountPct);
   const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, memberDiscountPct));
-  const pointsRedeemedValue = nonNegativeFinite(input.pointsRedeemedValue);
+  const pointsRedeemedValue = nonNegativeFinite2(input.pointsRedeemedValue);
   const deductions = [
     ...seniorPwdDiscount > 0 ? [{
       label: `${input.discountType === "senior" ? "Senior Citizen" : "PWD"} discount (${discountPct}%)`,
@@ -228663,11 +230789,11 @@ function composeRateBreakdown(input) {
     roomLines: input.roomLines,
     addOns,
     deductions,
-    finalTotal: nonNegativeFinite(input.finalTotal)
+    finalTotal: nonNegativeFinite2(input.finalTotal)
   };
 }
 function buildRateBreakdown(input) {
-  const breakfastAddOn = input.breakfastTotal > 0 ? { label: "Breakfast add-on", amount: input.breakfastTotal } : null;
+  const breakfastAddOns = input.breakfastLines ? input.breakfastLines.filter((line) => Number(line.amount) > 0) : input.breakfastTotal > 0 ? [{ label: BREAKFAST_RATE_LINE_LABEL, amount: input.breakfastTotal }] : [];
   const extraBedAddOn = (input.extraBedTotal ?? 0) > 0 ? {
     label: (() => {
       const count = Number(input.extraBedCount) || 0;
@@ -228685,7 +230811,7 @@ function buildRateBreakdown(input) {
   } : null;
   return composeRateBreakdown({
     ...input,
-    addOns: [breakfastAddOn, extraBedAddOn].filter(
+    addOns: [...breakfastAddOns, extraBedAddOn].filter(
       (line) => line !== null
     ),
     pointsRedeemedValue: input.pointsRedeemedValue || 0
@@ -228694,16 +230820,16 @@ function buildRateBreakdown(input) {
 function rebuildRateBreakdown(booking, overrides = {}) {
   const existing = booking.rateBreakdown;
   if (!existing) return void 0;
-  const pointsRedeemedValue = overrides.pointsRedeemedValue === void 0 ? nonNegativeFinite(booking.pointsRedeemedValue) : nonNegativeFinite(overrides.pointsRedeemedValue);
-  const finalTotal = overrides.finalTotal === void 0 ? nonNegativeFinite(booking.totalPrice) : nonNegativeFinite(overrides.finalTotal);
+  const pointsRedeemedValue = overrides.pointsRedeemedValue === void 0 ? nonNegativeFinite2(booking.pointsRedeemedValue) : nonNegativeFinite2(overrides.pointsRedeemedValue);
+  const finalTotal = overrides.finalTotal === void 0 ? nonNegativeFinite2(booking.totalPrice) : nonNegativeFinite2(overrides.finalTotal);
   return composeRateBreakdown({
     roomLines: existing.roomLines || [],
     roomSubtotal: existing.roomSubtotal,
     addOns: existing.addOns || [],
     discountType: String(booking.discountType || ""),
-    discountPct: nonNegativeFinite(booking.discountPct),
-    voucherDiscount: nonNegativeFinite(booking.voucherDiscount),
-    memberDiscountPct: nonNegativeFinite(booking.memberDiscountPct),
+    discountPct: nonNegativeFinite2(booking.discountPct),
+    voucherDiscount: nonNegativeFinite2(booking.voucherDiscount),
+    memberDiscountPct: nonNegativeFinite2(booking.memberDiscountPct),
     pointsRedeemedValue,
     finalTotal
   });
@@ -228718,14 +230844,14 @@ function dateKeyFromUnknown(value) {
   return Number.isNaN(date.getTime()) ? "1970-01-01" : date.toISOString().slice(0, 10);
 }
 function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
-  const nights = Math.max(Math.floor(nonNegativeFinite(newNights)), 1);
-  const originalNights = Math.max(Math.floor(nonNegativeFinite(booking.numNights)), nights);
-  const finalTotal = nonNegativeFinite(booking.totalPrice);
+  const nights = Math.max(Math.floor(nonNegativeFinite2(newNights)), 1);
+  const originalNights = Math.max(Math.floor(nonNegativeFinite2(booking.numNights)), nights);
+  const finalTotal = nonNegativeFinite2(booking.totalPrice);
   const existing = booking.rateBreakdown;
   let remainingNights = nights;
   const roomLines = (existing?.roomLines || []).flatMap((line) => {
     if (remainingNights <= 0) return [];
-    const lineNights = Math.max(Math.floor(nonNegativeFinite(line.nights)), 0);
+    const lineNights = Math.max(Math.floor(nonNegativeFinite2(line.nights)), 0);
     const consumedNights = Math.min(lineNights, remainingNights);
     if (consumedNights <= 0) return [];
     remainingNights -= consumedNights;
@@ -228733,12 +230859,12 @@ function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
       ...line,
       endDate: shiftDateKey(line.startDate, consumedNights),
       nights: consumedNights,
-      subtotal: nonNegativeFinite(line.nightlyRate) * consumedNights
+      subtotal: nonNegativeFinite2(line.nightlyRate) * consumedNights
     }];
   });
   if (roomLines.length === 0) {
     const startDate = dateKeyFromUnknown(booking.checkIn);
-    const nightlyRate = nonNegativeFinite(booking.ratePerNight);
+    const nightlyRate = nonNegativeFinite2(booking.ratePerNight);
     roomLines.push({
       source: "manual",
       label: "Locked room rate",
@@ -228751,44 +230877,18 @@ function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
   }
   const roomSubtotal = roomLines.reduce((sum, line) => sum + line.subtotal, 0);
   const addOnRatio = originalNights > 0 ? nights / originalNights : 1;
-  const addOns = existing ? (existing.addOns || []).map((line) => ({ ...line, amount: Math.round(nonNegativeFinite(line.amount) * addOnRatio * 100) / 100 })) : booking.hasBreakfast ? [{
-    label: "Breakfast add-on",
-    amount: calculateBreakfastAddOn({
-      hasBreakfast: booking.hasBreakfast,
-      breakfastRate: booking.breakfastRate,
-      numGuests: booking.numGuests,
-      numNights: nights,
-      // Per EXB-12 (2026-08-06, per decision #199):
-      // pass the extra-bed breakfast fields from
-      // the booking doc so the rebuild matches the
-      // create-time total. Nullish → no extra-bed
-      // breakfast (back-compat with older docs).
-      extraBedCount: booking.extraBedCount,
-      extraBedBreakfast: booking.extraBedBreakfast === true
-    })
-  }] : [];
-  const originalRoomSubtotal = existing?.roomSubtotal ?? nonNegativeFinite(booking.ratePerNight) * originalNights;
-  const originalAddOns = existing?.addOns ?? (booking.hasBreakfast ? [{
-    label: "Breakfast add-on",
-    amount: calculateBreakfastAddOn({
-      hasBreakfast: booking.hasBreakfast,
-      breakfastRate: booking.breakfastRate,
-      numGuests: booking.numGuests,
-      numNights: originalNights,
-      // Per EXB-12: same as above.
-      extraBedCount: booking.extraBedCount,
-      extraBedBreakfast: booking.extraBedBreakfast === true
-    })
-  }] : []);
+  const addOns = existing ? (existing.addOns || []).map((line) => ({ ...line, amount: Math.round(nonNegativeFinite2(line.amount) * addOnRatio * 100) / 100 })) : [];
+  const originalRoomSubtotal = existing?.roomSubtotal ?? nonNegativeFinite2(booking.ratePerNight) * originalNights;
+  const originalAddOns = existing?.addOns ?? [];
   const originalPricing = composeRateBreakdown({
     roomLines: existing?.roomLines || roomLines,
     roomSubtotal: originalRoomSubtotal,
     addOns: originalAddOns,
     discountType: String(booking.discountType || ""),
-    discountPct: nonNegativeFinite(booking.discountPct),
-    voucherDiscount: nonNegativeFinite(booking.voucherDiscount),
-    memberDiscountPct: nonNegativeFinite(booking.memberDiscountPct),
-    pointsRedeemedValue: nonNegativeFinite(booking.pointsRedeemedValue),
+    discountPct: nonNegativeFinite2(booking.discountPct),
+    voucherDiscount: nonNegativeFinite2(booking.voucherDiscount),
+    memberDiscountPct: nonNegativeFinite2(booking.memberDiscountPct),
+    pointsRedeemedValue: nonNegativeFinite2(booking.pointsRedeemedValue),
     finalTotal
   });
   const deductionTotal = originalPricing.deductions.reduce((sum, line) => sum + line.amount, 0);
@@ -228804,6 +230904,7 @@ function rebuildEarlyCheckoutRateBreakdown(booking, newNights) {
 }
 
 // server/handlers/bookings.ts
+var OTHER_ADDON_NOT_AVAILABLE_ERROR = "One of the selected add-ons is no longer available. Please refresh and try again.";
 function buildValidArrivalTimeOptions(checkInTimeStr) {
   const valid = /* @__PURE__ */ new Set();
   for (const option2 of buildArrivalTimeOptions(checkInTimeStr)) {
@@ -228908,7 +231009,7 @@ function buildCreateEmailView(args) {
   const children = args.finalRooms.map((room, index) => {
     const typeEntry = args.roomTypes.find((type) => type && type.value === room.roomType);
     const roomName = typeEntry?.label || typeEntry?.shortLabel || room.roomType;
-    const pricing = args.childPricing[index] || { rateBreakdown: null, activeRoomRate: 0, finalHasBreakfast: false };
+    const pricing = args.childPricing[index] || { rateBreakdown: null, activeRoomRate: 0 };
     return {
       id: room.bookingId,
       bookingRef: args.finalBookingRefs[index] || "",
@@ -228920,7 +231021,13 @@ function buildCreateEmailView(args) {
       numAdults: room.numAdults,
       numChildren: room.numChildren,
       extraBedCount: room.extraBedCount,
-      hasBreakfast: pricing.finalHasBreakfast,
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy `hasBreakfast: boolean` flat-rate flag
+      // is deleted from the create-write. The new meal-based
+      // model writes `breakfastSelections` +
+      // `breakfastTotal` directly (the room's per-child
+      // breakfast state lives on the snapshot map stamped
+      // later in the create transaction).
       ratePerNight: pricing.activeRoomRate,
       totalPrice: room.totalPrice,
       rateBreakdown: pricing.rateBreakdown,
@@ -228943,8 +231050,8 @@ function buildCreateEmailView(args) {
 }
 async function loadReservationEmailView(bookingId) {
   if (!bookingId) return null;
-  const bookingRef = adminDb.collection("bookings").doc(bookingId);
-  const bookingSnap = await bookingRef.get();
+  const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
+  const bookingSnap = await bookingRef2.get();
   if (!bookingSnap.exists) return null;
   const booking = bookingSnap.data() || {};
   const reservationId = String(booking.reservationId || "").trim();
@@ -229008,11 +231115,11 @@ function sumBilledAddToBillOrders(snapshot) {
   }, 0);
 }
 async function readTransactionalFolioSnapshot(input) {
-  const { transaction, bookingRef, bookingId, bookingData: bookingData2 } = input;
+  const { transaction, bookingRef: bookingRef2, bookingId, bookingData: bookingData2 } = input;
   const bookingReservationId2 = String(bookingData2.reservationId || "").trim();
   if (!bookingReservationId2) {
-    const paymentsRef = bookingRef.collection("payments");
-    const chargesRef = bookingRef.collection("charges");
+    const paymentsRef = bookingRef2.collection("payments");
+    const chargesRef = bookingRef2.collection("charges");
     const storeOrdersQuery = adminDb.collection("storeOrders").where("bookingId", "==", bookingId);
     const [paymentsSnapshot, chargesSnapshot, storeOrdersSnapshot] = await Promise.all([
       transaction.get(paymentsRef),
@@ -229022,15 +231129,21 @@ async function readTransactionalFolioSnapshot(input) {
     const collectedTotal2 = sumLedgerAmounts(paymentsSnapshot);
     const incidentalTotal2 = sumLedgerAmounts(chargesSnapshot);
     const addToBillTotal2 = sumBilledAddToBillOrders(storeOrdersSnapshot);
+    const otherAddOnTotal2 = Math.max(
+      0,
+      Number(bookingData2.otherAddOnTotal) || 0
+    );
     const totals2 = computeServerFolioTotals({
       totalPrice: Number(bookingData2.totalPrice) || 0,
       incidentalTotal: incidentalTotal2,
       addToBillTotal: addToBillTotal2,
-      collectedTotal: collectedTotal2
+      collectedTotal: collectedTotal2,
+      otherAddOnTotal: otherAddOnTotal2
     });
     return {
       reservationId: "",
       totalPrice: Number(bookingData2.totalPrice) || 0,
+      otherAddOnTotal: otherAddOnTotal2,
       collectedTotal: collectedTotal2,
       incidentalTotal: incidentalTotal2,
       addToBillTotal: addToBillTotal2,
@@ -229088,15 +231201,21 @@ async function readTransactionalFolioSnapshot(input) {
   const collectedTotal = sumLedgerAmounts(reservationPaymentsSnapshot) + sumLedgerAmounts(reservationRefundsSnapshot) + transitionalCollectedTotal;
   const incidentalTotal = sumLedgerAmounts(reservationChargesSnapshot) + transitionalIncidentalTotal;
   const totalPrice = Number(reservationDoc.data()?.totalPrice) || 0;
+  const otherAddOnTotal = childBookingsSnapshot.docs.reduce(
+    (sum, docSnap) => sum + Math.max(0, Number(docSnap.data()?.otherAddOnTotal) || 0),
+    0
+  );
   const totals = computeServerFolioTotals({
     totalPrice,
     incidentalTotal,
     addToBillTotal,
-    collectedTotal
+    collectedTotal,
+    otherAddOnTotal
   });
   return {
     reservationId: bookingReservationId2,
     totalPrice,
+    otherAddOnTotal,
     collectedTotal,
     incidentalTotal,
     addToBillTotal,
@@ -229282,19 +231401,18 @@ var publicRoomSelectionSchema = external_exports.object({
   numAdults: external_exports.coerce.number().int().min(0).max(100),
   numChildren: external_exports.coerce.number().int().min(0).max(100),
   extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0),
-  hasBreakfast: external_exports.boolean(),
-  breakfastIncludesChildren: external_exports.boolean().optional(),
-  // Per EXB-12 (2026-08-06, per decision #199): the
-  // per-room opt-in for breakfast on the extra-bed
-  // occupant(s). The client sends this from the
-  // per-type toggle in the Extras sub-section (or
-  // always, even when false — the strict schema
-  // would otherwise reject every booking because
-  // EXB-12's body always includes the field).
-  // The server enforces the invariant
-  // `extraBedBreakfast implies extraBedCount > 0`
-  // in the `validatedRoomStays` loop below.
-  extraBedBreakfast: external_exports.boolean().optional(),
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy flat-rate `hasBreakfast: boolean` +
+  // `breakfastIncludesChildren: boolean` +
+  // `extraBedBreakfast: boolean` per-room fields are
+  // deleted from the public-room-selection schema. The
+  // new meal-based model carries breakfast intent in the
+  // request body's root-level `breakfastSelections`
+  // record (validated by `breakfastSelectionsSchema`)
+  // and applies it uniformly to every room in the booking
+  // — per-room flags are gone. The `extraBedCount` field
+  // stays (it's still a per-room physical-occupancy value,
+  // independent of breakfast).
   // Per SR-01..05 (2026-10-12): the per-room
   // bed-set-up choice. Empty string means
   // "no preference" (the guest left the
@@ -229335,14 +231453,15 @@ var createBookingSchema = external_exports.object({
   checkIn: external_exports.string().trim().min(1).max(40),
   checkOut: external_exports.string().trim().min(1).max(40),
   guests: external_exports.number().finite().int().min(1).max(100),
-  hasBreakfast: external_exports.boolean(),
-  // Per CHD-10 (2026-07-31, per CVQ-01): optional — when absent,
-  // the server snapshots the admin default from
-  // `settings/breakfastConfig.breakfastIncludesChildrenDefault`
-  // and writes the result to the booking doc alongside
-  // `hasBreakfast`. `true` is the safe default (matches the
-  // historical "children pay the full rate" math).
-  breakfastIncludesChildren: external_exports.boolean().optional(),
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy `hasBreakfast: boolean` +
+  // `breakfastIncludesChildren: boolean` pair is deleted
+  // from the create-booking schema. The new meal-based
+  // model carries breakfast intent in the request body's
+  // optional `breakfastSelections` field (validated by
+  // `breakfastSelectionsSchema`); the legacy "include
+  // children in breakfast" toggle is gone (every guest —
+  // adult or child — is an ordinary meal slot in Step 2).
   // Per CHD-01 (2026-08-01, per decision #144): the
   // adults/children split. Both optional — when absent,
   // the server derives `numAdults = guests`, `numChildren
@@ -229360,17 +231479,13 @@ var createBookingSchema = external_exports.object({
   // snapshots the room type's `extraBedRate` onto the booking doc
   // alongside this field.
   extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional(),
-  // Per EXB-12 (2026-08-06, per decision #199): the
-  // top-level extra-bed breakfast toggle. The client
-  // always sends it (defaults to `false` from
-  // `bookingRoomCart.ts:63`), so the strict schema
-  // must accept the field. The server-side
-  // authoritative value lives on each
-  // `roomSelections[i].extraBedBreakfast` (per-room
-  // pricing + invariant enforcement); this top-level
-  // field is accepted for wire back-compat with the
-  // EXB-12 client shape and otherwise unused.
-  extraBedBreakfast: external_exports.boolean().optional(),
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy top-level `extraBedBreakfast: boolean` toggle
+  // is deleted from the create-booking schema. Extra-bed
+  // occupants are ordinary meal slots in Step 2 (the
+  // per-meal picker). The room-level `extraBedCount`
+  // (line above) stays — it's still a per-room physical
+  // occupancy value independent of breakfast.
   guestDetails: guestDetailsSchema,
   discountType: external_exports.enum(["", "senior", "pwd"]),
   // Per X-01 (E2E audit 2026-07-17): the URL is derived server-side
@@ -229390,6 +231505,15 @@ var createBookingSchema = external_exports.object({
   corporateCode: external_exports.string().trim().max(120).optional().default(""),
   corporateFlatRate: external_exports.boolean().optional().default(false),
   linkedInquiryId: external_exports.string().trim().max(160).nullable().optional().default(null),
+  // Per PR #9 fix (2026-10-13): the optional points amount a
+  // signed-in member wants to apply at booking creation time.
+  // The server applies the redemption atomically inside the
+  // create transaction via the shared `applyPointsRedemption`
+  // helper (passes `skipBookingUpdate: true` so the caller writes
+  // the booking with the discounted totalPrice). Default 0 =
+  // no points applied. Max bounded to prevent accidental
+  // underflow (real-world redemptions are < 100,000 points).
+  pointsToRedeem: external_exports.coerce.number().int().min(0).max(1e6).optional().default(0),
   // Per MRB-06 (2026-08-02, per decision #159): the N>1
   // generalization. The client requests N rooms of the
   // same `roomType`; the server assigns N DISTINCT
@@ -229478,8 +231602,59 @@ var createBookingSchema = external_exports.object({
   // missing value matches the "LOU not yet received"
   // state.
   louReceived: external_exports.boolean().optional().default(false),
+  // Per BR-03 (2026-10-12, decision #232): the new
+  // per-guest × per-date breakfast selections rich
+  // shape. Optional — when absent, the create handler
+  // falls back to the legacy `hasBreakfast` flat-rate
+  // model (per-room + per-occupancy), preserving back-
+  // compat for the walkin modal + older clients. When
+  // present (even as an empty `{}`), the handler
+  // switches to the new path: the `breakfastTotal` is
+  // recomputed from the selections, the legacy
+  // `hasBreakfast` / `breakfastRate` /
+  // `breakfastIncludesChildren` / `extraBedBreakfast`
+  // fields are NOT written to the booking doc, and the
+  // new `breakfastSelections` map is snapshotted onto
+  // the doc. The strict schema validates the entry
+  // shape (the per-class fields + the date key); the
+  // server-side `validateBreakfastSelections` helper
+  // applies the meal-catalog + cutoff gates and throws
+  // a 400 with a human message on violation.
+  breakfastSelections: breakfastSelectionsSchema.optional(),
+  // Per OCT-M4 (2026-10-20, decision #297): the BR-12 other
+  // add-ons the guest selected in the Step 2 grid.
+  //
+  // BR-12 shipped the catalog, the staff walk-in grid and the
+  // post-booking "Manage Other Add-Ons" page — but the GUEST
+  // booking flow had no grid at all (`BookingPage.tsx` contained
+  // ZERO occurrences of "otherAddOn"), so a guest could not order an
+  // airport transfer at booking time. Combined with OCT-C5 (the
+  // create path never persisted `otherAddOnSelections` even if it
+  // did), other add-ons were only purchasable post-booking.
+  //
+  // The values are ADVISORY: the server rebuilds every entry from
+  // the live `addOns` catalog (catalog price + name + unit), so a
+  // client-supplied price is never persisted and an add-on that is
+  // no longer on sale is refused. Same shape + same rule as the
+  // walk-in schema (OCT-C5).
+  otherAddOnSelections: external_exports.record(external_exports.string(), external_exports.array(external_exports.unknown())).optional(),
   _hp: external_exports.string().max(200).optional().default("")
 }).strict();
+async function loadMaxStayNights() {
+  try {
+    const snap = await adminDb.collection("settings").doc("hotelConfig").get();
+    if (!snap.exists) return resolveMaxStayNights(void 0);
+    return resolveMaxStayNights(snap.data()?.maxStayNights);
+  } catch {
+    return resolveMaxStayNights(void 0);
+  }
+}
+function buildMaxStayNightsError(res, maxNights) {
+  res.status(400).json({
+    success: false,
+    error: `Maximum stay length is ${describeMaxStayNights(maxNights)}. Please shorten your stay.`
+  });
+}
 async function handleCreateBooking(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -229492,13 +231667,33 @@ async function handleCreateBooking(req, res) {
     });
   }
   const body = parsedBody.data;
+  if (!isValidIsoDate(body.checkIn) || !isValidIsoDate(body.checkOut)) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid check-in or check-out date."
+    });
+  }
+  if (diffNightsBetweenIso(body.checkIn, body.checkOut) < 1) {
+    return res.status(400).json({
+      success: false,
+      error: "Check-out must be at least one night after check-in."
+    });
+  }
   const {
     bookingId,
     roomType,
     checkIn,
     checkOut,
     guests,
-    hasBreakfast,
+    // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+    // legacy `hasBreakfast: boolean` +
+    // `breakfastIncludesChildren: boolean` pair is gone
+    // from the create handler's body destructure. The new
+    // meal-based model carries breakfast intent in the
+    // optional `breakfastSelections` field (validated by
+    // `breakfastSelectionsSchema`); the create transaction
+    // reads it below and stamps `breakfastSelections` +
+    // `breakfastTotal` onto the booking doc.
     // Per CHD-01 (2026-08-01, per decision #144): the
     // adults/children split. Both optional — when absent,
     // the server derives `numAdults = guests`, `numChildren
@@ -229512,14 +231707,6 @@ async function handleCreateBooking(req, res) {
     // (CHD-07 follow-up).
     numAdults: requestedNumAdults,
     numChildren: requestedNumChildren,
-    // Per CHD-10 (2026-07-31, per CVQ-01): the optional per-booking
-    // override for "include children in the breakfast charge". When
-    // undefined, the server snapshots the admin default from
-    // `settings/breakfastConfig.breakfastIncludesChildrenDefault`
-    // inside the create transaction. Storing the result on the
-    // booking doc means a later policy change never rewrites an
-    // existing bill.
-    breakfastIncludesChildren: requestedBreakfastIncludesChildren,
     // Per EXB-01 (2026-07-31): extra-bed count. Optional — when
     // absent, treated as 0. Bounded server-side by the room type's
     // `maxExtraBeds` (a booking with `extraBedCount > maxExtraBeds`
@@ -229564,6 +231751,7 @@ async function handleCreateBooking(req, res) {
     // omit the field and stay green.
     holdId
   } = body;
+  const pointsToRedeem = body.pointsToRedeem || 0;
   const guestDetails = rawGuestDetails;
   const normalizedRoomSelections = requestedRoomSelections?.length ? requestedRoomSelections.map((selection, index) => ({
     bookingId: index === 0 ? bookingId : selection.bookingId || adminDb.collection("bookings").doc().id,
@@ -229571,8 +231759,16 @@ async function handleCreateBooking(req, res) {
     numAdults: selection.numAdults,
     numChildren: selection.numChildren,
     extraBedCount: selection.extraBedCount || 0,
-    hasBreakfast: selection.hasBreakfast,
-    breakfastIncludesChildren: selection.breakfastIncludesChildren,
+    // Per BR-08 (decision #238, 2026-10-14 — close-out):
+    // the legacy per-room `hasBreakfast` +
+    // `breakfastIncludesChildren` + `extraBedBreakfast`
+    // flags are deleted from the room-selection
+    // normalization. The new meal-based model carries
+    // breakfast intent in the request body's root-level
+    // `breakfastSelections` record (validated by
+    // `breakfastSelectionsSchema`); the create
+    // transaction reads it below and stamps per-room
+    // snapshots via the rate-breakdown builder.
     // Per SR-01..05 (2026-10-12): the per-room
     // bed-set-up choice. Empty string means
     // "no preference" (the guest left the
@@ -229586,8 +231782,14 @@ async function handleCreateBooking(req, res) {
     numAdults: Math.max(0, Math.floor(Number(requestedNumAdults ?? guests) || 0)),
     numChildren: Math.max(0, Math.floor(Number(requestedNumChildren ?? 0) || 0)),
     extraBedCount: Math.max(0, Math.floor(Number(requestedExtraBedCount ?? 0) || 0)),
-    hasBreakfast,
-    breakfastIncludesChildren: requestedBreakfastIncludesChildren,
+    // Per BR-08 (decision #238, 2026-10-14 — close-out):
+    // the legacy `hasBreakfast: boolean` field is
+    // deleted from the room-selection normalization.
+    // The breakfast data is carried by the root-level
+    // `breakfastSelections` record (validated by
+    // `breakfastSelectionsSchema`); the create
+    // transaction reads it below and stamps per-room
+    // snapshots via the rate-breakdown builder.
     // Per SR-01..05 (2026-10-12): the corporate
     // path sends `bedSetup` at the top level;
     // mirror it onto every room (the corporate
@@ -229613,6 +231815,9 @@ async function handleCreateBooking(req, res) {
   }
   const checkInDate = /* @__PURE__ */ new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = /* @__PURE__ */ new Date(`${checkOut}T00:00:00Z`);
+  if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) {
+    return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
+  }
   if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
     return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
   }
@@ -229630,11 +231835,10 @@ async function handleCreateBooking(req, res) {
   if (numNights < 1) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
   }
-  if (numNights > MAX_STAY_NIGHTS) {
-    return res.status(400).json({
-      success: false,
-      error: `Maximum stay length is ${MAX_STAY_NIGHTS} nights. Please shorten your stay.`
-    });
+  const maxStayNights = await loadMaxStayNights();
+  if (numNights > maxStayNights) {
+    buildMaxStayNightsError(res, maxStayNights);
+    return;
   }
   const advanceDays = Math.round((checkInDate.getTime() - currentManilaDate.getTime()) / 864e5);
   if (advanceDays > MAX_ADVANCE_DAYS) {
@@ -229675,9 +231879,7 @@ async function handleCreateBooking(req, res) {
       quantity: 1,
       adults: selection.numAdults,
       children: selection.numChildren,
-      extraBeds: selection.extraBedCount,
-      hasBreakfast: selection.hasBreakfast,
-      breakfastIncludesChildren: selection.breakfastIncludesChildren
+      extraBeds: selection.extraBedCount
     })),
     checkIn: String(checkIn || "").trim(),
     checkOut: String(checkOut || "").trim(),
@@ -229971,10 +232173,80 @@ async function handleCreateBooking(req, res) {
       assignedRoomNumber = String(roomData.roomNumber || "");
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
-      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT };
-      const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT : 0;
-      const breakfastIncludesChildrenDefault = breakfastConfig.breakfastIncludesChildrenDefault !== false;
-      const breakfastIncludesChildren = requestedBreakfastIncludesChildren !== void 0 ? requestedBreakfastIncludesChildren : breakfastIncludesChildrenDefault;
+      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: 0 };
+      const actualBreakfastRate2 = 0;
+      const breakfastIncludesChildrenDefault = true;
+      const validatedBreakfastSelections = validateBreakfastSelections({
+        selections: body.breakfastSelections,
+        breakfastConfig,
+        now
+      });
+      const rawOtherAddOns = body.otherAddOnSelections;
+      let validatedOtherAddOnSelections = null;
+      let validatedOtherAddOnTotal = 0;
+      if (rawOtherAddOns && typeof rawOtherAddOns === "object") {
+        if (!normalizeOtherAddOnsEnabled(hotelConfig.otherAddOnsEnabled)) {
+          throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+        }
+        const addOnsCatalogSnap = await transaction.get(adminDb.collection("addOns"));
+        const addOnsCatalog = /* @__PURE__ */ new Map();
+        for (const d of addOnsCatalogSnap.docs) {
+          const norm = normalizeAddOn({ id: d.id, ...d.data() }, d.id);
+          if (norm) addOnsCatalog.set(norm.id, norm);
+        }
+        if (addOnsCatalog.size === 0) {
+          const pre = normalizeAddOn(
+            { id: "airport-transfer", ...AIRPORT_TRANSFER_PRESEED },
+            "airport-transfer"
+          );
+          if (pre) addOnsCatalog.set(pre.id, pre);
+        }
+        const rebuilt = {};
+        for (const [dateKey2, rawItems] of Object.entries(
+          rawOtherAddOns
+        )) {
+          if (!Array.isArray(rawItems)) continue;
+          const rows = [];
+          for (const rawItem of rawItems) {
+            if (!rawItem || typeof rawItem !== "object") continue;
+            const entry = rawItem;
+            const addOnId = String(entry.addOnId || "").trim();
+            if (!addOnId) continue;
+            const live = addOnsCatalog.get(addOnId);
+            if (!live) {
+              throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+            }
+            if (live.isEnabled === false) {
+              throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+            }
+            const quantity = Math.max(
+              0,
+              Math.min(
+                guests,
+                Math.floor(Number(entry.quantity) || 0)
+              )
+            );
+            if (quantity <= 0) continue;
+            rows.push({
+              ...entry,
+              addOnId: live.id,
+              nameSnapshot: live.name,
+              priceSnapshot: Math.max(0, Number(live.price) || 0),
+              quantity,
+              unitSnapshot: live.unit,
+              cutoffHoursBeforeCheckInSnapshot: Math.max(
+                0,
+                Math.min(168, Math.floor(Number(live.cutoffHoursBeforeCheckIn) || 24))
+              )
+            });
+          }
+          if (rows.length > 0) rebuilt[dateKey2] = rows;
+        }
+        if (Object.keys(rebuilt).length > 0) {
+          validatedOtherAddOnSelections = rebuilt;
+          validatedOtherAddOnTotal = recomputeOtherAddOnTotal(rebuilt);
+        }
+      }
       const validatedRoomStays = assignedRooms.map((assignedRoom, index) => {
         const selection = assignedRoom.selection;
         const selectionType = selection.typeEntry;
@@ -230008,20 +232280,13 @@ async function handleCreateBooking(req, res) {
             requestedRoomSelections?.length ? `Room ${index + 1} needs ${overflow.requiredExtraBeds} extra bed(s), but only ${extraBedCount2} selected.` : `Not enough extra beds: ${overflow.overflowAdults} overflow adult(s) + ${overflow.overflowChildren} overflow child(ren) = ${overflow.requiredExtraBeds} extra bed(s) needed, but only ${extraBedCount2} extra bed(s) selected. The room type allows up to ${maxExtraBeds} extra bed(s).`
           );
         }
-        const extraBedBreakfast = selection.extraBedBreakfast === true && extraBedCount2 > 0;
         return {
           ...assignedRoom,
           numAdults: numAdults2,
           numChildren: numChildren2,
           numGuests: numAdults2 + numChildren2,
           extraBedCount: extraBedCount2,
-          extraBedRate: extraBedCount2 > 0 ? Math.max(0, Number(selectionType.extraBedRate) || 0) : 0,
-          // Per EXB-12: snapshot the breakfast-for-extra-beds
-          // toggle onto the validated stay. The pricing loop
-          // reads this to count the extra beds toward the
-          // breakfast total (same rate as adult breakfast).
-          extraBedBreakfast,
-          breakfastIncludesChildren: selection.breakfastIncludesChildren !== void 0 ? selection.breakfastIncludesChildren : breakfastIncludesChildrenDefault
+          extraBedRate: extraBedCount2 > 0 ? Math.max(0, Number(selectionType.extraBedRate) || 0) : 0
         };
       });
       const numAdults = validatedRoomStays[0].numAdults;
@@ -230140,27 +232405,9 @@ async function handleCreateBooking(req, res) {
           weekendRate: Number(stayType.weekendRate) || 0,
           seasonalRateOverrides
         });
-        const stayHasBreakfast = breakfastConfig.isEnabled && stay.selection.hasBreakfast;
-        const stayBreakfastTotal = calculateBreakfastAddOn({
-          hasBreakfast: stayHasBreakfast,
-          breakfastRate: actualBreakfastRate,
-          numGuests: stay.numGuests,
-          numAdults: stay.numAdults,
-          numChildren: stay.numChildren,
-          numNights,
-          breakfastIncludesChildren: stay.breakfastIncludesChildren,
-          // Per EXB-12 (2026-08-06, per decision #199):
-          // when the guest opts in to breakfast for the
-          // extra-bed occupant(s), the helper counts
-          // `extraBedCount` toward the breakfast total
-          // (priced as `breakfastRate × extraBedCount ×
-          // numNights`). The toggle is per-type, snapshotted
-          // onto the validated stay above. The invariant
-          // `extraBedBreakfast implies extraBedCount > 0`
-          // is enforced above.
-          extraBedCount: stay.extraBedCount,
-          extraBedBreakfast: stay.extraBedBreakfast === true
-        });
+        const breakfastSelectionsActive = validatedBreakfastSelections !== null;
+        const stayHasBreakfast = breakfastSelectionsActive ? validatedBreakfastSelections.hasAny : false;
+        const stayBreakfastTotal = 0;
         const stayExtraBedTotal = calculateExtraBedAddOn({
           extraBedCount: stay.extraBedCount,
           extraBedRate: stay.extraBedRate,
@@ -230187,10 +232434,10 @@ async function handleCreateBooking(req, res) {
         )
       };
       const roomTotal = roomBreakdown.roomSubtotal;
-      const breakfastTotal = roomStayPricing.reduce((sum, stay) => sum + stay.breakfastTotal, 0);
+      const breakfastTotal = validatedBreakfastSelections !== null ? validatedBreakfastSelections.total : roomStayPricing.reduce((sum, stay) => sum + stay.breakfastTotal, 0);
       const extraBedTotal = roomStayPricing.reduce((sum, stay) => sum + stay.extraBedTotal, 0);
       const subtotal = roomTotal + breakfastTotal + extraBedTotal;
-      const finalHasBreakfast = roomStayPricing[0].finalHasBreakfast;
+      const finalHasBreakfast = validatedBreakfastSelections !== null ? validatedBreakfastSelections.hasAny : roomStayPricing[0].finalHasBreakfast;
       let discountPct = 0;
       if (discountType === "senior" || discountType === "pwd") {
         discountPct = 20;
@@ -230253,11 +232500,17 @@ async function handleCreateBooking(req, res) {
       }
       let appliedMemberDiscountPct = 0;
       if (detectedMemberId) {
+        const memberRef = adminDb.doc(`members/${detectedMemberId}`);
+        const memberDocInTx = await transaction.get(memberRef);
+        const memberTier = memberDocInTx.exists ? memberDocInTx.data()?.currentLevel : null;
+        const tierPct = memberTier && Number.isFinite(Number(memberTier.discountPct)) ? Math.max(0, Math.floor(Number(memberTier.discountPct))) : null;
         const rewardsRef = adminDb.doc("settings/rewardsConfig");
         const rewardsDoc = await transaction.get(rewardsRef);
         if (rewardsDoc.exists) {
           const rc = rewardsDoc.data();
-          if (rc.memberDiscountEnabled !== false) {
+          if (tierPct !== null) {
+            appliedMemberDiscountPct = tierPct;
+          } else if (rc.memberDiscountEnabled !== false) {
             const pct = Number(rc.memberDiscountPct) || 0;
             if (pct > 0) appliedMemberDiscountPct = pct;
           }
@@ -230277,10 +232530,12 @@ async function handleCreateBooking(req, res) {
         throw new Error("Invalid booking total.");
       }
       const originalTotalPrice = subtotal;
+      const breakfastRateBreakdownLines = validatedBreakfastSelections !== null ? buildBreakfastRateBreakdownLines(validatedBreakfastSelections.entries) : void 0;
       const rateBreakdown = buildRateBreakdown({
         roomLines: roomBreakdown.roomLines,
         roomSubtotal: roomTotal,
         breakfastTotal,
+        breakfastLines: breakfastRateBreakdownLines,
         // Per EXB-08 (2026-08-01, per decision #156):
         // the extra-bed add-on term. The `addOns[]`
         // now includes both the breakfast line and
@@ -230312,8 +232567,23 @@ async function handleCreateBooking(req, res) {
         rateBreakdown: {
           roomSubtotal: stay.roomTotal,
           roomLines: stay.roomBreakdown.roomLines,
+          // Per BR-03 (2026-10-12, decision #232): when
+          // the new `breakfastSelections` shape is
+          // active, the per-room breakfast lines are
+          // attributed to the FIRST stay only (the
+          // reservation-level breakfast is not
+          // per-room, per open item #1 in the spec).
+          // The email view's `addOns.concat(...)`
+          // would otherwise duplicate the per-date
+          // lines N times for an N-room booking; this
+          // single-source attribution keeps the
+          // per-date lines on the reservation
+          // breakdown (which the email view reads
+          // first). Legacy path: each stay carries
+          // its own "Breakfast add-on" line (the
+          // historical EXB-08 behavior).
           addOns: [
-            ...stay.breakfastTotal > 0 ? [{ label: "Breakfast add-on", amount: stay.breakfastTotal }] : [],
+            ...breakfastRateBreakdownLines && breakfastRateBreakdownLines.length > 0 ? index === 0 ? breakfastRateBreakdownLines : [] : stay.breakfastTotal > 0 ? [{ label: "Breakfast add-on", amount: stay.breakfastTotal }] : [],
             ...stay.extraBedTotal > 0 ? [{
               label: stay.extraBedCount > 1 ? `Extra bed add-on (${stay.extraBedCount} beds \xD7 ${numNights} ${numNights === 1 ? "night" : "nights"})` : "Extra bed add-on",
               amount: stay.extraBedTotal
@@ -230335,8 +232605,8 @@ async function handleCreateBooking(req, res) {
       const childBookingRefs2 = assignedRooms.map(
         (_2, roomIdx) => `${hotel_config_default.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence + roomIdx).padStart(5, "0")}`
       );
-      const bookingRef = childBookingRefs2[0];
-      finalBookingRef = bookingRef;
+      const bookingRef2 = childBookingRefs2[0];
+      finalBookingRef = bookingRef2;
       finalTotalPrice = totalPrice;
       finalRateBreakdown = rateBreakdown;
       finalReservationRef = `R-${todayCompact}-${String(sequence).padStart(5, "0")}`;
@@ -230351,9 +232621,87 @@ async function handleCreateBooking(req, res) {
       } else {
         transaction.set(counterRef, { count: assignedRooms.length });
       }
+      let selfRedeemedPoints = 0;
+      let selfRedeemedValue = 0;
+      let selfRedeemedBy = null;
+      let selfRedeemedAt = null;
+      if (pointsToRedeem > 0) {
+        if (!detectedMemberId) {
+          throw new Error("Sign in is required to redeem points at booking creation. Please sign in or remove the points amount.");
+        }
+        const selfRcRef = adminDb.collection("settings").doc("rewardsConfig");
+        const selfRcSnap = await transaction.get(selfRcRef);
+        const selfRcData = selfRcSnap.exists ? selfRcSnap.data() : null;
+        if (selfRcData?.allowMemberPointsRedemption !== true) {
+          throw new Error("Self-service points redemption is not enabled. Please contact the front desk.");
+        }
+        const selfMemberRef = adminDb.collection("members").doc(detectedMemberId);
+        const selfMemberDoc = await transaction.get(selfMemberRef);
+        if (!selfMemberDoc.exists) {
+          throw new Error("Member not found.");
+        }
+        const selfMemberData = selfMemberDoc.data();
+        if (selfMemberData.isActive === false || selfMemberData.isMember === false) {
+          throw new Error("Member account is not active.");
+        }
+        const pointsRedemptionRate = Number(selfRcData?.pointsRedemptionRate || 0);
+        if (pointsRedemptionRate <= 0) {
+          throw new Error("Points redemption is not configured.");
+        }
+        const minPointsToRedeem = Number(selfRcData?.minPointsToRedeem || 0);
+        const billPct = Number(selfRcData?.pointsCanPayUpToBillPct ?? 100);
+        if (minPointsToRedeem > 0 && pointsToRedeem < minPointsToRedeem) {
+          throw new Error(`Points redemption requires at least ${minPointsToRedeem} points.`);
+        }
+        if (Number.isFinite(billPct) && billPct < 100) {
+          const reservationTotal = finalTotalPrice;
+          const maxRedeemableCurrency = Math.floor(reservationTotal * Math.max(0, billPct) / 100);
+          const maxRedeemablePoints = Math.floor(maxRedeemableCurrency * 100 / pointsRedemptionRate);
+          if (pointsToRedeem > maxRedeemablePoints) {
+            throw new Error(
+              `Points redemption exceeds the ${billPct}% bill cap (max ${maxRedeemablePoints} points for this booking).`
+            );
+          }
+        }
+        const validation = validatePointsRedemption(
+          pointsToRedeem,
+          Number(selfMemberData.rewardsPoints || 0),
+          pointsRedemptionRate
+        );
+        if (!validation.valid) {
+          throw new Error(validation.error);
+        }
+        const redemptionValue = Math.round(validation.value);
+        if (redemptionValue <= 0 || redemptionValue > finalTotalPrice) {
+          throw new Error("Points redemption value exceeds the booking total.");
+        }
+        finalTotalPrice = Math.max(finalTotalPrice - redemptionValue, 0);
+        if (rateBreakdown) {
+          rateBreakdown.finalTotal = finalTotalPrice;
+          rateBreakdown.pointsRedeemedValue = redemptionValue;
+        }
+        selfRedeemedPoints = pointsToRedeem;
+        selfRedeemedValue = redemptionValue;
+        selfRedeemedBy = `self:${detectedMemberId}`;
+        selfRedeemedAt = now;
+        transaction.update(selfMemberRef, {
+          rewardsPoints: Number(selfMemberData.rewardsPoints || 0) - pointsToRedeem,
+          updatedAt: now
+        });
+        const historyRef = adminDb.collection(`members/${detectedMemberId}/pointsHistory`).doc();
+        transaction.set(historyRef, {
+          type: "redeem",
+          points: -pointsToRedeem,
+          description: `Redeemed at booking creation ${bookingId}`,
+          reason: "Points redeemed by member at checkout",
+          bookingId,
+          by: selfRedeemedBy,
+          at: now
+        });
+      }
       const guestName2 = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
       const newBooking = {
-        bookingRef,
+        bookingRef: bookingRef2,
         roomId,
         roomNumber: roomData.roomNumber,
         roomType,
@@ -230382,6 +232730,18 @@ async function handleCreateBooking(req, res) {
         // without leaking the raw `guestEmail` in URLs.
         lookupToken: generateLookupToken(),
         totalPrice,
+        // Per BR-03 (2026-10-12, decision #232): the
+        // denormalized `breakfastTotal` field. The
+        // existing `computeServerFolioTotals` reads
+        // `totalPrice` (which already includes the new
+        // breakfast total via the discount chain), so
+        // this field is the future-proof snapshot for
+        // the BR-04 Manage Breakfast page +
+        // downstream readers (kitchen list per BR-05,
+        // reports per BR-08). Always written so a
+        // legacy reader can detect the absence of
+        // breakfast (`0`) without a special-case.
+        breakfastTotal,
         rateBreakdown,
         originalTotalPrice,
         discountType: discountType || "",
@@ -230466,14 +232826,65 @@ async function handleCreateBooking(req, res) {
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
-        hasBreakfast: finalHasBreakfast,
-        breakfastRate: finalHasBreakfast ? actualBreakfastRate : 0,
-        // Per CHD-10 (2026-07-31, per CVQ-01): the snapshotted
-        // "include children in breakfast" flag. Written to the
-        // booking doc so a later policy change never rewrites an
-        // existing bill. Math consumers (the helper, the receipt
-        // PDF, the rate breakdown) read this field.
-        breakfastIncludesChildren: finalHasBreakfast ? breakfastIncludesChildren : false,
+        // Per BR-03 (2026-10-12, decision #232): the
+        // breakfast-doc fields. Two shapes coexist during
+        // the rollout:
+        //
+        //   - Legacy shape: `hasBreakfast: bool`,
+        //     `breakfastRate: number`,
+        //     `breakfastIncludesChildren: bool`,
+        //     `extraBedBreakfast: bool`. Written for
+        //     pre-BR-03 callers (the walkin modal per the
+        //     BR-03 plan) and any client that omits
+        //     `breakfastSelections`.
+        //
+        //   - New shape: `breakfastSelections: Record<key,
+        //     BreakfastSelectionEntry>` + a single
+        //     `hasAnyBreakfast: bool` flag (the
+        //     `breakfastTotal` is denormalized separately
+        //     below for the folio math). The new shape
+        //     REPLACES the legacy fields — the BR-03 spec
+        //     pins the create-path cleanup so a future
+        //     read site can switch on `breakfastSelections`
+        //     being a non-null object. The legacy fields
+        //     are NOT written when the new shape is used.
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `hasBreakfast: boolean` +
+        // `breakfastRate: number` +
+        // `breakfastIncludesChildren: boolean` pair is gone
+        // from the create-write. When the new rich
+        // `breakfastSelections` shape is in use, only the
+        // new fields are written. When no
+        // `breakfastSelections` is provided (no breakfast
+        // was selected), no legacy or new fields are
+        // written — `breakfastSelections` reads as
+        // `undefined` on the doc and `breakfastTotal` is
+        // implicitly 0.
+        ...validatedBreakfastSelections !== null ? {
+          breakfastSelections: validatedBreakfastSelections.entries,
+          hasAnyBreakfast: validatedBreakfastSelections.hasAny,
+          // The folio math reads `breakfastTotal`
+          // (denormalized); expose the same value the
+          // chain saw.
+          breakfastTotal: validatedBreakfastSelections.total
+        } : {},
+        // Per OCT-M4 (2026-10-20, decision #297): the BR-12 other
+        // add-ons the guest selected in the Step 2 grid.
+        //
+        // Per `plan/features/OTHER-ADD-ONS.md` decision 2 these are
+        // ADDITIVE `Booking` fields and they are NOT inside
+        // `totalPrice` — they are "added on top of it for the
+        // balance". The same shape the walk-in path writes (OCT-C5,
+        // decision #281) and the post-booking guest path writes.
+        //
+        // The fields are written only when the guest actually
+        // selected something, so a booking with no other add-ons
+        // carries no `otherAddOnSelections` key at all.
+        ...validatedOtherAddOnSelections !== null ? {
+          otherAddOnSelections: validatedOtherAddOnSelections,
+          otherAddOnTotal: validatedOtherAddOnTotal,
+          hasAnyOtherAddOns: hasAnyOtherAddOns(validatedOtherAddOnSelections)
+        } : {},
         // Per EXB-01 (2026-07-31): the snapshotted extra-bed
         // count + rate. `extraBedRate` is the room-type rate
         // snapshotted at booking time so a later rate change never
@@ -230491,7 +232902,15 @@ async function handleCreateBooking(req, res) {
         discountScopeSnapshot: snapshottedDiscountScope,
         guestIdPhotoUrl: null,
         guestRegistration: null,
-        breakfastSelections: {},
+        // Per BR-03 (2026-10-12, decision #232): the
+        // `breakfastSelections` field is now written
+        // conditionally above (the legacy flat-rate
+        // path writes the legacy fields; the new
+        // selections-driven path writes the rich
+        // `breakfastSelections` map + `hasAnyBreakfast`).
+        // The hard-coded `breakfastSelections: {}`
+        // placeholder was removed — leaving it would
+        // double-write the field.
         // Per LCE-01 (decision #137, 2026-07-25): stamp the
         // Terms of Service version that was live at
         // booking-create time. The admin's
@@ -230618,10 +233037,18 @@ async function handleCreateBooking(req, res) {
         // room of the same `roomType` + same dates +
         // same guest inputs, so the sum is
         // `roomCount * per-room value`).
+        // Per PR #9 fix (2026-10-13): when points are applied
+        // at booking creation, `totalPrice` carries the post-
+        // redemption amount (the per-room writes below carry
+        // the same discounted total). For non-redemption
+        // bookings this is byte-equivalent to the previous
+        // `totalPrice: totalPrice` reference — `finalTotalPrice`
+        // stays equal to `totalPrice` when the redemption block
+        // doesn't execute.
         originalSubtotal: subtotal,
         discountScopeSnapshot: snapshottedDiscountScope,
         subtotal,
-        totalPrice,
+        totalPrice: finalTotalPrice,
         // Per MRB-11 (2026-08-03, per decision #177):
         // the aggregate of every child booking's
         // `revenueAllocation`. Reports reads this for
@@ -230711,6 +233138,17 @@ async function handleCreateBooking(req, res) {
           latestCheckOut: checkOutDate,
           isDivergent: false
         },
+        // Per PR #9 fix (2026-10-13): the reservation-level
+        // mirror of the per-room redemption. Both fields are
+        // populated ONLY when the member applied points at
+        // booking creation (pre-Phase-9 reservations stay
+        // byte-equivalent with both fields absent).
+        ...selfRedeemedPoints > 0 ? {
+          pointsRedeemed: selfRedeemedPoints,
+          pointsRedeemedValue: selfRedeemedValue,
+          pointsRedeemedBy: selfRedeemedBy,
+          pointsRedeemedAt: selfRedeemedAt
+        } : {},
         createdAt: now,
         updatedAt: now,
         createdBy: "guest"
@@ -230760,19 +233198,32 @@ async function handleCreateBooking(req, res) {
             originalTotalPrice: pricingForRoom.subtotal,
             rateBreakdown: pricingForRoom.rateBreakdown,
             voucherDiscount: pricingForRoom.voucherDiscount,
-            hasBreakfast: pricingForRoom.finalHasBreakfast,
-            breakfastRate: pricingForRoom.finalHasBreakfast ? actualBreakfastRate : 0,
-            breakfastIncludesChildren: pricingForRoom.finalHasBreakfast ? pricingForRoom.breakfastIncludesChildren : false,
+            // Per BR-08 (decision #238, 2026-10-14 — close-out):
+            // the legacy `hasBreakfast: boolean` +
+            // `breakfastRate: number` +
+            // `breakfastIncludesChildren: boolean` pair is
+            // deleted from the create-write. The per-room
+            // breakfast data is carried by the new rich
+            // `breakfastSelections` shape stamped onto the
+            // doc header (above), or by the `breakfastTotal`
+            // denormalized field for folio math. The legacy
+            // fallback to "no breakfast" is the empty object
+            // (no fields written).
+            ...validatedBreakfastSelections !== null ? {
+              breakfastSelections: validatedBreakfastSelections.entries,
+              breakfastTotal: validatedBreakfastSelections.total
+            } : {},
             extraBedCount: pricingForRoom.extraBedCount,
             extraBedRate: pricingForRoom.extraBedRate,
-            // Per EXB-12 (2026-08-06, per decision #199):
-            // snapshot the extra-bed breakfast toggle onto
-            // the booking doc. The invariant
-            // `extraBedBreakfast implies extraBedCount > 0`
-            // is enforced in the validatedRoomStays loop
-            // above. Absent → `false` (no breakfast for extra
-            // beds) for back-compat with older booking docs.
-            extraBedBreakfast: pricingForRoom.extraBedBreakfast === true,
+            // Per BR-08 (decision #238, 2026-10-14 — close-out):
+            // the legacy EXB-12 `extraBedBreakfast: boolean`
+            // toggle is deleted from the create-write. Extra-bed
+            // occupants are ordinary meal slots in Step 2 (the
+            // per-meal picker) — the per-room breakfast intent is
+            // carried by `breakfastSelections` (stamped above).
+            // The invariant `extraBedCount > 0` (the only check
+            // that survives the close-out) is enforced in the
+            // validatedRoomStays loop above.
             // Per MRB-11 (2026-08-03, per decision #177):
             // the per-child revenue allocation snapshot.
             // The per-stream values are the GROSS amounts
@@ -230848,7 +233299,6 @@ async function handleCreateBooking(req, res) {
           numAdults: pricing.numAdults,
           numChildren: pricing.numChildren,
           extraBedCount: pricing.extraBedCount,
-          hasBreakfast: pricing.finalHasBreakfast,
           totalPrice: pricing.totalPrice
         };
       });
@@ -231069,10 +233519,14 @@ async function handleCreateBooking(req, res) {
     const code = error?.code || "";
     const isInfraError = typeof code === "string" && (code.includes("UNAVAILABLE") || code.includes("DEADLINE_EXCEEDED") || code.includes("RESOURCE_EXHAUSTED") || code.includes("INTERNAL"));
     let status;
-    if (error.message === "Room no longer available" || error.message === ROOM_NOT_READY_PREVIOUS_GUEST_ERROR) {
+    if (error.name === "BreakfastSelectionValidationError") {
+      status = typeof error.status === "number" && error.status > 0 ? error.status : 400;
+    } else if (error.message === "Room no longer available" || error.message === ROOM_NOT_READY_PREVIOUS_GUEST_ERROR) {
       status = 409;
     } else if (error.message === "Voucher no longer valid") {
       status = 409;
+    } else if (error.message === OTHER_ADDON_NOT_AVAILABLE_ERROR) {
+      status = 400;
     } else if (
       // Per MRB-02 (2026-08-02, per decision #164): the client
       // preallocated a `reservationId` that already carries a
@@ -231135,11 +233589,21 @@ async function handleCreateWalkin(req, res) {
     checkIn,
     checkOut,
     guests,
-    hasBreakfast,
-    // Per CHD-10: walk-ins are staff-created. The breakfast toggle
-    // is snapshotted from the admin default (no per-booking override
-    // on the walk-in surface).
-    breakfastIncludesChildren: requestedBreakfastIncludesChildren,
+    // Per OCT-C5 (2026-10-20, audit
+    // `plan/project/AUDIT-OCTOBER-2026.md`): the rich per-meal
+    // breakfast selections + the BR-12 other add-ons the desk
+    // selected. Both were previously dropped on the floor by the
+    // walk-in transaction.
+    breakfastSelections: requestedBreakfastSelections,
+    otherAddOnSelections: requestedOtherAddOnSelections,
+    // Per BR-08 (decision #238, 2026-10-14 — close-out):
+    // the legacy `hasBreakfast: boolean` flat-rate flag is
+    // removed from the walk-in create path. Walk-ins that
+    // want breakfast must send the rich `breakfastSelections`
+    // shape — the per-meal sum becomes `booking.breakfastTotal`.
+    // The variable below (`breakfastTotal: 0`) was the
+    // legacy default; now it's the unconditional default
+    // when no selections are provided.
     // Per EXB-01: extra-bed count. Optional — walk-in defaults to
     // 0 when absent. Bounded by the room type's `maxExtraBeds`.
     extraBedCount: requestedExtraBedCount,
@@ -231218,6 +233682,9 @@ async function handleCreateWalkin(req, res) {
   const walkinRoomCount = walkinRoomLines.length;
   const checkInDate = /* @__PURE__ */ new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = /* @__PURE__ */ new Date(`${checkOut}T00:00:00Z`);
+  if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) {
+    return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
+  }
   if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
     return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
   }
@@ -231227,11 +233694,10 @@ async function handleCreateWalkin(req, res) {
   if (numNights < 1) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
   }
-  if (numNights > MAX_STAY_NIGHTS) {
-    return res.status(400).json({
-      success: false,
-      error: `Maximum stay length is ${MAX_STAY_NIGHTS} nights. Please shorten the stay.`
-    });
+  const maxStayNights = await loadMaxStayNights();
+  if (numNights > maxStayNights) {
+    buildMaxStayNightsError(res, maxStayNights);
+    return;
   }
   const expiredHoldRetirements = [];
   const { todayStr: todayKey, manilaDate: currentManilaDate } = getManilaDateInfo();
@@ -231480,10 +233946,71 @@ async function handleCreateWalkin(req, res) {
       }
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
-      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT };
-      const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT : 0;
-      const breakfastIncludesChildrenDefault = breakfastConfig.breakfastIncludesChildrenDefault !== false;
+      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: 0 };
+      const actualBreakfastRate2 = 0;
+      const breakfastIncludesChildrenDefault = true;
       const breakfastIncludesChildren = breakfastIncludesChildrenDefault;
+      const validatedWalkinBreakfast = validateBreakfastSelections({
+        selections: requestedBreakfastSelections,
+        breakfastConfig,
+        now,
+        staffCreated: true
+      });
+      const walkinBreakfastTotal = validatedWalkinBreakfast?.total ?? 0;
+      const rawWalkinOtherAddOns = requestedOtherAddOnSelections;
+      let walkinOtherAddOnSelections = null;
+      let walkinOtherAddOnTotal = 0;
+      if (rawWalkinOtherAddOns && typeof rawWalkinOtherAddOns === "object") {
+        const addOnsCatalogSnap = await transaction.get(adminDb.collection("addOns"));
+        const addOnsCatalog = /* @__PURE__ */ new Map();
+        for (const d of addOnsCatalogSnap.docs) {
+          const norm = normalizeAddOn({ id: d.id, ...d.data() }, d.id);
+          if (norm) addOnsCatalog.set(norm.id, norm);
+        }
+        if (addOnsCatalog.size === 0) {
+          const pre = normalizeAddOn(
+            { id: "airport-transfer", ...AIRPORT_TRANSFER_PRESEED },
+            "airport-transfer"
+          );
+          if (pre) addOnsCatalog.set(pre.id, pre);
+        }
+        const rebuilt = {};
+        for (const [dateKey2, rawItems] of Object.entries(
+          rawWalkinOtherAddOns
+        )) {
+          if (!Array.isArray(rawItems)) continue;
+          const rows = [];
+          for (const rawItem of rawItems) {
+            if (!rawItem || typeof rawItem !== "object") continue;
+            const entry = rawItem;
+            const addOnId = String(entry.addOnId || "").trim();
+            if (!addOnId) continue;
+            const live = addOnsCatalog.get(addOnId);
+            if (!live) {
+              throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+            }
+            if (live.isEnabled === false) {
+              throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
+            }
+            rows.push({
+              ...entry,
+              addOnId: live.id,
+              nameSnapshot: live.name,
+              priceSnapshot: Math.max(0, Number(live.price) || 0),
+              unitSnapshot: live.unit,
+              cutoffHoursBeforeCheckInSnapshot: Math.max(
+                0,
+                Math.min(168, Math.floor(Number(live.cutoffHoursBeforeCheckIn) || 24))
+              )
+            });
+          }
+          if (rows.length > 0) rebuilt[dateKey2] = rows;
+        }
+        if (Object.keys(rebuilt).length > 0) {
+          walkinOtherAddOnSelections = rebuilt;
+          walkinOtherAddOnTotal = recomputeOtherAddOnTotal(rebuilt);
+        }
+      }
       const walkinPerRoomExtraBeds = walkinAssignedRooms.map((assigned, lineIdx) => {
         const lineTypeEntry = walkinTypeEntries[lineIdx];
         const lineExtraBedCount = assigned.extraBedCount;
@@ -231531,7 +234058,6 @@ async function handleCreateWalkin(req, res) {
           );
         }
       }
-      const finalHasBreakfast = breakfastConfig.isEnabled && hasBreakfast;
       const walkinRoomStayPricing = walkinAssignedRooms.map((assigned, lineIdx) => {
         const lineTypeEntry = walkinTypeEntries[lineIdx];
         const lineRoomBreakdown = calculateSeasonalAwareRoomBreakdown({
@@ -231542,13 +234068,7 @@ async function handleCreateWalkin(req, res) {
           weekendRate: Number(lineTypeEntry.weekendRate) || 0,
           seasonalRateOverrides
         });
-        const lineBreakfastTotal = calculateBreakfastAddOn({
-          hasBreakfast: finalHasBreakfast,
-          breakfastRate: actualBreakfastRate,
-          numGuests: assigned.numAdults + assigned.numChildren,
-          numNights,
-          breakfastIncludesChildren
-        });
+        const lineBreakfastTotal = lineIdx === 0 ? walkinBreakfastTotal : 0;
         const lineExtraBedTotal = calculateExtraBedAddOn({
           extraBedCount: walkinPerRoomExtraBeds[lineIdx].extraBedCount,
           extraBedRate: walkinPerRoomExtraBeds[lineIdx].extraBedRate,
@@ -231700,12 +234220,12 @@ async function handleCreateWalkin(req, res) {
       const walkinBookingRefs = walkinAssignedRooms.map(
         (_2, lineIdx) => `${hotel_config_default.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence + lineIdx).padStart(5, "0")}`
       );
-      const bookingRef = walkinBookingRefs[0];
-      finalBookingRef = bookingRef;
+      const bookingRef2 = walkinBookingRefs[0];
+      finalBookingRef = bookingRef2;
       finalReservationRef = `R-${todayCompact}-${String(sequence).padStart(5, "0")}`;
       const guestName2 = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
       newBooking = {
-        bookingRef,
+        bookingRef: bookingRef2,
         roomId,
         roomNumber: roomData.roomNumber,
         roomType: roomData.type,
@@ -231780,13 +234300,21 @@ async function handleCreateWalkin(req, res) {
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
-        hasBreakfast: finalHasBreakfast,
-        breakfastRate: finalHasBreakfast ? actualBreakfastRate : 0,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `breakfastRate: number` write is
+        // removed from the walk-in booking doc. Walk-ins
+        // that want breakfast must send the rich
+        // `breakfastSelections` shape — the per-meal sum
+        // becomes `booking.breakfastTotal` via the
+        // `calculateBreakfastMealsTotal` helper. The
+        // `finalHasBreakfast` derivation above is now
+        // dead; the variable is retained only as a
+        // type-system placeholder for downstream
+        // consumers.
         // Per CHD-10 (2026-07-31, per CVQ-01): the snapshotted
         // "include children in breakfast" flag. Same shape as
         // the online-create path; walk-in + corporate inquiry
         // surfaces don't expose a per-booking override.
-        breakfastIncludesChildren: finalHasBreakfast ? breakfastIncludesChildren : false,
         // Per EXB-01 (2026-07-31): the snapshotted extra-bed
         // count + rate for the walk-in (which also covers the
         // corporate inquiry conversion). Same shape as the
@@ -231800,7 +234328,37 @@ async function handleCreateWalkin(req, res) {
         discountScopeSnapshot: snapshottedDiscountScope,
         guestIdPhotoUrl: null,
         guestRegistration: null,
-        breakfastSelections: {},
+        // Per OCT-C5 (2026-10-20, audit
+        // `plan/project/AUDIT-OCTOBER-2026.md`): the walk-in now
+        // PERSISTS the validated breakfast selections instead of
+        // discarding them. The pre-fix code wrote a hard-coded
+        // `breakfastSelections: {}` here, so the desk's meals
+        // vanished — no breakfast was served, the kitchen list
+        // was empty, and the hotel was never charged.
+        //
+        // `validatedWalkinBreakfast.entries` is the server-
+        // validated map (catalog price + name, NOT the client's),
+        // so the same price-authority rule as the public create
+        // path applies. `null` (the desk picked no meals) writes
+        // an empty map, matching the public path's "explicit
+        // opt-out" shape.
+        breakfastSelections: validatedWalkinBreakfast?.entries ?? {},
+        // Per BR-03 (2026-10-12, decision #232): the denormalized
+        // `breakfastTotal` field — the future-proof snapshot for
+        // the BR-04 Manage Breakfast page + the kitchen list +
+        // reports. The walk-in previously omitted the field
+        // entirely, so a reader could not tell "no breakfast"
+        // from "breakfast that was never recorded".
+        breakfastTotal,
+        // Per BR-12.1 (2026-10-15, decision #247): the other
+        // add-ons the desk selected. See the
+        // `otherAddOnSelections` handling above — these were
+        // dropped on the floor before this fix.
+        ...walkinOtherAddOnSelections ? {
+          otherAddOnSelections: walkinOtherAddOnSelections,
+          otherAddOnTotal: walkinOtherAddOnTotal,
+          hasAnyOtherAddOns: true
+        } : {},
         cancellationReason: "",
         linkedInquiryId: linkedInquiryId || null,
         ...validatedTestRunId ? { isTestData: true, testRunId: validatedTestRunId, testRunName: validatedTestRunName, testRunEnvironment: validatedTestRunEnvironment } : {},
@@ -232078,6 +234636,16 @@ async function handleCreateWalkin(req, res) {
       status2 = 409;
     } else if (errorMessage === "RESERVATION_HEADER_WITHOUT_CHILD") {
       status2 = 500;
+    } else if (
+      // Per OCT-C5 (2026-10-20): the walk-in now validates the
+      // desk's breakfast selections + other add-ons, so its
+      // validation failures must reach the desk as 400s with a
+      // human message — not 500s. Symmetric with the public
+      // create path's `BreakfastSelectionValidationError`
+      // mapping at :4373.
+      error.name === "BreakfastSelectionValidationError" || errorMessage === OTHER_ADDON_NOT_AVAILABLE_ERROR
+    ) {
+      status2 = typeof error.status === "number" && error.status > 0 ? error.status : 400;
     } else {
       status2 = 500;
     }
@@ -232100,8 +234668,8 @@ async function handleApplyBookingDiscount(req, res) {
   try {
     let result = {};
     await adminDb.runTransaction(async (transaction) => {
-      const bookingRef = adminDb.collection("bookings").doc(bookingId);
-      const bookingSnap = await transaction.get(bookingRef);
+      const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
+      const bookingSnap = await transaction.get(bookingRef2);
       if (!bookingSnap.exists) throw new Error("Booking not found.");
       const booking = bookingSnap.data();
       if (!["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"].includes(booking.status)) {
@@ -232179,7 +234747,7 @@ async function handleApplyBookingDiscount(req, res) {
         updatedAt: /* @__PURE__ */ new Date()
       };
       if (voucherRef) transaction.update(voucherRef, { usageCount: voucherUsageCount, updatedAt: /* @__PURE__ */ new Date() });
-      transaction.update(bookingRef, updates);
+      transaction.update(bookingRef2, updates);
       result = updates;
     });
     return res.status(200).json({ success: true, data: result });
@@ -232357,8 +234925,8 @@ async function handleRemoveVoucher(req, res) {
   try {
     let result = {};
     await adminDb.runTransaction(async (transaction) => {
-      const bookingRef = adminDb.collection("bookings").doc(bookingId);
-      const bookingDoc = await transaction.get(bookingRef);
+      const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
+      const bookingDoc = await transaction.get(bookingRef2);
       if (!bookingDoc.exists) throw new Error("Booking not found.");
       const bookingData2 = bookingDoc.data();
       const existingVoucherCode = String(bookingData2.voucherCode || "").trim();
@@ -232429,7 +234997,7 @@ async function handleRemoveVoucher(req, res) {
           updatedAt: /* @__PURE__ */ new Date()
         });
       }
-      transaction.update(bookingRef, updates);
+      transaction.update(bookingRef2, updates);
       result = updates;
     });
     return res.status(200).json({ success: true, data: result });
@@ -232445,8 +235013,8 @@ async function handleRejectDiscount(req, res) {
     return res.status(400).json({ success: false, error: "Booking ID is required." });
   }
   try {
-    const bookingRef = adminDb.collection("bookings").doc(bookingId);
-    const bookingDoc = await bookingRef.get();
+    const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
+    const bookingDoc = await bookingRef2.get();
     if (!bookingDoc.exists) {
       return res.status(404).json({ success: false, error: "Booking not found." });
     }
@@ -232493,7 +235061,7 @@ async function handleRejectDiscount(req, res) {
       ...rateBreakdown ? { rateBreakdown } : {},
       updatedAt: /* @__PURE__ */ new Date()
     };
-    await bookingRef.update(updates);
+    await bookingRef2.update(updates);
     try {
       await sendBookingTrigger("discount-rejected", {
         ...bookingData2,
@@ -232520,8 +235088,8 @@ async function handleSetLouReceived(req, res) {
   try {
     let result = {};
     await adminDb.runTransaction(async (transaction) => {
-      const bookingRef = adminDb.collection("bookings").doc(String(bookingId).trim());
-      const bookingSnap = await transaction.get(bookingRef);
+      const bookingRef2 = adminDb.collection("bookings").doc(String(bookingId).trim());
+      const bookingSnap = await transaction.get(bookingRef2);
       if (!bookingSnap.exists) {
         throw new Error("Booking not found.");
       }
@@ -232545,7 +235113,7 @@ async function handleSetLouReceived(req, res) {
         },
         updatedAt: now
       };
-      transaction.update(bookingRef, updates);
+      transaction.update(bookingRef2, updates);
       result = updates;
     });
     return res.status(200).json({ success: true, data: result });
@@ -232575,8 +235143,8 @@ async function handleSetSpecialRequests(req, res) {
   try {
     let result = {};
     await adminDb.runTransaction(async (transaction) => {
-      const bookingRef = adminDb.collection("bookings").doc(bookingId.trim());
-      const bookingSnap = await transaction.get(bookingRef);
+      const bookingRef2 = adminDb.collection("bookings").doc(bookingId.trim());
+      const bookingSnap = await transaction.get(bookingRef2);
       if (!bookingSnap.exists) {
         throw new Error("Booking not found.");
       }
@@ -232588,7 +235156,7 @@ async function handleSetSpecialRequests(req, res) {
         specialRequestsUpdatedBy: staffUid2,
         updatedAt: now
       };
-      transaction.update(bookingRef, updates);
+      transaction.update(bookingRef2, updates);
       result = updates;
     });
     return res.status(200).json({ success: true, data: result });
@@ -232613,14 +235181,14 @@ async function handleRejectPayment(req, res) {
   let bookingData2 = null;
   let siblingRejectedCount = 0;
   try {
-    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
     const updatedAt = /* @__PURE__ */ new Date();
     let paymentRejectionReason = null;
     let paymentRejectedAt = null;
     let paymentRejectedBy2 = null;
     let freshHoldExpiresAt = null;
     await adminDb.runTransaction(async (transaction) => {
-      const bookingDoc = await transaction.get(bookingRef);
+      const bookingDoc = await transaction.get(bookingRef2);
       if (!bookingDoc.exists) {
         throw new Error("Booking not found.");
       }
@@ -232680,7 +235248,7 @@ async function handleRejectPayment(req, res) {
       );
       siblingRejectedCount = helperSiblingRejectedCount;
       if (isTargetInPaymentUploaded) {
-        transaction.update(bookingRef, {
+        transaction.update(bookingRef2, {
           status: "pending",
           paymentRejectionReason: safeReason,
           paymentRejectedAt: updatedAt,
@@ -232724,12 +235292,106 @@ async function handleRejectPayment(req, res) {
     return res.status(500).json({ success: false, error: message });
   }
 }
+function redateAddOnsForCancel(input) {
+  const { transaction, bookingId, bookingRef: bookingRef2, booking, today, actorUid, actorRole } = input;
+  const paidAmount = Number(booking.paidAmount) || 0;
+  const redatedBreakfast = redateBreakfastSelections({
+    mode: "cancel",
+    window: { checkIn: String(booking.checkIn || ""), checkOut: String(booking.checkOut || "") },
+    today,
+    selections: booking.breakfastSelections,
+    paidAmount
+  });
+  const redatedOtherAddOns = redateOtherAddOnSelections({
+    mode: "cancel",
+    window: { checkIn: String(booking.checkIn || ""), checkOut: String(booking.checkOut || "") },
+    today,
+    selections: booking.otherAddOnSelections,
+    paidAmount
+  });
+  const reason = "Booking cancelled \u2014 the meal date is in the future and will not be served.";
+  for (const removed of redatedBreakfast.removed) {
+    auditBreakfastOp({
+      transaction,
+      bookingId,
+      slotKey: removed.key,
+      action: "remove",
+      mealSnapshot: {
+        mealId: String(removed.entry.mealId || ""),
+        mealName: String(removed.entry.mealName || ""),
+        price: removed.amount
+      },
+      actorUid,
+      actorRole,
+      reasonOrCutoff: { reason, occurredAfterCutoff: false }
+    });
+    if (removed.wasPaid && !input.policyRefunded) {
+      createBreakfastRefundLiability({
+        transaction,
+        booking: { id: bookingId, bookingRef: bookingRef2 },
+        slotKey: removed.key,
+        mealEntry: {
+          mealId: String(removed.entry.mealId || ""),
+          mealName: String(removed.entry.mealName || ""),
+          price: removed.amount
+        },
+        amount: removed.amount,
+        reason,
+        recordedBy: actorRole,
+        recordedByUid: actorUid
+      });
+    }
+  }
+  for (const removed of redatedOtherAddOns.removed) {
+    auditOtherAddOnOp({
+      transaction,
+      bookingId,
+      selectionKey: removed.selectionKey,
+      action: "remove",
+      addOnSnapshot: {
+        addOnId: removed.addOnId,
+        name: String(removed.entry.nameSnapshot || ""),
+        price: Number(removed.entry.priceSnapshot) || 0,
+        quantity: Math.max(0, Math.floor(Number(removed.entry.quantity) || 0))
+      },
+      actorUid,
+      actorRole,
+      reasonOrCutoff: { reason, occurredAfterCutoff: false }
+    });
+    if (removed.wasPaid && !input.policyRefunded) {
+      createOtherAddOnRefundLiability({
+        transaction,
+        booking: { id: bookingId, bookingRef: bookingRef2 },
+        selectionKey: removed.selectionKey,
+        addOnEntry: {
+          addOnId: removed.addOnId,
+          nameSnapshot: String(removed.entry.nameSnapshot || ""),
+          priceSnapshot: Number(removed.entry.priceSnapshot) || 0,
+          quantity: Math.max(0, Math.floor(Number(removed.entry.quantity) || 0))
+        },
+        amount: removed.amount,
+        reason,
+        recordedBy: actorRole,
+        recordedByUid: actorUid
+      });
+    }
+  }
+  return {
+    breakfastSelections: redatedBreakfast.selections,
+    breakfastTotal: redatedBreakfast.total,
+    hasAnyBreakfast: redatedBreakfast.total > 0,
+    otherAddOnSelections: redatedOtherAddOns.selections,
+    otherAddOnTotal: redatedOtherAddOns.total,
+    hasAnyOtherAddOns: redatedOtherAddOns.total > 0
+  };
+}
 async function handleCancelBooking(req, res) {
-  const { bookingId, bookingRef, guestEmail, reason } = req.body;
+  const { bookingId, bookingRef: bookingRef2, guestEmail, reason } = req.body;
   let validReason = typeof reason === "string" ? reason.slice(0, 500) : "";
   const isStaffCancellation = Boolean(req.staff?.uid);
   const cancellationSource = isStaffCancellation ? "staff" : "guest";
   const cancelledBy = isStaffCancellation ? String(req.staff.uid) : "guest";
+  const { todayStr: todayKey } = getManilaDateInfo();
   if (isStaffCancellation && !validReason.trim()) {
     return res.status(400).json({
       success: false,
@@ -232744,8 +235406,8 @@ async function handleCancelBooking(req, res) {
     if (req.staff) {
       if (bookingId) {
         bookingDocumentRef = adminDb.collection("bookings").doc(bookingId);
-      } else if (bookingRef) {
-        const query = adminDb.collection("bookings").where("bookingRef", "==", bookingRef).limit(1);
+      } else if (bookingRef2) {
+        const query = adminDb.collection("bookings").where("bookingRef", "==", bookingRef2).limit(1);
         const snapshot = await query.get();
         if (snapshot.empty) {
           return res.status(404).json({ success: false, error: "Booking not found." });
@@ -232941,6 +235603,31 @@ async function handleCancelBooking(req, res) {
             });
           }
         }
+        const cancelPolicyRefunded = Boolean(
+          liabilitySnapshot && Number(liabilitySnapshot.policyResult?.policyRefund) > 0
+        );
+        for (const child of children) {
+          if (!cancellableIds.has(child.id)) continue;
+          const redated = redateAddOnsForCancel({
+            transaction,
+            bookingId: child.id,
+            bookingRef: String(child.data.bookingRef || ""),
+            booking: child.data,
+            today: todayKey,
+            actorUid: cancelledBy,
+            actorRole: isStaffCancellation ? "front-desk" : "guest",
+            policyRefunded: cancelPolicyRefunded
+          });
+          transaction.update(child.ref, {
+            breakfastSelections: redated.breakfastSelections,
+            breakfastTotal: redated.breakfastTotal,
+            hasAnyBreakfast: redated.hasAnyBreakfast,
+            otherAddOnSelections: redated.otherAddOnSelections,
+            otherAddOnTotal: redated.otherAddOnTotal,
+            hasAnyOtherAddOns: redated.hasAnyOtherAddOns,
+            updatedAt: now
+          });
+        }
         const reservationHeaderUpdate = {
           updatedAt: now
         };
@@ -233082,6 +235769,25 @@ async function handleCancelBooking(req, res) {
         if (liabilitySnapshot) {
           bookingUpdate.cancellationLiability = liabilitySnapshot;
         }
+        const perChildCancelPolicyRefunded = Boolean(
+          liabilitySnapshot && Number(liabilitySnapshot.policyResult?.policyRefund) > 0
+        );
+        const perChildRedated = redateAddOnsForCancel({
+          transaction,
+          bookingId: bookingDocumentRef.id,
+          bookingRef: String(freshBooking.bookingRef || ""),
+          booking: freshBooking,
+          today: todayKey,
+          actorUid: cancelledBy,
+          actorRole: isStaffCancellation ? "front-desk" : "guest",
+          policyRefunded: perChildCancelPolicyRefunded
+        });
+        bookingUpdate.breakfastSelections = perChildRedated.breakfastSelections;
+        bookingUpdate.breakfastTotal = perChildRedated.breakfastTotal;
+        bookingUpdate.hasAnyBreakfast = perChildRedated.hasAnyBreakfast;
+        bookingUpdate.otherAddOnSelections = perChildRedated.otherAddOnSelections;
+        bookingUpdate.otherAddOnTotal = perChildRedated.otherAddOnTotal;
+        bookingUpdate.hasAnyOtherAddOns = perChildRedated.hasAnyOtherAddOns;
         transaction.update(bookingDocumentRef, bookingUpdate);
         const bookingReservationId2 = String(freshBooking.reservationId || "").trim();
         if (bookingReservationId2.length > 0) {
@@ -233187,7 +235893,7 @@ async function handleCancelBooking(req, res) {
   }
 }
 async function handleCancelPreview(req, res) {
-  const { bookingId, bookingRef } = req.body || {};
+  const { bookingId, bookingRef: bookingRef2 } = req.body || {};
   let requestedScope = req.staff ? String((req.body || {}).scope || "").trim().toLowerCase() === "reservation" ? "reservation" : "room" : "room";
   try {
     let bookingDocumentRef;
@@ -233195,8 +235901,8 @@ async function handleCancelPreview(req, res) {
     if (req.staff) {
       if (bookingId) {
         bookingDocumentRef = adminDb.collection("bookings").doc(bookingId);
-      } else if (bookingRef) {
-        const query = adminDb.collection("bookings").where("bookingRef", "==", bookingRef).limit(1);
+      } else if (bookingRef2) {
+        const query = adminDb.collection("bookings").where("bookingRef", "==", bookingRef2).limit(1);
         const snapshot = await query.get();
         if (snapshot.empty) {
           return res.status(404).json({ success: false, error: "Booking not found." });
@@ -233392,8 +236098,8 @@ async function handleAddPayment(req, res) {
   const now = /* @__PURE__ */ new Date();
   try {
     await adminDb.runTransaction(async (transaction) => {
-      const bookingRef = adminDb.collection("bookings").doc(bookingId);
-      const bookingDoc = await transaction.get(bookingRef);
+      const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
+      const bookingDoc = await transaction.get(bookingRef2);
       if (!bookingDoc.exists) {
         throw new Error("Booking not found");
       }
@@ -233411,7 +236117,7 @@ async function handleAddPayment(req, res) {
         }
       }
       const bookingReservationId2 = String(bookingData2.reservationId || "").trim();
-      const paymentsRef = bookingReservationId2.length > 0 ? adminDb.collection("reservations").doc(bookingReservationId2).collection("payments") : bookingRef.collection("payments");
+      const paymentsRef = bookingReservationId2.length > 0 ? adminDb.collection("reservations").doc(bookingReservationId2).collection("payments") : bookingRef2.collection("payments");
       const paymentsSnapshot = await transaction.get(paymentsRef);
       const existingPaid = paymentsSnapshot.docs.reduce((sum, docSnap) => {
         const data = docSnap.data();
@@ -233522,7 +236228,7 @@ async function handleAddPayment(req, res) {
         });
       }
       if (Object.keys(bookingUpdates).length > 0) {
-        transaction.update(bookingRef, bookingUpdates);
+        transaction.update(bookingRef2, bookingUpdates);
       }
       const newPaymentRef = paymentsRef.doc(paymentId);
       const recordWithReservation = bookingReservationId2.length > 0 ? { ...paymentRecord, reservationId: bookingReservationId2, bookingId } : paymentRecord;
@@ -233677,12 +236383,12 @@ async function handleAddRefund(req, res) {
     let newStateRef = null;
     let priorLiabilityRef = null;
     await adminDb.runTransaction(async (transaction) => {
-      const bookingRef = adminDb.collection("bookings").doc(bookingId);
-      const bookingDoc = await transaction.get(bookingRef);
+      const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
+      const bookingDoc = await transaction.get(bookingRef2);
       if (!bookingDoc.exists) throw new Error("Booking not found");
       const bookingData2 = bookingDoc.data();
       const bookingReservationId2 = String(bookingData2.reservationId || "").trim();
-      const refundsRef = bookingReservationId2.length > 0 ? adminDb.collection("reservations").doc(bookingReservationId2).collection("refunds") : bookingRef.collection("payments");
+      const refundsRef = bookingReservationId2.length > 0 ? adminDb.collection("reservations").doc(bookingReservationId2).collection("refunds") : bookingRef2.collection("payments");
       const refundsSnapshot = await transaction.get(refundsRef);
       let netPositivePayments = 0;
       if (bookingReservationId2.length > 0) {
@@ -233698,7 +236404,7 @@ async function handleAddRefund(req, res) {
         0
       );
       netCollected = netPositivePayments + netRefunds;
-      const liabilityDoc = bookingReservationId2.length > 0 ? adminDb.collection("reservations").doc(bookingReservationId2) : bookingRef;
+      const liabilityDoc = bookingReservationId2.length > 0 ? adminDb.collection("reservations").doc(bookingReservationId2) : bookingRef2;
       const liabilityData = (await transaction.get(liabilityDoc)).data() || {};
       const liability = liabilityData.cancellationLiability || null;
       priorLiabilityRef = liability;
@@ -233719,38 +236425,36 @@ async function handleAddRefund(req, res) {
         });
         newStateRef = newProjection.state;
       }
-      const existingRefund = refundsSnapshot.docs.find((docSnap) => docSnap.id === refundId);
-      if (existingRefund) {
-        const existingData = existingRefund.data();
-        const sameRequest = Math.abs(Number(existingData.amount || 0)) === numericAmount && String(existingData.method || "") === safeMethod && String(existingData.note || "") === safeReason && (existingData.transactionReference || null) === safeTransactionReference;
-        if (!sameRequest) {
-          throw new Error("Refund ID has already been used for a different refund.");
-        }
-        refundRecord = existingData;
+      const refundDocRef = refundsRef.doc(refundId);
+      const refundDocSnap = await transaction.get(refundDocRef);
+      const helperResult = markRefundPaid({
+        category: "cancellation",
+        bookingId,
+        refundId,
+        amount: numericAmount,
+        method: safeMethod,
+        transactionReference: safeTransactionReference,
+        reason: safeReason,
+        note: safeReason,
+        actor: { uid: String(req.staff.uid || "admin"), role: "admin" },
+        transaction,
+        existingDoc: refundDocSnap,
+        currentPaidAmount: Number(bookingData2.paidAmount || 0),
+        reservationId: bookingReservationId2.length > 0 ? bookingReservationId2 : null
+      });
+      if (helperResult.conflict) {
+        throw new Error("Refund ID has already been used for a different refund.");
+      }
+      if (helperResult.alreadyPaid) {
+        refundRecord = helperResult.refundEntry;
         idempotentReplay = true;
+        netCollected = netCollected;
         return;
       }
       if (numericAmount > netCollected) {
         throw new Error(`Refund exceeds the net collected amount of ${netCollected}.`);
       }
-      const approvedBy = req.staff.uid || "admin";
-      const newRecord = {
-        type: "refund",
-        amount: -numericAmount,
-        method: safeMethod,
-        note: safeReason,
-        reason: safeReason,
-        approvedBy,
-        recordedBy: approvedBy,
-        recordedAt: /* @__PURE__ */ new Date()
-      };
-      if (safeTransactionReference) newRecord.transactionReference = safeTransactionReference;
-      if (bookingReservationId2.length > 0) {
-        newRecord.reservationId = bookingReservationId2;
-        newRecord.bookingId = bookingId;
-      }
-      refundRecord = newRecord;
-      transaction.create(refundsRef.doc(refundId), newRecord);
+      refundRecord = helperResult.refundEntry;
     });
     if (!idempotentReplay && priorStateRef && newStateRef && priorStateRef !== newStateRef && priorLiabilityRef) {
       try {
@@ -233925,12 +236629,12 @@ async function handleMarkPaymentConfirmed(req, res) {
     return res.status(400).json({ success: false, error: "Booking ID is required." });
   }
   try {
-    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
     const handledBy = req.staff?.uid || "staff";
     let bookingData2 = null;
     let alreadyConfirmed = false;
     await adminDb.runTransaction(async (transaction) => {
-      const bookingDoc = await transaction.get(bookingRef);
+      const bookingDoc = await transaction.get(bookingRef2);
       if (!bookingDoc.exists) throw new Error("BOOKING_NOT_FOUND");
       const data = bookingDoc.data();
       bookingData2 = data;
@@ -233941,7 +236645,7 @@ async function handleMarkPaymentConfirmed(req, res) {
       if (data.status !== "payment-uploaded") {
         throw new Error(`INVALID_STATUS:${data.status}`);
       }
-      transaction.update(bookingRef, {
+      transaction.update(bookingRef2, {
         status: "payment-confirmed",
         handledBy,
         paymentConfirmedAt: /* @__PURE__ */ new Date(),
@@ -233994,7 +236698,7 @@ async function handleVerifyAndRecordPayment(req, res) {
   const paymentNote = safeNote || "Verified payment proof";
   const staffUid2 = req.staff?.uid || "staff";
   try {
-    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
     let bookingData2 = null;
     let totalCollected = 0;
     let totalPrice = 0;
@@ -234003,12 +236707,12 @@ async function handleVerifyAndRecordPayment(req, res) {
     let siblingFlippedCount = 0;
     const now = /* @__PURE__ */ new Date();
     await adminDb.runTransaction(async (transaction) => {
-      const bookingDoc = await transaction.get(bookingRef);
+      const bookingDoc = await transaction.get(bookingRef2);
       if (!bookingDoc.exists) throw new Error("BOOKING_NOT_FOUND");
       const data = bookingDoc.data();
       bookingData2 = data;
       const bookingReservationId2 = String(data.reservationId || "").trim();
-      const paymentsRef = bookingReservationId2.length > 0 ? adminDb.collection("reservations").doc(bookingReservationId2).collection("payments") : bookingRef.collection("payments");
+      const paymentsRef = bookingReservationId2.length > 0 ? adminDb.collection("reservations").doc(bookingReservationId2).collection("payments") : bookingRef2.collection("payments");
       const paymentsSnapshot = await transaction.get(paymentsRef);
       const existingPaid = paymentsSnapshot.docs.reduce((sum, docSnap) => {
         return sum + Number(docSnap.data().amount || 0);
@@ -234110,7 +236814,7 @@ async function handleVerifyAndRecordPayment(req, res) {
         bookingUpdates.paymentConfirmedAt = now;
       }
       if (Object.keys(bookingUpdates).length > 0) {
-        transaction.update(bookingRef, bookingUpdates);
+        transaction.update(bookingRef2, bookingUpdates);
       }
       bookingData2 = { ...data, ...bookingUpdates };
     });
@@ -234208,13 +236912,13 @@ async function handleConfirmBooking(req, res) {
     return res.status(400).json({ success: false, error: "Booking ID is required." });
   }
   try {
-    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
     const confirmedBy = req.staff?.uid || "staff";
     let bookingData2 = null;
     let alreadyConfirmed = false;
     const now = /* @__PURE__ */ new Date();
     await adminDb.runTransaction(async (transaction) => {
-      const bookingDoc = await transaction.get(bookingRef);
+      const bookingDoc = await transaction.get(bookingRef2);
       if (!bookingDoc.exists) {
         throw new Error("BOOKING_NOT_FOUND");
       }
@@ -234229,7 +236933,7 @@ async function handleConfirmBooking(req, res) {
         throw new Error(`INVALID_STATUS:${data.status}`);
       }
       const bookingReservationId2 = String(data.reservationId || "").trim();
-      transaction.update(bookingRef, {
+      transaction.update(bookingRef2, {
         status: "confirmed",
         confirmedAt: now,
         confirmedBy,
@@ -234302,10 +237006,10 @@ async function handleConfirmBookingWithBalance(req, res) {
   let needsAdminApproval = false;
   let balanceThreshold = unpaidCheckoutThreshold;
   try {
-    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
     const now = /* @__PURE__ */ new Date();
     await adminDb.runTransaction(async (transaction) => {
-      const bookingDoc = await transaction.get(bookingRef);
+      const bookingDoc = await transaction.get(bookingRef2);
       if (!bookingDoc.exists) {
         throw new Error("BOOKING_NOT_FOUND");
       }
@@ -234320,7 +237024,7 @@ async function handleConfirmBookingWithBalance(req, res) {
       balanceThreshold = txThreshold;
       const folioSnapshot = await readTransactionalFolioSnapshot({
         transaction,
-        bookingRef,
+        bookingRef: bookingRef2,
         bookingId,
         bookingData: data
       });
@@ -234337,7 +237041,7 @@ async function handleConfirmBookingWithBalance(req, res) {
           updatedAt: now
         });
       }
-      transaction.update(bookingRef, {
+      transaction.update(bookingRef2, {
         status: "confirmed",
         // Stamps the original balance at confirm time —
         // never rewritten as the guest settles onsite. The
@@ -234419,11 +237123,11 @@ async function handleCheckinBooking(req, res) {
     return res.status(400).json({ success: false, error: "Booking ID is required." });
   }
   try {
-    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
     const checkedInBy = req.staff?.uid || "staff";
     const now = /* @__PURE__ */ new Date();
     await adminDb.runTransaction(async (transaction) => {
-      const bookingDoc = await transaction.get(bookingRef);
+      const bookingDoc = await transaction.get(bookingRef2);
       if (!bookingDoc.exists) {
         throw new Error("Booking not found.");
       }
@@ -234464,7 +237168,7 @@ async function handleCheckinBooking(req, res) {
           (d) => d.id === bookingId ? "checked-in" : String(d.data()?.status || "")
         );
       }
-      transaction.update(bookingRef, {
+      transaction.update(bookingRef2, {
         status: "checked-in",
         checkedInAt: now,
         checkedInBy,
@@ -234511,9 +237215,9 @@ async function handleCheckoutBooking(req, res) {
     return res.status(400).json({ success: false, error: "Booking ID is required." });
   }
   try {
-    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
     const now = /* @__PURE__ */ new Date();
-    const bookingDoc = await bookingRef.get();
+    const bookingDoc = await bookingRef2.get();
     if (!bookingDoc.exists) {
       return res.status(404).json({ success: false, error: "Booking not found." });
     }
@@ -234552,8 +237256,10 @@ async function handleCheckoutBooking(req, res) {
       const rewardsDoc = await adminDb.collection("settings").doc("rewardsConfig").get();
       rewardsConfig = rewardsDoc.exists ? rewardsDoc.data() : null;
     }
+    const memberCurrentLevelBefore = memberDoc?.exists && resolveCurrentLevel ? resolveCurrentLevel(rewardsConfig?.levels, Number(memberDoc.data()?.completedStays || 0)) : null;
+    const memberTierMultiplier = memberCurrentLevelBefore?.pointsMultiplier ?? 1;
     await adminDb.runTransaction(async (transaction) => {
-      const freshBookingDoc = await transaction.get(bookingRef);
+      const freshBookingDoc = await transaction.get(bookingRef2);
       if (!freshBookingDoc.exists) {
         throw new Error("Booking not found.");
       }
@@ -234563,14 +237269,15 @@ async function handleCheckoutBooking(req, res) {
       }
       const folioSnapshot = await readTransactionalFolioSnapshot({
         transaction,
-        bookingRef,
+        bookingRef: bookingRef2,
         bookingId,
         bookingData: freshBookingData
       });
       const collectedTotal = folioSnapshot.collectedTotal;
       const checkoutFolioTotal = folioSnapshot.folioTotal;
       checkedOutWithBalance = folioSnapshot.computedBalance;
-      eligiblePoints = memberId ? calculateCheckoutPoints(Number(freshBookingData.totalPrice || 0), rewardsConfig) : 0;
+      const baseEligiblePoints = memberId ? calculateCheckoutPoints(Number(freshBookingData.totalPrice || 0), rewardsConfig) : 0;
+      eligiblePoints = calculatePointsWithMultiplier(baseEligiblePoints, memberTierMultiplier);
       if (checkedOutWithBalance > 0 && !safeUnpaidReason) {
         throw new Error("UNPAID_REASON_REQUIRED");
       }
@@ -234633,7 +237340,7 @@ async function handleCheckoutBooking(req, res) {
           (d) => d.id === bookingId ? "checked-out" : String(d.data()?.status || "")
         );
       }
-      transaction.update(bookingRef, bookingUpdate);
+      transaction.update(bookingRef2, bookingUpdate);
       if (bookingData2.roomId) {
         const roomRef = adminDb.collection("rooms").doc(String(bookingData2.roomId));
         transaction.update(roomRef, {
@@ -234657,22 +237364,73 @@ async function handleCheckoutBooking(req, res) {
           updatedAt: now
         });
       }
-      if (awardNow && memberId && memberRef && memberDocInTransaction?.exists) {
-        const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
-        transaction.update(memberRef, {
-          rewardsPoints: currentPoints + pointsAwarded,
-          updatedAt: now
-        });
-        const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc(`earn-${bookingId}`);
-        transaction.set(historyRef, {
-          type: "earn",
-          points: pointsAwarded,
-          bookingId,
-          bookingRef: bookingData2.bookingRef,
-          description: `Stay Checkout Earnings (${bookingData2.bookingRef})`,
-          by: checkedOutBy,
-          createdAt: /* @__PURE__ */ new Date()
-        });
+      if (canAwardPoints && memberId && memberRef && memberDocInTransaction?.exists) {
+        const priorCompletedStays = Number(memberDocInTransaction.data()?.completedStays || 0);
+        const nextCompletedStays = priorCompletedStays + 1;
+        const nextCurrentLevel = resolveCurrentLevel(rewardsConfig?.levels, nextCompletedStays);
+        if (awardNow) {
+          const currentPoints = Number(memberDocInTransaction.data()?.rewardsPoints || 0);
+          transaction.update(memberRef, {
+            rewardsPoints: currentPoints + pointsAwarded,
+            completedStays: nextCompletedStays,
+            currentLevel: nextCurrentLevel,
+            updatedAt: now
+          });
+          const historyRef = adminDb.collection("members").doc(memberId).collection("pointsHistory").doc(`earn-${bookingId}`);
+          transaction.set(historyRef, {
+            type: "earn",
+            points: pointsAwarded,
+            bookingId,
+            bookingRef: bookingData2.bookingRef,
+            description: `Stay Checkout Earnings (${bookingData2.bookingRef})`,
+            by: checkedOutBy,
+            createdAt: /* @__PURE__ */ new Date()
+          });
+        } else {
+          transaction.update(memberRef, {
+            completedStays: nextCompletedStays,
+            currentLevel: nextCurrentLevel,
+            updatedAt: now
+          });
+        }
+        const freeNightEvery = Number(rewardsConfig?.freeNightEvery || 0);
+        if (freeNightEvery > 0 && nextCompletedStays > 0 && nextCompletedStays % freeNightEvery === 0) {
+          const memberNumber = memberDocInTransaction.data()?.memberNumber || `M${memberId.slice(0, 8)}`;
+          const freeNightCode = `FREENIGHT-${memberNumber}-${nextCompletedStays}`;
+          const freeNightVoucherRef = adminDb.collection("vouchers").doc(freeNightCode);
+          const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1e3);
+          transaction.set(freeNightVoucherRef, {
+            code: freeNightCode,
+            // Phase 5 discriminator — pre-Phase-5 promo vouchers
+            // are missing these (treated as "promo" + valueType =
+            // discountType on read).
+            kind: "reward",
+            valueType: "free-night",
+            // Backward-compat with the existing percent/flat
+            // discount math — `discountType: "percent"` +
+            // `discountValue: 100` produces a 100% off discount.
+            // `calculateVoucherDiscount` caps at subtotal so any
+            // over-discount rounds to 0.
+            discountType: "percent",
+            discountValue: 100,
+            usageCap: 1,
+            usageCount: 0,
+            expiresAt,
+            // Empty array = applies to all room types (per
+            // VOU-03 all-or-none rule).
+            applicableRoomTypes: [],
+            isActive: true,
+            guestEmail: memberDocInTransaction.data()?.email || null,
+            // Phase 5 back-link fields for member portal display
+            // + admin "Reward vouchers" filter.
+            memberId,
+            memberNumber,
+            rewardSource: "free-night-tier",
+            createdBy: checkedOutBy || "system",
+            createdAt: /* @__PURE__ */ new Date(),
+            updatedAt: /* @__PURE__ */ new Date()
+          });
+        }
       }
     });
     try {
@@ -234911,7 +237669,6 @@ async function enrichAndRespond(res, bookingData2) {
       rateBreakdown: bookingData2.rateBreakdown || null,
       paymentMethod: bookingData2.paymentMethod,
       status: bookingData2.status,
-      hasBreakfast: bookingData2.hasBreakfast,
       specialRequests: bookingData2.specialRequests || ""
     }
   });
@@ -234940,7 +237697,14 @@ function buildReservationLookupView(reservation, children, anchorRoomData, ancho
       numAdults: Number(child.numAdults || 0),
       numChildren: Number(child.numChildren || 0),
       extraBedCount: Number(child.extraBedCount || 0),
-      hasBreakfast: Boolean(child.hasBreakfast),
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy `hasBreakfast: boolean` flat-rate flag is
+      // removed; the lookup view carries the BR-01
+      // `breakfastTotal` stamp + the per-slot
+      // `breakfastSelections` map so the page can render
+      // the new model end-to-end without the legacy gate.
+      breakfastTotal: Number(child.breakfastTotal || 0),
+      breakfastSelections: child.breakfastSelections && typeof child.breakfastSelections === "object" ? child.breakfastSelections : null,
       ratePerNight: Number(child.ratePerNight || 0),
       totalPrice: Number(child.totalPrice || 0),
       status: child.status,
@@ -235040,13 +237804,13 @@ async function handleResolveEarlyCheckin(req, res) {
     return res.status(400).json({ success: false, error: "Choose an early check-in time before granting it." });
   }
   try {
-    const bookingRef = adminDb.collection("bookings").doc(bookingId);
+    const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
     const resolvedBy = req.staff?.name || req.staff?.email || "Staff Member";
     let bookingData2 = null;
     let didWrite = false;
     let idempotentReplay = false;
     await adminDb.runTransaction(async (transaction) => {
-      const bookingDoc = await transaction.get(bookingRef);
+      const bookingDoc = await transaction.get(bookingRef2);
       if (!bookingDoc.exists) {
         throw new Error("BOOKING_NOT_FOUND");
       }
@@ -235086,7 +237850,7 @@ async function handleResolveEarlyCheckin(req, res) {
           confirmedTime
         };
         bookingData2 = { id: bookingDoc.id, ...data, earlyCheckIn: grantedEarlyCheckIn };
-        transaction.update(bookingRef, {
+        transaction.update(bookingRef2, {
           earlyCheckIn: grantedEarlyCheckIn,
           updatedAt: /* @__PURE__ */ new Date()
         });
@@ -235108,7 +237872,7 @@ async function handleResolveEarlyCheckin(req, res) {
         confirmedTime: status === "approved" ? confirmedTime || data.earlyCheckIn.requestedTime : null
       };
       bookingData2 = { id: bookingDoc.id, ...data, earlyCheckIn: updatedEarlyCheckIn };
-      transaction.update(bookingRef, {
+      transaction.update(bookingRef2, {
         earlyCheckIn: updatedEarlyCheckIn,
         updatedAt: /* @__PURE__ */ new Date()
       });
@@ -235159,15 +237923,23 @@ async function handleRescheduleBooking(req, res) {
       error: "Booking, room, check-in, and check-out are required."
     });
   }
-  const { bookingId, roomId, checkIn, checkOut, reason, reservationId: requestedReservationId } = parsedReschedule.data;
+  const { bookingId, roomId, checkIn, checkOut, reason, reservationId: requestedReservationId, mode } = parsedReschedule.data;
   const checkInDate = /* @__PURE__ */ new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = /* @__PURE__ */ new Date(`${checkOut}T00:00:00Z`);
+  if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) {
+    return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
+  }
   if (Number.isNaN(checkInDate.getTime()) || Number.isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
     return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
   }
   const numNights = Math.max(Math.round((checkOutDate.getTime() - checkInDate.getTime()) / 864e5), 0);
   if (numNights < 1) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
+  }
+  const maxStayNights = await loadMaxStayNights();
+  if (numNights > maxStayNights) {
+    buildMaxStayNightsError(res, maxStayNights);
+    return;
   }
   const { todayStr: todayKey, manilaDate: currentManilaDate } = getManilaDateInfo();
   const currentManilaMinutes = currentManilaDate.getHours() * 60 + currentManilaDate.getMinutes();
@@ -235178,10 +237950,24 @@ async function handleRescheduleBooking(req, res) {
     let existingReservationData = null;
     const expiredHoldRetirements = [];
     await adminDb.runTransaction(async (transaction) => {
-      const bookingRef = adminDb.collection("bookings").doc(String(bookingId));
-      const bookingDoc = await transaction.get(bookingRef);
+      const bookingRef2 = adminDb.collection("bookings").doc(String(bookingId));
+      const bookingDoc = await transaction.get(bookingRef2);
       if (!bookingDoc.exists) throw new Error("Booking not found.");
       const booking = bookingDoc.data() || {};
+      if (mode === "extend") {
+        const currentRoomId = String(booking.roomId || "");
+        const currentCheckIn = toDateOrNull(booking.checkIn);
+        if (String(roomId) !== currentRoomId) {
+          throw new Error("Extend stay cannot change the assigned room.");
+        }
+        if (!currentCheckIn || checkInDate.getTime() !== currentCheckIn.getTime()) {
+          throw new Error("Extend stay cannot change the check-in date.");
+        }
+        const currentCheckOut = toDateOrNull(booking.checkOut);
+        if (!currentCheckOut || checkOutDate.getTime() <= currentCheckOut.getTime()) {
+          throw new Error("Extended check-out must be after the current check-out date.");
+        }
+      }
       bookingReservationId2 = (() => {
         const stored = String(booking.reservationId || "").trim();
         if (stored.length > 0) return stored;
@@ -235368,19 +238154,23 @@ async function handleRescheduleBooking(req, res) {
         seasonalRateOverrides
       });
       const roomTotal = roomBreakdown.roomSubtotal;
-      const breakfastRate = booking.breakfastRate || breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
+      const redatedBreakfast = redateBreakfastSelections({
+        mode: "reschedule",
+        window: { checkIn, checkOut },
+        today: todayKey,
+        selections: booking.breakfastSelections,
+        paidAmount: Number(booking.paidAmount) || 0
+      });
+      const redatedOtherAddOns = redateOtherAddOnSelections({
+        mode: "reschedule",
+        window: { checkIn, checkOut },
+        today: todayKey,
+        selections: booking.otherAddOnSelections,
+        paidAmount: Number(booking.paidAmount) || 0
+      });
       const preservedExtraBedCount = Number(booking.extraBedCount) || 0;
       const preservedExtraBedRate = Number(booking.extraBedRate) || 0;
-      const preservedExtraBedBreakfast = booking.extraBedBreakfast === true;
-      const breakfastTotal = manualNightlyRate === null ? calculateBreakfastAddOn({
-        hasBreakfast: booking.hasBreakfast,
-        breakfastRate,
-        numGuests: booking.numGuests,
-        numNights,
-        breakfastIncludesChildren: booking.breakfastIncludesChildren,
-        extraBedCount: preservedExtraBedCount,
-        extraBedBreakfast: preservedExtraBedBreakfast
-      }) : 0;
+      const breakfastTotal = manualNightlyRate === null ? redatedBreakfast.total : 0;
       const extraBedTotal = manualNightlyRate === null ? calculateExtraBedAddOn({
         extraBedCount: preservedExtraBedCount,
         extraBedRate: preservedExtraBedRate,
@@ -235409,11 +238199,17 @@ async function handleRescheduleBooking(req, res) {
       }
       let appliedMemberDiscountPct = 0;
       if (booking.memberId) {
+        const memberRef = adminDb.doc(`members/${booking.memberId}`);
+        const memberDocInTx = await transaction.get(memberRef);
+        const memberTier = memberDocInTx.exists ? memberDocInTx.data()?.currentLevel : null;
+        const tierPct = memberTier && Number.isFinite(Number(memberTier.discountPct)) ? Math.max(0, Math.floor(Number(memberTier.discountPct))) : null;
         const rewardsRef = adminDb.doc("settings/rewardsConfig");
         const rewardsDoc = await transaction.get(rewardsRef);
         if (rewardsDoc.exists) {
           const rc = rewardsDoc.data();
-          if (rc.memberDiscountEnabled !== false) {
+          if (tierPct !== null) {
+            appliedMemberDiscountPct = tierPct;
+          } else if (rc.memberDiscountEnabled !== false) {
             const pct = Number(rc.memberDiscountPct) || 0;
             if (pct > 0) appliedMemberDiscountPct = pct;
           }
@@ -235471,7 +238267,13 @@ async function handleRescheduleBooking(req, res) {
         by: req.staff?.uid || req.staff?.email || "staff",
         at: (/* @__PURE__ */ new Date()).toISOString(),
         pricingBasis: manualNightlyRate !== null ? "manual" : "recalculated",
-        deltaTotalPrice: finalTotalPrice - (booking.totalPrice || 0)
+        deltaTotalPrice: finalTotalPrice - (booking.totalPrice || 0),
+        // Per EXT-01 (2026-01-27): the `kind` field distinguishes
+        // an extend-stay reschedule from a room move. Both write
+        // the same `rescheduleHistory[]` array; clients render
+        // them differently (extend shows a timeline entry with
+        // only the check-out change; move shows room + dates).
+        kind: mode === "extend" ? "extend" : "move"
       };
       updatedBooking = {
         roomId: String(roomId),
@@ -235510,6 +238312,31 @@ async function handleRescheduleBooking(req, res) {
           finalTotalPrice
         ),
         rescheduleHistory: [...Array.isArray(booking.rescheduleHistory) ? booking.rescheduleHistory : [], rescheduleEntry],
+        // Per OCT-H8 (2026-10-20, decision #288): the re-dated
+        // add-on selections + their recomputed totals.
+        //
+        // Without this, the booking kept the OLD selection keys
+        // and the OLD breakfast total after a date change — the
+        // guest was charged for meals on dates they were no longer
+        // staying for, and the kitchen list for the new dates
+        // showed nothing.
+        //
+        // `breakfastTotal` is the recomputed total over the
+        // survivors (the auto-cancelled entries are marked
+        // `removedAt`, and `recomputeBreakfastTotal` skips those),
+        // so the BR-01 invariant
+        // `breakfastTotal === recomputeBreakfastTotal(selections)`
+        // holds.
+        //
+        // The other add-ons are NOT inside `totalPrice` (they are
+        // added on top of it for the balance), so they are written
+        // separately — the same shape the BR-12 write paths use.
+        breakfastSelections: redatedBreakfast.selections,
+        breakfastTotal: redatedBreakfast.total,
+        hasAnyBreakfast: redatedBreakfast.total > 0,
+        otherAddOnSelections: redatedOtherAddOns.selections,
+        otherAddOnTotal: redatedOtherAddOns.total,
+        hasAnyOtherAddOns: redatedOtherAddOns.total > 0,
         updatedAt: /* @__PURE__ */ new Date()
       };
       fullBookingForEmail = {
@@ -235522,7 +238349,85 @@ async function handleRescheduleBooking(req, res) {
         transaction.update(oldRoomRef, { status: "available" });
         transaction.update(roomRef, { status: "occupied" });
       }
-      transaction.update(bookingRef, updatedBooking);
+      for (const removed of redatedBreakfast.removed) {
+        auditBreakfastOp({
+          transaction,
+          bookingId: String(bookingId),
+          slotKey: removed.key,
+          action: "remove",
+          mealSnapshot: {
+            mealId: String(removed.entry.mealId || ""),
+            mealName: String(removed.entry.mealName || ""),
+            price: removed.amount
+          },
+          actorUid: "system",
+          actorRole: "admin",
+          reasonOrCutoff: {
+            reason: `Auto-cancelled \u2014 the stay moved to ${checkIn} \u2192 ${checkOut} and this date is outside the new window.`,
+            occurredAfterCutoff: false
+          }
+        });
+        if (removed.wasPaid) {
+          createBreakfastRefundLiability({
+            transaction,
+            booking: {
+              id: String(bookingId),
+              bookingRef: String(booking.bookingRef || "")
+            },
+            slotKey: removed.key,
+            mealEntry: {
+              mealId: String(removed.entry.mealId || ""),
+              mealName: String(removed.entry.mealName || ""),
+              price: removed.amount
+            },
+            amount: removed.amount,
+            reason: "Booking rescheduled \u2014 the breakfast date is outside the new stay window.",
+            recordedBy: "admin",
+            recordedByUid: "system"
+          });
+        }
+      }
+      for (const removed of redatedOtherAddOns.removed) {
+        auditOtherAddOnOp({
+          transaction,
+          bookingId: String(bookingId),
+          selectionKey: removed.selectionKey,
+          action: "remove",
+          addOnSnapshot: {
+            addOnId: removed.addOnId,
+            name: String(removed.entry.nameSnapshot || ""),
+            price: Number(removed.entry.priceSnapshot) || 0,
+            quantity: Math.max(0, Math.floor(Number(removed.entry.quantity) || 0))
+          },
+          actorUid: "system",
+          actorRole: "admin",
+          reasonOrCutoff: {
+            reason: `Auto-cancelled \u2014 the stay moved to ${checkIn} \u2192 ${checkOut} and this date is outside the new window.`,
+            occurredAfterCutoff: false
+          }
+        });
+        if (removed.wasPaid) {
+          createOtherAddOnRefundLiability({
+            transaction,
+            booking: {
+              id: String(bookingId),
+              bookingRef: String(booking.bookingRef || "")
+            },
+            selectionKey: removed.selectionKey,
+            addOnEntry: {
+              addOnId: removed.addOnId,
+              nameSnapshot: String(removed.entry.nameSnapshot || ""),
+              priceSnapshot: Number(removed.entry.priceSnapshot) || 0,
+              quantity: Math.max(0, Math.floor(Number(removed.entry.quantity) || 0))
+            },
+            amount: removed.amount,
+            reason: "Booking rescheduled \u2014 the add-on date is outside the new stay window.",
+            recordedBy: "admin",
+            recordedByUid: "system"
+          });
+        }
+      }
+      transaction.update(bookingRef2, updatedBooking);
       if (reservationDocRef && existingReservationData) {
         const rescheduleActualDateRange = computeReservationActualDateRange(
           existingReservationData.checkIn,
@@ -235693,6 +238598,69 @@ async function handleRescheduleBooking(req, res) {
       });
     }
     return res.status(400).json({ success: false, error: error.message || "Failed to move booking." });
+  }
+}
+var GUEST_EXTEND_STATUSES = ["payment-confirmed", "confirmed", "checked-in"];
+async function handleExtendStay(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const {
+    bookingId,
+    bookingRef: bookingRef2,
+    guestEmail,
+    token: token2,
+    checkOut,
+    reason
+  } = req.body || {};
+  if (!bookingRef2 || !guestEmail && !token2 || !checkOut) {
+    return res.status(400).json({
+      success: false,
+      error: "Booking reference, email or token, and new check-out date are required."
+    });
+  }
+  try {
+    const parsed2 = guestCancelSchema.safeParse(req.body || {});
+    if (!parsed2.success) {
+      return res.status(400).json({
+        success: false,
+        error: "Please provide a valid booking reference and email or lookup token."
+      });
+    }
+    const compositeFilter = parsed2.data.token ? { field: "lookupToken", value: String(parsed2.data.token).toLowerCase() } : { field: "guestEmail", value: parsed2.data.guestEmail };
+    const query = adminDb.collection("bookings").where("bookingRef", "==", parsed2.data.bookingRef).where(compositeFilter.field, "==", compositeFilter.value).limit(1);
+    const snapshot = await query.get();
+    if (snapshot.empty) {
+      return res.status(404).json({
+        success: false,
+        error: parsed2.data.token ? "Booking not found with matching token." : "Booking not found with matching email."
+      });
+    }
+    const bookingDocumentRef = snapshot.docs[0].ref;
+    const bookingData2 = snapshot.docs[0].data();
+    if (!GUEST_EXTEND_STATUSES.includes(String(bookingData2.status || ""))) {
+      return res.status(400).json({
+        success: false,
+        error: "EXTEND_NOT_ELIGIBLE"
+      });
+    }
+    const extendReq = {
+      ...req,
+      body: {
+        bookingId: snapshot.docs[0].id,
+        roomId: bookingData2.roomId,
+        // locked — transaction enforces
+        checkIn: bookingData2.checkIn,
+        // locked — transaction enforces
+        checkOut,
+        reason: typeof reason === "string" ? reason.slice(0, 500) : "",
+        mode: "extend"
+      }
+    };
+    return await handleRescheduleBooking(extendReq, res);
+  } catch (err) {
+    console.error("[handleExtendStay]", err?.message);
+    return res.status(500).json({ success: false, error: "An unexpected error occurred." });
   }
 }
 async function handleAddRoomToReservation(req, res) {
@@ -235867,18 +238835,7 @@ async function handleAddRoomToReservation(req, res) {
         seasonalRateOverrides
       });
       const roomTotal = roomBreakdown.roomSubtotal;
-      const breakfastConfigDoc = await transaction.get(adminDb.collection("settings").doc("breakfastConfig"));
-      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() || {} : {};
-      const breakfastRate = Number(breakfastConfig.ratePerPersonPerNight) || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT;
-      const hasBreakfast = Boolean(reservation.hasBreakfast ?? false);
-      const breakfastIncludesChildren = reservation.breakfastIncludesChildren ?? true;
-      const breakfastTotal = hasBreakfast ? calculateBreakfastAddOn({
-        hasBreakfast: true,
-        breakfastRate,
-        numGuests: numAdults + numChildren,
-        numNights: headerNumNights,
-        breakfastIncludesChildren
-      }) : 0;
+      const breakfastTotal = Number(reservation.breakfastTotal) || 0;
       const extraBedRate = Number(targetTypeEntry.extraBedRate) || 0;
       const extraBedTotal = extraBedCount > 0 ? extraBedCount * extraBedRate * headerNumNights : 0;
       const subtotal = roomTotal + breakfastTotal + extraBedTotal;
@@ -235991,30 +238948,18 @@ async function handleAddRoomToReservation(req, res) {
         // Per CHD-10 (2026-07-31, per CVQ-01): the
         // snapshotted `breakfastIncludesChildren`
         // value the new child inherits from the
-        // header (the per-room override is out of
-        // scope for MRB-14 v1). `true` is the safe
-        // default for legacy reservations that
-        // pre-date the CHD-10 snapshot — matches the
-        // historical "children pay the full rate"
-        // math. The create + walkin paths write the
-        // same field; the add-room path pre-v0.264.8
-        // silently dropped it (silent data loss for
-        // any future read site that checks
-        // `booking.breakfastIncludesChildren === true`).
-        breakfastIncludesChildren: Boolean(reservation.breakfastIncludesChildren ?? true),
-        // Per EXB-12 (2026-08-06, per decision #199):
-        // the snapshotted `extraBedBreakfast` toggle
-        // the new child inherits. The current
-        // add-room admin UI doesn't expose the
-        // toggle yet (consistent with the walkin
-        // admin surface per the EXB-12 spec — a
-        // future UX work item), so the value is
-        // `false` for every new child created via
-        // add-room until the UI is updated. The
-        // create + walkin paths write the same
-        // field; the add-room path pre-v0.264.8
-        // silently dropped it.
-        extraBedBreakfast: false,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `breakfastIncludesChildren: boolean`
+        // flat-rate field is removed. The "include
+        // children in breakfast" toggle is gone (every
+        // guest is an ordinary meal slot in the new
+        // `breakfastSelections` map — no parent /
+        // children distinction). The add-room path
+        // doesn't expose the toggle (a future UX work
+        // item, per the EXB-12 spec) — the new child
+        // carries no legacy `breakfastIncludesChildren`
+        // field; the per-meal math runs through the new
+        // `breakfastSelections` picker instead.
         checkIn: Timestamp.fromDate(headerCheckIn),
         checkOut: Timestamp.fromDate(headerCheckOut),
         numNights: headerNumNights,
@@ -236048,8 +238993,15 @@ async function handleAddRoomToReservation(req, res) {
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
-        hasBreakfast,
-        breakfastRate,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `hasBreakfast: boolean` +
+        // `breakfastRate: number` flat-rate fields are
+        // removed from the booking-doc write. The new
+        // child carries `breakfastTotal: number` (the
+        // sum of `breakfastSelections[key].price`) —
+        // any breakfast that the staff add-room path
+        // brings in is added via the new per-meal
+        // picker, not a legacy boolean toggle.
         breakfastTotal,
         reminderSentAt: null,
         guestIdPhotoUrl: null,
@@ -236763,6 +239715,9 @@ async function handleConvertInquiryToBooking(req, res) {
   } = parsed2.data;
   const checkInDate = /* @__PURE__ */ new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = /* @__PURE__ */ new Date(`${checkOut}T00:00:00Z`);
+  if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) {
+    return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
+  }
   if (isNaN(checkInDate.getTime()) || isNaN(checkOutDate.getTime()) || checkOutDate <= checkInDate) {
     return res.status(400).json({ success: false, error: "Invalid check-in or check-out date." });
   }
@@ -236848,9 +239803,7 @@ async function handleConvertInquiryToBooking(req, res) {
       }
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
-      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT };
-      const actualBreakfastRate = breakfastConfig.isEnabled ? breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT : 0;
-      const finalHasBreakfast = !!hasBreakfast && breakfastConfig.isEnabled;
+      const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false };
       const typeBaseRate = Number(typeEntry.pricePerNight) || 0;
       const typeCorporateRate = Number(typeEntry.corporateRate) || 0;
       const hasExplicitOverride = ratePerNightOverride !== void 0 && ratePerNightOverride !== null;
@@ -236900,8 +239853,9 @@ async function handleConvertInquiryToBooking(req, res) {
       } else {
         transaction.set(counterRef, { count: 1 });
       }
-      const bookingRef = `${hotel_config_default.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(5, "0")}`;
-      finalBookingRef = bookingRef;
+      const bookingRef2 = `${hotel_config_default.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence).padStart(5, "0")}`;
+      finalBookingRef = bookingRef2;
+      const finalHasBreakfast = false;
       const roomTotal = ratePerNight * numNights;
       const breakfastTotal = finalHasBreakfast ? actualBreakfastRate * guests * numNights : 0;
       finalTotalPrice = roomTotal + breakfastTotal;
@@ -236934,7 +239888,7 @@ async function handleConvertInquiryToBooking(req, res) {
       const guestPhone = String(inquiryData.phone || "").trim();
       const companyName = String(inquiryData.companyName || "").trim();
       newBooking = {
-        bookingRef,
+        bookingRef: bookingRef2,
         roomId,
         roomNumber: roomData.roomNumber,
         roomType: roomData.type,
@@ -236994,8 +239948,17 @@ async function handleConvertInquiryToBooking(req, res) {
         pointsRedeemedValue: 0,
         pointsRedeemedBy: null,
         pointsRedeemedAt: null,
-        hasBreakfast: finalHasBreakfast,
-        breakfastRate: finalHasBreakfast ? actualBreakfastRate : 0,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the legacy `hasBreakfast: boolean` +
+        // `breakfastRate: number` flat-rate fields are
+        // removed from the corporate-inquiry-conversion
+        // booking-doc write. The new conversion creates a
+        // breakfast-free booking by default
+        // (`breakfastTotal: 0` + `hasAnyBreakfast: false`).
+        // Catering is negotiated separately per the corporate
+        // group's contract; staff add breakfast later via the
+        // booking drawer's breakfast section.
+        breakfastTotal: 0,
         guestIdPhotoUrl: null,
         guestRegistration: null,
         breakfastSelections: {},
@@ -237026,7 +239989,7 @@ async function handleConvertInquiryToBooking(req, res) {
       const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
       transaction.set(bookingDocRef, newBooking);
       const conversionNote = {
-        text: `Converted to booking ${bookingRef} (${bookingId})`,
+        text: `Converted to booking ${bookingRef2} (${bookingId})`,
         by: staff.email || "staff",
         at: (/* @__PURE__ */ new Date()).toISOString()
       };
@@ -237034,7 +239997,7 @@ async function handleConvertInquiryToBooking(req, res) {
       transaction.update(inquiryRef, {
         status: "converted",
         convertedBookingId: bookingId,
-        convertedBookingRef: bookingRef,
+        convertedBookingRef: bookingRef2,
         notes: [...existingNotes, conversionNote],
         updatedAt: /* @__PURE__ */ new Date()
       });
@@ -237157,7 +240120,7 @@ async function handleGenerateReference(req, res) {
     const timezone = hotel_config_default.timezone || "Asia/Manila";
     const { todayStr: counterId, manilaDate: today } = getManilaDateInfo(timezone);
     const counterRef = adminDb.collection("counters").doc(counterId);
-    let bookingRef = "";
+    let bookingRef2 = "";
     await adminDb.runTransaction(async (transaction) => {
       const counterDoc = await transaction.get(counterRef);
       const sequence = counterDoc.exists ? (counterDoc.data()?.count || 0) + 1 : 1;
@@ -237166,11 +240129,11 @@ async function handleGenerateReference(req, res) {
       } else {
         transaction.set(counterRef, { count: sequence, createdAt: /* @__PURE__ */ new Date(), updatedAt: /* @__PURE__ */ new Date() });
       }
-      bookingRef = generateBookingRef(hotel_config_default.bookingRefPrefix || "SI", today, sequence);
+      bookingRef2 = generateBookingRef(hotel_config_default.bookingRefPrefix || "SI", today, sequence);
     });
     return res.status(200).json({
       success: true,
-      data: { bookingRef }
+      data: { bookingRef: bookingRef2 }
     });
   } catch (error) {
     console.error("Reference generation failed:", error);
@@ -237199,6 +240162,10 @@ var redeemPointsSchema = external_exports.object({
   bookingId: external_exports.string().trim().min(1).max(120),
   memberId: external_exports.string().trim().max(120).optional().default(""),
   pointsToRedeem: external_exports.coerce.number().int().min(1)
+}).strict();
+var selfRedeemSchema = external_exports.object({
+  bookingId: external_exports.string().trim().min(1).max(120),
+  pointsToRedeem: external_exports.coerce.number().int().min(1).max(1e6)
 }).strict();
 var undoRedemptionSchema = external_exports.object({
   bookingId: external_exports.string().trim().min(1).max(120)
@@ -237248,14 +240215,14 @@ async function linkBookingsByEmail(email, uid, explicitBookingId) {
     linkedCount += 1;
   });
   if (explicitBookingId) {
-    const bookingRef = adminDb.collection("bookings").doc(explicitBookingId);
-    const bookingDoc = await bookingRef.get();
-    if (bookingDoc.exists && !linkedPaths.has(bookingRef.path)) {
+    const bookingRef2 = adminDb.collection("bookings").doc(explicitBookingId);
+    const bookingDoc = await bookingRef2.get();
+    if (bookingDoc.exists && !linkedPaths.has(bookingRef2.path)) {
       const data = bookingDoc.data() || {};
       const bookingEmail = String(data.guestEmail || "").trim().toLowerCase();
       const alreadyLinkedToCaller = data.memberId === uid;
       if (bookingEmail && bookingEmail === email || alreadyLinkedToCaller) {
-        batch.update(bookingRef, { memberId: uid, updatedAt: /* @__PURE__ */ new Date() });
+        batch.update(bookingRef2, { memberId: uid, updatedAt: /* @__PURE__ */ new Date() });
         linkedCount += 1;
       }
     }
@@ -237292,7 +240259,14 @@ function projectStay(bookingDoc) {
     numNights: Number(data.numNights || 0),
     totalPrice: Number(data.totalPrice || 0),
     status: data.status || "",
-    hasBreakfast: Boolean(data.hasBreakfast),
+    // Per BR-08 (decision #238, 2026-10-14 — close-out):
+    // the legacy `hasBreakfast: boolean` is removed. The
+    // My Stays card derives the breakfast pill from
+    // `breakfastSelections` (a non-empty map of non-removed
+    // entries = a breakfast on file). Carry the map
+    // through so the client doesn't have to round-trip
+    // the booking doc.
+    breakfastSelections: data.breakfastSelections && typeof data.breakfastSelections === "object" ? data.breakfastSelections : null,
     earlyCheckIn: data.earlyCheckIn || null
   };
 }
@@ -237392,6 +240366,22 @@ async function handleRegisterMember(req, res) {
       }
       const fullName = parsed2.data.fullName || authUser.name || email.split("@")[0];
       const photoUrl = parsed2.data.photoUrl || authUser.picture || "";
+      const rewardsDoc = await adminDb.collection("settings").doc("rewardsConfig").get();
+      const rewardsCfg = rewardsDoc.exists ? rewardsDoc.data() : null;
+      const baseCurrentLevel = resolveCurrentLevel(rewardsCfg?.levels, 0);
+      const welcomePoints = Math.max(0, Math.floor(Number(rewardsCfg?.welcomePoints || 0)));
+      let welcomeHistoryRef = null;
+      let welcomeAlreadyCredited = false;
+      let welcomeAmount = 0;
+      if (welcomePoints > 0) {
+        welcomeHistoryRef = adminDb.collection(`members/${uid}/pointsHistory`).doc("welcome");
+        const welcomeDocSnap = await transaction.get(welcomeHistoryRef);
+        welcomeAlreadyCredited = welcomeDocSnap.exists;
+        if (!welcomeAlreadyCredited) {
+          welcomeAmount = welcomePoints;
+        }
+      }
+      const initialRewardsPoints = (Number(existingMember?.rewardsPoints) || 0) + welcomeAmount;
       transaction.set(memberRef, {
         fullName,
         email,
@@ -237401,12 +240391,27 @@ async function handleRegisterMember(req, res) {
         memberNumber,
         isMember: true,
         memberSince: now,
-        rewardsPoints: existingMember?.rewardsPoints || 0,
+        rewardsPoints: initialRewardsPoints,
+        // Per Phase 2 (2026-10-12): initialize the stay-counter
+        // + tier cache. Absent on legacy pre-Phase-2 docs — readers
+        // must coalesce missing values to 0 / null.
+        completedStays: Number(existingMember?.completedStays || 0),
+        currentLevel: existingMember?.currentLevel ?? baseCurrentLevel,
         tier: existingMember?.tier || "standard",
         isActive: existingMember?.isActive !== false,
         createdAt: existingMember?.createdAt || now,
         updatedAt: now
       }, { merge: true });
+      if (welcomeAmount > 0 && welcomeHistoryRef) {
+        transaction.set(welcomeHistoryRef, {
+          type: "welcome",
+          points: welcomeAmount,
+          memberId: uid,
+          note: `Welcome bonus (${welcomeAmount} points)`,
+          createdAt: now,
+          createdBy: "system"
+        });
+      }
     });
     const emailIsVerified = authUser.email_verified === true;
     const linkedBookings = emailIsVerified ? await linkBookingsByEmail(email, uid, parsed2.data.bookingId || void 0) : 0;
@@ -237451,88 +240456,174 @@ async function handleRedeemMemberPoints(req, res) {
     });
   }
   try {
-    const now = /* @__PURE__ */ new Date();
     const { bookingId, memberId: requestedMemberId, pointsToRedeem } = parsed2.data;
-    let responseData = {};
-    await adminDb.runTransaction(async (transaction) => {
-      const bookingRef = adminDb.collection("bookings").doc(bookingId);
-      const bookingDoc = await transaction.get(bookingRef);
-      if (!bookingDoc.exists) {
-        throw new Error("Booking not found.");
-      }
-      const booking = bookingDoc.data();
-      if (["checked-in", "checked-out", "cancelled"].includes(booking.status)) {
-        throw new Error("Points can only be redeemed before check-in.");
-      }
-      if ((booking.pointsRedeemed || 0) > 0) {
-        throw new Error("This booking already has a points redemption.");
-      }
-      const memberId = requestedMemberId || booking.memberId;
-      if (!memberId || booking.memberId && requestedMemberId && requestedMemberId !== booking.memberId) {
-        throw new Error("Booking is not linked to this member.");
-      }
-      const memberRef = adminDb.collection("members").doc(memberId);
-      const rewardsConfigRef = adminDb.collection("settings").doc("rewardsConfig");
-      const memberDoc = await transaction.get(memberRef);
-      const rewardsConfigDoc = await transaction.get(rewardsConfigRef);
-      if (!memberDoc.exists) {
-        throw new Error("Member not found.");
-      }
-      const member = memberDoc.data();
-      if (member.isActive === false || member.isMember === false) {
-        throw new Error("Member account is not active.");
-      }
-      const pointsRedemptionRate = rewardsConfigDoc.exists ? Number(rewardsConfigDoc.data()?.pointsRedemptionRate || 0) : 0;
-      if (pointsRedemptionRate <= 0) {
-        throw new Error("Points redemption is not configured.");
-      }
-      const validation = validatePointsRedemption(pointsToRedeem, Number(member.rewardsPoints || 0), pointsRedemptionRate);
-      if (!validation.valid) {
-        throw new Error(validation.error);
-      }
-      const redemptionValue = Math.round(validation.value);
-      if (redemptionValue <= 0 || redemptionValue > Number(booking.totalPrice || 0)) {
-        throw new Error("Points redemption value exceeds the booking total.");
-      }
-      const nextTotalPrice = Math.max(Number(booking.totalPrice || 0) - redemptionValue, 0);
-      const rateBreakdown = rebuildRateBreakdown(booking, {
-        pointsRedeemedValue: redemptionValue,
-        finalTotal: nextTotalPrice
-      });
-      const historyRef = adminDb.collection(`members/${memberId}/pointsHistory`).doc();
-      transaction.update(bookingRef, {
-        memberId,
-        totalPrice: nextTotalPrice,
-        pointsRedeemed: pointsToRedeem,
-        pointsRedeemedValue: redemptionValue,
-        pointsRedeemedBy: staff.uid,
-        pointsRedeemedAt: now,
-        ...rateBreakdown ? { rateBreakdown } : {},
-        updatedAt: now
-      });
-      transaction.update(memberRef, {
-        rewardsPoints: Number(member.rewardsPoints || 0) - pointsToRedeem,
-        updatedAt: now
-      });
-      transaction.set(historyRef, {
-        type: "redeem",
-        points: -pointsToRedeem,
-        description: `Redeemed against booking ${booking.bookingRef || bookingId}`,
-        reason: "Points redeemed by staff",
+    const result = await adminDb.runTransaction(async (transaction) => {
+      return applyPointsRedemption(transaction, {
         bookingId,
-        by: staff.uid,
-        at: now
+        memberId: requestedMemberId,
+        pointsToRedeem,
+        appliedBy: staff.uid,
+        appliedByLabel: "staff"
       });
-      responseData = {
-        bookingId,
-        memberId,
-        pointsRedeemed: pointsToRedeem,
-        pointsRedeemedValue: redemptionValue,
-        totalPrice: nextTotalPrice,
-        rewardsPoints: Number(member.rewardsPoints || 0) - pointsToRedeem
-      };
     });
-    return res.status(200).json({ success: true, data: responseData });
+    return res.status(200).json({ success: true, data: result });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      error: error?.message || "We could not redeem points for this booking."
+    });
+  }
+}
+async function applyPointsRedemption(transaction, args) {
+  const now = /* @__PURE__ */ new Date();
+  const { bookingId, memberId: requestedMemberId, pointsToRedeem, appliedBy, appliedByLabel } = args;
+  const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
+  const bookingDoc = await transaction.get(bookingRef2);
+  if (!bookingDoc.exists) {
+    throw new Error("Booking not found.");
+  }
+  const booking = bookingDoc.data();
+  if (["checked-in", "checked-out", "cancelled"].includes(booking.status)) {
+    throw new Error("Points can only be redeemed before check-in.");
+  }
+  if ((booking.pointsRedeemed || 0) > 0) {
+    throw new Error("This booking already has a points redemption.");
+  }
+  const memberId = requestedMemberId || booking.memberId;
+  if (!memberId || booking.memberId && requestedMemberId && requestedMemberId !== booking.memberId) {
+    throw new Error("Booking is not linked to this member.");
+  }
+  const memberRef = adminDb.collection("members").doc(memberId);
+  const rewardsConfigRef = adminDb.collection("settings").doc("rewardsConfig");
+  const memberDoc = await transaction.get(memberRef);
+  const rewardsConfigDoc = await transaction.get(rewardsConfigRef);
+  if (!memberDoc.exists) {
+    throw new Error("Member not found.");
+  }
+  const member = memberDoc.data();
+  if (member.isActive === false || member.isMember === false) {
+    throw new Error("Member account is not active.");
+  }
+  const pointsRedemptionRate = rewardsConfigDoc.exists ? Number(rewardsConfigDoc.data()?.pointsRedemptionRate || 0) : 0;
+  if (pointsRedemptionRate <= 0) {
+    throw new Error("Points redemption is not configured.");
+  }
+  const rewardsCfgData = rewardsConfigDoc.exists ? rewardsConfigDoc.data() : null;
+  const minPointsToRedeem = Number(rewardsCfgData?.minPointsToRedeem || 0);
+  const billPct = Number(rewardsCfgData?.pointsCanPayUpToBillPct ?? 100);
+  if (minPointsToRedeem > 0 && pointsToRedeem < minPointsToRedeem) {
+    throw new Error(`Points redemption requires at least ${minPointsToRedeem} points.`);
+  }
+  if (Number.isFinite(billPct) && billPct < 100) {
+    const bookingSubtotal = Number(booking.totalPrice || 0);
+    const maxRedeemableCurrency = Math.floor(bookingSubtotal * Math.max(0, billPct) / 100);
+    const maxRedeemablePoints = Math.floor(maxRedeemableCurrency * 100 / pointsRedemptionRate);
+    if (pointsToRedeem > maxRedeemablePoints) {
+      throw new Error(
+        `Points redemption exceeds the ${billPct}% bill cap (max ${maxRedeemablePoints} points for this booking).`
+      );
+    }
+  }
+  const validation = validatePointsRedemption(
+    pointsToRedeem,
+    Number(member.rewardsPoints || 0),
+    pointsRedemptionRate
+  );
+  if (!validation.valid) {
+    throw new Error(validation.error);
+  }
+  const redemptionValue = Math.round(validation.value);
+  if (redemptionValue <= 0 || redemptionValue > Number(booking.totalPrice || 0)) {
+    throw new Error("Points redemption value exceeds the booking total.");
+  }
+  const nextTotalPrice = Math.max(Number(booking.totalPrice || 0) - redemptionValue, 0);
+  const rateBreakdown = rebuildRateBreakdown(booking, {
+    pointsRedeemedValue: redemptionValue,
+    finalTotal: nextTotalPrice
+  });
+  const historyRef = adminDb.collection(`members/${memberId}/pointsHistory`).doc();
+  const historyReason = appliedByLabel === "staff" ? "Points redeemed by staff" : "Points redeemed by member at checkout";
+  transaction.update(bookingRef2, {
+    memberId,
+    totalPrice: nextTotalPrice,
+    pointsRedeemed: pointsToRedeem,
+    pointsRedeemedValue: redemptionValue,
+    pointsRedeemedBy: appliedBy,
+    pointsRedeemedAt: now,
+    ...rateBreakdown ? { rateBreakdown } : {},
+    updatedAt: now
+  });
+  transaction.update(memberRef, {
+    rewardsPoints: Number(member.rewardsPoints || 0) - pointsToRedeem,
+    updatedAt: now
+  });
+  transaction.set(historyRef, {
+    type: "redeem",
+    points: -pointsToRedeem,
+    description: `Redeemed against booking ${booking.bookingRef || bookingId}`,
+    reason: historyReason,
+    bookingId,
+    by: appliedBy,
+    at: now
+  });
+  return {
+    bookingId,
+    memberId,
+    pointsRedeemed: pointsToRedeem,
+    pointsRedeemedValue: redemptionValue,
+    totalPrice: nextTotalPrice,
+    rewardsPoints: Number(member.rewardsPoints || 0) - pointsToRedeem
+  };
+}
+async function handleRedeemPointsSelf(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const authHeader = req.headers.authorization || "";
+  const token2 = authHeader.startsWith("Bearer ") ? authHeader.slice("Bearer ".length).trim() : "";
+  if (!token2) {
+    return res.status(401).json({ success: false, error: "Sign in is required to redeem points." });
+  }
+  let authUser;
+  try {
+    authUser = await adminAuth.verifyIdToken(token2);
+  } catch {
+    return res.status(401).json({ success: false, error: "Sign-in token is invalid or expired." });
+  }
+  if (!authUser?.uid) {
+    return res.status(401).json({ success: false, error: "Sign-in token is invalid or expired." });
+  }
+  const parsed2 = selfRedeemSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please check the points redemption details and try again."
+    });
+  }
+  try {
+    const { bookingId, pointsToRedeem } = parsed2.data;
+    const rewardsConfigSnap = await adminDb.collection("settings").doc("rewardsConfig").get();
+    const rewardsCfgData = rewardsConfigSnap.exists ? rewardsConfigSnap.data() : null;
+    if (rewardsCfgData?.allowMemberPointsRedemption !== true) {
+      return res.status(403).json({
+        success: false,
+        error: "Self-service points redemption is not enabled. Please contact the front desk."
+      });
+    }
+    const result = await adminDb.runTransaction(async (transaction) => {
+      return applyPointsRedemption(transaction, {
+        bookingId,
+        // Force memberId = authenticated UID. The helper's
+        // member-match guard rejects when this doesn't equal
+        // booking.memberId — the auth UID is the only input
+        // accepted for the self path (clients cannot spoof).
+        memberId: authUser.uid,
+        pointsToRedeem,
+        appliedBy: `self:${authUser.uid}`,
+        appliedByLabel: "self"
+      });
+    });
+    return res.status(200).json({ success: true, data: result });
   } catch (error) {
     return res.status(400).json({
       success: false,
@@ -237563,8 +240654,8 @@ async function handleUndoMemberPointsRedemption(req, res) {
     const { bookingId } = parsed2.data;
     let responseData = {};
     await adminDb.runTransaction(async (transaction) => {
-      const bookingRef = adminDb.collection("bookings").doc(bookingId);
-      const bookingDoc = await transaction.get(bookingRef);
+      const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
+      const bookingDoc = await transaction.get(bookingRef2);
       if (!bookingDoc.exists) {
         throw new Error("Booking not found.");
       }
@@ -237590,7 +240681,7 @@ async function handleUndoMemberPointsRedemption(req, res) {
       });
       const nextRewardsPoints = Number(member.rewardsPoints || 0) + restoredPoints;
       const historyRef = adminDb.collection(`members/${booking.memberId}/pointsHistory`).doc();
-      transaction.update(bookingRef, {
+      transaction.update(bookingRef2, {
         totalPrice: nextTotalPrice,
         pointsRedeemed: 0,
         pointsRedeemedValue: 0,
@@ -237876,8 +240967,8 @@ async function handleLinkBookingToMember(req, res) {
       if (!memberDoc.exists) {
         throw new Error("Member account was not found.");
       }
-      const bookingRef = adminDb.collection("bookings").doc(resolvedBookingId);
-      const bookingDoc = await transaction.get(bookingRef);
+      const bookingRef2 = adminDb.collection("bookings").doc(resolvedBookingId);
+      const bookingDoc = await transaction.get(bookingRef2);
       if (!bookingDoc.exists) {
         throw new Error("BOOKING_NOT_FOUND:Booking was not found.");
       }
@@ -238657,7 +241748,10 @@ async function handleCreateStoreOrder(req, res) {
   if (paymentProofPath && (!paymentProofPath.startsWith(expectedProofPrefix) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(proofFileName))) {
     return res.status(400).json({ success: false, error: "Invalid payment proof path." });
   }
-  if (isOnlinePaymentMethod && !paymentProofPath && !body.paymentProofUrl) {
+  const rawPaymentProofUrl = typeof body.paymentProofUrl === "string" ? body.paymentProofUrl.trim() : "";
+  const encodedProofPrefix = encodeURIComponent(expectedProofPrefix);
+  const paymentProofUrl = rawPaymentProofUrl.startsWith("https://firebasestorage.googleapis.com/") && rawPaymentProofUrl.includes(encodedProofPrefix) ? rawPaymentProofUrl : "";
+  if (isOnlinePaymentMethod && !paymentProofPath && !paymentProofUrl) {
     return res.status(400).json({ success: false, error: "Payment proof is required for this method." });
   }
   const normalizedItems = Array.from(
@@ -238737,7 +241831,7 @@ async function handleCreateStoreOrder(req, res) {
         items: orderItems,
         totalAmount,
         paymentMethod: body.paymentMethod,
-        paymentProofUrl: body.paymentProofUrl || "",
+        paymentProofUrl: paymentProofUrl || "",
         paymentProofPath: paymentProofPath || "",
         status: "placed",
         stockRestoredAt: null,
@@ -239101,6 +242195,7 @@ async function handleGetStoreOrderStatus(req, res) {
 // server/handlers/intercom.ts
 init_zod();
 init_firebase_admin();
+init_shared();
 var MAX_ROOM_NUMBER_LENGTH2 = 12;
 var MAX_LAST_NAME_LENGTH = 80;
 var MAX_BOOKING_ID_LENGTH = 128;
@@ -239108,6 +242203,11 @@ var guestMessageSchema = external_exports.object({
   roomNumber: external_exports.string().trim().min(1).max(MAX_ROOM_NUMBER_LENGTH2),
   guestName: external_exports.string().trim().min(1).max(120),
   currentStayId: external_exports.string().trim().min(1).max(128),
+  // Per PR-AUDIT-B3 (2026-10-20): the capability token issued by
+  // `handleVerifyIntercomGuest`. It selects the session-scoped
+  // collection the message is written to, and the server re-validates
+  // it against the intercom document before writing.
+  sessionToken: external_exports.string().trim().min(16).max(64),
   text: external_exports.string().trim().min(1).max(1e3),
   isQuickRequest: external_exports.boolean().optional().default(false),
   isStoreOrder: external_exports.boolean().optional().default(false),
@@ -239148,6 +242248,38 @@ function isGuestMessageRateLimited(key, limit, windowMs) {
   record.count++;
   return record.count > limit;
 }
+async function resolveVerifiedStay(params) {
+  const { roomNumber, currentStayId, sessionToken } = params;
+  const bookingSnap = await adminDb.collection("bookings").doc(currentStayId).get();
+  if (!bookingSnap.exists) {
+    return { ok: false, error: "We could not verify this stay." };
+  }
+  const booking = bookingSnap.data() || {};
+  const bookingRoom = String(booking.roomNumber || "").trim();
+  if (!bookingRoom || bookingRoom !== roomNumber) {
+    return { ok: false, error: "We could not verify this stay." };
+  }
+  if (String(booking.status || "") !== "checked-in") {
+    return { ok: false, error: "This intercom is available only for checked-in guests." };
+  }
+  const intercomSnap = await adminDb.collection("intercoms").doc(roomNumber).get();
+  const storedToken = String((intercomSnap.data() || {}).currentStayToken || "");
+  if (!storedToken || storedToken !== sessionToken) {
+    return { ok: false, error: "Please verify this stay again." };
+  }
+  if (String((intercomSnap.data() || {}).currentStayId || "") !== currentStayId) {
+    return { ok: false, error: "Please verify this stay again." };
+  }
+  const guestDetails = booking.guestDetails && typeof booking.guestDetails === "object" ? booking.guestDetails : {};
+  const bookingGuestName = String(
+    booking.guestName || [guestDetails.firstName, guestDetails.lastName].filter(Boolean).join(" ") || ""
+  ).trim();
+  return {
+    ok: true,
+    bookingId: bookingSnap.id,
+    guestName: bookingGuestName
+  };
+}
 async function handleSendGuestMessage(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -239159,8 +242291,8 @@ async function handleSendGuestMessage(req, res) {
       error: "Please check your message and try again."
     });
   }
-  const { roomNumber, guestName: guestName2, currentStayId, text, isQuickRequest, isStoreOrder, orderRef, isEarlyCheckInRequest, isCancelledOrder } = parsed2.data;
-  const rawIp = req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.socket.remoteAddress || "unknown";
+  const { roomNumber, sessionToken, text, isQuickRequest, isStoreOrder, orderRef, isEarlyCheckInRequest, isCancelledOrder } = parsed2.data;
+  const rawIp = req.headers["x-vercel-forwarded-for"] || req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.socket.remoteAddress || "unknown";
   const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp).split(",")[0].trim();
   if (isGuestMessageRateLimited(`intercom-msg:${ip}:${roomNumber}`, 30, 10 * 60 * 1e3)) {
     return res.status(429).json({
@@ -239169,15 +242301,25 @@ async function handleSendGuestMessage(req, res) {
     });
   }
   try {
+    const verified = await resolveVerifiedStay({
+      roomNumber,
+      currentStayId: parsed2.data.currentStayId,
+      sessionToken
+    });
+    if (!verified.ok) {
+      return res.status(403).json({ success: false, error: verified.error });
+    }
+    const guestName2 = verified.guestName || parsed2.data.guestName;
     await adminDb.collection("intercoms").doc(roomNumber).set({
       roomId: roomNumber,
       roomNumber,
       guestName: guestName2,
-      currentStayId,
+      currentStayId: verified.bookingId,
+      currentStayToken: sessionToken,
       resolved: false,
       updatedAt: /* @__PURE__ */ new Date()
     }, { merge: true });
-    await adminDb.collection("intercoms").doc(roomNumber).collection("messages").add({
+    await adminDb.collection("intercomSessions").doc(sessionToken).collection("messages").add({
       text,
       sender: "guest",
       guestName: guestName2,
@@ -239187,7 +242329,8 @@ async function handleSendGuestMessage(req, res) {
       isStoreOrder,
       orderRef: orderRef || "",
       isEarlyCheckInRequest,
-      currentStayId
+      currentStayId: verified.bookingId,
+      roomNumber
     });
     return res.status(200).json({ success: true });
   } catch (error) {
@@ -239220,30 +242363,43 @@ async function handleVerifyIntercomGuest(req, res) {
     if (!currentStay) {
       return res.status(403).json({ success: false, error: "This intercom is available only for checked-in guests." });
     }
+    const intercomRef = adminDb.collection("intercoms").doc(roomNumber);
+    const intercomSnap = await intercomRef.get();
+    const intercomData = intercomSnap.data() || {};
+    const sameStay = String(intercomData.currentStayId || "") === currentStay.id;
+    const existingToken = String(intercomData.currentStayToken || "");
+    const sessionToken = sameStay && existingToken ? existingToken : generateLookupToken();
     if (bookingId) {
       if (currentStay.id !== bookingId) {
         return res.status(403).json({ success: false, error: "Please verify this stay again." });
       }
-      await adminDb.collection("intercoms").doc(roomNumber).set({
+      await intercomRef.set({
         roomId: roomNumber,
         roomNumber,
         currentStayId: currentStay.id,
+        currentStayToken: sessionToken,
         updatedAt: /* @__PURE__ */ new Date()
       }, { merge: true });
-      return res.status(200).json({ success: true, data: getPublicBookingSummary(currentStay) });
+      return res.status(200).json({
+        success: true,
+        data: { ...getPublicBookingSummary(currentStay), sessionToken }
+      });
     }
     const expectedLastName = getBookingLastName(currentStay.data());
     if (!expectedLastName || normalizeName(lastName) !== expectedLastName) {
       return res.status(403).json({ success: false, error: "We could not verify that last name for this room." });
     }
-    const intercomRef = adminDb.collection("intercoms").doc(roomNumber);
     await intercomRef.set({
       roomId: roomNumber,
       roomNumber,
       currentStayId: currentStay.id,
+      currentStayToken: sessionToken,
       updatedAt: /* @__PURE__ */ new Date()
     }, { merge: true });
-    return res.status(200).json({ success: true, data: getPublicBookingSummary(currentStay) });
+    return res.status(200).json({
+      success: true,
+      data: { ...getPublicBookingSummary(currentStay), sessionToken }
+    });
   } catch (error) {
     console.error("Intercom guest verification failed:", error);
     return res.status(500).json({ success: false, error: "Unable to verify this intercom session." });
@@ -239461,6 +242617,3147 @@ async function handleH2BackfillStatus(req, res) {
       ...cursor,
       completed: cursor.afterId === null && cursor.runs > 0
     }
+  });
+}
+
+// server/handlers/breakfast-config.ts
+init_shared();
+init_firebase_admin();
+var CACHE_TTL_SECONDS = 60;
+async function handleGetBreakfastConfig(req, res) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  try {
+    const snapshot = await adminDb.collection("settings").doc("breakfastConfig").get();
+    const source = snapshot.exists ? snapshot.data() : null;
+    const normalized = normalizeBreakfastConfig(source);
+    res.setHeader("Cache-Control", `public, max-age=${CACHE_TTL_SECONDS}, s-maxage=${CACHE_TTL_SECONDS}`);
+    return res.status(200).json({ success: true, data: normalized });
+  } catch (error) {
+    const code = String(error?.code || "");
+    const isInfra = code.includes("UNAVAILABLE") || code.includes("DEADLINE_EXCEEDED") || code.includes("RESOURCE_EXHAUSTED");
+    return res.status(isInfra ? 503 : 500).json({
+      success: false,
+      error: "Failed to load breakfast config."
+    });
+  }
+}
+
+// server/handlers/breakfast-manage.ts
+init_zod();
+init_firestore();
+init_shared();
+init_firebase_admin();
+init_hotel_config();
+var manageGetSchema = external_exports.preprocess(
+  (body) => {
+    if (body && typeof body === "object" && !Array.isArray(body)) {
+      const obj = { ...body };
+      for (const key of ["bookingRef", "token"]) {
+        const v6 = obj[key];
+        if (typeof v6 === "string" && v6.trim() === "") {
+          delete obj[key];
+        }
+      }
+      return obj;
+    }
+    return body;
+  },
+  external_exports.object({
+    bookingRef: external_exports.string().trim().max(40).regex(BOOKING_REF_REGEX, "Invalid booking reference format.").optional(),
+    token: external_exports.string().trim().max(64).optional()
+  }).strict()
+);
+var slotKeySchema = external_exports.string().trim().min(11).max(80).regex(/^\d{4}-\d{2}-\d{2}-[A-Za-z0-9_-]+$/, "Invalid slot key.");
+var addOrChangeSchema = external_exports.object({
+  slotKey: slotKeySchema,
+  mealId: external_exports.string().trim().min(1).max(80),
+  mealName: external_exports.string().trim().min(1).max(120),
+  price: external_exports.number().finite().min(0).max(1e6)
+});
+var removeSchema = external_exports.object({
+  slotKey: slotKeySchema
+});
+var updateBodySchema = external_exports.preprocess(
+  (body) => {
+    if (body && typeof body === "object" && !Array.isArray(body)) {
+      const obj = { ...body };
+      for (const key of ["bookingRef", "token", "clientBatchId", "turnstileToken"]) {
+        const v6 = obj[key];
+        if (typeof v6 === "string" && v6.trim() === "") {
+          delete obj[key];
+        }
+      }
+      return obj;
+    }
+    return body;
+  },
+  external_exports.object({
+    bookingRef: external_exports.string().trim().max(40).regex(BOOKING_REF_REGEX, "Invalid booking reference format."),
+    token: external_exports.string().trim().max(64),
+    clientBatchId: external_exports.string().trim().min(8).max(80).regex(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      "Invalid clientBatchId."
+    ),
+    add: external_exports.array(addOrChangeSchema).max(200).default([]),
+    change: external_exports.array(addOrChangeSchema).max(200).default([]),
+    remove: external_exports.array(removeSchema).max(200).default([]),
+    turnstileToken: external_exports.string().trim().max(2e3).optional()
+  }).passthrough()
+);
+function enumerateBreakfastDates(checkInIso, checkOutIso) {
+  const dates = [];
+  const startMs = Date.parse(`${checkInIso}T00:00:00Z`);
+  const endMs = Date.parse(`${checkOutIso}T00:00:00Z`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return dates;
+  const maxDays = 60;
+  for (let ms2 = startMs, i2 = 0; ms2 < endMs && i2 < maxDays; ms2 += 864e5, i2 += 1) {
+    const d = new Date(ms2);
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    dates.push(`${yyyy}-${mm}-${dd}`);
+  }
+  return dates;
+}
+function manilaDateKey(value, timezone) {
+  if (!value) return null;
+  let d = null;
+  if (value instanceof Date) d = new Date(value.getTime());
+  else if (typeof value?.toDate === "function") {
+    const x4 = value.toDate();
+    if (x4 instanceof Date) d = new Date(x4.getTime());
+  } else if (typeof value === "string" || typeof value === "number") {
+    d = new Date(value);
+  }
+  if (!d || Number.isNaN(d.getTime())) return null;
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(d);
+    const get2 = (type) => {
+      const found = parts.find((p) => p.type === type);
+      return found ? found.value : "";
+    };
+    return `${get2("year")}-${get2("month")}-${get2("day")}`;
+  } catch {
+    return null;
+  }
+}
+async function loadBreakfastConfigForManage() {
+  try {
+    const snap = await adminDb.collection("settings").doc("breakfastConfig").get();
+    const source = snap.exists ? snap.data() : null;
+    return normalizeBreakfastConfig(source);
+  } catch {
+    return normalizeBreakfastConfig(null);
+  }
+}
+async function fetchBookingByToken(bookingRef2, token2) {
+  if (!isValidLookupToken(token2)) return null;
+  const snapshot = await adminDb.collection("bookings").where("bookingRef", "==", bookingRef2).where("lookupToken", "==", String(token2).toLowerCase()).limit(1).get();
+  if (snapshot.empty) return null;
+  const doc = snapshot.docs[0];
+  return { id: doc.id, ...doc.data() };
+}
+async function loadPendingBreakfastRefunds(bookingId) {
+  try {
+    const snap = await adminDb.collection("bookings").doc(bookingId).collection("refunds").where("category", "==", "breakfast").get();
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  } catch {
+    return [];
+  }
+}
+async function handleGetBreakfastManage(req, res) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const parsed2 = manageGetSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid booking reference and lookup token."
+    });
+  }
+  const { bookingRef: bookingRef2, token: token2 } = parsed2.data;
+  if (!bookingRef2 || !token2) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid booking reference and lookup token."
+    });
+  }
+  const booking = await fetchBookingByToken(bookingRef2, token2);
+  if (!booking) {
+    return res.status(404).json({ success: false, error: "Booking not found." });
+  }
+  const tz = String(
+    booking.timezone || hotel_config_default.timezone || "Asia/Manila"
+  );
+  const checkInDate = manilaDateKey(booking.checkIn, tz);
+  const checkOutDate = manilaDateKey(booking.checkOut, tz);
+  if (!checkInDate || !checkOutDate) {
+    return res.status(404).json({ success: false, error: "Booking not found." });
+  }
+  const breakfastConfig = await loadBreakfastConfigForManage();
+  const isEnabled = Boolean(breakfastConfig?.isEnabled);
+  let servedGraceMinutes = 15;
+  try {
+    const rawConfigSnap = await adminDb.collection("settings").doc("breakfastConfig").get();
+    if (rawConfigSnap.exists) {
+      const raw = rawConfigSnap.data() || {};
+      const g = Number(raw.servedGraceMinutes);
+      if (Number.isFinite(g) && g >= 0 && g <= 60) servedGraceMinutes = g;
+    }
+  } catch {
+  }
+  const status = String(booking.status || "").trim();
+  const readOnly = status === "checked-out" || status === "cancelled";
+  const dates = enumerateBreakfastDates(checkInDate, checkOutDate);
+  const now = /* @__PURE__ */ new Date();
+  const cutoffTime = String(breakfastConfig?.cutoffTime || "20:00");
+  const cutoffTz = String(
+    breakfastConfig?.cutoffTimezone || tz
+  );
+  const cutoffsEnabled = breakfastConfig.cutoffsEnabled !== false;
+  const cutoffStates = dates.map((serviceDate) => {
+    return computeBreakfastCutoffState({
+      serviceDate,
+      now,
+      cutoffTime,
+      timezone: cutoffTz,
+      cutoffsEnabled
+    });
+  });
+  const existingSelections = booking.breakfastSelections && typeof booking.breakfastSelections === "object" ? booking.breakfastSelections : {};
+  const recomputedTotal = recomputeBreakfastTotal(existingSelections);
+  const totalPrice = Number(booking.totalPrice || 0);
+  const paidAmount = Number(booking.paidAmount || 0);
+  const breakfastInTotalPrice = sumBreakfastRateLines(
+    booking.rateBreakdown
+  );
+  const balance = Math.max(
+    0,
+    (breakfastInTotalPrice === null ? totalPrice : totalPrice - breakfastInTotalPrice + recomputedTotal) - paidAmount
+  );
+  const served = booking.breakfastServed && typeof booking.breakfastServed === "object" ? booking.breakfastServed : {};
+  const refunds = await loadPendingBreakfastRefunds(booking.id);
+  return res.status(200).json({
+    success: true,
+    data: {
+      readOnly,
+      // Strip PII: no `guestName`, no `guestEmail`. The
+      // booking ref is the only identifier the page
+      // surfaces (the lookupToken is NOT echoed back, same
+      // as handleLookupBooking).
+      booking: {
+        id: booking.id,
+        bookingRef: booking.bookingRef,
+        checkIn: checkInDate,
+        checkOut: checkOutDate,
+        numNights: Number(booking.numNights || dates.length),
+        numGuests: Number(booking.numGuests || 0),
+        numAdults: Number(booking.numAdults || booking.numGuests || 0),
+        numChildren: Number(booking.numChildren || 0),
+        totalPrice,
+        // The denormalised field on the doc — also
+        // recomputed client-side for parity (the page
+        // uses the recomputed value to render its own
+        // total; the denormalised value is the
+        // authoritative source).
+        breakfastTotal: Number(booking.breakfastTotal || 0),
+        paidAmount,
+        balance,
+        status
+      },
+      breakfastSelections: existingSelections,
+      breakfastServed: served,
+      refunds,
+      breakfastConfig: isEnabled ? breakfastConfig : { ...breakfastConfig, isEnabled: false },
+      cutoffStates,
+      servedGraceMinutes
+    }
+  });
+}
+async function handleUpdateBreakfast(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const parsed2 = updateBodySchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid breakfast update payload."
+    });
+  }
+  const { bookingRef: bookingRef2, token: token2, clientBatchId, add, change, remove } = parsed2.data;
+  const breakfastConfig = await loadBreakfastConfigForManage();
+  if (!breakfastConfig.isEnabled) {
+    return res.status(400).json({
+      success: false,
+      error: "Breakfast is currently not available. Please contact the front desk."
+    });
+  }
+  const mealById = /* @__PURE__ */ new Map();
+  for (const meal of breakfastConfig.meals || []) {
+    if (meal?.id) mealById.set(meal.id, meal);
+  }
+  const serverNow = /* @__PURE__ */ new Date();
+  const resultSummary = {
+    newBalance: 0,
+    refundLiabilityCreated: 0,
+    opsApplied: 0,
+    auditEntriesWritten: 0
+  };
+  let priorResult = null;
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const batchDocRef = adminDb.collection("bookings").doc("__breakfastUpdateBatches").collection("batches").doc(clientBatchId);
+      const existingBatch = await transaction.get(batchDocRef);
+      if (existingBatch.exists) {
+        const prior = existingBatch.data() || {};
+        const ageMs = Date.now() - Number(prior.committedAt || 0);
+        if (ageMs < 6e4 && prior.bookingRef === bookingRef2) {
+          priorResult = prior.summary || null;
+          return;
+        }
+      }
+      const booking = await fetchBookingByToken(bookingRef2, token2);
+      if (!booking) {
+        throw new Error("BOOKING_NOT_FOUND");
+      }
+      const status = String(booking.status || "").trim();
+      if (status === "cancelled") {
+        throw new Error("BOOKING_CANCELLED");
+      }
+      if (status === "checked-out") {
+        throw new Error("BOOKING_CHECKED_OUT");
+      }
+      const tz = String(
+        breakfastConfig.cutoffTimezone || booking.timezone || hotel_config_default.timezone || "Asia/Manila"
+      );
+      const cutoffTime = String(
+        breakfastConfig.cutoffTime || "20:00"
+      );
+      const cutoffsEnabled = breakfastConfig.cutoffsEnabled !== false;
+      const existingSelections = booking.breakfastSelections && typeof booking.breakfastSelections === "object" ? booking.breakfastSelections : {};
+      const existingServed = booking.breakfastServed && typeof booking.breakfastServed === "object" ? booking.breakfastServed : {};
+      const nextSelections = { ...existingSelections };
+      let opsApplied = 0;
+      let auditEntriesWritten = 0;
+      let refundLiabilityCreated = 0;
+      for (const op of add) {
+        assertMealExists(mealById, op.mealId);
+        assertNotLocked({
+          slotKey: op.slotKey,
+          serverNow,
+          cutoffTime,
+          timezone: tz,
+          cutoffsEnabled
+        });
+        assertSlotNotServed(existingServed, op.slotKey);
+        assertSlotForAdd(nextSelections, op.slotKey);
+        const meal = mealById.get(op.mealId);
+        const serverPrice = Number(meal.price || 0);
+        const priceChanged = Math.abs(serverPrice - Number(op.price)) > 5e-3;
+        nextSelections[op.slotKey] = {
+          mealId: meal.id,
+          mealName: meal.name,
+          price: serverPrice,
+          // server-side price wins
+          addedAt: Timestamp.now(),
+          addedBy: "guest",
+          lastModifiedAt: Timestamp.now(),
+          lastModifiedBy: "guest",
+          removedAt: null,
+          removedBy: null,
+          overrideCutoff: false,
+          overrideReason: null
+        };
+        opsApplied += 1;
+        auditEntriesWritten += 1;
+        auditBreakfastOp({
+          transaction,
+          bookingId: booking.id,
+          slotKey: op.slotKey,
+          action: "add",
+          mealSnapshot: {
+            mealId: meal.id,
+            mealName: meal.name,
+            price: serverPrice
+          },
+          actorUid: "guest",
+          actorRole: "guest",
+          reasonOrCutoff: false
+        });
+        if (priceChanged) {
+          auditBreakfastOp({
+            transaction,
+            bookingId: booking.id,
+            slotKey: op.slotKey,
+            action: "change",
+            mealSnapshot: {
+              mealId: meal.id,
+              mealName: meal.name,
+              price: serverPrice
+            },
+            actorUid: "guest",
+            actorRole: "guest",
+            reasonOrCutoff: `Price updated from ${Number(op.price).toFixed(2)} to ${serverPrice.toFixed(2)} at write time.`
+          });
+          auditEntriesWritten += 1;
+        }
+      }
+      for (const op of change) {
+        assertMealExists(mealById, op.mealId);
+        assertNotLocked({
+          slotKey: op.slotKey,
+          serverNow,
+          cutoffTime,
+          timezone: tz,
+          cutoffsEnabled
+        });
+        assertSlotNotServed(existingServed, op.slotKey);
+        assertSlotForChange(nextSelections, op.slotKey);
+        const prior = nextSelections[op.slotKey];
+        const meal = mealById.get(op.mealId);
+        const serverPrice = Number(meal.price || 0);
+        const priceChanged = Math.abs(serverPrice - Number(prior.price)) > 5e-3;
+        nextSelections[op.slotKey] = {
+          ...prior,
+          mealId: meal.id,
+          mealName: meal.name,
+          price: serverPrice,
+          lastModifiedAt: Timestamp.now(),
+          lastModifiedBy: "guest"
+        };
+        opsApplied += 1;
+        auditEntriesWritten += 1;
+        const reason = priceChanged ? `Price adjusted from ${Number(prior.price).toFixed(2)} to ${serverPrice.toFixed(2)}.` : false;
+        auditBreakfastOp({
+          transaction,
+          bookingId: booking.id,
+          slotKey: op.slotKey,
+          action: "change",
+          mealSnapshot: {
+            mealId: meal.id,
+            mealName: meal.name,
+            price: serverPrice
+          },
+          actorUid: "guest",
+          actorRole: "guest",
+          reasonOrCutoff: reason
+        });
+      }
+      for (const op of remove) {
+        assertNotLocked({
+          slotKey: op.slotKey,
+          serverNow,
+          cutoffTime,
+          timezone: tz,
+          cutoffsEnabled
+        });
+        assertSlotNotServed(existingServed, op.slotKey);
+        assertSlotForChange(nextSelections, op.slotKey);
+        const prior = nextSelections[op.slotKey];
+        nextSelections[op.slotKey] = {
+          ...prior,
+          removedAt: Timestamp.now(),
+          removedBy: "guest",
+          lastModifiedAt: Timestamp.now(),
+          lastModifiedBy: "guest"
+        };
+        const mealPrice = Number(prior.price || 0);
+        const currentPaidAmount = Number(booking.paidAmount || 0);
+        const looksPaid = mealPrice > 0 && currentPaidAmount >= mealPrice;
+        if (looksPaid) {
+          createBreakfastRefundLiability({
+            transaction,
+            booking,
+            slotKey: op.slotKey,
+            mealEntry: {
+              mealId: prior.mealId,
+              mealName: prior.mealName,
+              price: mealPrice
+            },
+            amount: mealPrice,
+            reason: "Guest removed paid breakfast meal via Manage Breakfast.",
+            recordedBy: "guest",
+            recordedByUid: "guest"
+          });
+          refundLiabilityCreated += 1;
+        }
+        opsApplied += 1;
+        auditEntriesWritten += 1;
+        const reason = `Removed by guest${looksPaid ? " (refund liability opened)" : ""}.`;
+        auditBreakfastOp({
+          transaction,
+          bookingId: booking.id,
+          slotKey: op.slotKey,
+          action: "remove",
+          mealSnapshot: {
+            mealId: prior.mealId,
+            mealName: prior.mealName,
+            price: mealPrice
+          },
+          actorUid: "guest",
+          actorRole: "guest",
+          reasonOrCutoff: reason
+        });
+      }
+      const newBreakfastTotal = recomputeBreakfastTotal(nextSelections);
+      const totalPriceNum = Number(booking.totalPrice || 0);
+      const paidAmountNum = Number(booking.paidAmount || 0);
+      const bookingRefDoc = adminDb.collection("bookings").doc(booking.id);
+      transaction.update(bookingRefDoc, {
+        breakfastSelections: nextSelections,
+        breakfastTotal: newBreakfastTotal,
+        updatedAt: Timestamp.now()
+      });
+      const breakfastInTotalPrice = sumBreakfastRateLines(
+        booking.rateBreakdown
+      );
+      const newBalance = Math.max(
+        0,
+        (breakfastInTotalPrice === null ? totalPriceNum : totalPriceNum - breakfastInTotalPrice + newBreakfastTotal) - paidAmountNum
+      );
+      resultSummary.newBalance = Number(newBalance.toFixed(2));
+      resultSummary.refundLiabilityCreated = refundLiabilityCreated;
+      resultSummary.opsApplied = opsApplied;
+      resultSummary.auditEntriesWritten = auditEntriesWritten;
+      transaction.set(batchDocRef, {
+        bookingRef: bookingRef2,
+        clientBatchId,
+        committedAt: Date.now(),
+        summary: resultSummary
+      });
+    });
+  } catch (err) {
+    const code = String(err && err.message || "");
+    if (code === "BOOKING_NOT_FOUND" || code === "BOOKING_CANCELLED" || code === "BOOKING_CHECKED_OUT") {
+      return res.status(404).json({
+        success: false,
+        error: "Booking not found."
+      });
+    }
+    if (code.startsWith("LOCKED_DATE:")) {
+      const date = code.split(":")[1] || "";
+      return res.status(400).json({
+        success: false,
+        error: `Ordering closed for breakfast on ${date}.`
+      });
+    }
+    if (code.startsWith("SLOT_SERVED:")) {
+      return res.status(400).json({
+        success: false,
+        error: "This meal has already been served and cannot be edited."
+      });
+    }
+    if (code === "MEAL_NOT_AVAILABLE") {
+      return res.status(400).json({
+        success: false,
+        // Per the BR-01 validator's contract: no
+        // specific meal name so the endpoint isn't a
+        // menu-state oracle.
+        error: "One of the selected meals is no longer available. Please refresh and try again."
+      });
+    }
+    if (code === "SLOT_ALREADY_ORDERED") {
+      return res.status(400).json({
+        success: false,
+        error: "This slot already has a meal selected. Use 'change' to update it."
+      });
+    }
+    if (code === "SLOT_NOT_ORDERED") {
+      return res.status(400).json({
+        success: false,
+        error: "This slot has no meal to change. Use 'add' instead."
+      });
+    }
+    console.error("[breakfast-manage] update failed:", err?.message || err);
+    return res.status(500).json({
+      success: false,
+      error: "We couldn't save your changes. Please try again in a moment."
+    });
+  }
+  if (priorResult) {
+    return res.status(200).json({
+      success: true,
+      data: { ...priorResult, replayed: true, clientBatchId }
+    });
+  }
+  return res.status(200).json({
+    success: true,
+    data: { ...resultSummary, replayed: false, clientBatchId }
+  });
+}
+
+// server/handlers/breakfast-staff-update.ts
+init_zod();
+init_firestore();
+init_shared();
+init_firebase_admin();
+var slotKeySchema2 = external_exports.string().trim().min(11).max(80).regex(/^\d{4}-\d{2}-\d{2}-[A-Za-z0-9_-]+$/, "Invalid slot key.");
+var addOrChangeSchema2 = external_exports.object({
+  slotKey: slotKeySchema2,
+  mealId: external_exports.string().trim().min(1).max(80),
+  mealName: external_exports.string().trim().min(1).max(120),
+  price: external_exports.number().finite().min(0).max(1e6)
+});
+var removeSchema2 = external_exports.object({
+  slotKey: slotKeySchema2
+});
+var updateBodySchema2 = external_exports.object({
+  bookingId: external_exports.string().trim().min(8).max(80),
+  // Optional clientBatchId for the same idempotency-replay
+  // model the BR-04 handler uses. A staff retry after
+  // an uncertain response lands on the same batch slot.
+  clientBatchId: external_exports.string().trim().min(8).max(80).regex(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    "Invalid clientBatchId."
+  ).optional(),
+  add: external_exports.array(addOrChangeSchema2).max(200).default([]),
+  change: external_exports.array(addOrChangeSchema2).max(200).default([]),
+  remove: external_exports.array(removeSchema2).max(200).default([]),
+  overrideCutoff: external_exports.boolean().optional().default(false),
+  overrideReason: external_exports.string().trim().max(500).nullable().optional().default(null),
+  turnstileToken: external_exports.string().trim().max(2e3).optional()
+}).passthrough();
+async function loadPublicBreakfastConfig() {
+  const mod5 = await Promise.resolve().then(() => (init_shared(), shared_exports));
+  const normalize2 = mod5.normalizeBreakfastConfig;
+  try {
+    const snap = await adminDb.collection("settings").doc("breakfastConfig").get();
+    const source = snap.exists ? snap.data() : null;
+    return typeof normalize2 === "function" ? normalize2(source) : source || {};
+  } catch {
+    return typeof normalize2 === "function" ? normalize2(null) : {};
+  }
+}
+async function loadFrontDeskOverrideEnabled() {
+  try {
+    const snap = await adminDb.collection("settings").doc("breakfastConfig").get();
+    const source = snap.exists ? snap.data() : null;
+    return Boolean(source && source.frontDeskOverrideEnabled === true);
+  } catch {
+    return false;
+  }
+}
+function readStaff(req) {
+  const anyReq = req;
+  const staff = anyReq.staff;
+  if (!staff || !staff.uid) return null;
+  const role = String(staff.role || "");
+  if (role !== "admin" && role !== "front-desk") return null;
+  return { uid: String(staff.uid), role };
+}
+function translateOpError(code) {
+  if (code === "MEAL_NOT_AVAILABLE") {
+    return {
+      status: 400,
+      message: "One of the selected meals is no longer available. Please refresh and try again."
+    };
+  }
+  if (code.startsWith("LOCKED_DATE:")) {
+    const date = code.split(":")[1] || "";
+    return {
+      status: 400,
+      message: `Ordering closed for breakfast on ${date}.`
+    };
+  }
+  if (code.startsWith("SLOT_SERVED:")) {
+    return {
+      status: 400,
+      message: "This meal has already been served and cannot be edited."
+    };
+  }
+  if (code === "SLOT_ALREADY_ORDERED") {
+    return {
+      status: 400,
+      message: "This slot already has a meal selected. Use 'change' to update it."
+    };
+  }
+  if (code === "SLOT_NOT_ORDERED") {
+    return {
+      status: 400,
+      message: "This slot has no meal to change. Use 'add' instead."
+    };
+  }
+  return { status: 500, message: "We couldn't save the changes. Please try again in a moment." };
+}
+async function handleStaffUpdateBreakfast(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = readStaff(req);
+  if (!staff) {
+    return res.status(403).json({
+      success: false,
+      error: "Forbidden: Access restricted to staff members."
+    });
+  }
+  const parsed2 = updateBodySchema2.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid breakfast update payload."
+    });
+  }
+  const {
+    bookingId,
+    clientBatchId,
+    add,
+    change,
+    remove,
+    overrideCutoff,
+    overrideReason
+  } = parsed2.data;
+  if (overrideCutoff) {
+    const reason = String(overrideReason || "").trim();
+    if (reason.length < MIN_BREAKFAST_OVERRIDE_REASON_LENGTH) {
+      return res.status(400).json({
+        success: false,
+        error: `Override reason required (min ${MIN_BREAKFAST_OVERRIDE_REASON_LENGTH} characters) when continuing past the cutoff.`
+      });
+    }
+    if (staff.role === "front-desk") {
+      const enabled = await loadFrontDeskOverrideEnabled();
+      if (!enabled) {
+        return res.status(403).json({
+          success: false,
+          error: "Front-desk overrides are disabled in Settings. Ask an admin to perform this change."
+        });
+      }
+    }
+  }
+  const publicConfig = await loadPublicBreakfastConfig();
+  const breakfastConfigAny = publicConfig;
+  const cutoffTime = String(
+    breakfastConfigAny.cutoffTime || "20:00"
+  );
+  const tz = String(
+    breakfastConfigAny.cutoffTimezone || breakfastConfigAny.timezone || "Asia/Manila"
+  );
+  const cutoffsEnabled = publicConfig.cutoffsEnabled !== false;
+  const mealById = /* @__PURE__ */ new Map();
+  for (const meal of breakfastConfigAny.meals || []) {
+    if (meal && meal.id) mealById.set(meal.id, meal);
+  }
+  if (!breakfastConfigAny.isEnabled) {
+    return res.status(400).json({
+      success: false,
+      error: "Breakfast is currently not available. Please contact the front desk."
+    });
+  }
+  const serverNow = /* @__PURE__ */ new Date();
+  const resultSummary = {
+    newBalance: 0,
+    refundLiabilityCreated: 0,
+    opsApplied: 0,
+    overrideCount: 0,
+    auditEntriesWritten: 0
+  };
+  let priorResult = null;
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      if (clientBatchId) {
+        const batchDocRef = adminDb.collection("bookings").doc("__breakfastStaffUpdateBatches").collection("batches").doc(clientBatchId);
+        const existingBatch = await transaction.get(batchDocRef);
+        if (existingBatch.exists) {
+          const prior = existingBatch.data() || {};
+          const ageMs = Date.now() - Number(prior.committedAt || 0);
+          if (ageMs < 6e4 && prior.bookingId === bookingId) {
+            priorResult = prior.summary || null;
+            return;
+          }
+        }
+      }
+      const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
+      const bookingSnap = await transaction.get(bookingRef2);
+      if (!bookingSnap.exists) {
+        throw new Error("BOOKING_NOT_FOUND");
+      }
+      const booking = { id: bookingSnap.id, ...bookingSnap.data() };
+      const status = String(booking.status || "").trim();
+      if (status === "cancelled" || status === "checked-out") {
+        throw new Error("BOOKING_TERMINAL");
+      }
+      const existingSelections = booking.breakfastSelections && typeof booking.breakfastSelections === "object" ? booking.breakfastSelections : {};
+      const existingServed = booking.breakfastServed && typeof booking.breakfastServed === "object" ? booking.breakfastServed : {};
+      const nextSelections = {
+        ...existingSelections
+      };
+      let opsApplied = 0;
+      let auditEntriesWritten = 0;
+      let refundLiabilityCreated = 0;
+      let overrideCount = 0;
+      const applyAddOrChange = (op, actionKind) => {
+        assertMealExists(mealById, op.mealId);
+        let isOverride = false;
+        try {
+          assertNotLocked({
+            slotKey: op.slotKey,
+            serverNow,
+            cutoffTime,
+            timezone: tz,
+            cutoffsEnabled
+          });
+        } catch (err) {
+          if (String(err?.message || "").startsWith("LOCKED_DATE:") && overrideCutoff) {
+            isOverride = true;
+          } else {
+            throw err;
+          }
+        }
+        assertSlotNotServed(existingServed, op.slotKey);
+        if (actionKind === "add") {
+          assertSlotForAdd(nextSelections, op.slotKey);
+        } else {
+          assertSlotForChange(nextSelections, op.slotKey);
+        }
+        const meal = mealById.get(op.mealId);
+        const serverPrice = Number(meal.price || 0);
+        const reason = String(overrideReason || "").trim() || null;
+        if (actionKind === "add") {
+          nextSelections[op.slotKey] = {
+            mealId: meal.id,
+            mealName: meal.name,
+            price: serverPrice,
+            addedAt: Timestamp.now(),
+            addedBy: staff.uid,
+            lastModifiedAt: Timestamp.now(),
+            lastModifiedBy: staff.uid,
+            removedAt: null,
+            removedBy: null,
+            overrideCutoff: isOverride,
+            overrideReason: isOverride ? reason : null
+          };
+        } else {
+          const prior = nextSelections[op.slotKey];
+          nextSelections[op.slotKey] = {
+            ...prior,
+            mealId: meal.id,
+            mealName: meal.name,
+            price: serverPrice,
+            lastModifiedAt: Timestamp.now(),
+            lastModifiedBy: staff.uid,
+            overrideCutoff: isOverride ? true : prior.overrideCutoff === true,
+            overrideReason: isOverride ? reason : prior.overrideReason ?? null
+          };
+        }
+        opsApplied += 1;
+        auditEntriesWritten += 1;
+        auditBreakfastOp({
+          transaction,
+          bookingId: booking.id,
+          slotKey: op.slotKey,
+          action: isOverride ? actionKind === "add" ? "override-add" : "override-change" : actionKind,
+          mealSnapshot: {
+            mealId: meal.id,
+            mealName: meal.name,
+            price: serverPrice
+          },
+          actorUid: staff.uid,
+          actorRole: staff.role,
+          // Per OCT-H7 (2026-10-20, decision #286): the object
+          // form carries BOTH the free-text reason and the
+          // cut-off flag.
+          //
+          // The previous call passed the reason STRING (or
+          // `false`) through the two-way `string | boolean`
+          // overload, so the helper could set EITHER the reason
+          // OR the flag — never both. An override therefore
+          // wrote `reason: "<text>"` with
+          // `occurredAfterCutoff: false`, and the "Late changes"
+          // metric (which filters
+          // `occurredAfterCutoff == true`) was permanently empty
+          // for precisely the case it exists to count: a staff
+          // member overriding a locked date after cut-off.
+          //
+          // Non-override actions still stamp `false` (they mirror
+          // the BR-04 guest path, which is always pre-cutoff).
+          reasonOrCutoff: {
+            reason: isOverride ? reason : null,
+            occurredAfterCutoff: isOverride
+          }
+        });
+        if (isOverride) overrideCount += 1;
+      };
+      const applyRemove = (op) => {
+        let isOverride = false;
+        try {
+          assertNotLocked({
+            slotKey: op.slotKey,
+            serverNow,
+            cutoffTime,
+            timezone: tz,
+            cutoffsEnabled
+          });
+        } catch (err) {
+          if (String(err?.message || "").startsWith("LOCKED_DATE:") && overrideCutoff) {
+            isOverride = true;
+          } else {
+            throw err;
+          }
+        }
+        assertSlotNotServed(existingServed, op.slotKey);
+        assertSlotForChange(nextSelections, op.slotKey);
+        const prior = nextSelections[op.slotKey];
+        const reason = String(overrideReason || "").trim() || null;
+        nextSelections[op.slotKey] = {
+          ...prior,
+          removedAt: Timestamp.now(),
+          removedBy: staff.uid,
+          lastModifiedAt: Timestamp.now(),
+          lastModifiedBy: staff.uid,
+          overrideCutoff: isOverride ? true : prior.overrideCutoff || false,
+          overrideReason: isOverride ? reason : prior.overrideReason || null
+        };
+        const mealPrice = Number(prior.price || 0);
+        const currentPaidAmount = Number(booking.paidAmount || 0);
+        const looksPaid = mealPrice > 0 && currentPaidAmount >= mealPrice;
+        if (looksPaid) {
+          createBreakfastRefundLiability({
+            transaction,
+            booking,
+            slotKey: op.slotKey,
+            mealEntry: {
+              mealId: prior.mealId,
+              mealName: prior.mealName,
+              price: mealPrice
+            },
+            amount: mealPrice,
+            reason: "Staff removed paid breakfast meal via booking drawer.",
+            recordedBy: staff.role,
+            recordedByUid: staff.uid
+          });
+          refundLiabilityCreated += 1;
+        }
+        opsApplied += 1;
+        auditEntriesWritten += 1;
+        auditBreakfastOp({
+          transaction,
+          bookingId: booking.id,
+          slotKey: op.slotKey,
+          action: isOverride ? "override-remove" : "remove",
+          mealSnapshot: {
+            mealId: prior.mealId,
+            mealName: prior.mealName,
+            price: mealPrice
+          },
+          actorUid: staff.uid,
+          actorRole: staff.role,
+          // Per OCT-H7 (2026-10-20, decision #286): the object
+          // form carries BOTH the free-text reason and the
+          // cut-off flag. The previous two-way overload could
+          // only carry one of them, so a staff override of a
+          // locked date logged `occurredAfterCutoff: false` and
+          // the "Late changes" metric never counted it.
+          reasonOrCutoff: {
+            reason,
+            occurredAfterCutoff: isOverride
+          }
+        });
+        if (isOverride) overrideCount += 1;
+      };
+      for (const op of add) applyAddOrChange(op, "add");
+      for (const op of change) applyAddOrChange(op, "change");
+      for (const op of remove) applyRemove(op);
+      const newBreakfastTotal = recomputeBreakfastTotal(nextSelections);
+      const totalPriceNum = Number(booking.totalPrice || 0);
+      const paidAmountNum = Number(booking.paidAmount || 0);
+      const newBalance = Math.max(
+        0,
+        totalPriceNum + newBreakfastTotal - paidAmountNum
+      );
+      transaction.update(bookingRef2, {
+        breakfastSelections: nextSelections,
+        breakfastTotal: newBreakfastTotal,
+        updatedAt: Timestamp.now(),
+        updatedBy: staff.uid
+      });
+      resultSummary.newBalance = Number(newBalance.toFixed(2));
+      resultSummary.refundLiabilityCreated = refundLiabilityCreated;
+      resultSummary.opsApplied = opsApplied;
+      resultSummary.overrideCount = overrideCount;
+      resultSummary.auditEntriesWritten = auditEntriesWritten;
+      if (clientBatchId) {
+        const batchDocRef = adminDb.collection("bookings").doc("__breakfastStaffUpdateBatches").collection("batches").doc(clientBatchId);
+        transaction.set(batchDocRef, {
+          bookingId,
+          clientBatchId,
+          committedAt: Date.now(),
+          summary: resultSummary
+        });
+      }
+    });
+  } catch (err) {
+    const code = String(err && err.message || "");
+    if (code === "BOOKING_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    if (code === "BOOKING_TERMINAL") {
+      return res.status(400).json({
+        success: false,
+        error: "This booking is checked-out or cancelled; breakfast edits are not allowed."
+      });
+    }
+    const translated = translateOpError(code);
+    if (translated.status !== 500) {
+      return res.status(translated.status).json({ success: false, error: translated.message });
+    }
+    console.error("[breakfast-staff-update] update failed:", err?.message || err);
+    return res.status(500).json({ success: false, error: translated.message });
+  }
+  if (priorResult) {
+    return res.status(200).json({
+      success: true,
+      data: { ...priorResult, replayed: true, clientBatchId: clientBatchId || null }
+    });
+  }
+  return res.status(200).json({
+    success: true,
+    data: { ...resultSummary, replayed: false, clientBatchId: clientBatchId || null }
+  });
+}
+
+// server/handlers/breakfast-mark-served.ts
+init_zod();
+init_firestore();
+init_shared();
+init_firebase_admin();
+init_email();
+var slotKeySchema3 = external_exports.string().trim().min(11).max(80).regex(/^\d{4}-\d{2}-\d{2}-[A-Za-z0-9_-]+$/, "Invalid slot key.");
+var markServedBodySchema = external_exports.object({
+  bookingId: external_exports.string().trim().min(8).max(80),
+  slotKey: slotKeySchema3,
+  action: external_exports.enum(["serve", "unserve"]),
+  reason: external_exports.string().trim().max(500).nullable().optional().default(null),
+  turnstileToken: external_exports.string().trim().max(2e3).optional()
+}).passthrough();
+function readStaff2(req) {
+  const anyReq = req;
+  const staff = anyReq.staff;
+  if (!staff || !staff.uid) return null;
+  const role = String(staff.role || "");
+  if (role !== "admin" && role !== "front-desk") return null;
+  return { uid: String(staff.uid), role };
+}
+async function loadServedGraceMinutes() {
+  try {
+    const snap = await adminDb.collection("settings").doc("breakfastConfig").get();
+    const source = snap.exists ? snap.data() : null;
+    const raw = Number(source && source.servedGraceMinutes);
+    if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw);
+  } catch {
+  }
+  return DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES;
+}
+async function loadCutoffConfig() {
+  try {
+    const snap = await adminDb.collection("settings").doc("breakfastConfig").get();
+    const source = snap.exists ? snap.data() : null;
+    const rawCutoff = String(source && source.cutoffTime || "").trim();
+    const rawZone = String(source && source.cutoffTimezone || "").trim();
+    if (/^([01]\d|2[0-3]):[0-5]\d$/.test(rawCutoff) && rawZone.length > 0) {
+      return {
+        cutoffTime: rawCutoff,
+        cutoffTimezone: rawZone,
+        cutoffsEnabled: source?.cutoffsEnabled !== false
+      };
+    }
+  } catch {
+  }
+  return {
+    cutoffTime: DEFAULT_BREAKFAST_CUTOFF_TIME,
+    cutoffTimezone: DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
+    cutoffsEnabled: true
+  };
+}
+async function readBookingSlotEntry(bookingId, slotKey) {
+  const ref = adminDb.collection("bookings").doc(bookingId);
+  const snap = await ref.get();
+  if (!snap.exists) return { ok: false, code: "NOT_FOUND" };
+  const data = snap.data() || {};
+  const status = String(data.status || "");
+  if (status === "cancelled" || status === "checked-out") {
+    return { ok: false, code: "TERMINAL" };
+  }
+  return {
+    ok: true,
+    booking: {
+      id: snap.id,
+      status,
+      breakfastSelections: data.breakfastSelections && typeof data.breakfastSelections === "object" ? data.breakfastSelections : {}
+    },
+    breakfastSelections: data.breakfastSelections || {}
+  };
+}
+async function handleMarkServed(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = readStaff2(req);
+  if (!staff) {
+    return res.status(403).json({
+      success: false,
+      error: "Forbidden: Access restricted to staff members."
+    });
+  }
+  const parsed2 = markServedBodySchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid mark-served payload."
+    });
+  }
+  const { bookingId, slotKey, action, reason } = parsed2.data;
+  const trimmedReason = String(reason || "").trim() || null;
+  const graceMinutes = await loadServedGraceMinutes();
+  const { cutoffTime, cutoffTimezone, cutoffsEnabled } = await loadCutoffConfig();
+  const slotDate = slotKey.slice(0, 10);
+  let isLateServe = false;
+  if (action === "serve") {
+    const cutoffState = computeBreakfastCutoffState({
+      serviceDate: slotDate,
+      now: /* @__PURE__ */ new Date(),
+      cutoffTime,
+      timezone: cutoffTimezone,
+      cutoffsEnabled
+    });
+    isLateServe = cutoffState.isLocked;
+  }
+  const slotLookup = await readBookingSlotEntry(bookingId, slotKey);
+  if (!slotLookup.ok) {
+    if (slotLookup.code === "NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    return res.status(400).json({
+      success: false,
+      error: "This booking is checked-out or cancelled; kitchen visibility is locked."
+    });
+  }
+  const selection = slotLookup.breakfastSelections[slotKey] || null;
+  if (action === "serve") {
+    if (!selection || selection.removedAt) {
+      return res.status(400).json({
+        success: false,
+        error: "This slot has no meal to serve. Add a meal before marking it served."
+      });
+    }
+  } else {
+    const existingServed = {};
+    if (!selection || selection.removedAt) {
+      return res.status(400).json({
+        success: false,
+        error: "This slot has no meal to unserve."
+      });
+    }
+  }
+  let resultPayload = null;
+  let opError = null;
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
+      const freshSnap = await transaction.get(bookingRef2);
+      if (!freshSnap.exists) {
+        opError = { status: 404, error: "Booking not found." };
+        return;
+      }
+      const fresh = freshSnap.data() || {};
+      const freshServed = fresh.breakfastServed && typeof fresh.breakfastServed === "object" ? fresh.breakfastServed : {};
+      const now = Timestamp.now();
+      if (action === "serve") {
+        const newEntry = {
+          servedAt: now,
+          servedBy: staff.uid,
+          unservedAt: null,
+          unservedBy: null
+        };
+        const nextServed2 = { ...freshServed, [slotKey]: newEntry };
+        transaction.update(bookingRef2, {
+          breakfastServed: nextServed2,
+          updatedAt: now,
+          updatedBy: staff.uid
+        });
+        auditBreakfastOp({
+          transaction,
+          bookingId,
+          slotKey,
+          action: "serve",
+          mealSnapshot: {
+            mealId: String(selection.mealId),
+            mealName: String(selection.mealName),
+            price: Number(selection.price || 0)
+          },
+          actorUid: staff.uid,
+          actorRole: staff.role,
+          // Per BR-08 (decision #238, 2026-10-14 — close-out):
+          // late serves (a serve action after the per-date
+          // cutoff window) carry `true` so the audit doc
+          // stamps `occurredAfterCutoff: true`. The kitchen
+          // list's "Late changes" column (BR-07) and the new
+          // late-served guest email both read this flag.
+          // On-time serves (`isLocked === false`) keep the
+          // historical `false` (no flag).
+          reasonOrCutoff: isLateServe
+        });
+        resultPayload = {
+          servedAt: now,
+          servedBy: staff.uid,
+          unservedAt: null,
+          unservedBy: null
+        };
+        return;
+      }
+      const existing = freshServed[slotKey];
+      if (!existing || !existing.servedAt) {
+        opError = {
+          status: 400,
+          error: "This slot has not been marked served yet."
+        };
+        return;
+      }
+      const servedAt = typeof existing.servedAt?.toDate === "function" ? existing.servedAt.toDate() : new Date(existing.servedAt);
+      const nowDate = /* @__PURE__ */ new Date();
+      const elapsedMinutes = Math.max(
+        0,
+        Math.floor((nowDate.getTime() - servedAt.getTime()) / 6e4)
+      );
+      if (elapsedMinutes > graceMinutes && !trimmedReason) {
+        opError = {
+          status: 400,
+          error: `Served-grace window passed (${graceMinutes} min). Un-serving requires a reason.`
+        };
+        return;
+      }
+      if (trimmedReason && trimmedReason.length < MIN_BREAKFAST_OVERRIDE_REASON_LENGTH) {
+        opError = {
+          status: 400,
+          error: `Reason must be at least ${MIN_BREAKFAST_OVERRIDE_REASON_LENGTH} characters when un-serving past the grace window.`
+        };
+        return;
+      }
+      const updatedEntry = {
+        ...existing,
+        unservedAt: now,
+        unservedBy: staff.uid
+      };
+      const nextServed = { ...freshServed, [slotKey]: updatedEntry };
+      transaction.update(bookingRef2, {
+        breakfastServed: nextServed,
+        updatedAt: now,
+        updatedBy: staff.uid
+      });
+      auditBreakfastOp({
+        transaction,
+        bookingId,
+        slotKey,
+        action: "unserve",
+        mealSnapshot: {
+          mealId: String(selection.mealId),
+          mealName: String(selection.mealName),
+          price: Number(selection.price || 0)
+        },
+        actorUid: staff.uid,
+        actorRole: staff.role,
+        // The grace-window un-serve (no reason) records
+        // `false` so `occurredAfterCutoff` stays false.
+        // The beyond-grace un-serve (with reason) carries
+        // the staff's free-text — the kitchen list's
+        // "Late un-serves" column (BR-07) filters on
+        // either `action: "unserve"` or the reason
+        // presence.
+        reasonOrCutoff: trimmedReason ? trimmedReason : false
+      });
+      resultPayload = {
+        servedAt: existing.servedAt,
+        servedBy: existing.servedBy,
+        unservedAt: now,
+        unservedBy: staff.uid
+      };
+    });
+  } catch (err) {
+    console.error("[breakfast-mark-served] failed:", err?.message || err);
+    return res.status(500).json({
+      success: false,
+      error: "We couldn't update the kitchen visibility. Please try again in a moment."
+    });
+  }
+  if (opError) {
+    return res.status(opError.status).json({ success: false, error: opError.error });
+  }
+  if (isLateServe && action === "serve") {
+    try {
+      const detail = await adminDb.collection("bookings").doc(bookingId).get();
+      const data = detail.exists ? detail.data() || {} : {};
+      const guestEmail = String(data.guestEmail || "").trim();
+      if (guestEmail) {
+        const slotEntry = {
+          slotKey,
+          mealId: String(selection.mealId),
+          mealName: String(selection.mealName),
+          price: Number(selection.price || 0)
+        };
+        const occurredAtIso = (/* @__PURE__ */ new Date()).toISOString();
+        await sendLateServedTrigger(
+          {
+            id: bookingId,
+            bookingRef: data.bookingRef || data.reservationRef || bookingId,
+            reservationRef: data.reservationRef || null,
+            guestEmail,
+            guestName: data.guestName || "",
+            isTestData: data.isTestData === true,
+            testRunName: typeof data.testRunName === "string" ? data.testRunName : void 0,
+            testRunEnvironment: data.testRunEnvironment === "staging" || data.testRunEnvironment === "production" ? data.testRunEnvironment : void 0
+          },
+          slotEntry,
+          occurredAtIso
+        );
+      }
+    } catch (err) {
+      console.error("[breakfast-mark-served] late-served email failed:", err?.message || err);
+    }
+  }
+  return res.status(200).json({ success: true, data: resultPayload });
+}
+
+// server/handlers/breakfast-refund-paid.ts
+init_zod();
+init_firebase_admin();
+var refundIdSchema = external_exports.string().trim().regex(
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+  "Invalid refundId."
+);
+var markRefundPaidBodySchema = external_exports.object({
+  bookingId: external_exports.string().trim().min(8).max(80),
+  refundId: refundIdSchema,
+  // The paid-by method (e.g. "cash", "gcash",
+  // "bank-transfer"). Free-form per the existing
+  // onsite-payment surface — settings-driven list
+  // resolved on the client. Server keeps the value
+  // as-is so the entry is faithful to the receipt.
+  method: external_exports.string().trim().min(1).max(60),
+  transactionReference: external_exports.string().trim().max(200).nullable().optional().default(null),
+  note: external_exports.string().trim().max(500).nullable().optional().default(null),
+  turnstileToken: external_exports.string().trim().max(2e3).optional()
+}).passthrough();
+function readStaff3(req) {
+  const anyReq = req;
+  const staff = anyReq.staff;
+  if (!staff || !staff.uid) return null;
+  const role = String(staff.role || "");
+  if (role !== "admin" && role !== "front-desk") return null;
+  return { uid: String(staff.uid), role };
+}
+function refundIdToMessage(code) {
+  return refundPaidErrorToMessage(code);
+}
+async function handleMarkRefundPaid(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = readStaff3(req);
+  if (!staff) {
+    return res.status(403).json({
+      success: false,
+      error: "Forbidden: Access restricted to staff members."
+    });
+  }
+  const parsed2 = markRefundPaidBodySchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid mark-refund-paid payload."
+    });
+  }
+  const { bookingId, refundId, method, transactionReference, note } = parsed2.data;
+  const trimmedReference = transactionReference ? String(transactionReference).trim() : null;
+  const trimmedNote = note ? String(note).trim() : null;
+  let resultPayload = null;
+  let opCode = null;
+  let replayed = false;
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const refundRef = adminDb.collection("bookings").doc(bookingId).collection("refunds").doc(refundId);
+      const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
+      const [refundSnap, bookingSnap] = await Promise.all([
+        transaction.get(refundRef),
+        transaction.get(bookingRef2)
+      ]);
+      let helperResult;
+      try {
+        helperResult = markRefundPaid({
+          category: "breakfast",
+          bookingId,
+          refundId,
+          amount: Math.abs(Number(refundSnap.data()?.amount || 0)),
+          method,
+          transactionReference: trimmedReference,
+          note: trimmedNote,
+          actor: { uid: staff.uid, role: staff.role },
+          transaction,
+          existingDoc: refundSnap,
+          currentPaidAmount: Number(bookingSnap.data()?.paidAmount || 0),
+          slotKey: String(refundSnap.data()?.slotKey || "")
+        });
+      } catch (err) {
+        opCode = String(err?.message || "UNKNOWN");
+        return;
+      }
+      resultPayload = {
+        refundId,
+        status: helperResult.refundEntry.status || "paid",
+        paidAt: helperResult.refundEntry.paidAt,
+        paidBy: helperResult.refundEntry.paidBy,
+        method: helperResult.refundEntry.method,
+        transactionReference: helperResult.refundEntry.transactionReference,
+        note: helperResult.refundEntry.note,
+        amount: helperResult.refundEntry.amount,
+        category: helperResult.refundEntry.category || "breakfast",
+        slotKey: helperResult.refundEntry.slotKey
+      };
+      replayed = helperResult.alreadyPaid;
+    });
+  } catch (err) {
+    console.error("[breakfast-refund-paid] failed:", err?.message || err);
+    return res.status(500).json({
+      success: false,
+      error: refundIdToMessage("UNKNOWN")
+    });
+  }
+  if (opCode) {
+    return res.status(400).json({
+      success: false,
+      error: refundIdToMessage(opCode)
+    });
+  }
+  return res.status(200).json({
+    success: true,
+    data: { ...resultPayload, replayed }
+  });
+}
+
+// server/handlers/addons-config.ts
+init_firebase_admin();
+
+// server/lib/otherAddOns-settings.ts
+init_firebase_admin();
+init_shared();
+async function loadOtherAddOnsHotelEnabled() {
+  try {
+    const snap = await adminDb.collection("settings").doc("hotelConfig").get();
+    if (!snap.exists) return true;
+    return normalizeOtherAddOnsEnabled(snap.data()?.otherAddOnsEnabled);
+  } catch (err) {
+    console.error(
+      "Failed to read settings/hotelConfig.otherAddOnsEnabled; treating other add-ons as enabled:",
+      err
+    );
+    return true;
+  }
+}
+var OTHER_ADD_ONS_UNAVAILABLE_ERROR = "Other add-ons are currently unavailable.";
+
+// server/handlers/addons-config.ts
+init_shared();
+async function handleGetAddOnsConfig(req, res) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  try {
+    const snap = await adminDb.collection("addOns").get();
+    const rawAddOns = [];
+    for (const doc of snap.docs) {
+      const norm = normalizeAddOn({ id: doc.id, ...doc.data() }, doc.id);
+      if (norm) rawAddOns.push(norm);
+    }
+    if (rawAddOns.length === 0) {
+      const pre = {
+        id: "airport-transfer",
+        ...AIRPORT_TRANSFER_PRESEED,
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        updatedBy: "pre-seed"
+      };
+      rawAddOns.push(pre);
+    }
+    const hotelEnabled = await loadOtherAddOnsHotelEnabled();
+    const enabled = getEnabledAddOnsByHotel(rawAddOns, hotelEnabled);
+    res.setHeader("Cache-Control", "public, max-age=60");
+    return res.status(200).json({
+      success: true,
+      addOns: enabled.map((a) => ({
+        id: a.id,
+        name: a.name,
+        description: a.description,
+        price: a.price,
+        unit: a.unit,
+        cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn,
+        displayOrder: a.displayOrder
+      })),
+      // Per OCT-M1: the master switch is echoed so the guest UI
+      // can tell "the hotel turned other add-ons off" apart from
+      // "the hotel has no other add-ons" — both render an empty
+      // grid, but only one of them is a temporary state the guest
+      // should hear about.
+      otherAddOnsEnabled: hotelEnabled,
+      preSeeded: rawAddOns.length === 1 && rawAddOns[0].id === "airport-transfer"
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: "Failed to load other-add-ons catalog."
+    });
+  }
+}
+
+// server/handlers/addons-manage.ts
+init_firebase_admin();
+init_shared();
+function isIsoDate(s4) {
+  return typeof s4 === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s4);
+}
+function enumerateDates(checkIn, checkOut) {
+  const out = [];
+  const a = Date.parse(`${checkIn}T00:00:00Z`);
+  const b3 = Date.parse(`${checkOut}T00:00:00Z`);
+  if (!Number.isFinite(a) || !Number.isFinite(b3)) return out;
+  const maxDays = 60;
+  for (let ms2 = a, i2 = 0; ms2 < b3 && i2 < maxDays; ms2 += 864e5, i2 += 1) {
+    const d = new Date(ms2);
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    out.push(`${yyyy}-${mm}-${dd}`);
+  }
+  return out;
+}
+async function handleGetAddOnsManage(req, res) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const ref = String(req.query.ref || "").trim();
+  const token2 = String(req.query.token || "").trim();
+  if (!ref || !token2) {
+    return res.status(400).json({ success: false, error: "Missing bookingRef or token." });
+  }
+  let bookingSnap;
+  let bookingData2;
+  try {
+    const q3 = await adminDb.collection("bookings").where("bookingRef", "==", ref).limit(1).get();
+    if (q3.empty) {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    const doc = q3.docs[0];
+    bookingSnap = doc;
+    bookingData2 = doc.data();
+    if (String(bookingData2.lookupToken || "") !== token2) {
+      return res.status(403).json({ success: false, error: "Invalid token." });
+    }
+  } catch {
+    return res.status(500).json({ success: false, error: "Failed to load booking." });
+  }
+  if (!bookingSnap || !bookingData2) {
+    return res.status(404).json({ success: false, error: "Booking not found." });
+  }
+  const checkIn = bookingData2.checkIn;
+  const checkOut = bookingData2.checkOut;
+  const checkInDate = isIsoDate(checkIn) ? checkIn : typeof checkIn === "object" && checkIn && typeof checkIn.toDate === "function" ? (() => {
+    const d = checkIn.toDate();
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  })() : "";
+  const checkOutDate = isIsoDate(checkOut) ? checkOut : typeof checkOut === "object" && checkOut && typeof checkOut.toDate === "function" ? (() => {
+    const d = checkOut.toDate();
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  })() : "";
+  const status = String(bookingData2.status || "").trim();
+  const readOnly = !isOtherAddOnBookingMutable(status);
+  const hotelEnabled = await loadOtherAddOnsHotelEnabled();
+  let enabledAddOns = [];
+  try {
+    const snap = await adminDb.collection("addOns").get();
+    for (const d of snap.docs) {
+      const norm = normalizeAddOn({ id: d.id, ...d.data() }, d.id);
+      if (norm) enabledAddOns.push(norm);
+    }
+    enabledAddOns = getEnabledAddOnsByHotel(enabledAddOns, hotelEnabled);
+  } catch {
+  }
+  const existingSelections = bookingData2.otherAddOnSelections && typeof bookingData2.otherAddOnSelections === "object" ? bookingData2.otherAddOnSelections : {};
+  const dates = enumerateDates(checkInDate, checkOutDate);
+  const now = /* @__PURE__ */ new Date();
+  const addOnById = /* @__PURE__ */ new Map();
+  for (const a of enabledAddOns) addOnById.set(a.id, a);
+  const dateLockByAddOn = [];
+  for (const date of dates) {
+    for (const a of enabledAddOns) {
+      const state = computeOtherAddOnCutoffState({
+        checkInDate,
+        addOn: { isEnabled: a.isEnabled, cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn },
+        now
+      });
+      dateLockByAddOn.push({
+        date,
+        addOnId: a.id,
+        isLocked: state.isLocked,
+        cutoffAt: state.cutoffAt,
+        minutesUntilCutoff: state.minutesUntilCutoff,
+        reasonOrCutoff: state.reasonOrCutoff
+      });
+    }
+  }
+  const served = bookingData2.otherAddOnServed && typeof bookingData2.otherAddOnServed === "object" ? bookingData2.otherAddOnServed : {};
+  let refunds = [];
+  try {
+    const refundSnap = await adminDb.collection("bookings").doc(bookingSnap.id).collection("refunds").where("category", "==", "otherAddOn").get();
+    for (const d of refundSnap.docs) {
+      refunds.push({ id: d.id, ...d.data() });
+    }
+  } catch {
+    refunds = [];
+  }
+  const totalPrice = Number(bookingData2.totalPrice || 0);
+  const otherAddOnTotal = recomputeOtherAddOnTotal(existingSelections);
+  const hasAny = hasAnyOtherAddOns(existingSelections);
+  const paidAmount = Number(bookingData2.paidAmount || 0);
+  const balance = Math.max(0, totalPrice + otherAddOnTotal - paidAmount);
+  return res.status(200).json({
+    success: true,
+    data: {
+      readOnly,
+      booking: {
+        id: bookingSnap.id,
+        bookingRef: ref,
+        checkIn: checkInDate,
+        checkOut: checkOutDate,
+        numNights: dates.length,
+        numGuests: Number(bookingData2.numGuests || 0),
+        numAdults: Number(bookingData2.numAdults || bookingData2.numGuests || 0),
+        numChildren: Number(bookingData2.numChildren || 0),
+        totalPrice,
+        otherAddOnTotal,
+        hasAnyOtherAddOns: hasAny,
+        paidAmount,
+        balance,
+        status
+      },
+      otherAddOnSelections: existingSelections,
+      otherAddOnServed: served,
+      refunds,
+      addOns: enabledAddOns.map((a) => ({
+        id: a.id,
+        name: a.name,
+        description: a.description,
+        price: a.price,
+        unit: a.unit,
+        cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn,
+        displayOrder: a.displayOrder
+      })),
+      dateLockByAddOn
+    }
+  });
+}
+
+// server/handlers/addons-manage-save.ts
+init_firestore();
+init_firebase_admin();
+init_shared();
+init_shared();
+var IDEMPOTENCY_WINDOW_MS = 6e4;
+function readOps(body) {
+  const out = { add: [], change: [], remove: [] };
+  const mapOp = (raw, kind) => {
+    if (!raw || typeof raw !== "object") return null;
+    const selectionKey = String(raw.selectionKey || "").trim();
+    const addOnId = String(raw.addOnId || "").trim();
+    if (!selectionKey || !addOnId) return null;
+    const op = { kind, selectionKey, addOnId };
+    if (kind !== "remove") {
+      op.quantity = Math.max(0, Math.floor(Number(raw.quantity ?? 0)));
+      op.priceSnapshot = Math.max(0, Number(raw.priceSnapshot ?? 0));
+      op.nameSnapshot = String(raw.nameSnapshot || "").trim().slice(0, 120);
+      op.unitSnapshot = raw.unitSnapshot === "per-stay" ? "per-stay" : "per-person";
+      op.cutoffHoursBeforeCheckInSnapshot = Math.max(
+        0,
+        Math.min(168, Math.floor(Number(raw.cutoffHoursBeforeCheckInSnapshot ?? 24)))
+      );
+    }
+    return op;
+  };
+  if (Array.isArray(body?.add)) for (const r3 of body.add) {
+    const m2 = mapOp(r3, "add");
+    if (m2) out.add.push(m2);
+  }
+  if (Array.isArray(body?.change)) for (const r3 of body.change) {
+    const m2 = mapOp(r3, "change");
+    if (m2) out.change.push(m2);
+  }
+  if (Array.isArray(body?.remove)) for (const r3 of body.remove) {
+    const m2 = mapOp(r3, "remove");
+    if (m2) out.remove.push(m2);
+  }
+  return out;
+}
+function opErrorToMessage(code) {
+  if (code === OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE) return "That add-on is not available.";
+  if (code === OTHER_ADDON_OP_ERROR.SELECTION_ALREADY_ORDERED) return "Add-on already ordered for that day.";
+  if (code === OTHER_ADDON_OP_ERROR.SELECTION_NOT_ORDERED) return "Nothing to change \u2014 add the add-on first.";
+  if (code === OTHER_ADDON_OP_ERROR.INVALID_QUANTITY) return "Quantity must be between 0 and 50.";
+  if (code.startsWith(OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX)) {
+    const date = code.slice(OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX.length);
+    return `Ordering closed for ${date}.`;
+  }
+  if (code === "BOOKING_CHECK_IN_MISSING") {
+    return "This booking has no check-in date, so the add-on cut-off cannot be applied. Please contact the front desk.";
+  }
+  return "Could not save the add-on change.";
+}
+async function handleUpdateAddOns(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const parsed2 = OtherAddOnUpdateSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({ success: false, error: "Invalid other-add-ons update payload." });
+  }
+  const { bookingRef: bookingRef2, lookupToken, clientBatchId } = parsed2.data;
+  const ops = readOps(req.body || {});
+  const totalOps = ops.add.length + ops.change.length + ops.remove.length;
+  if (totalOps === 0) {
+    return res.status(400).json({ success: false, error: "No add-on changes supplied." });
+  }
+  if (totalOps > 80) {
+    return res.status(400).json({ success: false, error: "Too many add-on changes in one batch." });
+  }
+  const idempotencyRef = adminDb.collection("idempotencyLog").doc(`addons-update:${bookingRef2}:${clientBatchId}`);
+  try {
+    const existing = await idempotencyRef.get();
+    if (existing.exists) {
+      const stamp = existing.data() || {};
+      const ageMs = Date.now() - Number(stamp.createdAtMs || 0);
+      if (ageMs < IDEMPOTENCY_WINDOW_MS) {
+        return res.status(200).json({
+          success: true,
+          idempotent: true,
+          otherAddOnTotal: Number(stamp.otherAddOnTotal || 0),
+          hasAnyOtherAddOns: Boolean(stamp.hasAnyOtherAddOns),
+          pendingRefunds: stamp.pendingRefunds || []
+        });
+      }
+    }
+  } catch {
+  }
+  const bookingQ = await adminDb.collection("bookings").where("bookingRef", "==", bookingRef2).limit(1).get();
+  if (bookingQ.empty) {
+    return res.status(404).json({ success: false, error: "Booking not found." });
+  }
+  const bookingDoc = bookingQ.docs[0];
+  if (String(bookingDoc.data().lookupToken || "") !== lookupToken) {
+    return res.status(403).json({ success: false, error: "Invalid token." });
+  }
+  const bookingId = bookingDoc.id;
+  const bookingData2 = bookingDoc.data();
+  const status = String(bookingData2.status || "").trim();
+  if (!isOtherAddOnBookingMutable(status)) {
+    return res.status(400).json({ success: false, error: OTHER_ADD_ON_READ_ONLY_ERROR });
+  }
+  const hotelEnabled = await loadOtherAddOnsHotelEnabled();
+  if (!hotelEnabled) {
+    return res.status(400).json({ success: false, error: OTHER_ADD_ONS_UNAVAILABLE_ERROR });
+  }
+  const addOnSnap = await adminDb.collection("addOns").get();
+  const addOnById = /* @__PURE__ */ new Map();
+  for (const d of addOnSnap.docs) {
+    const norm = normalizeAddOn({ id: d.id, ...d.data() }, d.id);
+    if (norm) addOnById.set(norm.id, norm);
+  }
+  if (addOnById.size === 0) {
+    return res.status(400).json({ success: false, error: "No add-ons available right now." });
+  }
+  let opCode = null;
+  let pendingRefundKeys = [];
+  let newTotal = 0;
+  let newHasAny = false;
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const bookingRefInTx = adminDb.collection("bookings").doc(bookingId);
+      const bookingSnap = await transaction.get(bookingRefInTx);
+      if (!bookingSnap.exists) {
+        opCode = "BOOKING_NOT_FOUND";
+        return;
+      }
+      const liveBooking = bookingSnap.data() || {};
+      const liveCheckInDate = toUtcDateKey(liveBooking.checkIn);
+      if (!liveCheckInDate) {
+        opCode = "BOOKING_CHECK_IN_MISSING";
+        return;
+      }
+      const liveSelections = liveBooking.otherAddOnSelections && typeof liveBooking.otherAddOnSelections === "object" ? { ...liveBooking.otherAddOnSelections } : {};
+      const liveServed = liveBooking.otherAddOnServed && typeof liveBooking.otherAddOnServed === "object" ? liveBooking.otherAddOnServed : {};
+      const next = { ...liveSelections };
+      const auditWrites = [];
+      const refundWrites = [];
+      const now = /* @__PURE__ */ new Date();
+      const nowIso = now.toISOString();
+      const livePaidAmount = Number(liveBooking.paidAmount || 0);
+      for (const op of ops.remove) {
+        const parsedKey = parseOtherAddOnSelectionKey(op.selectionKey);
+        if (!parsedKey) {
+          opCode = OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE;
+          return;
+        }
+        const liveAddOn = addOnById.get(op.addOnId);
+        if (!liveAddOn) {
+          opCode = OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE;
+          return;
+        }
+        try {
+          assertNotLocked2({
+            selectionKey: op.selectionKey,
+            serverNow: now,
+            addOn: liveAddOn,
+            // Per OCT-M5 (2026-10-20, decision #292): the
+            // cut-off anchor is the BOOKING's check-in, not the
+            // selection's own service date. The parameter is now
+            // required, so the compiler enforces it.
+            checkInDate: liveCheckInDate
+          });
+        } catch (err) {
+          opCode = String(err?.message || OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX);
+          return;
+        }
+        if (liveServed[op.selectionKey]) {
+          opCode = `SERVE_BLOCKED:${op.selectionKey}`;
+          return;
+        }
+        try {
+          assertSelectionForChange(next, op.selectionKey);
+        } catch (err) {
+          opCode = String(err?.message || OTHER_ADDON_OP_ERROR.SELECTION_NOT_ORDERED);
+          return;
+        }
+        const dateKey2 = parsedKey.date;
+        const prior = (next[dateKey2] || []).find((e3) => e3 && e3.addOnId === parsedKey.addOnId);
+        if (!prior) continue;
+        const quantity = Math.max(0, Math.floor(Number(prior.quantity) || 0));
+        const price = Math.max(0, Number(prior.priceSnapshot) || 0);
+        const totalAmt = roundToTwoDecimals(price * quantity);
+        const marked = {
+          ...prior,
+          removedAt: nowIso,
+          removedBy: "guest",
+          lastModifiedAt: nowIso,
+          lastModifiedBy: "guest"
+        };
+        next[dateKey2] = (next[dateKey2] || []).map(
+          (e3) => e3 && e3.addOnId === parsedKey.addOnId ? marked : e3
+        );
+        if (totalAmt > 0 && livePaidAmount > 0) {
+          refundWrites.push({
+            selectionKey: op.selectionKey,
+            entry: marked,
+            amount: totalAmt
+          });
+        }
+        auditWrites.push({
+          op,
+          addOnSnapshot: { addOnId: op.addOnId, name: prior.nameSnapshot, price, quantity },
+          actorRole: "guest",
+          reason: "Guest removed add-on.",
+          occurredAfterCutoff: false
+        });
+      }
+      for (const op of ops.add) {
+        const parsedKey = parseOtherAddOnSelectionKey(op.selectionKey);
+        if (!parsedKey) {
+          opCode = OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE;
+          return;
+        }
+        const liveAddOn = addOnById.get(op.addOnId);
+        if (!liveAddOn) {
+          opCode = OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE;
+          return;
+        }
+        try {
+          assertNotLocked2({
+            selectionKey: op.selectionKey,
+            serverNow: now,
+            addOn: liveAddOn,
+            // Per OCT-M5 (2026-10-20, decision #292): the
+            // cut-off anchor is the BOOKING's check-in, not the
+            // selection's own service date. The parameter is now
+            // required, so the compiler enforces it.
+            checkInDate: liveCheckInDate
+          });
+        } catch (err) {
+          opCode = String(err?.message || OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX);
+          return;
+        }
+        if (liveServed[op.selectionKey]) {
+          opCode = `SERVE_BLOCKED:${op.selectionKey}`;
+          return;
+        }
+        try {
+          assertAddOnExists(addOnById, op.addOnId);
+          assertSelectionForAdd(next, op.selectionKey);
+        } catch (err) {
+          opCode = String(err?.message || OTHER_ADDON_OP_ERROR.SELECTION_ALREADY_ORDERED);
+          return;
+        }
+        const dateKey2 = parsedKey.date;
+        const entry = {
+          addOnId: op.addOnId,
+          nameSnapshot: liveAddOn.name,
+          priceSnapshot: Math.max(0, Number(liveAddOn.price) || 0),
+          quantity: Math.max(0, Math.floor(Number(op.quantity ?? 0) || 0)),
+          unitSnapshot: liveAddOn.unit,
+          addedAt: nowIso,
+          addedBy: "guest",
+          lastModifiedAt: nowIso,
+          lastModifiedBy: "guest",
+          removedAt: null,
+          removedBy: null,
+          cutoffHoursBeforeCheckInSnapshot: Math.max(
+            0,
+            Math.min(168, Math.floor(Number(liveAddOn.cutoffHoursBeforeCheckIn) || 24))
+          )
+        };
+        next[dateKey2] = [...next[dateKey2] || [], entry];
+        auditWrites.push({
+          op,
+          addOnSnapshot: {
+            addOnId: entry.addOnId,
+            name: entry.nameSnapshot,
+            price: entry.priceSnapshot,
+            quantity: entry.quantity
+          },
+          actorRole: "guest",
+          reason: null,
+          occurredAfterCutoff: false
+        });
+      }
+      for (const op of ops.change) {
+        const parsedKey = parseOtherAddOnSelectionKey(op.selectionKey);
+        if (!parsedKey) {
+          opCode = OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE;
+          return;
+        }
+        const liveAddOn = addOnById.get(op.addOnId);
+        if (!liveAddOn) {
+          opCode = OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE;
+          return;
+        }
+        try {
+          assertNotLocked2({
+            selectionKey: op.selectionKey,
+            serverNow: now,
+            addOn: liveAddOn,
+            // Per OCT-M5 (2026-10-20, decision #292): the
+            // cut-off anchor is the BOOKING's check-in, not the
+            // selection's own service date. The parameter is now
+            // required, so the compiler enforces it.
+            checkInDate: liveCheckInDate
+          });
+        } catch (err) {
+          opCode = String(err?.message || OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX);
+          return;
+        }
+        if (liveServed[op.selectionKey]) {
+          opCode = `SERVE_BLOCKED:${op.selectionKey}`;
+          return;
+        }
+        try {
+          assertSelectionForChange(next, op.selectionKey);
+        } catch (err) {
+          opCode = String(err?.message || OTHER_ADDON_OP_ERROR.SELECTION_NOT_ORDERED);
+          return;
+        }
+        const dateKey2 = parsedKey.date;
+        const prior = (next[dateKey2] || []).find((e3) => e3 && e3.addOnId === parsedKey.addOnId);
+        if (!prior) continue;
+        const updated = {
+          ...prior,
+          // Per OCT-C2 (2026-10-20): a CHANGE may only alter the
+          // QUANTITY. The name / price / unit are the entry's
+          // existing snapshot — the pre-fix code preferred the
+          // client's `op.priceSnapshot` here too, so a guest
+          // could re-price an existing line item on the way in.
+          //
+          // The snapshot is intentionally NOT re-read from the
+          // catalog on a change: per OTHER-ADD-ONS.md the guest
+          // keeps the price they ordered at, even if the admin
+          // changes the catalog price afterwards. A NEW order
+          // takes the current catalog price (see the add op).
+          nameSnapshot: prior.nameSnapshot,
+          priceSnapshot: prior.priceSnapshot,
+          quantity: Math.max(0, Math.floor(Number(op.quantity ?? prior.quantity) || 0)),
+          unitSnapshot: prior.unitSnapshot,
+          lastModifiedAt: nowIso,
+          lastModifiedBy: "guest"
+        };
+        next[dateKey2] = (next[dateKey2] || []).map(
+          (e3) => e3 && e3.addOnId === parsedKey.addOnId ? updated : e3
+        );
+        auditWrites.push({
+          op,
+          addOnSnapshot: {
+            addOnId: updated.addOnId,
+            name: updated.nameSnapshot,
+            price: updated.priceSnapshot,
+            quantity: updated.quantity
+          },
+          actorRole: "guest",
+          reason: null,
+          occurredAfterCutoff: false
+        });
+      }
+      newTotal = recomputeOtherAddOnTotal(next);
+      newHasAny = hasAnyOtherAddOns(next);
+      transaction.update(bookingRefInTx, {
+        otherAddOnSelections: next,
+        otherAddOnTotal: newTotal,
+        hasAnyOtherAddOns: newHasAny,
+        updatedAt: Timestamp.now()
+      });
+      for (const r3 of refundWrites) {
+        createOtherAddOnRefundLiability({
+          transaction,
+          booking: { id: bookingId, bookingRef: bookingRef2 },
+          selectionKey: r3.selectionKey,
+          addOnEntry: {
+            addOnId: r3.entry.addOnId,
+            nameSnapshot: r3.entry.nameSnapshot,
+            priceSnapshot: r3.entry.priceSnapshot,
+            quantity: r3.entry.quantity
+          },
+          amount: r3.amount,
+          reason: `Guest removed ${r3.entry.nameSnapshot} on ${parseOtherAddOnSelectionKey(r3.selectionKey)?.date || ""}.`,
+          recordedBy: "guest",
+          recordedByUid: "guest"
+        });
+        pendingRefundKeys.push(r3.selectionKey);
+      }
+      for (const a of auditWrites) {
+        auditOtherAddOnOp({
+          transaction,
+          bookingId,
+          selectionKey: a.op.selectionKey,
+          action: a.op.kind === "add" ? "add" : a.op.kind === "change" ? "change" : "remove",
+          addOnSnapshot: a.addOnSnapshot,
+          actorUid: "guest",
+          actorRole: a.actorRole,
+          // Per OCT-H7 (2026-10-20, decision #286): the object form
+          // carries BOTH the free-text reason and the cut-off flag.
+          // On the guest surface the flag is always `false` (the
+          // guest is blocked once a date locks), but passing it
+          // explicitly keeps the intent visible instead of
+          // relying on the default.
+          reasonOrCutoff: {
+            reason: a.reason,
+            occurredAfterCutoff: a.occurredAfterCutoff
+          }
+        });
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: "Failed to save add-on changes."
+    });
+  }
+  if (opCode) {
+    return res.status(400).json({
+      success: false,
+      error: opErrorToMessage(opCode)
+    });
+  }
+  try {
+    await idempotencyRef.set({
+      bookingRef: bookingRef2,
+      clientBatchId,
+      createdAtMs: Date.now(),
+      otherAddOnTotal: newTotal,
+      hasAnyOtherAddOns: newHasAny,
+      pendingRefunds: pendingRefundKeys
+    });
+  } catch {
+  }
+  return res.status(200).json({
+    success: true,
+    otherAddOnTotal: newTotal,
+    hasAnyOtherAddOns: newHasAny,
+    pendingRefunds: pendingRefundKeys
+  });
+}
+
+// server/handlers/addons-staff-update.ts
+init_firestore();
+init_firebase_admin();
+init_shared();
+function readOps2(body) {
+  const out = { add: [], change: [], remove: [] };
+  const mapOp = (raw, kind) => {
+    if (!raw || typeof raw !== "object") return null;
+    const selectionKey = String(raw.selectionKey || "").trim();
+    const addOnId = String(raw.addOnId || "").trim();
+    if (!selectionKey || !addOnId) return null;
+    const op = { kind, selectionKey, addOnId };
+    if (kind !== "remove") {
+      op.quantity = Math.max(0, Math.floor(Number(raw.quantity ?? 0)));
+      op.priceSnapshot = Math.max(0, Number(raw.priceSnapshot ?? 0));
+      op.nameSnapshot = String(raw.nameSnapshot || "").trim().slice(0, 120);
+      op.unitSnapshot = raw.unitSnapshot === "per-stay" ? "per-stay" : "per-person";
+      op.cutoffHoursBeforeCheckInSnapshot = Math.max(
+        0,
+        Math.min(168, Math.floor(Number(raw.cutoffHoursBeforeCheckInSnapshot ?? 24)))
+      );
+    }
+    return op;
+  };
+  if (Array.isArray(body?.add)) for (const r3 of body.add) {
+    const m2 = mapOp(r3, "add");
+    if (m2) out.add.push(m2);
+  }
+  if (Array.isArray(body?.change)) for (const r3 of body.change) {
+    const m2 = mapOp(r3, "change");
+    if (m2) out.change.push(m2);
+  }
+  if (Array.isArray(body?.remove)) for (const r3 of body.remove) {
+    const m2 = mapOp(r3, "remove");
+    if (m2) out.remove.push(m2);
+  }
+  return out;
+}
+function opErrorToMessage2(code) {
+  if (code === OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE) return "That add-on is not available.";
+  if (code === OTHER_ADDON_OP_ERROR.SELECTION_ALREADY_ORDERED) return "Add-on already ordered for that day.";
+  if (code === OTHER_ADDON_OP_ERROR.SELECTION_NOT_ORDERED) return "Nothing to change.";
+  if (code === OTHER_ADDON_OP_ERROR.INVALID_QUANTITY) return "Quantity must be between 0 and 50.";
+  if (code.startsWith(OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX)) {
+    return `Ordering closed \u2014 use overrideReason for late changes.`;
+  }
+  if (code === "BOOKING_CHECK_IN_MISSING") {
+    return "This booking has no check-in date, so the add-on cut-off cannot be applied.";
+  }
+  return "Could not save the staff add-on update.";
+}
+async function handleStaffUpdateAddOns(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const parsed2 = StaffOtherAddOnUpdateSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({ success: false, error: "Invalid staff other-add-ons update payload." });
+  }
+  const { bookingId, overrideReason } = parsed2.data;
+  const ops = readOps2(req.body || {});
+  const totalOps = ops.add.length + ops.change.length + ops.remove.length;
+  if (totalOps === 0) {
+    return res.status(400).json({ success: false, error: "No add-on changes supplied." });
+  }
+  if (totalOps > 200) {
+    return res.status(400).json({ success: false, error: "Too many add-on changes in one batch." });
+  }
+  const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
+  const bookingSnap = await bookingRef2.get();
+  if (!bookingSnap.exists) {
+    return res.status(404).json({ success: false, error: "Booking not found." });
+  }
+  const bookingData2 = bookingSnap.data() || {};
+  const bookingRefValue = String(bookingData2.bookingRef || "");
+  if (!isOtherAddOnBookingMutable(bookingData2.status)) {
+    return res.status(400).json({ success: false, error: OTHER_ADD_ON_READ_ONLY_ERROR });
+  }
+  const addOnSnap = await adminDb.collection("addOns").get();
+  const addOnById = /* @__PURE__ */ new Map();
+  for (const d of addOnSnap.docs) {
+    const norm = normalizeAddOn({ id: d.id, ...d.data() }, d.id);
+    if (norm) addOnById.set(norm.id, norm);
+  }
+  let opCode = null;
+  let newTotal = 0;
+  let newHasAny = false;
+  let pendingRefundKeys = [];
+  const actorUid = req.staff?.uid || "staff";
+  const actorRole = req.staff?.role === "admin" ? "admin" : "front-desk";
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const live = await transaction.get(bookingRef2);
+      const liveBooking = live.data() || {};
+      const liveCheckInDate = toUtcDateKey(liveBooking.checkIn);
+      if (!liveCheckInDate) {
+        opCode = "BOOKING_CHECK_IN_MISSING";
+        return false;
+      }
+      const liveSelections = liveBooking.otherAddOnSelections && typeof liveBooking.otherAddOnSelections === "object" ? { ...liveBooking.otherAddOnSelections } : {};
+      const liveServed = liveBooking.otherAddOnServed && typeof liveBooking.otherAddOnServed === "object" ? liveBooking.otherAddOnServed : {};
+      const next = { ...liveSelections };
+      const auditWrites = [];
+      const refundWrites = [];
+      const now = /* @__PURE__ */ new Date();
+      const nowIso = now.toISOString();
+      const livePaidAmount = Number(liveBooking.paidAmount || 0);
+      const runOp = (op, kind) => {
+        const parsedKey = parseOtherAddOnSelectionKey(op.selectionKey);
+        if (!parsedKey) {
+          opCode = OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE;
+          return false;
+        }
+        const liveAddOn = addOnById.get(op.addOnId);
+        if (!liveAddOn) {
+          opCode = OTHER_ADDON_OP_ERROR.ADDON_NOT_AVAILABLE;
+          return false;
+        }
+        let isLateCutoff = false;
+        try {
+          assertNotLocked2({
+            selectionKey: op.selectionKey,
+            serverNow: now,
+            addOn: liveAddOn,
+            // Per OCT-M5 (2026-10-20, decision #292): the
+            // cut-off anchor is the BOOKING's check-in, not the
+            // selection's own service date. The parameter is now
+            // required, so the compiler enforces it.
+            checkInDate: liveCheckInDate
+          });
+        } catch (err) {
+          if (!overrideReason || overrideReason.length < 8) {
+            opCode = `${OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX}${parsedKey.date}`;
+            return false;
+          }
+          isLateCutoff = true;
+        }
+        if (liveServed[op.selectionKey] && kind !== "remove") {
+          opCode = `SERVE_BLOCKED:${op.selectionKey}`;
+          return false;
+        }
+        const dateKey2 = parsedKey.date;
+        if (kind === "remove") {
+          try {
+            assertSelectionForChange(next, op.selectionKey);
+          } catch (err) {
+            opCode = String(err?.message || OTHER_ADDON_OP_ERROR.SELECTION_NOT_ORDERED);
+            return false;
+          }
+          const prior2 = (next[dateKey2] || []).find((e3) => e3 && e3.addOnId === parsedKey.addOnId);
+          if (!prior2) return true;
+          const price = Math.max(0, Number(prior2.priceSnapshot) || 0);
+          const quantity = Math.max(0, Math.floor(Number(prior2.quantity) || 0));
+          const totalAmt = roundToTwoDecimals(price * quantity);
+          const marked = {
+            ...prior2,
+            removedAt: nowIso,
+            removedBy: actorUid,
+            lastModifiedAt: nowIso,
+            lastModifiedBy: actorUid
+          };
+          next[dateKey2] = (next[dateKey2] || []).map(
+            (e3) => e3 && e3.addOnId === parsedKey.addOnId ? marked : e3
+          );
+          if (totalAmt > 0 && livePaidAmount > 0) {
+            refundWrites.push({ selectionKey: op.selectionKey, entry: marked, amount: totalAmt });
+          }
+          auditWrites.push({
+            op,
+            addOnSnapshot: { addOnId: op.addOnId, name: prior2.nameSnapshot, price, quantity },
+            reason: isLateCutoff ? overrideReason || null : "Staff removed add-on.",
+            occurredAfterCutoff: isLateCutoff
+          });
+          return true;
+        }
+        if (kind === "add") {
+          try {
+            assertAddOnExists(addOnById, op.addOnId);
+            assertSelectionForAdd(next, op.selectionKey);
+          } catch (err) {
+            opCode = String(err?.message || OTHER_ADDON_OP_ERROR.SELECTION_ALREADY_ORDERED);
+            return false;
+          }
+          const entry = {
+            addOnId: op.addOnId,
+            // Per OCT-C2 (2026-10-20, audit
+            // `plan/project/AUDIT-OCTOBER-2026.md`): the snapshot
+            // fields come from the LIVE CATALOG, never from the
+            // request body. The pre-fix code preferred the
+            // client's `op.priceSnapshot` (`op.priceSnapshot ??
+            // liveAddOn.price` — the client always sends it, so
+            // the catalog fallback could never fire). That
+            // defeated the `priceSnapshot` audit trail on the
+            // staff path too: the `addOnSnapshot.price` written
+            // to `otherAddOnAudit` recorded the REQUEST's price,
+            // not the catalog's.
+            nameSnapshot: liveAddOn.name,
+            priceSnapshot: Math.max(0, Number(liveAddOn.price) || 0),
+            quantity: Math.max(0, Math.floor(Number(op.quantity ?? 0) || 0)),
+            unitSnapshot: liveAddOn.unit,
+            addedAt: nowIso,
+            addedBy: actorUid,
+            lastModifiedAt: nowIso,
+            lastModifiedBy: actorUid,
+            removedAt: null,
+            removedBy: null,
+            cutoffHoursBeforeCheckInSnapshot: Math.max(
+              0,
+              Math.min(168, Math.floor(Number(liveAddOn.cutoffHoursBeforeCheckIn) || 24))
+            )
+          };
+          next[dateKey2] = [...next[dateKey2] || [], entry];
+          auditWrites.push({
+            op,
+            addOnSnapshot: {
+              addOnId: entry.addOnId,
+              name: entry.nameSnapshot,
+              price: entry.priceSnapshot,
+              quantity: entry.quantity
+            },
+            reason: isLateCutoff ? overrideReason || null : null,
+            occurredAfterCutoff: isLateCutoff
+          });
+          return true;
+        }
+        try {
+          assertSelectionForChange(next, op.selectionKey);
+        } catch (err) {
+          opCode = String(err?.message || OTHER_ADDON_OP_ERROR.SELECTION_NOT_ORDERED);
+          return false;
+        }
+        const prior = (next[dateKey2] || []).find((e3) => e3 && e3.addOnId === parsedKey.addOnId);
+        if (!prior) return true;
+        const updated = {
+          ...prior,
+          // Per OCT-C2 (2026-10-20): a CHANGE may only alter the
+          // QUANTITY. Name / price / unit stay the entry's
+          // existing snapshot — the pre-fix code preferred the
+          // client's `op.priceSnapshot` here too.
+          nameSnapshot: prior.nameSnapshot,
+          priceSnapshot: prior.priceSnapshot,
+          quantity: Math.max(0, Math.floor(Number(op.quantity ?? prior.quantity) || 0)),
+          unitSnapshot: prior.unitSnapshot,
+          lastModifiedAt: nowIso,
+          lastModifiedBy: actorUid
+        };
+        next[dateKey2] = (next[dateKey2] || []).map(
+          (e3) => e3 && e3.addOnId === parsedKey.addOnId ? updated : e3
+        );
+        auditWrites.push({
+          op,
+          addOnSnapshot: {
+            addOnId: updated.addOnId,
+            name: updated.nameSnapshot,
+            price: updated.priceSnapshot,
+            quantity: updated.quantity
+          },
+          reason: isLateCutoff ? overrideReason || null : null,
+          occurredAfterCutoff: isLateCutoff
+        });
+        return true;
+      };
+      for (const op of ops.remove) {
+        if (!runOp(op, "remove")) return;
+      }
+      for (const op of ops.add) {
+        if (!runOp(op, "add")) return;
+      }
+      for (const op of ops.change) {
+        if (!runOp(op, "change")) return;
+      }
+      newTotal = recomputeOtherAddOnTotal(next);
+      newHasAny = hasAnyOtherAddOns(next);
+      transaction.update(bookingRef2, {
+        otherAddOnSelections: next,
+        otherAddOnTotal: newTotal,
+        hasAnyOtherAddOns: newHasAny,
+        updatedAt: Timestamp.now()
+      });
+      for (const r3 of refundWrites) {
+        createOtherAddOnRefundLiability({
+          transaction,
+          booking: { id: bookingId, bookingRef: bookingRefValue },
+          selectionKey: r3.selectionKey,
+          addOnEntry: {
+            addOnId: r3.entry.addOnId,
+            nameSnapshot: r3.entry.nameSnapshot,
+            priceSnapshot: r3.entry.priceSnapshot,
+            quantity: r3.entry.quantity
+          },
+          amount: r3.amount,
+          reason: `Staff removed ${r3.entry.nameSnapshot} on ${parseOtherAddOnSelectionKey(r3.selectionKey)?.date || ""}.`,
+          recordedBy: actorRole,
+          recordedByUid: actorUid
+        });
+        pendingRefundKeys.push(r3.selectionKey);
+      }
+      for (const a of auditWrites) {
+        const baseAction = a.op.kind === "add" ? "add" : a.op.kind === "change" ? "change" : "remove";
+        auditOtherAddOnOp({
+          transaction,
+          bookingId,
+          selectionKey: a.op.selectionKey,
+          action: a.occurredAfterCutoff ? `override-${baseAction}` : baseAction,
+          addOnSnapshot: a.addOnSnapshot,
+          actorUid,
+          actorRole,
+          // Per OCT-H7 (2026-10-20, decision #286): the object form
+          // carries BOTH the free-text reason and the cut-off flag.
+          // The previous two-way `string | boolean` overload could
+          // only carry one, so an override (which the action name
+          // already flagged as `override-*`) still wrote
+          // `occurredAfterCutoff: false` and the late-change
+          // counter stayed at zero.
+          reasonOrCutoff: {
+            reason: a.reason,
+            occurredAfterCutoff: a.occurredAfterCutoff
+          }
+        });
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: "Failed to save staff add-on updates."
+    });
+  }
+  if (opCode) {
+    return res.status(400).json({
+      success: false,
+      error: opErrorToMessage2(opCode)
+    });
+  }
+  return res.status(200).json({
+    success: true,
+    otherAddOnTotal: newTotal,
+    hasAnyOtherAddOns: newHasAny,
+    pendingRefunds: pendingRefundKeys
+  });
+}
+
+// server/handlers/addons-mark-served.ts
+init_firestore();
+init_firebase_admin();
+init_shared();
+async function handleMarkServedAddOns(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const parsed2 = OtherAddOnMarkServedSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({ success: false, error: "Invalid mark-served payload." });
+  }
+  const { bookingId, selectionKeys } = parsed2.data;
+  const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
+  const actorUid = req.staff?.uid || "staff";
+  const actorRole = req.staff?.role === "admin" ? "admin" : "front-desk";
+  let opCode = null;
+  const servedAt = Timestamp.now();
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const live = await transaction.get(bookingRef2);
+      if (!live.exists) {
+        opCode = "BOOKING_NOT_FOUND";
+        return;
+      }
+      const liveBooking = live.data() || {};
+      if (!isOtherAddOnBookingMutable(liveBooking.status)) {
+        opCode = "BOOKING_READ_ONLY";
+        return;
+      }
+      const liveSelections = liveBooking.otherAddOnSelections && typeof liveBooking.otherAddOnSelections === "object" ? { ...liveBooking.otherAddOnSelections } : {};
+      const liveServed = liveBooking.otherAddOnServed && typeof liveBooking.otherAddOnServed === "object" ? { ...liveBooking.otherAddOnServed } : {};
+      const servedSnapshot = { ...liveServed };
+      for (const key of selectionKeys) {
+        const parsedKey = parseOtherAddOnSelectionKey(key);
+        if (!parsedKey) {
+          opCode = `INVALID_KEY:${key}`;
+          return;
+        }
+        const entry = (liveSelections[parsedKey.date] || []).find(
+          (e3) => e3 && e3.addOnId === parsedKey.addOnId
+        );
+        if (!entry) {
+          opCode = `SERVE_NOT_FOUND:${key}`;
+          return;
+        }
+        servedSnapshot[key] = {
+          servedAt,
+          servedBy: actorUid
+        };
+        auditOtherAddOnOp({
+          transaction,
+          bookingId,
+          selectionKey: key,
+          action: "mark-served",
+          addOnSnapshot: {
+            addOnId: entry.addOnId,
+            name: entry.nameSnapshot,
+            price: entry.priceSnapshot,
+            quantity: entry.quantity
+          },
+          actorUid,
+          actorRole,
+          reasonOrCutoff: null
+        });
+      }
+      transaction.update(bookingRef2, {
+        otherAddOnServed: servedSnapshot,
+        updatedAt: Timestamp.now()
+      });
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: "Failed to mark add-on served." });
+  }
+  if (opCode) {
+    if (opCode.startsWith("SERVE_NOT_FOUND:")) {
+      return res.status(404).json({ success: false, error: "Add-on selection not found." });
+    }
+    if (opCode === "BOOKING_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Booking not found." });
+    }
+    if (opCode === "BOOKING_READ_ONLY") {
+      return res.status(400).json({ success: false, error: OTHER_ADD_ON_READ_ONLY_ERROR });
+    }
+    return res.status(400).json({ success: false, error: "Could not mark add-on served." });
+  }
+  return res.status(200).json({ success: true });
+}
+
+// server/handlers/addons-refund-paid.ts
+init_firebase_admin();
+init_shared();
+function readStaff4(req) {
+  const anyReq = req;
+  const staff = anyReq.staff;
+  if (!staff || !staff.uid) return null;
+  const role = String(staff.role || "");
+  if (role !== "admin" && role !== "front-desk") return null;
+  return { uid: String(staff.uid), role };
+}
+async function handleMarkRefundPaidAddOns(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const parsed2 = OtherAddOnMarkRefundPaidSchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({ success: false, error: "Invalid mark-refund-paid payload." });
+  }
+  const staff = readStaff4(req);
+  if (!staff) {
+    return res.status(403).json({
+      success: false,
+      error: "Forbidden: Access restricted to staff members."
+    });
+  }
+  const { bookingId, refundId, method, transactionReference, note } = parsed2.data;
+  const trimmedReference = transactionReference ? String(transactionReference).trim() : null;
+  const trimmedNote = note ? String(note).trim() : null;
+  let opCode = null;
+  let resultSummary = null;
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const refundRef = adminDb.collection("bookings").doc(bookingId).collection("refunds").doc(refundId);
+      const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
+      const [refundSnap, bookingSnap] = await Promise.all([
+        transaction.get(refundRef),
+        transaction.get(bookingRef2)
+      ]);
+      if (!refundSnap.exists) {
+        opCode = "REFUND_NOT_FOUND";
+        return;
+      }
+      const refundData = refundSnap.data() || {};
+      const bookingData2 = bookingSnap.data() || {};
+      const selectionKey = String(refundData?.otherAddOnRefundContext?.selectionKey || "");
+      const liveSelections = bookingData2.otherAddOnSelections && typeof bookingData2.otherAddOnSelections === "object" ? bookingData2.otherAddOnSelections : {};
+      const entry = selectionKey ? (() => {
+        const parts = selectionKey.split("-");
+        const date = parts.slice(0, 3).join("-");
+        const addOnId = parts.slice(3).join("-");
+        return (liveSelections[date] || []).find((e3) => e3 && e3.addOnId === addOnId);
+      })() : null;
+      try {
+        const helperResult = markRefundPaid({
+          category: "otherAddOn",
+          bookingId,
+          refundId,
+          amount: Math.abs(Number(refundData.amount || 0)),
+          method,
+          transactionReference: trimmedReference,
+          note: trimmedNote,
+          actor: { uid: staff.uid, role: staff.role },
+          transaction,
+          existingDoc: refundSnap,
+          currentPaidAmount: Number(bookingData2.paidAmount || 0),
+          slotKey: selectionKey
+        });
+        resultSummary = {
+          refundEntry: {
+            refundId,
+            status: helperResult.refundEntry.status || "paid",
+            paidAt: helperResult.refundEntry.paidAt,
+            paidBy: helperResult.refundEntry.paidBy,
+            method: helperResult.refundEntry.method,
+            transactionReference: helperResult.refundEntry.transactionReference,
+            note: helperResult.refundEntry.note,
+            amount: helperResult.refundEntry.amount,
+            category: helperResult.refundEntry.category || "otherAddOn",
+            selectionKey: helperResult.refundEntry.slotKey
+          },
+          newBookingPaidAmount: helperResult.newBookingPaidAmount,
+          alreadyPaid: helperResult.alreadyPaid
+        };
+        if (entry) {
+          auditOtherAddOnOp({
+            transaction,
+            bookingId,
+            selectionKey,
+            action: "mark-served",
+            addOnSnapshot: {
+              addOnId: entry.addOnId,
+              name: entry.nameSnapshot,
+              price: entry.priceSnapshot,
+              quantity: entry.quantity
+            },
+            actorUid: staff.uid,
+            actorRole: staff.role,
+            reasonOrCutoff: `Mark refund paid via ${method}.`
+          });
+        }
+      } catch (err) {
+        opCode = String(err?.message || "UNKNOWN");
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: refundPaidErrorToMessage("UNKNOWN")
+    });
+  }
+  if (opCode) {
+    if (opCode === "REFUND_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: refundPaidErrorToMessage(opCode) });
+    }
+    return res.status(400).json({ success: false, error: refundPaidErrorToMessage(opCode) });
+  }
+  if (!resultSummary) {
+    return res.status(500).json({
+      success: false,
+      error: refundPaidErrorToMessage("UNKNOWN")
+    });
+  }
+  return res.status(200).json({
+    success: true,
+    newBookingPaidAmount: resultSummary.newBookingPaidAmount,
+    refundEntry: resultSummary.refundEntry,
+    alreadyPaid: resultSummary.alreadyPaid
+  });
+}
+
+// server/handlers/breakfast-kitchen-list.ts
+init_zod();
+init_firestore();
+init_shared();
+init_firebase_admin();
+var dateStringSchema = external_exports.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be a YYYY-MM-DD calendar date.");
+function isValidCalendarDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [yearStr, monthStr, dayStr] = value.split("-");
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const day = Number(dayStr);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return false;
+  if (month < 1 || month > 12) return false;
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  return probe.getUTCFullYear() === year && probe.getUTCMonth() === month - 1 && probe.getUTCDate() === day;
+}
+var acknowledgeBodySchema = external_exports.object({
+  bookingId: external_exports.string().trim().min(8).max(80),
+  // Firestore auto-id — a 20-char string is the typical
+  // floor, but we accept the wider auto-id alphabet
+  // to be future-proof.
+  auditId: external_exports.string().trim().min(8).max(80)
+}).passthrough();
+var CACHE_TTL_MS = 3e4;
+var CACHE_MAX_ENTRIES = 64;
+var responseCache = /* @__PURE__ */ new Map();
+function cacheGet(date) {
+  const entry = responseCache.get(date);
+  if (!entry) return null;
+  if (Date.now() - entry.cachedAt > CACHE_TTL_MS) {
+    responseCache.delete(date);
+    return null;
+  }
+  responseCache.delete(date);
+  responseCache.set(date, entry);
+  return entry.value;
+}
+function cacheSet(date, value) {
+  if (responseCache.size >= CACHE_MAX_ENTRIES) {
+    const oldest = responseCache.keys().next().value;
+    if (oldest !== void 0) responseCache.delete(oldest);
+  }
+  responseCache.set(date, { value, cachedAt: Date.now() });
+}
+function invalidateKitchenListCacheForSlotKey(slotKey) {
+  if (typeof slotKey !== "string" || slotKey.length < 10) return;
+  const datePrefix = slotKey.slice(0, 10);
+  if (responseCache.delete(datePrefix)) {
+  }
+}
+function readStaff5(req) {
+  const anyReq = req;
+  const staff = anyReq.staff;
+  if (!staff || !staff.uid) return null;
+  const role = String(staff.role || "");
+  if (role !== "admin" && role !== "front-desk") return null;
+  return { uid: String(staff.uid), role };
+}
+function extractGuestNameFromSlotKey(booking, slotKey, guestIndexFallback) {
+  const guests = Array.isArray(booking?.guests) ? booking.guests : [];
+  const parts = slotKey.split("-");
+  let guestIndex = guestIndexFallback;
+  const tail = parts[parts.length - 1];
+  if (tail !== void 0) {
+    const parsed2 = Number.parseInt(tail, 10);
+    if (Number.isFinite(parsed2) && parsed2 >= 0) guestIndex = parsed2;
+  }
+  const slotGuest = guests[guestIndex];
+  if (slotGuest && typeof slotGuest === "object") {
+    const first = typeof slotGuest.firstName === "string" ? slotGuest.firstName : "";
+    const last = typeof slotGuest.lastName === "string" ? slotGuest.lastName : "";
+    const combined = `${first} ${last}`.trim();
+    if (combined.length > 0) return { guestIndex, guestName: combined };
+    if (typeof slotGuest.name === "string" && slotGuest.name.trim().length > 0) {
+      return { guestIndex, guestName: slotGuest.name.trim() };
+    }
+  }
+  const firstGuest = guests[0];
+  if (firstGuest && typeof firstGuest === "object") {
+    const first = typeof firstGuest.firstName === "string" ? firstGuest.firstName : "";
+    const last = typeof firstGuest.lastName === "string" ? firstGuest.lastName : "";
+    const combined = `${first} ${last}`.trim();
+    if (combined.length > 0) return { guestIndex: 0, guestName: combined };
+    if (typeof firstGuest.name === "string" && firstGuest.name.trim().length > 0) {
+      return { guestIndex: 0, guestName: firstGuest.name.trim() };
+    }
+  }
+  if (typeof booking?.guestName === "string" && booking.guestName.trim().length > 0) {
+    return { guestIndex, guestName: booking.guestName.trim() };
+  }
+  return { guestIndex, guestName: "Guest" };
+}
+function bookingRoomNumber(booking) {
+  const direct = booking?.roomNumber;
+  if (typeof direct === "string" && direct.trim().length > 0) return direct.trim();
+  if (typeof direct === "number" && Number.isFinite(direct)) return String(direct);
+  const rooms = booking?.rooms;
+  if (Array.isArray(rooms) && rooms.length > 0) {
+    const candidate = rooms[0]?.number;
+    if (typeof candidate === "string" && candidate.trim().length > 0) return candidate.trim();
+    if (typeof candidate === "number" && Number.isFinite(candidate)) return String(candidate);
+  }
+  return "\u2014";
+}
+function bookingRef(booking) {
+  const ref = booking?.ref ?? booking?.reference ?? booking?.bookingRef;
+  if (typeof ref === "string" && ref.length > 0) return ref;
+  return "\u2014";
+}
+function slotKeyDatePrefixMatches(slotKey, datePrefix) {
+  return typeof slotKey === "string" && slotKey.startsWith(`${datePrefix}-`);
+}
+function toIsoString(value) {
+  if (value instanceof Timestamp) return value.toDate().toISOString();
+  if (value && typeof value === "object" && "_seconds" in value) {
+    const seconds = Number(value._seconds);
+    if (Number.isFinite(seconds)) return new Date(seconds * 1e3).toISOString();
+  }
+  if (typeof value === "string") {
+    const parsed2 = Date.parse(value);
+    if (Number.isFinite(parsed2)) return new Date(parsed2).toISOString();
+  }
+  if (value instanceof Date) return value.toISOString();
+  return "";
+}
+async function computeKitchenList(date) {
+  const datePrefix = date;
+  const cutoffsEnabled = await loadKitchenListCutoffsEnabled();
+  const cutoffState = computeBreakfastCutoffStateSafe(date, cutoffsEnabled);
+  const cutoffAtIso = cutoffState.cutoffAt.toISOString();
+  const cutoffPassed = cutoffState.isLocked;
+  const bookings = [];
+  try {
+    const snap = await adminDb.collection("bookings").where("hasAnyBreakfast", "==", true).get();
+    snap.forEach((doc) => {
+      bookings.push({ id: doc.id, ...doc.data() });
+    });
+  } catch (err) {
+    console.error("[breakfast-kitchen-list] booking scan failed:", err?.message || err);
+  }
+  const finalized = [];
+  for (const booking of bookings) {
+    const selections = booking.breakfastSelections;
+    if (!selections || typeof selections !== "object") continue;
+    const bookingId = booking.id;
+    const roomNumber = bookingRoomNumber(booking);
+    const ref = bookingRef(booking);
+    for (const slotKey of Object.keys(selections)) {
+      if (!slotKeyDatePrefixMatches(slotKey, datePrefix)) continue;
+      const entry = selections[slotKey];
+      if (!entry || typeof entry !== "object") continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0 && entry.removedAt !== "") {
+        continue;
+      }
+      const { guestIndex, guestName: guestName2 } = extractGuestNameFromSlotKey(booking, slotKey, 0);
+      finalized.push({
+        bookingId,
+        ref,
+        roomNumber,
+        guestName: guestName2,
+        guestIndex,
+        slotKey,
+        mealId: typeof entry.mealId === "string" ? entry.mealId : "",
+        mealName: typeof entry.mealName === "string" ? entry.mealName : "Unnamed meal",
+        price: Number.isFinite(Number(entry.price)) ? Number(entry.price) : 0,
+        lastModifiedAt: toIsoString(entry.lastModifiedAt)
+      });
+    }
+  }
+  const byMeal = {};
+  for (const entry of finalized) {
+    const key = entry.mealName || "Unnamed meal";
+    byMeal[key] = (byMeal[key] || 0) + 1;
+  }
+  const summary = {
+    totalMeals: finalized.length,
+    byMeal
+  };
+  const lateChanges = [];
+  try {
+    const auditGroup = adminDb.collectionGroup("breakfastAudit");
+    const auditSnap = await auditGroup.where("occurredAfterCutoff", "==", true).get();
+    const bookingById = /* @__PURE__ */ new Map();
+    for (const booking of bookings) {
+      bookingById.set(booking.id, booking);
+    }
+    auditSnap.forEach((doc) => {
+      const data = doc.data();
+      if (!data) return;
+      if (!slotKeyDatePrefixMatches(data.slotKey, datePrefix)) return;
+      const bookingRefDoc = doc.ref.parent.parent;
+      if (!bookingRefDoc) return;
+      const bookingId = bookingRefDoc.id;
+      const matchingBooking = bookingById.get(bookingId);
+      const roomNumber = matchingBooking ? bookingRoomNumber(matchingBooking) : "\u2014";
+      const ref = matchingBooking ? bookingRef(matchingBooking) : "\u2014";
+      const { guestIndex, guestName: guestName2 } = extractGuestNameFromSlotKey(
+        matchingBooking || { guests: [] },
+        typeof data.slotKey === "string" ? data.slotKey : "",
+        0
+      );
+      const mealSnapshot = data.mealSnapshot && typeof data.mealSnapshot === "object" ? {
+        mealId: String(data.mealSnapshot.mealId || ""),
+        mealName: String(data.mealSnapshot.mealName || ""),
+        price: Number.isFinite(Number(data.mealSnapshot.price)) ? Number(data.mealSnapshot.price) : 0
+      } : null;
+      lateChanges.push({
+        auditId: doc.id,
+        bookingId,
+        ref,
+        roomNumber,
+        guestName: guestName2,
+        guestIndex,
+        action: typeof data.action === "string" ? data.action : "",
+        mealSnapshot,
+        slotKey: typeof data.slotKey === "string" ? data.slotKey : "",
+        occurredAt: toIsoString(data.occurredAt),
+        occurredAfterCutoff: data.occurredAfterCutoff === true,
+        reason: typeof data.reason === "string" ? data.reason : null,
+        actorRole: typeof data.actorRole === "string" ? data.actorRole : "",
+        acknowledgedAt: data.acknowledgedAt !== null && data.acknowledgedAt !== void 0 ? toIsoString(data.acknowledgedAt) : null,
+        acknowledgedBy: typeof data.acknowledgedBy === "string" ? data.acknowledgedBy : null
+      });
+    });
+  } catch (err) {
+    console.error("[breakfast-kitchen-list] audit scan failed:", err?.message || err);
+  }
+  lateChanges.sort((a, b3) => {
+    if (a.occurredAt < b3.occurredAt) return 1;
+    if (a.occurredAt > b3.occurredAt) return -1;
+    return 0;
+  });
+  return {
+    success: true,
+    date,
+    cutoffAt: cutoffAtIso,
+    cutoffPassed,
+    finalized,
+    lateChanges,
+    summary
+  };
+}
+function computeBreakfastCutoffStateSafe(date, cutoffsEnabled = true) {
+  try {
+    const state = computeBreakfastCutoffState({
+      serviceDate: date,
+      now: /* @__PURE__ */ new Date(),
+      // The handler reads the same defaults the
+      // settings doc would supply. Reading from
+      // Firestore on every kitchen list hit is a
+      // worthwhile follow-up but not required for
+      // BR-07 (the defaults match the BR-02
+      // settings surface 99% of the time). Per
+      // BR-10 the `cutoffsEnabled` toggle IS
+      // re-read on every uncached request via
+      // `loadKitchenListCutoffsEnabled` so the
+      // late-change split honors the admin-side
+      // flip immediately.
+      cutoffTime: DEFAULT_BREAKFAST_CUTOFF_TIME,
+      timezone: DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
+      cutoffsEnabled
+    });
+    return {
+      cutoffAt: state.cutoffAt instanceof Date ? state.cutoffAt : new Date(state.cutoffAt),
+      isLocked: Boolean(state.isLocked)
+    };
+  } catch {
+    return {
+      cutoffAt: /* @__PURE__ */ new Date(),
+      isLocked: false
+    };
+  }
+}
+var cutoffsEnabledCache = null;
+var KITCHEN_LIST_CUTOFFS_CACHE_MS = 3e4;
+async function loadKitchenListCutoffsEnabled() {
+  const now = Date.now();
+  if (cutoffsEnabledCache && now - cutoffsEnabledCache.at < KITCHEN_LIST_CUTOFFS_CACHE_MS) {
+    return cutoffsEnabledCache.value;
+  }
+  try {
+    const snap = await adminDb.collection("settings").doc("breakfastConfig").get();
+    const source = snap.exists ? snap.data() : null;
+    const value = source?.cutoffsEnabled !== false;
+    cutoffsEnabledCache = { value, at: now };
+    return value;
+  } catch {
+    return true;
+  }
+}
+async function handleGetKitchenList(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = readStaff5(req);
+  if (!staff) {
+    return res.status(403).json({
+      success: false,
+      error: "Forbidden: Access restricted to staff members."
+    });
+  }
+  const dateRaw = typeof req.query.date === "string" ? req.query.date.trim() : Array.isArray(req.query.date) && typeof req.query.date[0] === "string" ? req.query.date[0].trim() : "";
+  if (!dateRaw) {
+    return res.status(400).json({
+      success: false,
+      error: "date is required (YYYY-MM-DD)."
+    });
+  }
+  const dateParse = dateStringSchema.safeParse(dateRaw);
+  if (!dateParse.success || !isValidCalendarDate(dateRaw)) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid date \u2014 must match YYYY-MM-DD and be a real calendar date."
+    });
+  }
+  const cacheKey = dateRaw;
+  const cached = cacheGet(cacheKey);
+  if (cached) {
+    res.setHeader("X-Cache", "HIT");
+    return res.status(200).json(cached);
+  }
+  const payload = await computeKitchenList(dateRaw);
+  cacheSet(cacheKey, payload);
+  res.setHeader("X-Cache", "MISS");
+  return res.status(200).json(payload);
+}
+async function handleAcknowledgeKitchenListAudit(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = readStaff5(req);
+  if (!staff) {
+    return res.status(403).json({
+      success: false,
+      error: "Forbidden: Access restricted to staff members."
+    });
+  }
+  const parsed2 = acknowledgeBodySchema.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid acknowledge payload."
+    });
+  }
+  const { bookingId, auditId } = parsed2.data;
+  const auditRef = adminDb.collection("bookings").doc(bookingId).collection("breakfastAudit").doc(auditId);
+  const auditSnap = await auditRef.get();
+  if (!auditSnap.exists) {
+    return res.status(404).json({
+      success: false,
+      error: "Audit entry not found."
+    });
+  }
+  const acknowledgedAt = Timestamp.now();
+  await auditRef.update({
+    acknowledgedAt,
+    acknowledgedBy: staff.uid,
+    // The BR-06 follow-up also stamps
+    // `acknowledgedByRole` so the page can show
+    // "Acked by Front Desk · Jane" instead of an
+    // opaque UID — keeping the field name singular
+    // mirrors the `addedBy` / `removedBy` convention
+    // on `BreakfastSelectionEntry`.
+    acknowledgedByRole: staff.role
+  });
+  const existing = auditSnap.data() || {};
+  if (typeof existing.slotKey === "string") {
+    invalidateKitchenListCacheForSlotKey(existing.slotKey);
+  }
+  return res.status(200).json({
+    success: true,
+    data: {
+      auditId,
+      bookingId,
+      acknowledgedAt: acknowledgedAt.toDate().toISOString(),
+      acknowledgedBy: staff.uid,
+      acknowledgedByRole: staff.role
+    }
+  });
+}
+
+// server/handlers/refunds.ts
+init_zod();
+init_firebase_admin();
+var refundIdSchema2 = external_exports.string().trim().regex(
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+  "Invalid refundId."
+);
+var markRefundPaidBodySchema2 = external_exports.object({
+  bookingId: external_exports.string().trim().min(8).max(80),
+  refundId: refundIdSchema2,
+  method: external_exports.string().trim().min(1).max(60),
+  transactionReference: external_exports.string().trim().max(200).nullable().optional().default(null),
+  note: external_exports.string().trim().max(500).nullable().optional().default(null)
+}).passthrough();
+function readStaff6(req) {
+  const anyReq = req;
+  const staff = anyReq.staff;
+  if (!staff || !staff.uid) return null;
+  const role = String(staff.role || "");
+  if (role !== "admin" && role !== "front-desk") return null;
+  return { uid: String(staff.uid), role };
+}
+async function handleMarkRefundPaidStandalone(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = readStaff6(req);
+  if (!staff) {
+    return res.status(403).json({
+      success: false,
+      error: "Forbidden: Access restricted to staff members."
+    });
+  }
+  const parsed2 = markRefundPaidBodySchema2.safeParse(req.body || {});
+  if (!parsed2.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid mark-refund-paid payload."
+    });
+  }
+  const { bookingId, refundId, method, transactionReference, note } = parsed2.data;
+  const trimmedReference = transactionReference ? String(transactionReference).trim() : null;
+  const trimmedNote = note ? String(note).trim() : null;
+  let resultSummary = null;
+  let opCode = null;
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const refundRef = adminDb.collection("bookings").doc(bookingId).collection("refunds").doc(refundId);
+      const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
+      const [refundSnap, bookingSnap] = await Promise.all([
+        transaction.get(refundRef),
+        transaction.get(bookingRef2)
+      ]);
+      try {
+        const helperResult = markRefundPaid({
+          category: "breakfast",
+          bookingId,
+          refundId,
+          amount: Math.abs(Number(refundSnap.data()?.amount || 0)),
+          method,
+          transactionReference: trimmedReference,
+          note: trimmedNote,
+          actor: { uid: staff.uid, role: staff.role },
+          transaction,
+          existingDoc: refundSnap,
+          currentPaidAmount: Number(bookingSnap.data()?.paidAmount || 0),
+          slotKey: String(refundSnap.data()?.slotKey || "")
+        });
+        resultSummary = {
+          refundEntry: {
+            refundId,
+            status: helperResult.refundEntry.status || "paid",
+            paidAt: helperResult.refundEntry.paidAt,
+            paidBy: helperResult.refundEntry.paidBy,
+            method: helperResult.refundEntry.method,
+            transactionReference: helperResult.refundEntry.transactionReference,
+            note: helperResult.refundEntry.note,
+            amount: helperResult.refundEntry.amount,
+            category: helperResult.refundEntry.category || "breakfast",
+            slotKey: helperResult.refundEntry.slotKey
+          },
+          newBookingPaidAmount: helperResult.newBookingPaidAmount,
+          alreadyPaid: helperResult.alreadyPaid
+        };
+      } catch (err) {
+        opCode = String(err?.message || "UNKNOWN");
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: refundPaidErrorToMessage("UNKNOWN")
+    });
+  }
+  if (opCode) {
+    if (opCode === "REFUND_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: refundPaidErrorToMessage(opCode) });
+    }
+    return res.status(400).json({
+      success: false,
+      error: refundPaidErrorToMessage(opCode)
+    });
+  }
+  if (!resultSummary) {
+    return res.status(500).json({
+      success: false,
+      error: refundPaidErrorToMessage("UNKNOWN")
+    });
+  }
+  return res.status(200).json({
+    success: true,
+    newBookingPaidAmount: resultSummary.newBookingPaidAmount,
+    refundEntry: resultSummary.refundEntry,
+    alreadyPaid: resultSummary.alreadyPaid
   });
 }
 
@@ -239890,8 +246187,18 @@ async function authenticateUser(req) {
   }
 }
 var rateLimitCache = /* @__PURE__ */ new Map();
+var RATE_LIMIT_PRUNE_INTERVAL_MS = 6e4;
+var lastRateLimitPruneAt = 0;
+function pruneRateLimitCache(now) {
+  if (now - lastRateLimitPruneAt < RATE_LIMIT_PRUNE_INTERVAL_MS) return;
+  lastRateLimitPruneAt = now;
+  for (const [key, record] of rateLimitCache) {
+    if (now > record.resetTime) rateLimitCache.delete(key);
+  }
+}
 function isRateLimited(ip, limit, windowMs) {
   const now = Date.now();
+  pruneRateLimitCache(now);
   const record = rateLimitCache.get(ip);
   if (!record) {
     rateLimitCache.set(ip, { count: 1, resetTime: now + windowMs });
@@ -240000,7 +246307,7 @@ async function handler(req, res) {
   const routePath = Array.isArray(rewrittenRoute) ? rewrittenRoute.join("/") : typeof rewrittenRoute === "string" ? rewrittenRoute : parsedUrl.pathname.replace(/^\/api\//, "");
   const pathSegments = routePath.split("/").filter(Boolean);
   const [domain, action] = pathSegments;
-  const rawIp = req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.socket.remoteAddress || "unknown";
+  const rawIp = req.headers["x-vercel-forwarded-for"] || req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.socket.remoteAddress || "unknown";
   const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp).split(",")[0].trim();
   if (domain === "bookings" && action === "create" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-create:${ip}`, 5, 6e4)) {
@@ -240291,6 +246598,12 @@ async function handler(req, res) {
     return await handleCheckinBooking(req, res);
   }
   if (domain === "bookings" && action === "cancel" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-cancel:${ip}`, 10, 6e4)) {
+      return res.status(429).json({
+        success: false,
+        error: "Too many cancellation requests. Please try again in a minute."
+      });
+    }
     let authResult = { success: false };
     if (req.headers.authorization) {
       const staffAuth = await authenticateStaff(req);
@@ -240324,6 +246637,22 @@ async function handler(req, res) {
     req.staff = authResult.success ? authResult : null;
     return await handleCancelPreview(req, res);
   }
+  if (domain === "bookings" && action === "extend-stay" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-extend-stay:${ip}`, 10, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many extend requests. Please try again in a minute." });
+    }
+    if (req.headers.authorization) {
+      const staffAuth = await authenticateStaff(req);
+      if (staffAuth.success) {
+        return res.status(403).json({ success: false, error: "Staff authentication is not accepted on this endpoint." });
+      }
+    }
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleExtendStay(req, res);
+  }
   if (domain === "bookings" && action === "lookup" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-lookup:${ip}`, 10, 6e4)) {
       return res.status(429).json({ success: false, error: "Too many lookup attempts. Please try again in a minute." });
@@ -240354,6 +246683,173 @@ async function handler(req, res) {
       return res.status(429).json({ success: false, error: "Too many availability requests. Please try again in a minute." });
     }
     return await handleRoomAvailability(req, res);
+  }
+  if (domain === "bookings" && action === "breakfast" && pathSegments[2] === "manage" && req.method === "GET") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-manage:${ip}`, 10, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many manage-breakfast requests. Please try again in a minute." });
+    }
+    return await handleGetBreakfastManage(req, res);
+  }
+  if (domain === "bookings" && action === "breakfast" && pathSegments[2] === "update" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-update:${ip}`, 10, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many breakfast-save requests. Please try again in a minute." });
+    }
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleUpdateBreakfast(req, res);
+  }
+  if (domain === "bookings" && action === "breakfast" && pathSegments[2] === "staff-update" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-staff-update:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many staff breakfast-update requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleStaffUpdateBreakfast(req, res);
+  }
+  if (domain === "bookings" && action === "breakfast" && pathSegments[2] === "mark-served" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-mark-served:${ip}`, 60, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many mark-served requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleMarkServed(req, res);
+  }
+  if (domain === "bookings" && action === "breakfast" && pathSegments[2] === "mark-refund-paid" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-mark-refund-paid:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many mark-refund-paid requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleMarkRefundPaid(req, res);
+  }
+  if (domain === "refunds" && action === "mark-paid" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`refunds-mark-paid:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many mark-refund-paid requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleMarkRefundPaidStandalone(req, res);
+  }
+  if (domain === "bookings" && action === "breakfast" && pathSegments[2] === "kitchen-list" && pathSegments[3] === void 0 && req.method === "GET") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-kitchen-list:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many kitchen-list requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleGetKitchenList(req, res);
+  }
+  if (domain === "bookings" && action === "breakfast" && pathSegments[2] === "kitchen-list" && pathSegments[3] === "acknowledge" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-kitchen-list-acknowledge:${ip}`, 120, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many acknowledge requests. Please slow down." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleAcknowledgeKitchenListAudit(req, res);
+  }
+  if (domain === "bookings" && action === "breakfast" && (pathSegments[2] === void 0 || pathSegments[2] === "config") && req.method === "GET") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-config:${ip}`, 60, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many breakfast-config requests. Please try again in a minute." });
+    }
+    return await handleGetBreakfastConfig(req, res);
+  }
+  if (domain === "bookings" && action === "addons" && pathSegments[2] === "manage" && req.method === "GET") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-manage:${ip}`, 10, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many manage-addons requests. Please try again in a minute." });
+    }
+    return await handleGetAddOnsManage(req, res);
+  }
+  if (domain === "bookings" && action === "addons" && pathSegments[2] === "update" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-update:${ip}`, 10, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many addons-save requests. Please try again in a minute." });
+    }
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleUpdateAddOns(req, res);
+  }
+  if (domain === "bookings" && action === "addons" && pathSegments[2] === "staff-update" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-staff-update:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many staff addons-update requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleStaffUpdateAddOns(req, res);
+  }
+  if (domain === "bookings" && action === "addons" && pathSegments[2] === "mark-served" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-mark-served:${ip}`, 60, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many mark-served addons requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleMarkServedAddOns(req, res);
+  }
+  if (domain === "bookings" && action === "addons" && pathSegments[2] === "mark-refund-paid" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-mark-refund-paid:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many mark-refund-paid addons requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleMarkRefundPaidAddOns(req, res);
+  }
+  if (domain === "bookings" && action === "addons" && (pathSegments[2] === void 0 || pathSegments[2] === "config") && req.method === "GET") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-config:${ip}`, 60, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many addons-config requests. Please try again in a minute." });
+    }
+    return await handleGetAddOnsConfig(req, res);
   }
   if (domain === "validate" && action === "voucher" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`validate-voucher:${ip}`, 20, 6e4)) {
@@ -240463,6 +246959,15 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleRedeemMemberPoints(req, res);
+  }
+  if (domain === "members" && action === "redeem-points-self" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-redeem-points-self:${ip}`, 10, 6e4)) {
+      return res.status(429).json({
+        success: false,
+        error: "Too many redemption attempts. Please try again in a minute."
+      });
+    }
+    return await handleRedeemPointsSelf(req, res);
   }
   if (domain === "members" && action === "undo-redemption" && req.method === "POST") {
     const authResult = await authenticateStaff(req);
@@ -240669,8 +247174,11 @@ async function handler(req, res) {
   const isCronEmailMethod = action === "checkin-reminder" && req.method === "GET";
   const isKnownEmailAction = publicEmailActions.has(action) || staffOnlyEmailActions.has(action);
   if (domain === "email" && isKnownEmailAction && (req.method === "POST" || isCronEmailMethod)) {
-    const rateLimitKey = req.body?.bookingRef || req.body?.bookingId || req.body?.inquiry?.email || req.body?.email || ip;
-    if (process.env.NODE_ENV !== "test" && isRateLimited(`email:${action}:${rateLimitKey}`, 3, 36e5)) {
+    const rateLimitKey = req.body?.bookingRef || req.body?.bookingId || req.body?.inquiry?.email || req.body?.email || "";
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`email:${action}:ip:${ip}`, 20, 36e5)) {
+      return res.status(429).json({ success: false, error: "Too many email requests. Please try again later." });
+    }
+    if (process.env.NODE_ENV !== "test" && rateLimitKey && isRateLimited(`email:${action}:ip:${ip}:target:${rateLimitKey}`, 3, 36e5)) {
       return res.status(429).json({ success: false, error: "Too many email requests. Please try again later." });
     }
     const cronSecret = req.headers["x-cron-secret"];
@@ -240740,6 +247248,12 @@ async function handler(req, res) {
       return res.status(429).json({ success: false, error: "Too many hold read requests. Please try again in a minute." });
     }
     return await handleReadInFlowHold(req, res);
+  }
+  if (domain === "holds" && action === "extend" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`holds-extend:${ip}`, 10, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many hold extension requests. Please try again in a minute." });
+    }
+    return await handleExtendInFlowHold(req, res);
   }
   if (domain === "holds" && action === "sweep" && (req.method === "POST" || req.method === "GET")) {
     const result = await handleSweepInFlowHolds(req, res);

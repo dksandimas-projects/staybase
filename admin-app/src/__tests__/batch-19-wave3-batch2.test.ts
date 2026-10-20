@@ -66,7 +66,7 @@ describe("Phase 11.6 Batch 19 — Wave 3 batch 2 (chrome + wording)", () => {
 
     it("PrivacyPage no longer renders the custom thin header chrome", () => {
       // Strip comments to avoid false positives on the migration note.
-      const stripped = privacyPageSrc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+      const stripped = privacyPageSrc.replace(/(^|[^:])\/\/.*$/gm, "$1").replace(/\/\*[\s\S]*?\*\//g, "");
       expect(stripped).not.toMatch(/Navigation Bar Header/);
       expect(stripped).not.toMatch(/Return to Homepage/);
     });

@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { adminAuth, adminDb } from "./lib/firebase-admin";
 import { sendBookingTrigger } from "./handlers/email";
 import { writeNotification } from "./lib/notifications";
-import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleAddRoomToReservation, handleApplyBookingDiscount, handleApplyReservationDiscount, handleCancelBooking, handleCancelPreview, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleConfirmBookingWithBalance, handleCreateBooking, handleCreateWalkin, handleGetCancellationLiability, handleLookupBooking, handleMarkPaymentConfirmed, handleRecordCancellationException, handleRejectDiscount, handleRejectPayment, handleRemoveVoucher, handleRescheduleBooking, handleResolveEarlyCheckin, handleSetLouReceived, handleSetSpecialRequests, handleVerifyAndRecordPayment } from "./handlers/bookings";
+import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleAddRoomToReservation, handleApplyBookingDiscount, handleApplyReservationDiscount, handleCancelBooking, handleCancelPreview, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleConfirmBookingWithBalance, handleCreateBooking, handleCreateWalkin, handleGetCancellationLiability, handleLookupBooking, handleMarkPaymentConfirmed, handleRecordCancellationException, handleRejectDiscount, handleRejectPayment, handleRemoveVoucher, handleRescheduleBooking, handleResolveEarlyCheckin, handleSetLouReceived, handleSetSpecialRequests, handleVerifyAndRecordPayment, handleExtendStay } from "./handlers/bookings";
 import { handleRoomAvailability } from "./handlers/rooms";
 import { handleCancelRoomBlock, handleCreateBulkRoomBlocks, handleCreateRoomBlock, handleUpdateRoomBlock } from "./handlers/room-blocks";
 import { handleAcquireStaffInventoryHold, handleExtendStaffInventoryHold, handleReleaseStaffInventoryHold } from "./handlers/staff-inventory-holds";
@@ -11,17 +11,33 @@ import { handleValidateCorporateCode } from "./handlers/corporate-codes";
 import { handleConvertInquiryToBooking, handleCreateCorporateInquiry } from "./handlers/corporate-inquiries";
 import { handleCreateContactInquiry } from "./handlers/contact";
 import { handleGenerateReference } from "./handlers/reference";
-import { handleEraseMemberAccount, handleLinkBookingToMember, handleListMemberStays, handleManualAdjustPoints, handleRedeemMemberPoints, handleRegisterMember, handleSendVerificationEmail, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
+import { handleEraseMemberAccount, handleLinkBookingToMember, handleListMemberStays, handleManualAdjustPoints, handleRedeemMemberPoints, handleRedeemPointsSelf, handleRegisterMember, handleSendVerificationEmail, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
 import { handleUpdateTerms } from "./handlers/legal";
 import { handleCreateStaff, handleDisableStaff, handleUpdateStaff } from "./handlers/admin";
 import { handleCancelStoreOrder, handleConfirmStoreOrder, handleCreateStoreOrder, handleDeliverStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
 import { handleVerifyIntercomGuest, handleSendGuestMessage } from "./handlers/intercom";
 import { handleEmailTrigger, handleEmailPreview } from "./handlers/email";
 import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
+import { handleGetBreakfastConfig } from "./handlers/breakfast-config";
+import { handleGetBreakfastManage, handleUpdateBreakfast } from "./handlers/breakfast-manage";
+import { handleStaffUpdateBreakfast } from "./handlers/breakfast-staff-update";
+import { handleMarkServed } from "./handlers/breakfast-mark-served";
+import { handleMarkRefundPaid } from "./handlers/breakfast-refund-paid";
+import { handleGetAddOnsConfig } from "./handlers/addons-config";
+import { handleGetAddOnsManage } from "./handlers/addons-manage";
+import { handleUpdateAddOns } from "./handlers/addons-manage-save";
+import { handleStaffUpdateAddOns } from "./handlers/addons-staff-update";
+import { handleMarkServedAddOns } from "./handlers/addons-mark-served";
+import { handleMarkRefundPaidAddOns } from "./handlers/addons-refund-paid";
+import {
+  handleAcknowledgeKitchenListAudit,
+  handleGetKitchenList
+} from "./handlers/breakfast-kitchen-list";
+import { handleMarkRefundPaidStandalone } from "./handlers/refunds";
 import { handlePublishSeo } from "./handlers/seo";
 import { handleNotificationsPrune } from "./handlers/notifications-prune";
 import { handleHoldExpiryCron } from "./handlers/hold-expiry";
-import { handleReadInFlowHold, handleStartInFlowHold, handleSweepInFlowHolds } from "./handlers/in-flow-hold";
+import { handleExtendInFlowHold, handleReadInFlowHold, handleStartInFlowHold, handleSweepInFlowHolds } from "./handlers/in-flow-hold";
 import { handleGetPrivateStorageUrl } from "./handlers/storage";
 import { handleCreateTestRun, handleCloseTestRun, handleDeleteTestRun, handleListTestRuns, handleStagingRefreshPreview, handleStagingRefreshImport, handleStagingRefreshDestroy, handleStagingResetPreview, handleStagingResetExecute } from "./handlers/test-runs";
 import config from "../../hotel.config";
@@ -263,8 +279,27 @@ function emailClaimGuardResponse(user: { email?: string; email_verified?: boolea
 // Simple in-memory IP cache for rate limiting
 const rateLimitCache = new Map<string, { count: number; resetTime: number }>();
 
+// Per PR-AUDIT-H6 (2026-10-20): the cache was never pruned, so every
+// distinct key (IP × route × window) stayed in the Map for the life of
+// the instance. On Vercel the instance is short-lived, so the leak is
+// bounded in practice — but a long-lived warm instance (or a local
+// `vercel dev` session) accumulated keys indefinitely. Sweep expired
+// entries opportunistically. The sweep is amortized: at most one pass
+// per `PRUNE_INTERVAL_MS`.
+const RATE_LIMIT_PRUNE_INTERVAL_MS = 60_000;
+let lastRateLimitPruneAt = 0;
+
+function pruneRateLimitCache(now: number) {
+  if (now - lastRateLimitPruneAt < RATE_LIMIT_PRUNE_INTERVAL_MS) return;
+  lastRateLimitPruneAt = now;
+  for (const [key, record] of rateLimitCache) {
+    if (now > record.resetTime) rateLimitCache.delete(key);
+  }
+}
+
 function isRateLimited(ip: string, limit: number, windowMs: number): boolean {
   const now = Date.now();
+  pruneRateLimitCache(now);
   const record = rateLimitCache.get(ip);
 
   if (!record) {
@@ -448,7 +483,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const [domain, action] = pathSegments;
 
   // 3. Rate Limiting based on IP
-  const rawIp = req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.socket.remoteAddress || "unknown";
+  //
+  // Per PR-AUDIT-H6 (2026-10-20): the header order now prefers
+  // `x-vercel-forwarded-for`. Vercel OVERWRITES `x-forwarded-for`
+  // and does not forward external IPs (per Vercel's request-headers
+  // documentation), so the previous first-hop read was NOT spoofable
+  // on Vercel — this is a robustness improvement, not a fix for a
+  // live bypass. `x-vercel-forwarded-for` is Vercel's own sanitized
+  // single-value client IP and stays correct even when a proxy sits
+  // in front of Vercel (which is the one configuration where
+  // `x-forwarded-for` could be overwritten).
+  const rawIp =
+    req.headers["x-vercel-forwarded-for"] ||
+    req.headers["x-forwarded-for"] ||
+    req.headers["x-real-ip"] ||
+    req.socket.remoteAddress ||
+    "unknown";
   const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp).split(",")[0].trim();
 
   // Route Dispatch and Middlewares
@@ -886,6 +936,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (domain === "bookings" && action === "cancel" && req.method === "POST") {
+    // Per PR-AUDIT-H5 (2026-10-20): the cancel path had NO IP rate
+    // limit — Turnstile was the only throttle, and Turnstile is a
+    // per-request human-verification challenge, not a throughput
+    // cap. Its read-only sibling `cancel-preview` already had
+    // 10/min; the cancel endpoint now matches it, so a caller cannot
+    // drive unbounded cancellation attempts at the booking lookup.
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-cancel:${ip}`, 10, 60000)) {
+      return res.status(429).json({
+        success: false,
+        error: "Too many cancellation requests. Please try again in a minute."
+      });
+    }
     let authResult: { success: boolean; uid?: string; email?: string } = { success: false };
     if (req.headers.authorization) {
       const staffAuth = await authenticateStaff(req);
@@ -940,6 +1002,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult.success ? authResult : null;
     return await handleCancelPreview(req, res);
+  }
+
+  // Per EXT-02 (2026-01-27): guest self-service extend stay.
+  // Same bookingRef + (email | token) credential as cancel.
+  // Turnstile gates the guest path; staff auth is NOT accepted
+  // on this endpoint (staff use handleRescheduleBooking directly
+  // via the admin API router).
+  if (domain === "bookings" && action === "extend-stay" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-extend-stay:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many extend requests. Please try again in a minute." });
+    }
+
+    // Staff token → reject (guest-only endpoint)
+    if (req.headers.authorization) {
+      const staffAuth = await authenticateStaff(req);
+      if (staffAuth.success) {
+        return res.status(403).json({ success: false, error: "Staff authentication is not accepted on this endpoint." });
+      }
+    }
+
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+
+    return await handleExtendStay(req, res);
   }
 
   if (domain === "bookings" && action === "lookup" && req.method === "POST") {
@@ -1000,6 +1088,429 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     
     return await handleRoomAvailability(req, res);
+  }
+
+  // Per BR-04 (2026-10-13, decision #233): the
+  // guest Manage Breakfast read endpoint
+  // (`/api/bookings/breakfast/manage`). Lookup-token
+  // gated via the `handleGetBreakfastManage`
+  // dispatcher (mirrors the
+  // `handleLookupBooking` magic-link gate from H2);
+  // the path's third segment is `manage`, which the
+  // `[domain, action]` destructuring above drops. We
+  // discriminate by `pathSegments[2]` because both
+  // routes share `domain === "bookings" && action
+  // === "breakfast"`. Route order matters — the
+  // more-specific `manage` / `update` blocks come
+  // before the catch-all `breakfast-config` block
+  // below so the dispatch lands on the right branch.
+  if (
+    domain === "bookings" &&
+    action === "breakfast" &&
+    pathSegments[2] === "manage" &&
+    req.method === "GET"
+  ) {
+    // Per feat/relax-booking-lookup: the same
+    // ref-alone OR ref+token path lookup applies.
+    // Mirror the `bookings-lookup` budget (10/min/IP)
+    // so a probing bot can't fan out faster than the
+    // existing lookup surface. The 3-failure 1-hour
+    // backoff doesn't apply here — the manage path
+    // always discloses "Booking not found" identically
+    // to lookup, so a sophisticated attacker can't
+    // distinguish, and the rate limit is the
+    // load-bearing defense.
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-manage:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many manage-breakfast requests. Please try again in a minute." });
+    }
+
+    return await handleGetBreakfastManage(req, res);
+  }
+
+  // Per BR-04: the guest Manage Breakfast save
+  // endpoint (`/api/bookings/breakfast/update`).
+  // Lookup-token gated via the dispatcher +
+  // Turnstile-gated per `plan/docs/SECURITY.md`
+  // (the same gate the booking-create path uses for
+  // mutations). Rate-limited at 10/min/IP — the same
+  // window as the lookup + cancel-preview surfaces.
+  if (
+    domain === "bookings" &&
+    action === "breakfast" &&
+    pathSegments[2] === "update" &&
+    req.method === "POST"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-update:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many breakfast-save requests. Please try again in a minute." });
+    }
+
+    // Per H1 (hardening batch 2026-06-26): the
+    // mutation is Turnstile-gated like every other
+    // write path.
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+
+    return await handleUpdateBreakfast(req, res);
+  }
+
+  // Per BR-05 (2026-10-13, decision #234): the staff
+  // booking-drawer batch save endpoint
+  // (`/api/bookings/breakfast/staff-update`). Mirrors the
+  // BR-04 `/update` path but reads the booking by
+  // `bookingId` and is gated behind `authenticateStaff`
+  // (the staff drawer is admin-app-only, never the
+  // guest Magic-Link token gate). Turnstile-gated per
+  // `plan/docs/SECURITY.md` (same posture as every other
+  // staff mutation endpoint — see `add-refund`,
+  // `add-payment`). Rate-limited at 30/min/IP — front
+  // desk can fan out across many bookings in a shift
+  // but the per-booking context still keeps the limit
+  // generous enough for the multi-booking workflow.
+  if (
+    domain === "bookings" &&
+    action === "breakfast" &&
+    pathSegments[2] === "staff-update" &&
+    req.method === "POST"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-staff-update:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many staff breakfast-update requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res
+        .status(authResult.error?.includes("Forbidden") ? 403 : 401)
+        .json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    // Per H1 (hardening batch 2026-06-26): the
+    // mutation is Turnstile-gated like every other
+    // staff write path. Same posture as `add-refund`.
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+
+    return await handleStaffUpdateBreakfast(req, res);
+  }
+
+  // Per BR-05: the staff kitchen-visibility endpoint
+  // (`/api/bookings/breakfast/mark-served`). Stamps
+  // `breakfastServed[key]` + `breakfastAudit` for the
+  // BR-07 kitchen list. STAFF-Token gated; Turnstile-
+  // gated per SECURITY.md; rate-limited at 60/min/IP
+  // — kitchen ticks happen frequently during the
+  // breakfast service window (a 12-table morning can
+  // plate 60+ meals in 90 minutes).
+  if (
+    domain === "bookings" &&
+    action === "breakfast" &&
+    pathSegments[2] === "mark-served" &&
+    req.method === "POST"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-mark-served:${ip}`, 60, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many mark-served requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res
+        .status(authResult.error?.includes("Forbidden") ? 403 : 401)
+        .json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+
+    return await handleMarkServed(req, res);
+  }
+
+  // Per BR-05: the staff refund-liability "Mark as
+  // paid" endpoint (`/api/bookings/breakfast/mark-refund-paid`).
+  // STAFF-Token gated; Turnstile-gated; rate-limited
+  // at 30/min/IP (this is a manual ops action, not
+  // kitchen-frequency). Idempotent on `refundId` per
+  // CRL-01 — a re-POST returns the existing paid
+  // entry unchanged.
+  if (
+    domain === "bookings" &&
+    action === "breakfast" &&
+    pathSegments[2] === "mark-refund-paid" &&
+    req.method === "POST"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-mark-refund-paid:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many mark-refund-paid requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res
+        .status(authResult.error?.includes("Forbidden") ? 403 : 401)
+        .json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+
+    return await handleMarkRefundPaid(req, res);
+  }
+
+  // Per BR-06 (2026-10-13, decision #235): the
+  // standalone "Mark as paid" endpoint for the
+  // admin Refunds view. Distinct URL from the
+  // booking-drawer path (`/api/bookings/breakfast/mark-refund-paid`,
+  // above) because this one is gated separately
+  // (admin staff only — no public inbound) and
+  // posts to the SAME helper via the dedicated
+  // refund-handler. The helper is the single
+  // source of truth for the `status: "paid"`
+  // transition regardless of entrypoint. The
+  // 12-function Vercel cap is unchanged (this is a
+  // handler in the existing catch-all
+  // `api/[...route].js`, NOT a new function).
+  if (
+    domain === "refunds" &&
+    action === "mark-paid" &&
+    req.method === "POST"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`refunds-mark-paid:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many mark-refund-paid requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res
+        .status(authResult.error?.includes("Forbidden") ? 403 : 401)
+        .json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    return await handleMarkRefundPaidStandalone(req, res);
+  }
+
+  // Per BR-07 (2026-10-13, decision #236): the kitchen
+  // list read endpoint. Returns the `finalized` (live
+  // recompute from `breakfastSelections`) + `lateChanges`
+  // (`breakfastAudit` with `occurredAfterCutoff === true`)
+  // for one date. STAFF-Token gated; rate-limited at
+  // 30/min/IP — the page reloads occasionally during a
+  // shift. The 30s in-memory cache is owned by the
+  // handler module (not Redis) — see
+  // `breakfast-kitchen-list.ts` for the cache contract.
+  if (
+    domain === "bookings" &&
+    action === "breakfast" &&
+    pathSegments[2] === "kitchen-list" &&
+    pathSegments[3] === undefined &&
+    req.method === "GET"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-kitchen-list:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many kitchen-list requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res
+        .status(authResult.error?.includes("Forbidden") ? 403 : 401)
+        .json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    return await handleGetKitchenList(req, res);
+  }
+
+  // Per BR-07: the per-audit acknowledge endpoint for
+  // the kitchen list's "Late changes" column. STAFF-Token
+  // gated; rate-limited at 120/min/IP — a single shift
+  // can acknowledge 60+ entries during the breakfast
+  // service window.
+  if (
+    domain === "bookings" &&
+    action === "breakfast" &&
+    pathSegments[2] === "kitchen-list" &&
+    pathSegments[3] === "acknowledge" &&
+    req.method === "POST"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-kitchen-list-acknowledge:${ip}`, 120, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many acknowledge requests. Please slow down." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res
+        .status(authResult.error?.includes("Forbidden") ? 403 : 401)
+        .json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    // Acknowledge is a low-risk idempotent mutation
+    // (the handler writes a fresh `acknowledgedAt`
+    // if absent; re-acknowledge is a no-op update).
+    // Turnstile is omitted intentionally to avoid
+    // punishing the kitchen for routine clicks.
+    return await handleAcknowledgeKitchenListAudit(req, res);
+  }
+
+  // Per BR-03 (2026-10-12, decision #232): the public
+  // breakfast-config endpoint. Returns the meal catalog
+  // + cutoff + instructions for the guest Step 2 UI +
+  // the future Manage Breakfast page. No auth required
+  // (the meal catalog is non-sensitive public site
+  // content). Cached 60s via the `Cache-Control` header
+  // set inside the handler. Rate-limited at 60/min/IP
+  // — the same window the existing per-IP mutation
+  // limits use, generous enough for a multi-render page.
+  // The third URL segment (`config`) is dropped by the
+  // `[domain, action] = pathSegments` destructuring
+  // above; the route is fully identified by
+  // `domain === "bookings" && action === "breakfast" && req.method === "GET"`.
+  // The block is restricted to the `config` segment (or
+  // no segment, for backward-compat) so the BR-04
+  // `manage` / `update` segments above fall through to
+  // their dedicated blocks instead of being answered
+  // here.
+  if (
+    domain === "bookings" &&
+    action === "breakfast" &&
+    (pathSegments[2] === undefined || pathSegments[2] === "config") &&
+    req.method === "GET"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-breakfast-config:${ip}`, 60, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many breakfast-config requests. Please try again in a minute." });
+    }
+    return await handleGetBreakfastConfig(req, res);
+  }
+
+  // Per BR-12 (Phase 14 — Other Add-Ons, decision #245 reserved,
+  // 2026-10-14): the guest Manage Other Add-Ons read endpoint
+  // (`/api/bookings/addons/manage`). Lookup-token gated via the
+  // `handleGetAddOnsManage` dispatcher. Rate-limited at 10/min/IP.
+  if (
+    domain === "bookings" &&
+    action === "addons" &&
+    pathSegments[2] === "manage" &&
+    req.method === "GET"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-manage:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many manage-addons requests. Please try again in a minute." });
+    }
+    return await handleGetAddOnsManage(req, res);
+  }
+
+  // Per BR-12: the guest Manage Other Add-Ons save endpoint
+  // (`/api/bookings/addons/update`). Lookup-token gated + Turnstile
+  // gated at the apiRouter layer. Rate-limited at 10/min/IP.
+  if (
+    domain === "bookings" &&
+    action === "addons" &&
+    pathSegments[2] === "update" &&
+    req.method === "POST"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-update:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many addons-save requests. Please try again in a minute." });
+    }
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleUpdateAddOns(req, res);
+  }
+
+  // Per BR-12: the staff booking-drawer batch-save endpoint
+  // (`/api/bookings/addons/staff-update`). STAFF-Token gated +
+  // Turnstile gated; rate-limited at 30/min/IP.
+  if (
+    domain === "bookings" &&
+    action === "addons" &&
+    pathSegments[2] === "staff-update" &&
+    req.method === "POST"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-staff-update:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many staff addons-update requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleStaffUpdateAddOns(req, res);
+  }
+
+  // Per BR-12: the staff mark-served endpoint
+  // (`/api/bookings/addons/mark-served`). STAFF-Token gated +
+  // Turnstile gated; rate-limited at 60/min/IP.
+  if (
+    domain === "bookings" &&
+    action === "addons" &&
+    pathSegments[2] === "mark-served" &&
+    req.method === "POST"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-mark-served:${ip}`, 60, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many mark-served addons requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleMarkServedAddOns(req, res);
+  }
+
+  // Per BR-12: the staff mark-refund-paid endpoint
+  // (`/api/bookings/addons/mark-refund-paid`). STAFF-Token gated +
+  // Turnstile gated; rate-limited at 30/min/IP.
+  if (
+    domain === "bookings" &&
+    action === "addons" &&
+    pathSegments[2] === "mark-refund-paid" &&
+    req.method === "POST"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-mark-refund-paid:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many mark-refund-paid addons requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+    if (!verification.success) {
+      return res.status(400).json({ success: false, error: verification.error });
+    }
+    return await handleMarkRefundPaidAddOns(req, res);
+  }
+
+  // Per BR-12: the public other-add-ons catalog endpoint
+  // (`/api/bookings/addons/config`). Mirrors the BR-03
+  // breakfast-config surface. No auth, cached 60s, rate-
+  // limited at 60/min/IP.
+  if (
+    domain === "bookings" &&
+    action === "addons" &&
+    (pathSegments[2] === undefined || pathSegments[2] === "config") &&
+    req.method === "GET"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-addons-config:${ip}`, 60, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many addons-config requests. Please try again in a minute." });
+    }
+    return await handleGetAddOnsConfig(req, res);
   }
 
   if (domain === "validate" && action === "voucher" && req.method === "POST") {
@@ -1151,8 +1662,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
-    
+
     return await handleRedeemMemberPoints(req, res);
+  }
+
+  if (domain === "members" && action === "redeem-points-self" && req.method === "POST") {
+    // Per PR #9 (2026-10-13): the member-self-service redemption
+    // endpoint. NOT staff-authenticated — the handler does its own
+    // Firebase ID token verification + the toggle check +
+    // ownership guard (booking.memberId === authUser.uid) inside
+    // `applyPointsRedemption`.
+    //
+    // Per PR-AUDIT-H5 (2026-10-20): this endpoint had NO rate limit
+    // of any kind. The handler's own comment claimed a
+    // `withRateLimit` middleware applied "at the Vercel API catch-all
+    // level" — no such middleware exists anywhere in the repo. A
+    // redemption mutates points and writes to the points ledger, so
+    // an unbounded retry loop is a real risk, not a theoretical one.
+    // 10/min per IP is generous for a human redeeming a voucher.
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`members-redeem-points-self:${ip}`, 10, 60000)) {
+      return res.status(429).json({
+        success: false,
+        error: "Too many redemption attempts. Please try again in a minute."
+      });
+    }
+    return await handleRedeemPointsSelf(req, res);
   }
 
   if (domain === "members" && action === "undo-redemption" && req.method === "POST") {
@@ -1435,8 +1969,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const isKnownEmailAction = publicEmailActions.has(action) || staffOnlyEmailActions.has(action);
   if (domain === "email" && isKnownEmailAction && (req.method === "POST" || isCronEmailMethod)) {
-    const rateLimitKey = req.body?.bookingRef || req.body?.bookingId || req.body?.inquiry?.email || req.body?.email || ip;
-    if (process.env.NODE_ENV !== "test" && isRateLimited(`email:${action}:${rateLimitKey}`, 3, 3600000)) {
+    // Per PR-AUDIT-H5 (2026-10-20): the limit was keyed ONLY on a
+    // CLIENT-SUPPLIED value (`bookingRef` / `bookingId` /
+    // `inquiry.email` / `email`), falling back to the IP only when
+    // none of those were present. Varying that value handed the
+    // caller a fresh bucket every request, so the "3 per hour"
+    // ceiling was not a ceiling at all.
+    //
+    // The fix is TWO limits:
+    //   1. per-IP-per-action (20/hour) — the anti-spam ceiling. It
+    //      is keyed on the platform-sanitized client IP, so it
+    //      cannot be varied by the caller.
+    //   2. per-IP-per-action-per-target (3/hour) — the original
+    //      intent, so one specific booking can still not have its
+    //      guest spammed with repeated triggers.
+    //
+    // The per-IP ceiling is deliberately looser than the per-target
+    // one: every guest of the hotel shares one NAT address on the
+    // hotel wifi, so a tight per-IP limit would block legitimate
+    // confirmation emails for unrelated guests.
+    const rateLimitKey = req.body?.bookingRef || req.body?.bookingId || req.body?.inquiry?.email || req.body?.email || "";
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`email:${action}:ip:${ip}`, 20, 3600000)) {
+      return res.status(429).json({ success: false, error: "Too many email requests. Please try again later." });
+    }
+    if (
+      process.env.NODE_ENV !== "test" &&
+      rateLimitKey &&
+      isRateLimited(`email:${action}:ip:${ip}:target:${rateLimitKey}`, 3, 3600000)
+    ) {
       return res.status(429).json({ success: false, error: "Too many email requests. Please try again later." });
     }
 
@@ -1586,6 +2146,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     return await handleReadInFlowHold(req, res);
+  }
+
+  // Per IMT-02 (2026-10-14, `plan/project/ROADMAP.md §IMT`): the "I
+  // need more time" endpoint. Adds a window to an active hold, or
+  // revives an expired one — the explicit-action-only counterpart to
+  // IMT-01's "Pick a new room" fresh-hold path.
+  //
+  // Rate limit is 10/IP/min, deliberately TIGHTER than start's 30.
+  // Start is a one-per-booking-attempt call; extend is the one that
+  // extends doc lifetime, so it gets the tighter budget. Combined with
+  // the server-side `MAX_IN_FLOW_HOLD_EXTENSIONS` cap, the two bound
+  // how long a doc can sit in `"active"`.
+  //
+  // No Turnstile gate, same reason as start: the banner renders on
+  // Steps 2 + 3 and fires before the Step-3-only Turnstile widget has
+  // loaded a token, so gating here would break the exact surface the
+  // button lives on (see `fix/holds-start-turnstile`). Extending a
+  // SOFT hold unlocks nothing — the authoritative boundary stays the
+  // Turnstile-gated `/api/bookings/create`.
+  if (domain === "holds" && action === "extend" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`holds-extend:${ip}`, 10, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many hold extension requests. Please try again in a minute." });
+    }
+
+    return await handleExtendInFlowHold(req, res);
   }
 
   // Per the IFH-01 follow-up: the daily Janitor sweep

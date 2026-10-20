@@ -10,16 +10,33 @@ import { ArrowLeft, ArrowRight, Ban, BedDouble, CalendarClock, CalendarDays, Edi
 import {
   calculateSeasonalAwareRoomTotal,
   getNumNights,
-  DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT,
   PaymentMethodConfig,
-  calculateBreakfastAddOn,
   generateReservationId
 } from "@spark-inn/shared";
+// Per BR-05 (2026-10-13, decision #234): the shared
+// `WalkinBreakfastGrid` powers both the walk-in modal +
+// this calendar-create modal. The grid is the staff
+// booking-entry surface for the rich `breakfastSelections`
+// shape — identical between both modals.
+import { WalkinBreakfastGrid, type WalkinBreakfastSelections } from "../components/breakfast/WalkinBreakfastGrid";
+// Per BR-12.1 (2026-10-15, decision #247): the
+// calendar-create modal's parallel "Other add-ons"
+// grid. Mirrors the walk-in modal's mount in
+// `BookingsPage.tsx` — both share the same Step 2
+// "Add-ons" step from the BR-09 step-flow refactor.
+import { WalkinOtherAddOnGrid, type WalkinOtherAddOnSelections } from "../components/otherAddOns/WalkinOtherAddOnGrid";
 import { collection, doc } from "firebase/firestore";
 import { db } from "../firebase/config";
 import { useAdmin, Booking, Room, RoomBlock } from "../context/AdminContext";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
+// Per BR-09 (2026-10-14): the calendar-create modal
+// renders the same 5-step stepper as the public
+// booking flow + the walk-in modal. Mirroring the
+// shared admin-app `StepIndicator` keeps the desk's
+// mental model consistent across booking-entry
+// surfaces.
+import { StepIndicator } from "../components/StepIndicator";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/Toast";
@@ -141,6 +158,16 @@ export function CalendarPage() {
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [selectedBlock, setSelectedBlock] = useState<RoomBlock | null>(null);
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
+  // Per BR-09 (2026-10-14): the calendar-create
+  // modal mirrors the walk-in modal's 5-step model.
+  // The step state is local to the modal lifecycle —
+  // a fresh open starts at Step 1 and Step 5 is the
+  // create-call handoff (the modal closes). The
+  // breakfast per-date × per-guest grid (BR-05) sits
+  // on Step 2 (Add-ons); the rest of the form fields
+  // (guest details, occupancy, payment) collapse into
+  // Step 3-4.
+  const [calendarStep, setCalendarStep] = useState<1 | 2 | 3 | 4 | 5>(1);
   const [blockReason, setBlockReason] = useState("Maintenance");
   const [blockNotes, setBlockNotes] = useState("");
   // Per fix/walkin-split-name (2026-07-25): the calendar's
@@ -166,7 +193,22 @@ export function CalendarPage() {
   const [numAdults, setNumAdults] = useState(1);
   const [numChildren, setNumChildren] = useState(0);
   const [extraBedCount, setExtraBedCount] = useState(0);
-  const [hasBreakfast, setHasBreakfast] = useState(false);
+  // Per BR-05 (2026-10-13, decision #234): the legacy
+  // `hasBreakfast` boolean is gone. The calendar-create
+  // modal's breakfast section uses the same
+  // `WalkinBreakfastGrid` the walk-in modal at
+  // `BookingsPage.tsx` does. The grid feeds the rich
+  // `breakfastSelections` shape + total into the booking
+  // create call via `addWalkinBooking`.
+  const [calendarBreakfast, setCalendarBreakfast] = useState<WalkinBreakfastSelections | null>(null);
+  const [calendarBreakfastOverrideReason, setCalendarBreakfastOverrideReason] = useState("");
+  // Per BR-12.1 (2026-10-15, decision #247): the
+  // calendar-create modal's other-add-ons state.
+  // Mirrors the walk-in modal's `walkinOtherAddOns`
+  // exactly — the same component (`<WalkinOtherAddOnGrid>`)
+  // feeds the rich `otherAddOnSelections` + `otherAddOnTotal`
+  // + `hasAnyOtherAddOns` to the create call.
+  const [calendarOtherAddOns, setCalendarOtherAddOns] = useState<WalkinOtherAddOnSelections | null>(null);
   const [paymentMethod, setPaymentMethod] = useState("pay-at-hotel");
   // Per feat/staff-special-requests-capture (2026-08-21):
   // the calendar-create modal captures requests at booking
@@ -450,21 +492,15 @@ export function CalendarPage() {
       );
       return;
     }
-    const breakfastRate = hasBreakfast ? Number(breakfastConfig.ratePerPersonPerNight || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT) : 0;
-    // Per EXB-02 (2026-07-31): the historical inline
-    // `hasBreakfast ? breakfastRate * guestCount * selectedNights : 0`
-    // now routes through the shared `calculateBreakfastAddOn` helper.
-    // Byte-equivalent output — the helper's defensive coercion matches
-    // the ternary's `hasBreakfast` gate and the `Number(x) || 0`
-    // pattern this site uses. The `numGuests` for the
-    // breakfast add-on is the total (adults + children) per
-    // the CHD-10 helper's contract.
-    const totalPrice = selectedRoomTotal + calculateBreakfastAddOn({
-      hasBreakfast,
-      breakfastRate,
-      numGuests: safeNumAdults + safeNumChildren,
-      numNights: selectedNights
-    });
+    // Per BR-05 (2026-10-13, decision #234) + BR-08
+    // (decision #238, 2026-10-14 — close-out): the calendar
+    // create breakfast section uses the same rich-shape
+    // `breakfastSelections` + `breakfastTotal` as the walk-in
+    // modal at `BookingsPage.tsx`. The flat-rate
+    // `calculateBreakfastAddOn` helper is gone — the grid
+    // (`<WalkinBreakfastGrid>`) computes the total + snapshots
+    // the per-slot entries when the desk selects a meal.
+    const totalPrice = selectedRoomTotal + (calendarBreakfast ? calendarBreakfast.breakfastTotal : 0);
     const result = await addWalkinBooking({
       // Per NBS-2026-08-08 (F1): the modal-session preallocations.
       preallocatedBookingId: calendarPreallocatedBookingId,
@@ -527,8 +563,32 @@ export function CalendarPage() {
       pointsRedeemedValue: 0,
       pointsRedeemedBy: null,
       pointsRedeemedAt: null,
-      hasBreakfast,
-      breakfastRate,
+      // Per BR-05 (2026-10-13, decision #234) + BR-08
+      // (decision #238, 2026-10-14 — close-out): the calendar
+      // create writes only the rich `breakfastSelections`
+      // shape + `breakfastTotal` when the desk selected
+      // meals via `<WalkinBreakfastGrid>`. The legacy
+      // `hasBreakfast` + `breakfastRate` pair is gone —
+      // the registration-form printout + receipt PDF now
+      // read the new shape (BR-08 updated both).
+      ...(calendarBreakfast ? {
+        breakfastSelections: calendarBreakfast.breakfastSelections,
+        breakfastTotal: calendarBreakfast.breakfastTotal
+      } : {}),
+      // Per BR-12.1 (2026-10-15, decision #247): the
+      // calendar-create modal's other-add-ons grid feeds
+      // the rich `otherAddOnSelections` + `otherAddOnTotal`
+      // + `hasAnyOtherAddOns` through to the create call.
+      // When the desk hasn't picked any add-ons (or the
+      // catalog is empty / disabled), the spread is omitted
+      // so the doc carries no empty keys.
+      ...(calendarOtherAddOns && calendarOtherAddOns.hasAnyOtherAddOns
+        ? {
+          otherAddOnSelections: calendarOtherAddOns.otherAddOnSelections,
+          otherAddOnTotal: calendarOtherAddOns.otherAddOnTotal,
+          hasAnyOtherAddOns: true
+        }
+        : {}),
       reminderSentAt: null,
       guestIdPhotoUrl: null,
       handledBy: "",
@@ -551,7 +611,16 @@ export function CalendarPage() {
     setNumAdults(1);
     setNumChildren(0);
     setExtraBedCount(0);
-    setHasBreakfast(false);
+    // Per BR-05: reset the rich-shape breakfast state
+    // + the override reason alongside the
+    // legacy hasBreakfast reset (the legacy boolean
+    // stays derived from `calendarBreakfast`, no longer
+    // a useState — the reset clears the rich shape).
+    setCalendarBreakfast(null);
+    setCalendarBreakfastOverrideReason("");
+    // Per BR-12.1: clear the other-add-ons state alongside
+    // breakfast so a fresh modal open starts clean.
+    setCalendarOtherAddOns(null);
     // Per feat/staff-special-requests-capture (2026-08-21):
     // reset the staff-captured special request alongside the
     // other fields so the next modal open starts clean.
@@ -865,7 +934,31 @@ export function CalendarPage() {
         )}
       </Modal>
 
-      <Modal title="Create Calendar Booking" open={isBookingModalOpen} onClose={() => setIsBookingModalOpen(false)}>
+      <Modal title="Create Calendar Booking" open={isBookingModalOpen} onClose={() => { setIsBookingModalOpen(false); setCalendarStep(1); }}>
+        {/* Per BR-09 (2026-10-14): the stepper at the top
+            of the modal. Same shape as the walk-in modal +
+            the public booking flow. The Reset on the close
+            path keeps fresh opens at Step 1. */}
+        <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
+          {(() => {
+            const calendarSteps = ["Rooms", "Add-ons", "Guest details", "Review", "Confirmation"];
+            return (
+              <>
+                <StepIndicator steps={calendarSteps} currentStep={calendarStep} />
+                <p className="mt-2 text-[10px] font-semibold uppercase tracking-wider text-primary">
+                  Step {calendarStep} of 5
+                </p>
+                <p className="mt-1 text-[11px] text-gray-600">
+                  {calendarStep === 1 && "Pick the rooms, dates, and occupancy."}
+                  {calendarStep === 2 && "Configure breakfast per guest per day (optional)."}
+                  {calendarStep === 3 && "Capture guest contact info."}
+                  {calendarStep === 4 && "Payment + final review."}
+                  {calendarStep === 5 && "Submitting…"}
+                </p>
+              </>
+            );
+          })()}
+        </div>
         <form onSubmit={handleCreateBooking} className="space-y-4 text-xs">
           {/* Per fix/walkin-split-name (2026-07-25): the
               calendar booking modal now mirrors the guest
@@ -916,7 +1009,42 @@ export function CalendarPage() {
             <label className="flex flex-col gap-2 font-semibold text-gray-700">Children<input type="number" min={0} max={20} value={numChildren} onChange={(e) => setNumChildren(Math.max(0, Number(e.target.value) || 0))} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
           </div>
           <label className="flex flex-col gap-2 font-semibold text-gray-700">Extra beds<input type="number" min={0} max={10} value={extraBedCount} onChange={(e) => setExtraBedCount(Math.max(0, Number(e.target.value) || 0))} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
-          <label className="flex items-center gap-2 font-semibold text-gray-700"><input type="checkbox" checked={hasBreakfast} onChange={(e) => setHasBreakfast(e.target.checked)} /> Include breakfast</label>
+          {/* Per BR-09 (2026-10-14): the breakfast
+              per-date × per-guest meal grid sits on
+              Step 2 (Add-ons) of the calendar-create
+              modal's 5-step model. The grid component
+              itself is unchanged — the BR-05 booking-
+              drawer tests still match because the
+              file still imports + renders
+              `<WalkinBreakfastGrid>` with the
+              `breakfastSelections` shape. */}
+          {calendarStep === 2 && selection ? (
+            <WalkinBreakfastGrid
+              checkIn={selection.startDate}
+              checkOut={selection.endDate}
+              numGuests={numAdults + numChildren}
+              staffUid=""
+              overrideReason={calendarBreakfastOverrideReason}
+              onOverrideReasonChange={setCalendarBreakfastOverrideReason}
+              onChange={setCalendarBreakfast}
+              timezone={config.timezone}
+            />
+          ) : null}
+          {/* Per BR-12.1 (2026-10-15, decision #247):
+              the calendar-create modal's parallel other
+              add-ons grid. Renders below the breakfast grid
+              when the modal is on Step 2. When the catalog
+              is empty / disabled the grid renders the
+              "Add-ons are currently disabled" placeholder. */}
+          {calendarStep === 2 && selection ? (
+            <WalkinOtherAddOnGrid
+              checkIn={selection.startDate}
+              checkOut={selection.endDate}
+              numGuests={numAdults + numChildren}
+              staffUid=""
+              onChange={setCalendarOtherAddOns}
+            />
+          ) : null}
           <label className="flex flex-col gap-2 font-semibold text-gray-700">Payment method<select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm">
             {[
               { method: "pay-at-hotel", label: "Pay at Hotel" },
@@ -925,9 +1053,78 @@ export function CalendarPage() {
               <option key={m.method} value={m.method}>{m.label || m.method}</option>
             ))}
           </select></label>
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={() => setIsBookingModalOpen(false)} className="min-h-[44px] rounded-lg border border-gray-250 px-5 text-xs font-semibold text-gray-700">Cancel</button>
-            <PrimaryButton type="submit">Create booking</PrimaryButton>
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setCalendarStep((current) => (current > 1 ? ((current - 1) as 1 | 2 | 3 | 4 | 5) : current))}
+              disabled={calendarStep === 1 || calendarStep === 5}
+              className="min-h-[40px] rounded-lg border border-gray-300 px-4 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Back
+            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => { setIsBookingModalOpen(false); setCalendarStep(1); }}
+                className="min-h-[40px] rounded-lg border border-gray-250 px-4 text-xs font-semibold text-gray-700"
+              >
+                Cancel
+              </button>
+              {calendarStep < 4 ? (
+                // Per BR-10 (decision #244 reserved, 2026-10-14
+                // — Phase 14): the calendar-create modal's
+                // Add-ons step (step 2) renders TWO parallel
+                // CTAs that both call the IDENTICAL
+                // `setCalendarStep` advance callback. They
+                // differ only in visual style + label,
+                // mirroring the walk-in modal + the public +
+                // corporate booking flows:
+                //   - **Primary**  "Continue to guest details"
+                //     — mirrored from the pre-BR-10 single
+                //     button.
+                //   - **Ghost**    "No add-ons, continue"
+                //     — the skip affordance for staff who
+                //     want to bypass the per-date breakfast
+                //     picker (the grid is rendered one tab
+                //     over; the staff member hasn't actively
+                //     skipped it).
+                // The BR-10 invariant is "both buttons call
+                // the same nextStep function" — both
+                // onClick handlers below reference the
+                // exact same `setCalendarStep((current) =>
+                // (current < 4 ? ((current + 1) as ...) :
+                // current))` arrow. The
+                // `WalkinBreakfastGrid` still runs the
+                // cut-off check per-date, so a past-cutoff
+                // date locks the dropdown and requires a
+                // selection OR an explicit
+                // `cutoffsEnabled = false` admin toggle to
+                // advance.
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setCalendarStep((current) => (current < 4 ? ((current + 1) as 1 | 2 | 3 | 4 | 5) : current))}
+                    className="min-h-[40px] rounded-lg bg-primary px-4 text-xs font-semibold text-white transition hover:bg-primary-dark"
+                  >
+                    {calendarStep === 1 && "Continue to add-ons"}
+                    {calendarStep === 2 && "Continue to guest details"}
+                    {calendarStep === 3 && "Continue to review"}
+                  </button>
+                  {calendarStep === 2 && (
+                    <button
+                      type="button"
+                      onClick={() => setCalendarStep((current) => (current < 4 ? ((current + 1) as 1 | 2 | 3 | 4 | 5) : current))}
+                      data-testid="calendar-addons-skip-addons"
+                      className="min-h-[40px] rounded-lg border border-gray-300 bg-transparent px-4 text-xs font-semibold text-gray-500 transition hover:bg-gray-50"
+                    >
+                      No add-ons, continue
+                    </button>
+                  )}
+                </>
+              ) : (
+                <PrimaryButton type="submit">Place booking</PrimaryButton>
+              )}
+            </div>
           </div>
         </form>
       </Modal>

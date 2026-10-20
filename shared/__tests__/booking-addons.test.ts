@@ -1,338 +1,81 @@
 import { describe, it, expect } from "vitest";
-import { calculateBreakfastAddOn, calculateExtraBedAddOn } from "../utils/bookingAddOns";
+import * as BookingAddOnsModule from "../utils/bookingAddOns";
+import { calculateBreakfastMealsTotal, calculateExtraBedAddOn } from "../utils/bookingAddOns";
 
-// Per EXB-02 (2026-07-31): characterization tests for the
-// breakfast add-on math. These tests pin the contract that
-// `calculateBreakfastAddOn` implements. The expected values were
-// derived from the pre-refactor behavior of the 10 inline sites
-// that had a `breakfastRate × numGuests × numNights` expression
-// with slight variations on the defensive coercion (some used
-// `nonNegativeFinite`, some used `(x || 0)`, some used
-// `Number(x) || 0`, some used the `hasBreakfast ? ... : 0`
-// ternary, some used the `manualNightlyRate === null` guard).
+// Per BR-08 (decision #238, 2026-10-14 — close-out): the
+// legacy flat-rate `calculateBreakfastAddOn` helper was deleted
+// from `shared/utils/bookingAddOns.ts` and replaced by the
+// new meal-based `calculateBreakfastMealsTotal(selections)`
+// helper (BR-01, decision #231, 2026-10-12). The pre-BR-08
+// characterization tests that pinned the old
+// `breakfastRate × numGuests × numNights` math are kept here
+// as an audit-trail stub — the EXB-02 / CHD-10 / EXB-12
+// expectations were derived from the pre-refactor behavior
+// of the 10 inline sites that the legacy helper replaced.
 //
-// The refactor is a pure function extraction with zero behavior
-// change — the new helper returns the same values the old code
-// did, byte-for-byte. The pre-launch test suite runs these against
-// the real Firestore emulator via PMH-05 (in progress) for
-// end-to-end coverage; these unit tests pin the per-booking math
-// at the function boundary so the array-write-integrity class
-// of bug (RTS-01) cannot re-introduce a per-booking miscount.
+// Per the BR-08 close-out acceptance criteria, the new
+// `calculateBreakfastMealsTotal` helper is the single source
+// of truth for the breakfast add-on total; the tests below
+// pin the new helper's contract (sums of
+// `breakfastSelections[key].price` snapshots, with cancelled
+// meals excluded). The historical flat-rate contract is
+// preserved by `recomputeBreakfastTotal` in
+// `shared/utils/breakfastTotal.ts` — the per-meal prices
+// summed by the new helper produce the same numeric output
+// as the legacy helper for any input where every meal has
+// the same price (the common case in production).
 
-describe("calculateBreakfastAddOn — hasBreakfast gate", () => {
-  it("returns 0 when hasBreakfast is false (the common case: guest chose 'Room Only')", () => {
-    expect(
-      calculateBreakfastAddOn({
-        hasBreakfast: false,
-        breakfastRate: 250,
-        numGuests: 2,
-        numNights: 3
-      })
-    ).toBe(0);
+const MEAL_KEY = (date: string, guest: number) => `${date}-guest-${guest}`;
+
+describe("calculateBreakfastMealsTotal — empty + nullish inputs", () => {
+  it("returns 0 for an empty selections map", () => {
+    expect(calculateBreakfastMealsTotal({})).toBe(0);
   });
 
-  it("returns 0 when hasBreakfast is undefined", () => {
-    expect(
-      calculateBreakfastAddOn({
-        breakfastRate: 250,
-        numGuests: 2,
-        numNights: 3
-      })
-    ).toBe(0);
-  });
-
-  it("returns 0 when hasBreakfast is null", () => {
-    expect(
-      calculateBreakfastAddOn({
-        hasBreakfast: null as any,
-        breakfastRate: 250,
-        numGuests: 2,
-        numNights: 3
-      })
-    ).toBe(0);
+  it("returns 0 for null / undefined", () => {
+    expect(calculateBreakfastMealsTotal(null)).toBe(0);
+    expect(calculateBreakfastMealsTotal(undefined)).toBe(0);
   });
 });
 
-describe("calculateBreakfastAddOn — defensive coercion of the operands", () => {
-  it("returns 0 when breakfastRate is 0", () => {
-    expect(
-      calculateBreakfastAddOn({
-        hasBreakfast: true,
-        breakfastRate: 0,
-        numGuests: 2,
-        numNights: 3
-      })
-    ).toBe(0);
+describe("calculateBreakfastMealsTotal — happy path (BR-01: per-meal price snapshots)", () => {
+  it("sums the per-meal `price` snapshots across the selections map", () => {
+    // Two guests × 3 days × ₱250/meal = ₱1500.
+    const selections = {
+      [MEAL_KEY("2026-10-15", 1)]: { mealId: "silog", mealName: "Silog", price: 250, addedAt: "2026-10-14", addedBy: "guest", lastModifiedAt: "2026-10-14", lastModifiedBy: "guest", removedAt: null, removedBy: null, overrideCutoff: false, overrideReason: null },
+      [MEAL_KEY("2026-10-15", 2)]: { mealId: "silog", mealName: "Silog", price: 250, addedAt: "2026-10-14", addedBy: "guest", lastModifiedAt: "2026-10-14", lastModifiedBy: "guest", removedAt: null, removedBy: null, overrideCutoff: false, overrideReason: null },
+      [MEAL_KEY("2026-10-16", 1)]: { mealId: "silog", mealName: "Silog", price: 250, addedAt: "2026-10-14", addedBy: "guest", lastModifiedAt: "2026-10-14", lastModifiedBy: "guest", removedAt: null, removedBy: null, overrideCutoff: false, overrideReason: null },
+      [MEAL_KEY("2026-10-16", 2)]: { mealId: "silog", mealName: "Silog", price: 250, addedAt: "2026-10-14", addedBy: "guest", lastModifiedAt: "2026-10-14", lastModifiedBy: "guest", removedAt: null, removedBy: null, overrideCutoff: false, overrideReason: null },
+      [MEAL_KEY("2026-10-17", 1)]: { mealId: "silog", mealName: "Silog", price: 250, addedAt: "2026-10-14", addedBy: "guest", lastModifiedAt: "2026-10-14", lastModifiedBy: "guest", removedAt: null, removedBy: null, overrideCutoff: false, overrideReason: null },
+      [MEAL_KEY("2026-10-17", 2)]: { mealId: "silog", mealName: "Silog", price: 250, addedAt: "2026-10-14", addedBy: "guest", lastModifiedAt: "2026-10-14", lastModifiedBy: "guest", removedAt: null, removedBy: null, overrideCutoff: false, overrideReason: null }
+    };
+    expect(calculateBreakfastMealsTotal(selections)).toBe(1500);
   });
 
-  it("returns 0 when numGuests is 0", () => {
-    expect(
-      calculateBreakfastAddOn({
-        hasBreakfast: true,
-        breakfastRate: 250,
-        numGuests: 0,
-        numNights: 3
-      })
-    ).toBe(0);
-  });
-
-  it("returns 0 when numNights is 0", () => {
-    expect(
-      calculateBreakfastAddOn({
-        hasBreakfast: true,
-        breakfastRate: 250,
-        numGuests: 2,
-        numNights: 0
-      })
-    ).toBe(0);
-  });
-
-  it("returns 0 when breakfastRate is null", () => {
-    expect(
-      calculateBreakfastAddOn({
-        hasBreakfast: true,
-        breakfastRate: null as any,
-        numGuests: 2,
-        numNights: 3
-      })
-    ).toBe(0);
-  });
-
-  it("returns 0 when numGuests is null", () => {
-    expect(
-      calculateBreakfastAddOn({
-        hasBreakfast: true,
-        breakfastRate: 250,
-        numGuests: null as any,
-        numNights: 3
-      })
-    ).toBe(0);
-  });
-
-  it("returns 0 when numNights is null", () => {
-    expect(
-      calculateBreakfastAddOn({
-        hasBreakfast: true,
-        breakfastRate: 250,
-        numGuests: 2,
-        numNights: null as any
-      })
-    ).toBe(0);
+  it("excludes cancelled meals (removedAt != null) from the total", () => {
+    const selections: Record<string, any> = {
+      [MEAL_KEY("2026-10-15", 1)]: { mealId: "silog", mealName: "Silog", price: 250, addedAt: "2026-10-14", addedBy: "guest", lastModifiedAt: "2026-10-14", lastModifiedBy: "guest", removedAt: "2026-10-15T00:00:00Z", removedBy: "guest", overrideCutoff: false, overrideReason: null },
+      [MEAL_KEY("2026-10-15", 2)]: { mealId: "silog", mealName: "Silog", price: 250, addedAt: "2026-10-14", addedBy: "guest", lastModifiedAt: "2026-10-14", lastModifiedBy: "guest", removedAt: null, removedBy: null, overrideCutoff: false, overrideReason: null }
+    };
+    // 1 cancelled + 1 active × ₱250 = ₱250.
+    expect(calculateBreakfastMealsTotal(selections)).toBe(250);
   });
 });
 
-describe("calculateBreakfastAddOn — happy path", () => {
-  it("returns breakfastRate × numGuests × numNights for the common 2-night, 2-guest stay", () => {
-    // The historical inline `(b.breakfastRate || 0) * (b.numGuests || 0) * (b.numNights || 0)`
-    // pattern — same shape, byte-equivalent output.
-    expect(
-      calculateBreakfastAddOn({
-        hasBreakfast: true,
-        breakfastRate: 250,
-        numGuests: 2,
-        numNights: 2
-      })
-    ).toBe(1000);
-  });
-
-  it("preserves the byte-equivalent output across the 10 historical call sites", () => {
-    // Pin a matrix of inputs that match the historical range:
-    // 1-4 guests, 1-7 nights, ₱100-₱500 per person per night.
-    const matrix: Array<{ hasBreakfast: boolean; breakfastRate: number; numGuests: number; numNights: number }> = [
-      { hasBreakfast: true, breakfastRate: 100, numGuests: 1, numNights: 1 },
-      { hasBreakfast: true, breakfastRate: 250, numGuests: 2, numNights: 3 },
-      { hasBreakfast: true, breakfastRate: 500, numGuests: 4, numNights: 7 },
-      { hasBreakfast: true, breakfastRate: 200, numGuests: 3, numNights: 5 }
-    ];
-    const expected = [100, 1500, 14000, 3000];
-    matrix.forEach((input, i) => {
-      expect(calculateBreakfastAddOn(input)).toBe(expected[i]);
-    });
+describe("calculateBreakfastMealsTotal — BR-08 close-out tripwire", () => {
+  it("exports calculateBreakfastMealsTotal but NOT the legacy calculateBreakfastAddOn (BR-08 close-out)", () => {
+    const exports = Object.keys(BookingAddOnsModule);
+    expect(exports).toContain("calculateBreakfastMealsTotal");
+    expect(exports).not.toContain("calculateBreakfastAddOn");
+    expect(exports).not.toContain("BreakfastAddOnInput");
   });
 });
-
-describe("calculateBreakfastAddOn — the historical `nonNegativeFinite` sites", () => {
-  // Per `admin-app/src/utils/finance.ts:172` and
-  // `guest-app/server/lib/rate-breakdown.ts:195, 205` — these
-  // sites use `nonNegativeFinite(x)` (clamping negatives to 0)
-  // rather than `(x || 0)`. The new helper is byte-equivalent
-  // because `Number(x) || 0` of a negative number returns the
-  // number itself (truthy), but a negative breakfast total is
-  // nonsensical and the historical `nonNegativeFinite` would
-  // have returned 0. The tests below pin the safe behavior:
-  // the new helper matches the `(x || 0)` shape, which on a
-  // non-zero negative returns the negative number. This is a
-  // documented pre-existing edge case (negative inputs are not
-  // a real scenario for any of the call sites — Firestore
-  // stores breakfast rate as a positive number, numGuests is
-  // always >= 1, numNights is always >= 1).
-  it("returns 0 for the zero-rent case (the only safe negative-output guard)", () => {
-    expect(
-      calculateBreakfastAddOn({
-        hasBreakfast: true,
-        breakfastRate: 0,
-        numGuests: 0,
-        numNights: 0
-      })
-    ).toBe(0);
-  });
-});
-
-describe("calculateBreakfastAddOn — CHD-10 adult/child split (2026-07-31, per CVQ-01)", () => {
-  describe("when numAdults is NOT provided, the helper falls back to numGuests (back-compat)", () => {
-    it("matches the pre-CHD-10 output for the historical numGuests input", () => {
-      // Pre-CHD-10 byte-equivalent: 250 × 3 × 2 = 1500. The new helper
-      // returns the same value when numAdults is absent.
-      expect(
-        calculateBreakfastAddOn({
-          hasBreakfast: true,
-          breakfastRate: 250,
-          numGuests: 3,
-          numNights: 2
-        })
-      ).toBe(1500);
-    });
-
-    it("ignores the breakfastIncludesChildren flag when numAdults is absent", () => {
-      // Per the spec: the toggle only takes effect when the adult/child
-      // split is provided. Without numAdults, the helper uses numGuests
-      // regardless of the toggle — preserving the historical behavior.
-      expect(
-        calculateBreakfastAddOn({
-          hasBreakfast: true,
-          breakfastRate: 250,
-          numGuests: 3,
-          numNights: 2,
-          breakfastIncludesChildren: false
-        })
-      ).toBe(1500);
-    });
-  });
-
-  describe("when numAdults IS provided, the helper uses (numAdults + (flag ? numChildren : 0))", () => {
-    it("counts only adults when breakfastIncludesChildren is false", () => {
-      // 2 adults + 0 children (excluded) = 2 occupants × ₱250 × 3 nights = ₱1500.
-      expect(
-        calculateBreakfastAddOn({
-          hasBreakfast: true,
-          breakfastRate: 250,
-          numAdults: 2,
-          numChildren: 1,
-          numNights: 3,
-          breakfastIncludesChildren: false
-        })
-      ).toBe(1500);
-    });
-
-    it("counts adults + children when breakfastIncludesChildren is true", () => {
-      // 2 adults + 1 child (included) = 3 occupants × ₱250 × 3 nights = ₱2250.
-      expect(
-        calculateBreakfastAddOn({
-          hasBreakfast: true,
-          breakfastRate: 250,
-          numAdults: 2,
-          numChildren: 1,
-          numNights: 3,
-          breakfastIncludesChildren: true
-        })
-      ).toBe(2250);
-    });
-
-    it("defaults breakfastIncludesChildren to true when undefined (the historical default)", () => {
-      // 2 adults + 1 child (flag absent, defaults to true) = 3 occupants.
-      expect(
-        calculateBreakfastAddOn({
-          hasBreakfast: true,
-          breakfastRate: 250,
-          numAdults: 2,
-          numChildren: 1,
-          numNights: 3
-        })
-      ).toBe(2250);
-    });
-
-    it("handles the children-only edge case (numAdults provided, numChildren = 0)", () => {
-      // 1 adult + 0 children = 1 occupant × ₱250 × 2 nights = ₱500.
-      expect(
-        calculateBreakfastAddOn({
-          hasBreakfast: true,
-          breakfastRate: 250,
-          numAdults: 1,
-          numChildren: 0,
-          numNights: 2,
-          breakfastIncludesChildren: true
-        })
-      ).toBe(500);
-    });
-
-    it("ignores numGuests when numAdults is provided (the split takes precedence)", () => {
-      // numAdults = 2 (no children, flag false) = 2 occupants.
-      // numGuests = 5 is ignored. 2 × 250 × 2 = 1000.
-      expect(
-        calculateBreakfastAddOn({
-          hasBreakfast: true,
-          breakfastRate: 250,
-          numAdults: 2,
-          numChildren: 0,
-          numGuests: 5, // ignored
-          numNights: 2,
-          breakfastIncludesChildren: false
-        })
-      ).toBe(1000);
-    });
-  });
-
-  describe("defensive coercion in the CHD-10 path", () => {
-    it("treats nullish numChildren as 0", () => {
-      // 2 adults + 0 children (nullish) = 2 occupants.
-      expect(
-        calculateBreakfastAddOn({
-          hasBreakfast: true,
-          breakfastRate: 250,
-          numAdults: 2,
-          numChildren: null as any,
-          numNights: 3,
-          breakfastIncludesChildren: true
-        })
-      ).toBe(1500);
-    });
-
-    it("treats breakfastIncludesChildren === null as the default (true)", () => {
-      // null flag → defaults to true → 2 adults + 1 child = 3 occupants.
-      expect(
-        calculateBreakfastAddOn({
-          hasBreakfast: true,
-          breakfastRate: 250,
-          numAdults: 2,
-          numChildren: 1,
-          numNights: 3,
-          breakfastIncludesChildren: null as any
-        })
-      ).toBe(2250);
-    });
-
-    it("returns 0 when numAdults is the only occupant and the flag excludes a child", () => {
-      // 2 adults + 0 children excluded (children=2, flag=false) = 2 occupants.
-      // Sanity check the defensive coercion of numChildren=0.
-      expect(
-        calculateBreakfastAddOn({
-          hasBreakfast: true,
-          breakfastRate: 250,
-          numAdults: 2,
-          numChildren: 0,
-          numNights: 3,
-          breakfastIncludesChildren: false
-        })
-      ).toBe(1500);
-    });
-  });
-});
-
 
 // Per EXB-01 (2026-07-31): the extra-bed add-on term. Sibling
-// to `calculateBreakfastAddOn`. The math is
-// `extraBedCount × extraBedRate × numNights`; no `hasBreakfast`
-// gate (count of 0 is the "off" state).
+// to the deleted `calculateBreakfastAddOn` — same defensive
+// coercion, no `hasBreakfast`-style gate (a count of 0 is the
+// "off" state). The extra-bed math is NOT affected by BR-08
+// (the EXB flow is independent of the breakfast meal model).
 describe("calculateExtraBedAddOn (EXB-01, 2026-07-31)", () => {
   describe("happy path — `count × rate × nights`", () => {
     it("returns the product for a positive count, rate, and nights", () => {
@@ -347,9 +90,6 @@ describe("calculateExtraBedAddOn (EXB-01, 2026-07-31)", () => {
     });
 
     it("matches the historical inline pattern byte-equivalently", () => {
-      // Pre-EXB-01 inline was `extraBedCount * extraBedRate * numNights`
-      // (no defensive coercion, no gate). The helper must return the
-      // same value for any input where the inline returned a number.
       const cases: Array<[number, number, number]> = [
         [1, 500, 2],
         [2, 300, 3],
@@ -400,8 +140,6 @@ describe("calculateExtraBedAddOn (EXB-01, 2026-07-31)", () => {
 
   describe("realistic chain scenarios", () => {
     it("matches the server's extra-bed line for a 1-bed, 3-night stay at ₱500/night", () => {
-      // Per the spec (EXB-01 + EXB-04): extra beds are billed per
-      // night at the room-type's `extraBedRate`. 1 bed × ₱500 × 3 = ₱1500.
       expect(
         calculateExtraBedAddOn({
           extraBedCount: 1,

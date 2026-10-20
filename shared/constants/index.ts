@@ -208,14 +208,40 @@ export const ARRIVAL_WINDOW_HOURS = 24;
 
 export const MAX_ROOM_TYPE_PHOTOS = 10;
 
-// Single source of truth for the breakfast rate fallback (PHP per
-// person, per night). The live rate lives in the Firestore document
-// `settings/breakfastConfig.ratePerPersonPerNight` and is snapshotted
-// onto `booking.breakfastRate` at booking time. This constant is used
-// ONLY as the fallback when that config doc / snapshot is missing or
-// unset. Every handler and UI must reference this — never a hardcoded
-// number — so the fallback can never drift out of sync again.
-export const DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT = 150;
+// Per BR-01 (Phase 13 — Breakfast Redesign, decision #231,
+// 2026-10-12): the daily breakfast-order cutoff. The
+// `cutoffForDate(serviceDate)` rule is `(serviceDate − 1
+// calendar day) at DEFAULT_BREAKFAST_CUTOFF_TIME` in
+// DEFAULT_BREAKFAST_CUTOFF_TIMEZONE. The default 8:00 PM
+// was confirmed with the client during the 2026-10-12
+// design call. Live values come from
+// `settings/breakfastConfig.cutoffTime` +
+// `settings/breakfastConfig.cutoffTimezone` (added in BR-02
+// to the Settings UI); this constant is the seed for new
+// configs and the fallback when the settings doc is missing.
+export const DEFAULT_BREAKFAST_CUTOFF_TIME = "20:00";
+
+// Per BR-01: the property timezone defaults to
+// `Asia/Manila` for Bohol. The live value comes from
+// `hotel.config.ts` (already wired as the source of truth
+// for every existing hotel-scoped helper). This constant
+// is the fallback when the config is missing.
+export const DEFAULT_BREAKFAST_CUTOFF_TIMEZONE = "Asia/Manila";
+
+// Per BR-01 + Open Item #5 (decision #231): how long after
+// a meal is marked served can staff un-mark it without an
+// override reason. The recommended 15-minute default is
+// long enough to correct a mistake, short enough to keep
+// the audit trail meaningful. Configurable on
+// `BreakfastConfig.servedGraceMinutes` in BR-02.
+export const DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES = 15;
+
+// Per BR-01 + decision #231: the minimum character length
+// for a staff override reason. Five is the floor — anything
+// shorter is a "ok" / "fine" tap, not a real reason. The
+// Zod `BreakfastMealSchema.overrideReason` validator
+// (added in BR-02) and the staff-update route enforce this.
+export const MIN_BREAKFAST_OVERRIDE_REASON_LENGTH = 5;
 
 // Default perks shown on the public /corporate page (under the hero).
 // Shared between the guest app (Firestore override → this fallback)
@@ -440,13 +466,45 @@ export type ProtectedPaymentMethod = (typeof PROTECTED_PAYMENT_METHODS)[number];
 // Enforced in the admin Payment Methods tab's file input.
 export const MAX_PAYMENT_METHOD_QR_BYTES = 2 * 1024 * 1024;
 
-// Maximum stay length in nights and maximum advance booking
-// window in days for public online bookings. Enforced server-side
-// before Firestore work. Walk-ins are exempt from the advance
-// window (staff may backfill past stays) but should enforce
-// stay-length limits.
-// These are documented business assumptions — review with the
-// hotel owner before changing.
+/**
+ * Per MBUX-04 (decision #256, 2026-10-15): the pre-compression size
+ * ceiling for a breakfast meal thumbnail uploaded from
+ * Settings -> Dining. Checked BEFORE compression, so a user on a slow
+ * connection gets an immediate "too large" instead of waiting on a
+ * canvas resize that will not help anyway.
+ *
+ * 8 MB rather than the QR cap's 2 MB: a meal photo is a real
+ * photograph, while a QR is deliberately monochrome. It is still an
+ * input ceiling, not a target — `compressImageFile` re-encodes to
+ * JPEG at 1200x1200 / quality 0.82, which lands well under it.
+ */
+export const MAX_BREAKFAST_MEAL_IMAGE_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Per MBUX-04: accepted meal-thumbnail input formats. Mirrors the
+ * spec's JPEG / PNG / WebP list. The re-encode target is always JPEG
+ * (photos, not logos), so PNG alpha and WebP source compression are
+ * flattened on upload.
+ */
+export const BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES: ReadonlyArray<string> = [
+  "image/jpeg",
+  "image/png",
+  "image/webp"
+];
+
+// Maximum advance-booking window in days for public online bookings.
+// Enforced server-side before Firestore work. Walk-ins are exempt
+// from the advance window (staff may backfill past stays).
+// Still a hardcoded constant — there is no admin setting for it.
+//
+// MSL-01 (2026-10-15): MAX_STAY_NIGHTS IS NO LONGER THE POLICY. The
+// stay-length cap moved to `settings/hotelConfig.maxStayNights` and is
+// read through `resolveMaxStayNights` (`shared/utils/stayRange.ts`).
+// The value below survives only as the legacy fallback for a doc that
+// has no field, so an un-migrated hotel behaves exactly as it did
+// before. Prefer `DEFAULT_MAX_STAY_NIGHTS` (same value, lives beside
+// the resolver) or `resolveMaxStayNights(...)` in new code — never
+// this constant, which no longer describes what the system enforces.
 export const MAX_STAY_NIGHTS = 30;
 export const MAX_ADVANCE_DAYS = 365;
 

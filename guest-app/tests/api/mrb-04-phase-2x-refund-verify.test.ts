@@ -115,63 +115,76 @@ describe("MRB-04 Phase 2.x — handleAddRefund writes to reservations/{id}/refun
   });
 
   describe("Refund record shape — new reservation fields", () => {
-    it("includes `reservationId` + `bookingId` on the record when writing to the new subcollection", () => {
-      // The MRB-04 `ReservationRefund` type
-      // carries `reservationId` (canonical
-      // linkage to the parent reservation) +
-      // `bookingId` (per-room attribution). For
-      // new reservations, the refund record
-      // includes both fields so the new
-      // subcollection is self-describing. The
-      // legacy path leaves both fields off —
-      // byte-equivalent to pre-MRB-04 Phase 2.x.
-      expect(handleAddRefundBody).toMatch(
-        /if \(bookingReservationId\.length > 0\) \{\s*\n\s*newRecord\.reservationId = bookingReservationId;\s*\n\s*newRecord\.bookingId = bookingId;\s*\n\s*\}/
+    it("includes `reservationId` + `bookingId` on the record when writing to the new subcollection (helper-delegated, BR-06)", () => {
+      // BR-06 — the `reservationId + bookingId`
+      // stamping line moved from bookings.ts into
+      // the unified `markRefundPaid` helper (one
+      // source of truth for both the CRL-01
+      // cancellation create + the BR-05 breakfast
+      // mark-paid paths). The handler now passes
+      // `reservationId` + the pre-read snapshot to
+      // the helper via `markRefundPaid({...})`.
+      const helper = readFileSync(
+        resolve(__dirname, "../../server/lib/refunds.ts"),
+        "utf8"
       );
+      expect(handleAddRefundBody).toMatch(/markRefundPaid/);
+      expect(handleAddRefundBody).toMatch(/reservationId: bookingReservationId\.length > 0 \? bookingReservationId : null/);
+      // The helper itself still stamps both fields
+      // on the new entry (one source of truth).
+      expect(helper).toMatch(/newRecord\.reservationId = String\(reservationId\)/);
+      expect(helper).toMatch(/newRecord\.bookingId = bookingId/);
     });
 
-    it("stamps the refund record on the new subcollection via transaction.create (no overwrite path)", () => {
-      // The preallocated `refundId` is still the
-      // doc id (CL-01 idempotency contract). The
-      // `refundsRef.doc(refundId)` resolves to
-      // `reservations/{id}/refunds/{refundId}` for
-      // new reservations and
+    it("stamps the refund record on the new subcollection via transaction.create (helper-delegated, BR-06)", () => {
+      // BR-06 — the preallocated `refundId` is
+      // still the doc id (CRL-01 idempotency). The
+      // `transaction.create` line moved from
+      // bookings.ts into the unified helper, which
+      // routes to `reservations/{id}/refunds/{refundId}`
+      // for new reservations and
       // `bookings/{id}/payments/{refundId}` for
-      // legacy. `transaction.create` (not `set`)
-      // ensures a server-side race that lost the
-      // existingRefund lookup still throws a clean
-      // ALREADY_EXISTS rather than overwriting the
-      // original ledger entry.
-      expect(handleAddRefundBody).toMatch(
-        /transaction\.create\(refundsRef\.doc\(refundId\), newRecord\);/
+      // legacy via `resolveRefundDocParent`. A
+      // server-side race that lost the existingDoc
+      // lookup still throws a clean
+      // ALREADY_EXISTS rather than overwriting.
+      const helper = readFileSync(
+        resolve(__dirname, "../../server/lib/refunds.ts"),
+        "utf8"
       );
+      expect(handleAddRefundBody).toMatch(/refundsRef\.doc\(refundId\)/);
+      expect(helper).toMatch(/transaction\.create\(refundRef, newRecord\)/);
+      expect(helper).not.toMatch(/transaction\.set\(refundRef/);
     });
   });
 
   describe("Idempotency contract — preserved for both paths", () => {
-    it("reads existing refunds/payments FIRST so the same-request replay returns idempotentReplay: true", () => {
-      // The idempotency check is unchanged: the
-      // same refundId + same |amount| + same method +
-      // same reason + same transactionReference →
-      // `idempotentReplay = true`. The new
-      // subcollection path preserves the CRL-01
-      // contract (the per-field compare is the
-      // byte-equivalence check). For new
-      // reservations the lookup is on the
-      // reservation's `refunds/` subcollection;
-      // for legacy it's on the booking's `payments/`
-      // subcollection (where refunds are stored as
-      // negative-amount entries).
-      expect(handleAddRefundBody).toMatch(
-        /const existingRefund = refundsSnapshot\.docs\.find\(\(docSnap: any\) => docSnap\.id === refundId\);/
+    it("reads existing refunds/payments FIRST so the same-request replay returns idempotentReplay: true (helper-delegated, BR-06)", () => {
+      // BR-06 — the `existingRefund` lookup +
+      // `sameRequest` field compare + the 409
+      // conflict throw moved into the unified
+      // `markRefundPaid` helper. The handler still
+      // reads the refund collection FIRST (as a
+      // Map for the dual-source net-collected
+      // calc), then reads the specific refund doc
+      // as a snapshot and passes it to the helper.
+      // The helper returns
+      // `alreadyPaid: true`/`conflict: true`,
+      // which the handler translates to
+      // `idempotentReplay = true` / the existing
+      // 409 throw. CRL-01 idempotency contract is
+      // preserved end-to-end.
+      const helper = readFileSync(
+        resolve(__dirname, "../../server/lib/refunds.ts"),
+        "utf8"
       );
-      expect(handleAddRefundBody).toMatch(
-        /const sameRequest = Math\.abs\(Number\(existingData\.amount \|\| 0\)\) === numericAmount/
-      );
-      expect(handleAddRefundBody).toMatch(
-        /if \(!sameRequest\) \{\s*\n\s*throw new Error\("Refund ID has already been used for a different refund\."\);/
-      );
-      expect(handleAddRefundBody).toMatch(/idempotentReplay = true;/);
+      expect(handleAddRefundBody).toMatch(/refundDocSnap/);
+      expect(handleAddRefundBody).toMatch(/helperResult\.alreadyPaid/);
+      expect(handleAddRefundBody).toMatch(/helperResult\.conflict/);
+      expect(handleAddRefundBody).toMatch(/idempotentReplay = true/);
+      // The helper owns the sameRequest math.
+      expect(helper).toMatch(/const sameRequest = Math\.abs\(Number\(existingData\.amount \|\| 0\)\) === safeAmount/);
+      expect(helper).toMatch(/conflict: true/);
     });
 
     it("preserves the 409 status mapping for the conflict case (same id, different request)", () => {

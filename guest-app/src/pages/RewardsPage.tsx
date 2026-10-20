@@ -1,7 +1,17 @@
 import { useState, useEffect } from "react";
-import { Star, Award, Clock, Info, Calendar, CheckCircle2, ChevronRight, Loader2, Sparkles } from "lucide-react";
-import { collection, doc, query, getDoc, onSnapshot, orderBy } from "firebase/firestore";
+import { Star, Award, Clock, Info, Calendar, CheckCircle2, ChevronRight, Loader2, Sparkles, Gift } from "lucide-react";
+import { collection, doc, query, getDoc, onSnapshot, orderBy, where } from "firebase/firestore";
 import { getDateKeyInTimezone } from "@spark-inn/shared";
+// Per Phase 7 of the Spark Rewards tier system (2026-10-13,
+// decision pending): the member portal reads the cached
+// `currentLevel` from the `MemberProfile` (refreshed at checkout
+// + register) and the live `rewardsConfig.levels[]` array to
+// compute the tier badge + progress-to-next bar. The
+// `resolveCurrentLevel` helper is defensive (null on no tier /
+// legacy docs) so a pre-Phase-2 deployment falls back to
+// "Member" + a friendly "stay to unlock perks" prompt instead
+// of crashing the render.
+import type { LevelDef } from "@spark-inn/shared";
 import config from "@config";
 import { db } from "../firebase/config";
 import { AccountLayout } from "../components/AccountLayout";
@@ -27,6 +37,24 @@ interface PointsTransaction {
   type: string;
 }
 
+// Per Phase 7 (2026-10-13): the shape we read for reward
+// vouchers (free-night etc). Only the fields the portal needs
+// are typed — the full shape lives at
+// `shared/utils/vouchers.ts → VoucherLike`. We coerce
+// `expiresAt` to a string on the server side (the admin list
+// does the same — see AdminContext) so the portal doesn't need
+// to know about Firestore timestamps.
+interface RewardVoucher {
+  id: string;
+  code: string;
+  valueType: "percent" | "flat" | "free-night";
+  discountValue: number;
+  usageCount: number;
+  usageCap: number | null;
+  expiresAt: string | null;
+  isActive: boolean;
+}
+
 interface RewardsConfig {
   pointsEnabled: boolean;
   earningMode: "per-booking" | "per-spend";
@@ -41,6 +69,15 @@ interface RewardsConfig {
   // pre-EC-02 deployments keep the perk on until the
   // admin explicitly turns it off via Settings → Rewards.
   earlyCheckInEnabled: boolean;
+  // Phase 2 (2026-10-12): the new scalars + levels array. All
+  // optional for backward compat with pre-Phase-2 deployments
+  // (the `levels` array can be absent → tier display falls back
+  // to "Member" + a friendly "stay to unlock perks" prompt).
+  welcomePoints?: number;
+  minPointsToRedeem?: number;
+  pointsCanPayUpToBillPct?: number;
+  freeNightEvery?: number;
+  levels?: LevelDef[];
 }
 
 const DEFAULT_REWARDS_CONFIG: RewardsConfig = {
@@ -68,6 +105,11 @@ function toDateStr(value: any): string {
 export function RewardsPage() {
   const { user, memberProfile } = useGuestAuth();
   const [transactions, setTransactions] = useState<PointsTransaction[]>([]);
+  // Per Phase 7 (2026-10-13): live subscription to reward
+  // vouchers owned by this member. Empty when the program is
+  // off (freeNightEvery = 0) or the member has no qualifying
+  // stays yet.
+  const [rewardVouchers, setRewardVouchers] = useState<RewardVoucher[]>([]);
   const [rewardsConfig, setRewardsConfig] = useState<RewardsConfig>(DEFAULT_REWARDS_CONFIG);
   const [isLoading, setIsLoading] = useState(true);
   const [showEarlyCheckIn, setShowEarlyCheckIn] = useState(false);
@@ -104,7 +146,20 @@ export function RewardsPage() {
             // absent so pre-EC-02 deployments keep the perk
             // on. The admin Settings → Rewards toggle is the
             // single source of truth for hiding the button.
-            earlyCheckInEnabled: data.earlyCheckInEnabled !== false
+            earlyCheckInEnabled: data.earlyCheckInEnabled !== false,
+            // Phase 2 (2026-10-12) — defaults preserve the
+            // legacy behavior for deployments that haven't
+            // touched the new fields:
+            //   - welcomePoints=0 = no welcome bonus
+            //   - minPointsToRedeem=0 = no floor
+            //   - pointsCanPayUpToBillPct=100 = no cap
+            //   - freeNightEvery=0 = no free-night trigger
+            //   - levels=[] = no tier program (legacy display)
+            welcomePoints: Number(data.welcomePoints ?? 0),
+            minPointsToRedeem: Number(data.minPointsToRedeem ?? 0),
+            pointsCanPayUpToBillPct: Number(data.pointsCanPayUpToBillPct ?? 100),
+            freeNightEvery: Number(data.freeNightEvery ?? 0),
+            levels: Array.isArray(data.levels) ? data.levels : []
           });
         }
       } catch (err) {
@@ -139,9 +194,58 @@ export function RewardsPage() {
       }
     );
 
+    // Per Phase 7 of the Spark Rewards tier system (2026-10-13,
+    // decision pending): live subscription to the member's
+    // active reward vouchers (Phase 5 writes these at checkout
+    // for the free-night trigger). The query filters by
+    // `kind === "reward"` + `memberId === current uid` so the
+    // portal sees only the vouchers it owns — no shared
+    // collection traversal. Per PR-AUDIT-B2 (2026-10-20) the
+    // Firestore rule now carries an owner-scoped branch
+    // (`allow read: if isStaff() || (signedIn() &&
+    // resource.data.memberId == request.auth.uid)` —
+    // `firebase/firestore.rules`), which is what makes this query
+    // legal: Firestore proves the owner predicate from the
+    // `where("memberId","==",uid)` constraint. Before that fix the
+    // rule was staff-only, so this read was PERMISSION_DENIED and
+    // the portal silently rendered zero vouchers. The listener
+    // survives mid-session edits (admin deactivates, member
+    // redeems) and reflects the new state on the next snapshot.
+    const unsubscribeVouchers = onSnapshot(
+      query(
+        collection(db, "vouchers"),
+        where("kind", "==", "reward"),
+        where("memberId", "==", user.uid)
+      ),
+      (snapshot) => {
+        if (cancelled) return;
+        const vouchers: RewardVoucher[] = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            code: data.code || docSnap.id,
+            valueType: data.valueType === "free-night" ? "free-night" : (data.discountType || "flat"),
+            discountValue: Number(data.discountValue || 0),
+            usageCount: Number(data.usageCount || 0),
+            usageCap: data.usageCap === null ? null : Number(data.usageCap),
+            expiresAt: toDateStr(data.expiresAt) || null,
+            isActive: data.isActive !== false
+          };
+        });
+        setRewardVouchers(vouchers);
+      },
+      (err) => {
+        // Non-fatal — fall back to empty list. The portal still
+        // renders points + tier; just no free-night card.
+        console.warn("Reward vouchers listener failed (non-fatal):", err);
+        if (!cancelled) setRewardVouchers([]);
+      }
+    );
+
     return () => {
       cancelled = true;
       unsubscribeHistory?.();
+      unsubscribeVouchers();
     };
   }, [user]);
 
@@ -259,6 +363,61 @@ export function RewardsPage() {
   const pointsBalance = memberProfile?.rewardsPoints || 0;
   const pointsEnabled = rewardsConfig.pointsEnabled !== false;
   const memberDiscountEnabled = rewardsConfig.memberDiscountEnabled !== false && rewardsConfig.memberDiscountPct > 0;
+  // Per Phase 7 (2026-10-13): tier badge + progress-to-next
+  // computation. The `currentLevel` cache field is refreshed at
+  // checkout + register (Phase 3 PR #3); the live `levels` array
+  // is read from the rewardsConfig snapshot. We compute the
+  // next tier as the first array entry whose `fromStays` is
+  // greater than the current tier's `fromStays`. The progress
+  // bar width is `(completedStays - current.fromStays) /
+  // (next.fromStays - current.fromStays) × 100%`. When the
+  // member is at the top tier, progress = 100% + a friendly
+  // "top tier" message.
+  const completedStays = Number(memberProfile?.completedStays ?? 0);
+  const currentLevel: LevelDef | null = memberProfile?.currentLevel ?? null;
+  const sortedLevels = (rewardsConfig.levels ?? [])
+    .slice()
+    .sort((a, b) => a.fromStays - b.fromStays);
+  const nextLevel: LevelDef | null = (() => {
+    if (!currentLevel) {
+      // No tier cache — pick the base (fromStays=0) tier if
+      // any exists; otherwise null. Member without a tier shows
+      // a friendly prompt to unlock perks.
+      return sortedLevels.find((l) => l.fromStays === 0) ?? null;
+    }
+    const next = sortedLevels.find((l) => l.fromStays > currentLevel.fromStays);
+    return next ?? null;
+  })();
+  // The "tier name" rendered under the points balance. When
+  // the member has no tier cache (pre-Phase-2 / free-night tier
+  // not configured), fall back to the base tier name or
+  // "Member".
+  const tierName: string = currentLevel?.name
+    ?? sortedLevels.find((l) => l.fromStays === 0)?.name
+    ?? "Member";
+  // Progress % — `Math.min(100, …)` caps the top-tier case so
+  // the bar doesn't overflow.
+  const progressPct: number = (() => {
+    if (!currentLevel || !nextLevel) return 0;
+    const span = nextLevel.fromStays - currentLevel.fromStays;
+    if (span <= 0) return 100;
+    const completed = Math.max(0, completedStays - currentLevel.fromStays);
+    return Math.min(100, Math.round((completed / span) * 100));
+  })();
+  const remainingStays: number = (() => {
+    if (!currentLevel || !nextLevel) return 0;
+    return Math.max(0, nextLevel.fromStays - completedStays);
+  })();
+  // Per Phase 5 (2026-10-12): active free-night vouchers — we
+  // filter out used / deactivated / expired entries here so the
+  // render list shows only what the member can ACTUALLY apply.
+  const now = Date.now();
+  const activeRewardVouchers = rewardVouchers.filter((v) => {
+    if (!v.isActive) return false;
+    if (v.usageCap !== null && v.usageCount >= v.usageCap) return false;
+    if (v.expiresAt && new Date(v.expiresAt).getTime() < now) return false;
+    return true;
+  });
   // Per Spark Rewards audit 2026-07-18 LOW-4: align the copy
   // with the live checkout-time formula. The previous copy
   // ("Earn N points per ₱100 spent") understated the actual
@@ -283,7 +442,90 @@ export function RewardsPage() {
             <p className="text-5xl font-heading text-gray-950 mt-2">
               {pointsBalance.toLocaleString()}
             </p>
-            <p className="text-xs text-gray-500 mt-2">Standard Member</p>
+            {/*
+              Per Phase 7 (2026-10-13): tier badge + progress-to-next.
+              Reads `currentLevel` from the `MemberProfile` cache
+              (Phase 3 PR #3) and `levels` from the live
+              `settings/rewardsConfig` snapshot. When the member has
+              no tier cache (legacy doc, no levels configured), the
+              tier name falls back to "Member" + no progress bar
+              renders (Phase 1 backward-compat).
+            */}
+            <div className="mt-3 flex items-center justify-center gap-1.5">
+              <Sparkles size={12} className="text-primary" aria-hidden="true" />
+              <p className="text-sm font-bold text-primary" data-testid="member-tier-name">{tierName}</p>
+            </div>
+            {currentLevel && nextLevel && (
+              <div className="mt-4 text-left">
+                <div className="flex justify-between text-[10px] text-gray-500">
+                  <span>{currentLevel.name}</span>
+                  <span>{nextLevel.name}</span>
+                </div>
+                <div
+                  className="mt-1 h-2 w-full bg-gray-100 rounded-full overflow-hidden"
+                  role="progressbar"
+                  aria-valuenow={progressPct}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label={`${remainingStays} more stay${remainingStays !== 1 ? "s" : ""} to ${nextLevel.name}`}
+                >
+                  <div
+                    className="h-2 bg-primary rounded-full transition-all"
+                    style={{ width: `${progressPct}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-gray-500 mt-1 text-center">
+                  {remainingStays} more stay{remainingStays !== 1 ? "s" : ""} to {nextLevel.name}
+                </p>
+              </div>
+            )}
+            {currentLevel && !nextLevel && (
+              <p className="text-[10px] text-gray-500 mt-2">Top tier — enjoy your perks!</p>
+            )}
+            {!currentLevel && sortedLevels.length > 0 && (
+              <p className="text-[10px] text-gray-500 mt-2">Stay with us to unlock tier perks.</p>
+            )}
+          </div>
+        )}
+
+        {/*
+          Per Phase 5 (2026-10-12) + Phase 7 (2026-10-13): reward
+          voucher card. Lists the member's active free-night
+          vouchers (one per qualifying stay). The card only
+          renders when the live subscription returned at least one
+          active voucher — pre-Phase-2 members with no free-night
+          vouchers see no card, which is the right default
+          (don't surface a "you have no vouchers" empty state).
+        */}
+        {activeRewardVouchers.length > 0 && (
+          <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
+            <div className="flex items-center gap-2 mb-3">
+              <Gift size={16} className="text-primary" aria-hidden="true" />
+              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-900">Your Free Nights</h3>
+            </div>
+            <p className="text-[11px] text-gray-500 mb-3">
+              Earned from your {(rewardsConfig.freeNightEvery ?? 0) > 0 ? `${rewardsConfig.freeNightEvery}-stay` : ""} milestone. Apply the code at booking Step 3 to redeem.
+            </p>
+            <ul className="space-y-2">
+              {activeRewardVouchers.map((v) => (
+                <li
+                  key={v.id}
+                  className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs"
+                  data-testid="reward-voucher-row"
+                >
+                  <div className="flex flex-col">
+                    <span className="font-mono font-bold text-amber-900 tracking-wider">{v.code}</span>
+                    <span className="text-[10px] text-amber-700 mt-0.5">
+                      {v.valueType === "free-night" ? "100% off" : `${v.discountValue} off`}
+                      {v.expiresAt ? ` · expires ${v.expiresAt}` : ""}
+                    </span>
+                  </div>
+                  <span className="inline-flex items-center rounded-full bg-amber-900 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-50">
+                    Free Night
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 

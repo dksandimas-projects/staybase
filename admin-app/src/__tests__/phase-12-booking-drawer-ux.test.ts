@@ -34,8 +34,11 @@ describe("Phase 12 — booking drawer information architecture", () => {
   it("shows a compact operational header and booking lifecycle", () => {
     expect(workspaceSrc).toMatch(/Room \{booking\.roomNumber\}/);
     expect(workspaceSrc).toMatch(/booking\.numNights/);
-    expect(workspaceSrc).toContain("Breakfast included");
-    expect(workspaceSrc).toContain("No breakfast");
+    // BR-08 (decision #238, 2026-10-14 — close-out): the
+    // "Breakfast included" / "No breakfast" summary line
+    // is gone (the new meal-based model renders the
+    // meal count from `booking.breakfastSelections`).
+    expect(workspaceSrc).toMatch(/Object\.keys\(booking\.breakfastSelections\)\.length > 0/);
     expect(workspaceSrc).toMatch(/SummaryMetric label="Total"/);
     expect(workspaceSrc).toMatch(/SummaryMetric label="Paid"/);
     expect(workspaceSrc).toMatch(/aria-label="Booking lifecycle"/);

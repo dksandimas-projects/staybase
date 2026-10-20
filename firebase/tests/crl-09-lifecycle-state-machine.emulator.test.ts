@@ -60,12 +60,15 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment
 } from "@firebase/rules-unit-testing";
+import { initializeApp } from "firebase/app";
 import {
   collection,
   collectionGroup,
+  connectFirestoreEmulator,
   doc,
   getDoc,
   getDocs,
+  initializeFirestore,
   setDoc,
   serverTimestamp
 } from "firebase/firestore";
@@ -87,15 +90,26 @@ const REFUND_ID_CONFLICT = "rf-20260803-conflict";
 
 let testEnv: RulesTestEnvironment;
 
-// Admin-SDK-style context for seeding. The
-// real handlers use the Admin SDK (which
-// bypasses rules) — this is the same shape
-// the destructive cancel + refund writer use.
-// We do NOT need to mint staff contexts here
-// because the writes go through the Admin SDK
-// path; the rules tests in the same suite
-// validate the client-side authorization.
-const adminCtx = () => testEnv.unauthenticatedContext();
+// Admin-SDK-style context for seeding.
+//
+// The real destructive-cancel / refund-writer / exception handlers run
+// against the Firebase Admin SDK, which BYPASSES Firestore security
+// rules. `@firebase/rules-unit-testing` has NO Admin context:
+// `unauthenticatedContext()` is an ordinary client context, so the
+// rules apply to it and every seed write comes back PERMISSION_DENIED.
+//
+// The emulator's rules-bypass is the literal auth token "owner" (see
+// `withSecurityRulesDisabled` in `@firebase/rules-unit-testing`), and
+// the public SDK exposes it through
+// `connectFirestoreEmulator(..., { mockUserToken: "owner" })`. The
+// handle below therefore behaves like the Admin SDK the handlers use.
+//
+// The shim keeps the `adminCtx().firestore()` call shape, so the test
+// bodies below are unchanged by this wiring.
+const adminApp = initializeApp({ projectId: PROJECT_ID }, "crl-09-admin");
+const adminFs = initializeFirestore(adminApp, {});
+connectFirestoreEmulator(adminFs, "127.0.0.1", 8080, { mockUserToken: "owner" });
+const adminCtx = () => ({ firestore: () => adminFs });
 
 function buildPolicySnapshot(policyRefund: number, netCollected: number) {
   const now = new Date("2026-08-03T10:00:00.000Z");
@@ -112,6 +126,44 @@ function buildPolicySnapshot(policyRefund: number, netCollected: number) {
 
 function seedPaidReservation(policyRefund: number, netCollected: number) {
   return buildPolicySnapshot(policyRefund, netCollected);
+}
+
+/**
+ * Normalise a document read back from Firestore into the in-memory
+ * shape the builders produce.
+ *
+ * Firestore stores a JS `Date` as a `Timestamp` and returns it as a
+ * `Timestamp` on read, while `shared/types` declares these fields as
+ * `Date` (the shape `buildCancellationLiabilitySnapshot` and the
+ * exception audit produce). Comparing a raw read-back against the
+ * seeded object therefore fails on the timestamp fields alone, so the
+ * wire timestamps are converted back to `Date` before comparison.
+ *
+ * (No production code does date arithmetic on these fields today —
+ * `computeCancellationLiabilityState` and the Dashboard's pending-
+ * refund count both read only the amounts — so this is a
+ * representation detail, not a behaviour difference.)
+ */
+function asStoredShape<T>(value: T): T {
+  if (value instanceof Date) return value;
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    typeof (value as { toDate?: unknown }).toDate === "function"
+  ) {
+    return (value as unknown as { toDate: () => Date }).toDate() as unknown as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => asStoredShape(item)) as unknown as T;
+  }
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = asStoredShape(entry);
+    }
+    return out as unknown as T;
+  }
+  return value;
 }
 
 beforeAll(async () => {
@@ -178,8 +230,8 @@ describe("CRL-09 — the liability snapshot's data shape survives a re-read", ()
     // is the historical record (per CRL-07's per-child
     // snapshot).
     const headerSnap = await getDoc(doc(fs, "reservations", RESERVATION_ID));
-    expect(headerSnap.exists).toBe(true);
-    expect(headerSnap.data()?.cancellationLiability).toEqual(liability);
+    expect(headerSnap.exists()).toBe(true);
+    expect(asStoredShape(headerSnap.data()?.cancellationLiability)).toEqual(liability);
     // The state helper re-projects to `pending-processing`
     // when no refunds exist (the cancel just happened).
     const headerLiability = headerSnap.data()?.cancellationLiability as CancellationLiability;
@@ -212,7 +264,7 @@ describe("CRL-09 — the liability snapshot's data shape survives a re-read", ()
       cancellationPolicySnapshot: liability.policyResult
     });
     const bookingSnap = await getDoc(doc(fs, "bookings", BOOKING_ID_LEGACY));
-    expect(bookingSnap.data()?.cancellationLiability).toEqual(liability);
+    expect(asStoredShape(bookingSnap.data()?.cancellationLiability)).toEqual(liability);
     const projection = computeCancellationLiabilityState({
       liability: bookingSnap.data()?.cancellationLiability as CancellationLiability,
       processedAmount: 0
@@ -389,10 +441,10 @@ describe("CRL-09 — the exception mutation changes the state to retained", () =
     const headerSnap = await getDoc(doc(fs, "reservations", RESERVATION_ID));
     const updated = headerSnap.data()?.cancellationLiability as CancellationLiability;
     expect(updated.approvedAmount).toBe(2000);
-    expect(updated.exception).toEqual(exceptionAudit);
+    expect(asStoredShape(updated.exception)).toEqual(exceptionAudit);
     // The policy result is immutable — the
     // exception does not change it.
-    expect(updated.policyResult).toEqual(liability.policyResult);
+    expect(asStoredShape(updated.policyResult)).toEqual(liability.policyResult);
     // The state is now `retained` (exception applied,
     // no refunds recorded yet).
     const projection = computeCancellationLiabilityState({
@@ -491,7 +543,7 @@ describe("CRL-09 — the refund-id idempotency contract", () => {
     await setDoc(refundRef, refundDoc);
     await setDoc(refundRef, refundDoc);
     const snap = await getDoc(refundRef);
-    expect(snap.exists).toBe(true);
+    expect(snap.exists()).toBe(true);
     expect(snap.data()?.amount).toBe(-2000);
     // The cumulative is 2000 (one document, not two).
     const refundsGroup = await getDocs(collectionGroup(fs, "refunds"));
@@ -580,7 +632,7 @@ describe("CRL-09 — the legacy bookings/{id}/payments/ path", () => {
     // for negative entries to compute the
     // `processedAmount`.
     const bookingSnap = await getDoc(doc(fs, "bookings", BOOKING_ID_LEGACY));
-    const liability = bookingSnap.data()?.cancellationLiability as CancellationLiability;
+    const storedLiability = bookingSnap.data()?.cancellationLiability as CancellationLiability;
     const paymentsSnap = await getDocs(
       collection(fs, "bookings", BOOKING_ID_LEGACY, "payments")
     );
@@ -588,7 +640,7 @@ describe("CRL-09 — the legacy bookings/{id}/payments/ path", () => {
       .filter((d) => Number(d.data()?.amount || 0) < 0)
       .reduce((sum, d) => sum + Math.abs(Number(d.data()?.amount || 0)), 0);
     expect(processedAmount).toBe(1000);
-    const projection = computeCancellationLiabilityState({ liability, processedAmount });
+    const projection = computeCancellationLiabilityState({ liability: storedLiability, processedAmount });
     expect(projection.state).toBe("partially-processed");
     expect(projection.outstandingAmount).toBe(2000);
   });

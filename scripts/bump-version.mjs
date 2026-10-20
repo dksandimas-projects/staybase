@@ -46,6 +46,23 @@ if (bumpType === "patch") {
 }
 
 const nextVersion = `${major}.${minor}.${patch}`;
-writeFileSync(versionFile, `export const VERSION = "${nextVersion}";\n`);
+
+// Surgically replace ONLY the version string. This file used to be
+// rewritten wholesale, which silently destroyed every comment in it —
+// including the BR-08 (decision #238) close-out note documenting the
+// 2.0.0 MAJOR cutover and the deleted breakfast fields. That note was
+// lost twice in one session because every subsequent Conventional
+// Commit re-ran this write. If documentation belongs in this file, the
+// bump must not be able to eat it.
+//
+// A regex replace is safe here because the hook has already proven the
+// constant matches above (it exits 1 otherwise), so exactly one
+// replacement is made and the rest of the file — comments, blank
+// lines, anything — is preserved byte for byte.
+const updatedSource = versionSource.replace(
+  /VERSION\s*=\s*["']\d+\.\d+\.\d+["']/,
+  `VERSION = "${nextVersion}"`
+);
+writeFileSync(versionFile, updatedSource);
 execFileSync("git", ["add", versionFile], { stdio: "inherit" });
 console.log(`Bumped shared VERSION to ${nextVersion}.`);

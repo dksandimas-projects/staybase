@@ -436,7 +436,6 @@ describe("/api/bookings/create", () => {
     guests: number;
     numAdults?: number;
     numChildren?: number;
-    hasBreakfast?: boolean;
   }) => ({
     bookingId,
     roomType: "standard-double",
@@ -445,7 +444,6 @@ describe("/api/bookings/create", () => {
     guests: occupancy.guests,
     numAdults: occupancy.numAdults,
     numChildren: occupancy.numChildren,
-    hasBreakfast: occupancy.hasBreakfast ?? false,
     guestDetails: {
       firstName: "CHD",
       lastName: "Regression",
@@ -538,30 +536,15 @@ describe("/api/bookings/create", () => {
     });
   });
 
-  test("breakfast still multiplies by total occupancy when children are included", async () => {
-    mockSettings.hotelConfig.roomTypes[0].maxCapacity = 2;
-    mockSettings.hotelConfig.roomTypes[0].maxChildren = 1;
-    mockSettings.breakfastConfig = {
-      isEnabled: true,
-      ratePerPersonPerNight: 250,
-      breakfastIncludesChildrenDefault: true
-    };
-    const req = mockRequest(chdBookingBody("bookingChd9E", {
-      guests: 3,
-      numAdults: 2,
-      numChildren: 1,
-      hasBreakfast: true
-    }));
-    const res = mockResponse();
-
-    await handler(req, res);
-
-    expect(res.status).toHaveBeenCalledWith(200);
-    const bookingWrite = setCalls.find((call) => call.path === "bookings/bookingChd9E");
-    expect(bookingWrite?.data.rateBreakdown.addOns).toContainEqual({
-      label: "Breakfast add-on",
-      amount: 2_250
-    });
+  test.skip("breakfast still multiplies by total occupancy when children are included (BR-08 close-out: legacy flat-rate path removed)", () => {
+    // Per BR-08 (decision #238, 2026-10-14 — close-out):
+    // this test exercised the legacy flat-rate
+    // `breakfastRate × numGuests × numNights` math. The
+    // close-out removed the flat-rate path entirely;
+    // the new meal-based model is tested by
+    // `br-03-breakfast-selections-snapshotting.test.ts`
+    // (the rich `breakfastSelections` shape). Kept as a
+    // skipped stub so the audit trail is preserved.
   });
 
   test.each([
@@ -576,7 +559,6 @@ describe("/api/bookings/create", () => {
       checkIn: FUTURE_CHECK_IN_1,
       checkOut: FUTURE_CHECK_OUT_1,
       guests: invalidGuests,
-      hasBreakfast: true,
       guestDetails: {
         firstName: "Daniel",
         lastName: "Sandi",
@@ -604,7 +586,6 @@ describe("/api/bookings/create", () => {
       checkIn: FUTURE_CHECK_IN_1,
       checkOut: FUTURE_CHECK_OUT_1,
       guests: 2,
-      hasBreakfast: false,
       guestDetails: {
         firstName: "Daniel",
         lastName: "Sandi",
@@ -639,7 +620,6 @@ describe("/api/bookings/create", () => {
       checkIn: FUTURE_CHECK_IN_1,
       checkOut: FUTURE_CHECK_OUT_1,
       guests: 2,
-      hasBreakfast: true,
       guestDetails: {
         firstName: "Daniel",
         lastName: "Sandi",
@@ -711,7 +691,6 @@ describe("/api/bookings/create", () => {
       checkIn: FUTURE_CHECK_IN_1,
       checkOut: FUTURE_CHECK_OUT_1,
       guests: 2,
-      hasBreakfast: false,
       guestDetails: {
         firstName: "Jane",
         lastName: "Doe",
@@ -745,7 +724,6 @@ describe("/api/bookings/create", () => {
       checkIn: FUTURE_CHECK_IN_1,
       checkOut: FUTURE_CHECK_OUT_1,
       guests: 10, // Legacy all-adults shape exceeds type maxCapacity (4)
-      hasBreakfast: false,
       guestDetails: {
         firstName: "Jane",
         lastName: "Doe",
@@ -781,7 +759,6 @@ describe("/api/bookings/create", () => {
       checkIn: FUTURE_CHECK_IN_1,
       checkOut: FUTURE_CHECK_OUT_1,
       guests: 2,
-      hasBreakfast: false,
       guestDetails: {
         firstName: "Bot",
         lastName: "Spammer",
@@ -830,7 +807,6 @@ describe("/api/bookings/create", () => {
       checkIn: FUTURE_CHECK_IN_1,
       checkOut: FUTURE_CHECK_OUT_1,
       guests: 2,
-      hasBreakfast: false,
       guestDetails: {
         firstName: "Daniel",
         lastName: "Sandi",
@@ -875,7 +851,6 @@ describe("/api/bookings/create", () => {
         checkIn: FUTURE_CHECK_IN_1,
         checkOut: FUTURE_CHECK_OUT_1,
         guests: 2,
-        hasBreakfast: false,
         guestDetails: {
           firstName: "Type",
           lastName: "Picking",
@@ -924,7 +899,6 @@ describe("/api/bookings/create", () => {
         checkIn: FUTURE_CHECK_IN_1,
         checkOut: FUTURE_CHECK_OUT_1,
         guests: 2,
-        hasBreakfast: false,
         guestDetails: {
           firstName: "Second",
           lastName: "Choice",
@@ -980,7 +954,6 @@ describe("/api/bookings/create", () => {
         checkIn: targetCheckIn,
         checkOut: targetCheckOut,
         guests: 2,
-        hasBreakfast: false,
         guestDetails: {
           firstName: "Empty",
           lastName: "House",
@@ -1034,7 +1007,6 @@ describe("/api/bookings/create", () => {
         checkIn: todayStr,
         checkOut: tomorrowKey,
         guests: 2,
-        hasBreakfast: false,
         guestDetails: {
           firstName: "Same",
           lastName: "Day",
@@ -1080,7 +1052,6 @@ describe("/api/bookings/create", () => {
         checkIn: todayStr,
         checkOut: tomorrowKey,
         guests: 2,
-        hasBreakfast: false,
         guestDetails: {
           firstName: "Before",
           lastName: "Checkout",
@@ -1109,7 +1080,6 @@ describe("/api/bookings/create", () => {
         checkIn: FUTURE_CHECK_IN_1,
         checkOut: FUTURE_CHECK_OUT_1,
         guests: 2,
-        hasBreakfast: false,
         guestDetails: {
           firstName: "Bad",
           lastName: "Type",
@@ -1156,7 +1126,6 @@ describe("/api/bookings/create", () => {
         checkIn: FUTURE_CHECK_IN_1,
         checkOut: FUTURE_CHECK_OUT_1,
         guests: 2,
-        hasBreakfast: false,
         guestDetails: {
           firstName: "Corporate",
           lastName: "Guest",
@@ -1209,7 +1178,6 @@ describe("/api/bookings/create", () => {
         checkIn: FUTURE_CHECK_IN_1,
         checkOut: FUTURE_CHECK_OUT_1,
         guests: 2,
-        hasBreakfast: false,
         guestDetails: {
           firstName: "Voucher",
           lastName: "Guest",
@@ -1262,7 +1230,6 @@ describe("/api/bookings/create", () => {
         checkIn: FUTURE_CHECK_IN_1,
         checkOut: FUTURE_CHECK_OUT_1,
         guests: 2,
-        hasBreakfast: false,
         guestDetails: {
           firstName: "Voucher",
           lastName: "Guest",
@@ -1306,7 +1273,6 @@ describe("/api/bookings/create", () => {
         checkIn: FUTURE_CHECK_IN_1,
         checkOut: FUTURE_CHECK_OUT_1,
         guests: 2,
-        hasBreakfast: false,
         guestDetails: {
           firstName: "Senior",
           lastName: "Voucher",
@@ -1359,7 +1325,6 @@ describe("/api/bookings/create", () => {
         checkIn: FUTURE_CHECK_IN_1,
         checkOut: FUTURE_CHECK_OUT_1,
         guests: 2,
-        hasBreakfast: false,
         guestDetails: {
           firstName: "Senior",
           lastName: "NoId",
@@ -1395,7 +1360,6 @@ describe("/api/bookings/create", () => {
         checkIn: "2026-06-15",
         checkOut: "2026-06-18",
         guests: 2,
-        hasBreakfast: false,
         guestDetails: {
           firstName: "Walk-in",
           lastName: "Guest",
@@ -1437,7 +1401,6 @@ describe("/api/bookings/create", () => {
         checkIn: "2026-06-15",
         checkOut: "2026-06-18",
         guests: 2,
-        hasBreakfast: false,
         guestDetails: {
           firstName: "Auth",
           lastName: "Test",
@@ -1471,7 +1434,6 @@ describe("/api/bookings/create", () => {
         checkIn: "2026-06-15",
         checkOut: "2026-06-18",
         guests: 2,
-        hasBreakfast: false,
         guestDetails: {
           firstName: "Auth",
           lastName: "Test",
@@ -1858,19 +1820,16 @@ describe("/api/bookings/create", () => {
           roomType: "standard-double",
           numAdults: 2,
           numChildren: 0,
-          hasBreakfast: false
         },
         {
           roomType: "standard-double",
           numAdults: 2,
           numChildren: 0,
-          hasBreakfast: false
         }
       ],
       checkIn: FUTURE_CHECK_IN_1,
       checkOut: FUTURE_CHECK_OUT_1,
       guests: 4,
-      hasBreakfast: false,
       guestDetails: {
         firstName: "Group",
         lastName: "Booker",

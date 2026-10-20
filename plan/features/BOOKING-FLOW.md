@@ -54,7 +54,33 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] `breakfastRate` locked at selection time (snapshot of `ratePerPersonPerNight`) — stored on booking document
 - [x] The client sends one explicit `roomSelections[]` entry per requested room. The transaction assigns distinct physical rooms, prices every child stay, applies reservation-level discounts once, and allocates the exact rounded total back to the child bookings.
 
----
+### Stay-range normalization (DR-01, 2026-10-14) + range calendar (DR-02/DR-03, 2026-10-15)
+
+The check-in/check-out pair is **never** validated per-input at a call site. Every guest-facing surface routes the pair through `normalizeStayRange()` in `shared/utils/stayRange.ts` — the single source of truth for shape, ordering, the past-date floor, and the booking horizon.
+
+- [x] **The picker is ONE range calendar, not two independent date fields** (DR-02) — `react-day-picker` in `mode="range"`. The first click sets arrival, the UI moves to departure, the whole stay renders as one band. An inverted range is **not representable**, which is what Agoda / Airbnb / Booking.com all converged on. This is structural, not cosmetic: with two independent fields there is always a moment where the two disagree, and every clamp, `nights-preserved` correction and "we changed your date" message existed only to repair that state.
+- [x] **Two-step selection is enforced by a pure resolver, never inline logic** — `resolveRangeSelection()` in `shared/utils/stayRange.ts` returns `pending` / `complete` / `cleared`. A calendar's range mode reports the **first** click of a new selection as `{ from: day, to: day }` — same day, NOT `to: undefined`. Treating any `to` as complete commits a 1-night range on a single click, which fires an availability refetch, and BookingPage replaces itself with a full-page loader that **unmounts the picker and silently discards the half-made selection**. A same-day pair is therefore always `pending`.
+- [x] **The draft range is separate from the committed pair** — the calendar holds its own `draft`; the committed pair only changes when the range completes, so pricing and availability never chase a provisional date.
+- [x] **Clicking a day at or before the pending check-in restarts the selection** — it never produces an inverted range.
+- [x] **Normalization still runs for anything arriving from outside the calendar** — a shared `?checkIn=` link, a past date, a horizon overrun. URL seeding on `BookingPage` + `CorporateBookingPage` routes both params through the normalizer at init; the shape-only `isValidDateKey` regex is deleted.
+- [x] **The calendar is bounded by today .. the 365-day booking horizon**, two months side by side only at >=768px (at 640px they wrap awkwardly and read as one broken column). **The horizon and the maximum stay length are separate limits** (DR-03): `DEFAULT_BOOKING_HORIZON_DAYS = 365` is how far *ahead* a guest may book; the stay-length cap is the admin setting `settings/hotelConfig.maxStayNights` (30-night default). They were a single number until DR-03, which capped the calendar at `today + 30` and made December unreachable. Both are now enforced, each with its own adjustment reason (`horizon-capped` / `nights-clamped`) so the hint names the limit that actually bound. The night clamp uses `maxNights`, never `stayCap` (`min(maxNights, horizonNights)`), which would fold the horizon back in.
+- [x] **A click starts a new stay; only a pending check-in can be completed** (DR-03/DR-04) — the range is driven from `onSelect`, and the library's computed range is ignored in favour of its `triggerDate`. `addToRange` tests `isAfter(date, from)` before `isAfter(date, to)`, so with a complete range on screen every later click is absorbed as "move the check-out here" and the old `from` is kept — a guest picking a different stay silently stretched the current one instead.
+- [x] **The calendar must be driven through `onSelect`, not `onDayClick`** (DR-04) — `useRange` branches on `useControlledValue(selected, onSelect ? selected : undefined)`, so **without `onSelect` the component is uncontrolled**: `selected={draft}` is read once as an initial value and then ignored, and the library runs its own internal `addToRange` and paints it. That produced a phantom band over the real draft — the calendar showed a selection the fields did not have. **`value` without `onChange` is an initial value, not a control.**
+- [x] **The stay-length cap is a hotel setting, not a constant** (MSL-01) — `settings/hotelConfig.maxStayNights`, admin-editable in Settings → Booking & Holds, `0` = no limit, absent = 30-night default. The picker takes it as a `maxStayNights` prop and resolves it once via `resolveMaxStayNights`; the server resolves it per request via `loadMaxStayNights` and fails **closed** (a read error yields the 30-night default, never unlimited). The server stays authoritative: the client setting only prevents the guest from being *shown* a range the server would refuse. Copy on both sides quotes `describeMaxStayNights()` so the banner and the 400 name the same number. Never pass the raw setting into clamp arithmetic — `0` would collapse every stay to 1 night (see GOTCHAS).
+- [x] **A refused click is explained in the control's own surface** (DR-04) — a stay longer than the configured cap keeps the check-in, leaves the range pending, and states the limit in a `role="alert"` banner rendered **both** in the page flow and inside the sheet (on phones the sheet covers the flow copy). It never silently clamps the check-out to the cap.
+- [x] **The selected range uses `config.colors.primary`** — react-day-picker ships a blue default, which would put an off-brand colour on the most prominent element in the flow. The brand token is set on the wrapper as `--spark-primary` and the `--rdp-*` mapping lives in `styles.css` under `.spark-date-range .spark-range-root`. Two traps (DR-03): an **ancestor override does not work** (the derived range vars resolve `var(--rdp-accent-color)` at their point of declaration, and substitution resolves where it is written, not where it is used), and `classNames` **shallow-merges** — naming the `root` slot *replaces* `rdp-root`, silently un-defining every `--rdp-*` variable and collapsing the day cells to their text width. Keep `rdp-root` and append the hook. **Never hardcode the hex** — a per-client white-label change in `hotel.config.ts` must flow through.
+- [x] **`timeZone={config.timezone}` is set on `DayPicker`** (DR-03) — every date handed to the calendar is a `TZDate` pinned to the hotel zone. Without the prop the library's internal `DateLib` runs in the *browser's* zone, so its day cells and our `selected` values disagree: a deep-linked stay renders with nothing selected and a picked one paints `range_middle` across the whole grid.
+- [x] **A `TZDate` is built from its Y/M/D COMPONENTS, never from a date-time STRING** (OCT-C4, 2026-10-20; decision #280) — `new TZDate(year, month - 1, day, config.timezone)`, the exact construction `react-day-picker`'s own `DateLib.newDate` uses. `@date-fns/tz`'s `TZDate` constructor pops the timezone string and, when the REMAINING argument is a single date string, parses it with the native `Date` constructor — i.e. **in the browser's zone** — and only then re-projects into `config.timezone`. So `new TZDate(\`${iso}T00:00:00\`, config.timezone)` lands on the PREVIOUS day for any browser ahead of Asia/Manila, while the library's day cells (built from components) stay correct — the two disagree, which is the invariant this section exists to prevent. The guest clicked Oct 25 and the booking committed **Oct 24**: one night longer, priced, queried, booked and receipted for the wrong dates. **Do not "fix" this by using a `Z` anchor** — that is the local-parse trap again; the hotel's dates must not depend on the guest's device.
+- [x] **A calendar-local date list is anchored with `Z`, and read with UTC getters** (OCT-H2, 2026-10-20; decision #280) — `enumerateBreakfastDates` parses `new Date(\`${checkIn}T00:00:00Z\`)` and formats with `toISOString()`. A local parse + a UTC format shifts the list back one day in any UTC+ zone, so the LAST breakfast morning was never offered, never charged, and the server's cut-off check ran against the wrong date. The two sibling implementations (`ManageBreakfastPage`, `WalkinBreakfastGrid`) already used the `Z` anchor; the booking flow was the outlier.
+- [x] **The pair is committed atomically via `onRangeChange`** (DR-03) — `onCheckInChange` then `onCheckOutChange` both close over the same render's `checkIn`, so the second write clobbers the check-in from a stale value. Any parent deriving side effects (URL params above all) must use `onRangeChange(checkIn, checkOut)`.
+- [x] **On phones the calendar is a bottom sheet sized to its content** (DR-03) — `fixed inset-x-0 bottom-0` with **no `top`**, so the height is `auto` and the sheet hugs the calendar instead of stretching to the bottom of the screen. `max-h-[calc(100dvh-4rem)]` caps it for short viewports (and the two-month desktop-adjacent layout) and `overflow-y-auto` scrolls only once capped; `overscroll-contain` stops the page scrolling behind it. The first pass used `top-16` + `bottom-0`, which left roughly half the screen as dead white space under Done. Carries a dimmed backdrop, an X, and a **full-width** brand-orange Done (the primary action, in the thumb zone). The sheet header carries the instruction, so the footer does **not** repeat it on phones — desktop keeps the inline hint because it has no header row. At `md+` it reverts to the inline card, where a backdrop would be wrong.
+- [x] **The month grid is centred in the sheet** (DR-03) — react-day-picker sizes `.rdp-months` with `max-width: fit-content`, which left-aligned the grid and left a ragged dead strip down the right of the full-width sheet. `.spark-date-range .rdp-months { margin-inline: auto }`; the month nav is absolutely positioned inside `.rdp-months`, so it travels with the grid.
+- [x] **The server boundary rejects, it does not clamp** — `handleCreateBooking` returns 400 for a non-ISO date or a range shorter than one night. Never treat `Math.max(diff, 0)` as validation; that clamp is what hid the 0-night booking. `handleRescheduleBooking` enforces the same rule.
+- [x] **Every date-accepting endpoint validates the CALENDAR, not just the string shape** (OCT-L7, 2026-10-20; decision #304) — `new Date("2026-02-31T00:00:00Z")` **rolls over to Mar 3** rather than producing an Invalid Date, so an `isNaN(getTime())` guard never fires for a calendar-impossible date and the booking is stored for a day the caller never sent. The guest create path was already correct (it uses the shared `isValidIsoDate`), but the **walk-in create**, the **reschedule** and the **corporate inquiry→booking conversion** used the raw `new Date` + `isNaN` pattern and are now fixed. The schemas validate the SHAPE only — `z.string().regex(/^\d{4}-\d{2}-\d{2}$/)` accepts "2026-02-31" — so the calendar check is a separate, mandatory step: use `isValidIsoDate` (`shared/utils/stayRange.ts`), never a bare `isNaN(getTime())`.
+- [x] **Corporate *inquiry* pairs surface the constraint rather than rewriting them** — `CorporateStaysPage`'s preferred check-in/out captures what the client *wants*, so its inputs stay linked with `min`/`max` plus a live inline error. `BookingLookupPage`'s extend-stay field clamps on change and disables its CTA while invalid.
+- [x] **No nights stepper** — removed in DR-02. The range band already shows the length and clicking it is how you change it; a second control competed with the band. The night count remains visible as read-only text in the range summary.
+
+Tests: `shared/__tests__/stay-range.test.ts` (34 behavioural, incl. the two-step and December regressions) + `guest-app/tests/api/dr-01-stay-range-guard.test.ts` (source-level contract pins). See `plan/docs/DECISIONS-FEATURES.md` #245 / #246 / #249 / #250 / #252 and `plan/docs/GOTCHAS.md` §Booking Flow.
 
 ## Step 2 — Guest Details
 
@@ -147,6 +173,38 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] Online payment: "Your payment is under review. You will receive a confirmation email within 24 hours."
 - [x] Celebratory design treatment — Peak-End Rule, positive final impression
 - [x] Link to `/my-booking` to check status anytime
+### Per MBUX-08 (decision #260) — confirmation hierarchy
+
+The essential result leads; everything else is below it. All of this is derived from ONE
+`resolveConfirmationStatus()` call (`guest-app/src/utils/confirmationStatus.ts`), so the headline, summary,
+next step, payment-status label, payment-status detail and email-status sentence cannot disagree.
+
+- [x] **Payment PROOF is never presented as payment VERIFICATION.** The page derives every status string from the
+      server-returned `status` (already carried in the URL for the early-check-in gate), never from the payment-method
+      boolean. `payment-uploaded` renders `Proof received — not yet verified` verbatim; only `payment-confirmed` /
+      `confirmed` / `checked-in` / `checked-out` on an ONLINE method render `Payment verified`.
+- [x] **Precedence:** `cancelled` beats everything → a NON-online method outranks the booking status → verified outranks
+      `payment-uploaded` → `payment-uploaded` outranks awaiting-proof. The pay-at-hotel arm is deliberate: a
+      pay-at-hotel booking reaching `confirmed` has had its *stay* confirmed, but no money moved and none could have
+      been checked. An empty, unknown or hand-edited `status` on an online method resolves to awaiting-proof, never verified.
+- [x] **Payment status is a visible row, distinct from payment method.** The method keeps reading the admin-configured
+      label via `resolvePaymentMethodLabel`; the status is separate and never hardcoded per method.
+- [x] **Copyable reservation reference.** The front desk asks for it at check-in. `navigator.clipboard.writeText`,
+      `role="status"` live-region confirmation (guest-app has no toast system), auto-reset after 2.4s, and a
+      select-the-text fallback when the Clipboard API is unavailable — the control is never dead.
+- [x] **Explicit "What happens next"** — always states what the guest owes. For `payment-uploaded` it says verification
+      is the hotel's job, not the guest's.
+- [x] **Email status is state-driven**, replacing the old copy that told every online guest confirmation "will follow
+      after payment verification", including those already verified.
+- [x] **Primary action pair = `Add to Google Calendar` + `Manage booking` (`/my-booking`).** `Return to Homepage` is a
+      `GhostButton`; `Download .ics` stays. The `!hasAllParams` empty state keeps its primary "Return to Homepage"
+      deliberately — with no booking there is nothing else to offer. The Google label is deliberately NOT shortened to
+      "Add to Calendar": it deep-links to Google Calendar while `Download .ics` adds to the *device* calendar.
+- [x] **Early check-in moved below the actions** (reversed EC-02's placement, which put a member perk above the stay
+      summary). The rewards prompt already sat below. The full rate breakdown is a collapsed
+      `See the full price breakdown` `<details>` — a receipt detail, not the outcome.
+- [x] `cancelled` deep links get a neutral tone, so the green success tick is never rendered beside a cancellation.
+
 - [x] Spark Rewards prompt — shown only to logged-out guests or non-members:
   - [x] Heading: "Join Spark Rewards and earn points on this stay!"
   - [x] Perks chips — two static icon + name chips ("Earn Points", "Member Discounts"); NOT settings-driven (the settings-driven perks list lives on the homepage section only)
@@ -177,9 +235,177 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] **Per NBS-2026-08-08 (F2, booking-flow audit 2026-08-08): every server-side 4xx surfaces a matching recovery CTA on the Step 3 sticky footer.** The previous catch only auto-redirected for the "Room no longer available" message; every other 4xx (rate-limit 429, `MAX_STAY_NIGHTS`, `MAX_ADVANCE_DAYS`, past-checkin, etc.) stranded the user on Step 3 with a generic message and no next step. The fix maps the server error to one of three recovery actions via a `submitErrorAction: "back-to-step-1" | "retry" | "none"` discriminator: `back-to-step-1` for the stay/date-validation cases (room not available, max stay length, advance window, past check-in); `retry` for transient cases (rate limit, network); `none` for everything else (with a Dismiss button). The auto-redirect for the "Room no longer available" path now holds its timer on a `useRef` so a user-initiated nav (clicking the back CTA or the browser back button) cancels the timer (F11).
 - [x] **Per NBS-2026-08-08 (F11, booking-flow audit 2026-08-08): the 5s auto-redirect for "Room no longer available" is cancellable.** The previous bare `setTimeout` raced a user-initiated nav (the user clicks the back CTA before 5s elapses) and clobbered the URL the user already moved to. The timer is held on `redirectTimerRef: useRef<number | null>(null)`. The cleanup effect cancels any pending timer on unmount; the manual-nav CTA cancels the timer before navigating; a fresh `handleConfirmBooking` submit cancels the timer before re-firing the request.
 
+## Step 1 Room Discovery + Mobile Cart Tray (MBUX-02 + MBUX-03, shipped 2026-10-15)
+
+> Decision: `plan/docs/DECISIONS-FEATURES.md` #255. Owning spec: `plan/features/BOOKING-MOBILE-UX.md §Step 1 — Select Rooms`.
+
+### Card is the selection target
+
+- [x] The visible `Room Only` rate panel, the `selectRoomType` handler, and the `RateOption` component are **deleted**. After BR-03 (decision #232) removed `Room + Breakfast`, `Room Only` was the only rate option and therefore represented no choice — the panel duplicated the `Rooms` quantity stepper directly above it.
+- [x] `rateChoice: "room-only"` **remains** on every cart item. The API payload, `serializeBookingRoomCart` URL state, and server validation are unchanged — only the guest-facing label is gone.
+- [x] The duplicate type pill (rendering the same `type.label` as the heading directly beneath it) is removed, as is the copy `Click a rate to add a room. Click the same rate again to remove it.`
+- [x] `updateRoomQuantity` is the single mutation path for add AND remove. An unselected card shows one full-width `Select this room`; a selected card shows `N selected`, the per-type stay total, and the stepper.
+- [x] Decrementing to zero restores the unselected state automatically — `isSelected` derives from `cartQuantityByType`, so there is no separate clear path.
+- [x] A selected card takes a primary border. It is marked `aria-current="true"` — deliberately **not** `aria-current="step"`, because a card selection is not a navigation position.
+
+### EXB-11.5 supersession (read this before touching Step 1)
+
+- [x] EXB-11.5's per-type rate-option toggle is **superseded by MBUX-02, not merely refactored**. With one rate option left, its untick branch was reachable only by clicking the same lone panel twice (a gesture with nothing to toggle between) and its switch-rate branch was unreachable entirely.
+- [x] `guest-app/tests/api/exb-11-5-rate-option-toggle.test.ts` **keeps its filename** (referenced by this file and the roadmap) and now records the supersession, pins the new surface, and carries **negative pins so the panel cannot quietly return**.
+- [x] The **EXB-11.3 invariant is preserved and re-pinned**: no room may be pre-selected on page load; `Select this room` is the user-explicit add. `guest-app/tests/api/exb-11-3-no-default-room-type-on-load.test.ts` was retargeted to that path.
+- [x] **The selection-sync effect is now load-bearing.** The untick branch that explicitly skipped `setSelectedRoomType` / `setRateChoice` is gone, so the sync effect is the only thing keeping `selectedRoomType` coherent after a decrement-to-zero.
+- [x] **A "click the same card again to remove" gesture must not be reintroduced** — it would restore the meaningless double-tick MBUX-02 removed. Removal happens through the stepper.
+
+### Shared cart read surface
+
+- [x] `groupCartByType` + `RoomCartLines` were **extracted**, not copied, out of an IIFE inside the Step 1 sidebar. The desktop sidebar and the mobile tray render the same component and the same single `deriveRoomTypeCapacityFit` helper, so the tray cannot contradict the room-type card's Fits / Tight / Doesn't fit chip.
+- [x] Lines are grouped by room TYPE and render `N× <type label>` — never positional `Room 1` / `Room 2` (CHD-12).
+- [x] The two instances coexist via `idPrefix` (`cart-line` in the sidebar, `cart-tray-line` in the tray).
+
+### Mobile cart tray
+
+- [x] Mounted directly above the sticky footer, `lg:hidden` — from `lg:` up the sticky sidebar already shows the full cart, so both are never on screen at once.
+- [x] It sits above the footer because that is the only region a thumb reaches and the only region that does not scroll away. A body-positioned tray would scroll off, which is the regression MBUX-01 just fixed elsewhere.
+- [x] Renders nothing when the cart is empty.
+- [x] Collapsed by default; carries room count, adults/children rollup, fit state, and aggregate total. Expanded it shows the same grouped lines as the sidebar.
+- [x] Collapsed lines use the `hidden` attribute, not a visual clip, so they stay out of the accessibility tree.
+- [x] Its aggregate total is the **same `displayTotal`** the sticky footer shows — a second total derivation would be free to disagree with the figure the guest is about to be charged.
+- [x] The expand control is a 44px touch target with `aria-expanded` + `aria-controls`.
+
+### Preserved unchanged
+
+- [x] CHD-11's per-type Fits / Tight / Doesn't fit chip and the `You'd need N of [type]` nudge.
+- [x] CHD-11's occupancy gate: `step-one-occupancy-error`, `adjust-room-cta`, and `aria-describedby` on the disabled submit.
+- [x] The availability bound on increment (`disabled={typeQuantity >= entry.availableCount}`) — the cap is availability, not the fit state.
+- [x] EXB-11.4's extra-bed stepper and its soft floor.
+- [x] BR-03's room-rate-only breakfast preview on the card; WRV-01's mixed-rate breakdown panel.
+
+## Step 2 Add-ons for Phones (MBUX-05, shipped 2026-10-15)
+
+> Decision: `plan/docs/DECISIONS-FEATURES.md` #257. Owning spec: `plan/features/BOOKING-MOBILE-UX.md §Step 2 — Add-ons`. Public `/book` flow only; the corporate flow keeps its BR-10 dual CTA until MBUX-09.
+
+### Breakfast menu strip
+
+- [x] A single `Breakfast menu` strip renders **above every date card**, never inside a native `<option>` — mobile browsers render image-rich native options inconsistently, and the spec rejected that outright.
+- [x] Horizontally scrollable with `overscroll-x-contain` so a horizontal flick does not chain into the page's vertical scroll on iOS. Lazy-loaded thumbnails on a consistent 4:3 crop.
+- [x] Missing or failed images fall back to a branded-neutral tile. The meal **name is always rendered as text**, so a missing photo never removes information.
+- [x] Cards are non-interactive `<div>`s. A tappable photo beside a selector is indistinguishable from "pick this meal", and the strip must not become a second selection path.
+- [x] It reads the same active, display-ordered catalogue the selectors read, so a photo can never appear for a meal that cannot be chosen.
+
+### Per-guest selectors
+
+- [x] The row is stacked on mobile (label above, full-width select) and side-by-side from `sm:` up. The pre-MBUX-05 fixed `min-w-[160px]` label left the native select ~150px wide at 360px, truncating the option text.
+- [x] The empty option is `No breakfast`. The longer "skipping is allowed" explanation appears **once above the grid**, not inside every option on every date card.
+- [x] Locked dates remain visible and read-only; the server remains authoritative on cut-offs.
+
+### Copy to remaining days
+
+- [x] `Use these choices for all remaining days` appears only on a date with at least one explicit selection, and only when a later **editable** date exists.
+- [x] **`No breakfast` copies as a choice** — an empty source slot CLEARS the matching target slot rather than leaving a stale meal. Copying only filled slots would produce a result differing from what the guest actually chose.
+- [x] Locked dates are never overwritten. The lock filter is owned by the caller (it already computes cut-off state); the helper deliberately does not re-derive it.
+- [x] Copied entries are **re-stamped**, not shared by reference, so mutating one date's entry cannot rewrite another's.
+- [x] `updatedDates` counts only dates that actually changed, so the inline `role="status"` confirmation cannot overstate what the tap did. (The guest app has no toast system.)
+- [x] Copied dates remain fully editable — the helper writes the same selections map the selectors write.
+
+### One context-aware Continue action (BR-10 retired)
+
+- [x] The ghost `No add-ons, continue` link is removed from the public flow. Both BR-10 buttons advanced to the IDENTICAL `step=guest-details` URL and differed only in style and label, which implied the primary handled skipped breakfast differently. It did not.
+- [x] One action: `Continue without add-ons` at zero selections, `Continue with N add-ons · total` otherwise. Skipping is now simply "have no selections and press Continue" — no capability is lost.
+- [x] The quoted total is `breakfastTotal`, the same value the review step and create payload use, so the CTA cannot display a figure that differs from the bill.
+- [x] No new step key is minted; navigation stays a client-side `PrimaryButton` so `breakfastSelections` + `breakfastTotal` survive the route change.
+
+### Not shipped in this slice
+
+- [ ] **"Existing other add-ons as progressive cards" is vacuous** — Step 2 has breakfast only; the other-add-ons catalogue is not implemented in the guest flow. `addOnCount` is therefore derived from breakfast selections alone rather than hardcoded to a wider formula that does not exist yet.
+- [ ] The optional thumbnail **preview modal** (spec says "may open") is deferred. The strip's no-photo / loading / failed states are the contract MBUX-10 must verify.
+
+## Step 3 Essential Guest Details (MBUX-06, shipped 2026-10-15)
+
+> Decision: `plan/docs/DECISIONS-FEATURES.md` #258. Owning spec: `plan/features/BOOKING-MOBILE-UX.md §Step 3 — Guest Details`. Public `/book` flow.
+
+### One authoritative consent control
+
+- [x] **The duplicate Step 4 terms checkbox is deleted** and `termsConsent` no longer exists. `guestDetails.consent` (the Step 3 checkbox) is the single value read by the Confirm gate, the create payload, and the server.
+- [x] **This closes a real defect, not a cosmetic one.** NBS-2026-08-08 (F5) found the server validating `guestDetails.consent` while the UI gate read a different checkbox — so a guest could pass the UI and receive a server 400. F5's workaround ANDed both boxes and deferred the real fix; this is the real fix.
+- [x] **Rule to carry forward: when the client gates on a value the server does not validate, the gate is decorative.** Gate, payload, and server now read the same field.
+- [x] The consent checkbox links both `/privacy` and `/terms`.
+- [x] The line the deleted checkbox carried ("I understand that my booking is subject to the cancellation policy selected") is not lost — the cancellation-policy disclosure is always rendered on Step 4, so the guest reads it there rather than ticking it a second time.
+- [x] The "Agree to terms and conditions" CTA branch is removed; the missing-consent copy still points at the Step 3 checkbox.
+
+### Compact secure-handling line
+
+- [x] The large privacy explanation becomes a single inline line. The RA 10173 / Data Privacy Act reference is **kept** (compliance-relevant), with a decorative `ShieldCheck`; the sentence carries the meaning, not the icon.
+
+### Incomplete states name the first correction
+
+- [x] The Continue button is **not** permanently `disabled`. A disabled button is unfocusable, so keyboard and screen-reader users could not reach it, and tapping did nothing.
+- [x] Tapping it reveals the first offending field's inline error, scrolls it into view, and moves focus there — in visual order, with the consent checkbox reached only once every field is valid.
+- [x] `guestCount` has no focusable control on this step (the cart lives on Step 1), so it surfaces through the inline guest label rather than by stealing focus.
+- [x] The footer summary names the first correction instead of the generic "Complete required fields and consent". Summary and focus order derive from the same `guestErrors` object, so they cannot disagree.
+
+### Preserved (shipped earlier, pinned as regression guards)
+
+- [x] The four primary contact fields keep their `autoComplete` tokens (`given-name` / `family-name` / `email` / `tel`) and stay autofill-friendly.
+- [x] Special requests stay collapsed by default (SR-01..05).
+- [x] Signed-in member identity fields remain prefilled and `readOnly`.
+- [x] Inline validation stays touched-field gated; the cart-readiness gate still blocks Continue to review.
+
+## Step 4 Review & Pay — Summary-First (MBUX-07, shipped 2026-10-15)
+
+> Decision: `plan/docs/DECISIONS-FEATURES.md` #259. Owning spec: `plan/features/BOOKING-MOBILE-UX.md §Step 4 — Review & Pay`. Public `/book` flow.
+
+### Mobile information order
+
+- [x] **The booking summary is first on mobile.** Step 4's grid is `lg:grid-cols-[1fr_380px]`; below `lg:` it is a single column, so the summary used to render AFTER every control. The controls column is now `order-2 lg:order-1` and the summary aside `order-1 lg:order-2` — CSS `order`, so **one node moves** and the desktop sidebar cannot drift from the mobile card.
+- [x] Order is now: summary → total due → payment method → proof / eligibility upload → optional savings (collapsed) → cancellation policy → Place booking.
+- [x] **No DOM reorder and no duplicated summary component** — a second render would be free to diverge from the sidebar.
+
+### Optional savings
+
+- [x] Voucher, rewards points, and the Senior/PWD discount moved **below** payment and the upload, behind one collapsed `Have a voucher, points, or discount?` disclosure.
+- [x] The long eligibility guidance moved inside the disclosure, so it is only read when relevant.
+- [x] **An applied saving stays visible while collapsed.** A single `Applied: …` line renders outside the collapsible body whenever any saving is active. Hiding an applied voucher would invite the guest to conclude the discount vanished and apply a second code.
+- [x] Only eligible controls render, as before — the collapse does not change which controls exist.
+
+### Footer
+
+- [x] The summary reads `Total due` and the single action reads `Place booking · {formatPrice(displayTotal)}`. Both quote the same value as the summary card, the sidebar, and the create payload, so the button cannot display a figure that differs from the bill.
+- [x] Processing and upload states stay explicit and never replace the action. Blocking messages still name their specific gate.
+
+### Preserved
+
+- [x] Only the **selected** payment method expands its instructions (`isPayAtHotel` derives from the current selection).
+- [x] The cancellation policy stays a collapsed `<details>`.
+- [x] **The payment-method button strip never gets squashed.** Grid columns are adaptive to the enabled method count (decision #271 / UX-DESK-01): 1 method → 1 col (full-width button), 2 methods → 2 cols at `sm:`, 3 methods → 2 cols at `sm:` + 3 cols at `lg:`, 4+ methods → 2 cols at `sm:` + 4 cols at `lg:`. The pre-UX-DESK-01 grid was hard-pinned to `lg:grid-cols-4` (BF-10, 2026-06-26 — left over from the PayPal-as-4th-method audit), which forced each button into 25% of the container width. With the typical 2-method config that worked out to ~80px per button in the pre-UX-DESK-01 Step 4 sidebar (380px), where "Bank Transfer" wrapped onto three lines. The adaptive shape keeps each button proportional to the enabled count rather than the design-time ceiling.
+- [x] Proof and ID uploads accept JPEG/PNG/WebP and show format + size guidance. There is deliberately **no `capture` attribute** — on mobile a file input with image `accept` already offers "Take Photo" beside the library, and forcing `capture` would remove the library option.
+- [x] The duplicate consent checkbox stays removed (MBUX-06).
+
+## Shared Mobile Booking Shell (MBUX-01, shipped 2026-10-15)
+
+> Decision: `plan/docs/DECISIONS-FEATURES.md` #254. Owning spec: `plan/features/BOOKING-MOBILE-UX.md §Shared Mobile Booking Shell`. Applies to **both** the public `/book` flow and the corporate `/corporate/book` flow. Later slices (MBUX-02..09) change each step's *content*; this section covers the *frame* they all sit in.
+
+### Progress indicator
+
+- [x] Below `sm:` the stepper renders five connected circles sharing one row via `flex-1`, joined by 1px connectors, with a single `aria-hidden` caption beneath: `Step N of 5 · Current step name`. The pre-MBUX-01 component kept all five labels visible in a `flex flex-wrap` row, which cannot fit one line at phone width — it wrapped into a two- or three-row block above the fold on every render.
+- [x] From `sm:` up every label is visible and the layout is byte-equivalent to the pre-MBUX-01 component, so desktop and the existing wide-screen QA matrix are unchanged.
+- [x] The separate `Step N of 5` eyebrow on each step is `hidden sm:block`. On mobile the position is now stated **once** (in the caption); collapsing it at every width would delete the desktop position statement.
+- [x] Ordered-list semantics are preserved (`<ol>`/`<li>`) and the current item carries `aria-current="step"`.
+- [x] Every step keeps an accessible name even when its label is not painted: the label element is `sr-only` and flips to `sm:not-sr-only`. Rewriting it as `hidden sm:inline` would remove every step's name from the accessibility tree on phones.
+- [x] State is never carried by colour alone. A completed step pairs the check glyph with an `sr-only` "Completed"; the **current** step keeps its number (checks-only circles were rejected — they make the current position ambiguous); an upcoming step keeps its number in gray.
+- [x] The step count is never hardcoded — `steps.length` drives the caption, preserving BR-09's variable-count contract.
+- [x] No animation, so reduced-motion is respected by construction. A connector transition would need a `useReducedMotion()` guard; the connector is a static rule.
+
+### Sticky action footer
+
+- [x] All eight footers (four steps × public + corporate) render through the shared `BookingStickyFooter` — `summary` for the compact state, children for the action slot, optional `detail` for a full-width strip (Step 1's occupancy-recovery guidance).
+- [x] The footer applies `pb-[calc(1rem+env(safe-area-inset-bottom))]`. This fixes a real defect: the flat `py-4` meant a notched iPhone's home indicator sat **on top of** the primary action, which `plan/docs/FRONTEND.md §Admin App — Mobile UX Checklist` already forbids on sticky footers.
+- [x] Both booking shells reserve matching space (`pb-[calc(8rem+env(safe-area-inset-bottom))]` instead of `pb-32`), so the fixed bar never covers the last interactive element.
+- [x] The action slot is `w-full` below `sm:` so a single primary action clears the 44px minimum touch height on its own.
+- [x] **Scope boundary:** this extraction standardises the footer's *shell* only. Step 2's two post-BR-10 CTAs and Step 4's `Place booking` are unchanged — consolidating them into one context-aware action is MBUX-05 / MBUX-07, which is a behaviour change and its own task.
+
 ## In-flow Hold (Steps 2 + 3 Countdown Banner)
 
-> Decision: `plan/docs/DECISIONS-FEATURES.md` entry that ships with the feature. The booking flow's Steps 2 and 3 show a live countdown banner so the guest has a visible signal that the room is being held for them while they finish and pay. The hold is **soft** — it does not block the public availability query, and the authoritative double-booking guarantee is unchanged (the Firestore transaction in `handleCreateBooking` is still the only safety net). The banner is honest about this in the copy: "We'll lock it in the moment you confirm — if another guest books first, we'll let you know and you can pick a new room."
+> Decision: `plan/docs/DECISIONS-FEATURES.md` entry that ships with the feature. The booking flow's Steps 2 and 3 show a live countdown banner so the guest has a visible signal that the room is being held for them while they finish and pay. The hold is **soft** — it does not block the public availability query, and the authoritative double-booking guarantee is unchanged (the Firestore transaction in `handleCreateBooking` is still the only safety net). The banner is honest about this in the copy: "We'll lock it in the moment you confirm. If it goes through, you're set." (Tightened in HCT-01, decision #270 — the original "if another guest books first, we'll let you know and you can pick a new room" spelling was longer than necessary; the "If it goes through, you're set" half is the same honesty signal in a shorter form.)
 
 ### Lifecycle
 
@@ -189,9 +415,11 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 4. **Tick (1s + 30s resync):** The hook ticks every 1 second using `Date.now() - expiresAt` so the displayed `MM:SS` reflects the local clock. A 30-second resync re-fetch re-reads the server's `expiresAt` to guard against the rare clock-skew case.
 5. **Expire (timer hits 0):** The banner flips to the red "Hold expired" state with a "Pick a new room" CTA. The CTA routes back to Step 1 with `replace: true` so the history is clean. The user can still try to submit (the booking transaction re-checks the hold server-side).
 6. **Consume (Step 3 Confirm):** `handleCreateBooking` reads the optional `holdId` from the request body, calls `handleConsumeInFlowHold(holdId, reservationId)` best-effort **after** the booking transaction commits, and snapshots `inFlowHoldId` + `inFlowHoldMinutes` onto the booking doc. A failed consume never rolls back the booking (the hold is a UX signal, not a hard inventory lock).
+7. **Extend ("I need more time", IMT-02):** the guest asks for more time explicitly. The banner posts to `/api/holds/extend` with `holdId` + `reservationId` and nothing else. The server re-reads the hold, re-derives the deadline as **additive from `max(now, expiresAt)`**, and pushes `expiresAt` forward — so a hold with 13:30 left keeps that 13:30 *and* gains a full window, while an expired hold restarts from now. This is the **only** path that revives a dead hold: `useInFlowHold` never re-stamps on a passive re-entry, so an expired banner stays red until the guest asks (see `plan/docs/GOTCHAS.md §Booking Flow`).
 
 ### Data & Logic Checklist
 
+- [x] **Per MBUX-01 (decision #254, 2026-10-15): the `active` banner state is COMPACT below `sm:`** — one line reading `Room held · 13:21 remaining`, with the full explanation behind an `aria-expanded` info affordance (`hold-info-toggle` → `hold-help-text`). From `sm:` up the explanation is unconditional and the pre-MBUX-01 layout is unchanged. The `MM:SS` pill is `sm:inline-flex` so the mobile line and the pill are never both in the accessibility tree — two live copies of a ticking counter would be announced twice a second. `extendError` renders as a sibling of the collapsible region, never inside it: a guest who expanded nothing must still see that their extend failed. The expired state's two explicit actions, the `role="region"` wrapper, and the single `sr-only` announcement live region are unchanged. See `plan/features/BOOKING-MOBILE-UX.md §Shared Mobile Booking Shell`.
 - [x] Client preallocates a `holdId` (UUIDv4) on Step 1 mount via `generateHoldId()` — same pattern as `bookingId` + `reservationId`
 - [x] `continueParams` URLSearchParams includes `hold=<id>` so the id survives the Step 1 → Step 2 route change
 - [x] `useInFlowHold(holdId, startInput)` hook fires `GET /api/holds/read` on mount; on 404, fires `POST /api/holds/start` (idempotent on the same `holdId`)
@@ -205,14 +433,39 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 - [x] A failed consume (network blip, hold lapsed between booking commit and the consume call) is logged at `warn` level; the booking still commits. The hold's on-disk `status` may be stale until the future Janitor sweep runs.
 - [x] The public availability endpoint does NOT consult `bookingHolds` — a hold is a UX signal, not an inventory lock. Two guests can both see the room as available and both have an active hold; the booking transaction picks the first commit and the second gets a "Room no longer available" error on Confirm.
 - [x] Walk-in bookings (`/api/bookings/create-walkin`) do NOT stamp an in-flow hold — the desk has the keys, no UX timer needed
-- [x] The hold copy is honest: "We'll lock it in the moment you confirm — if another guest books first, we'll let you know and you can pick a new room" — not a literal "the room is reserved for you" promise
+- [x] The hold copy is honest: "We'll lock it in the moment you confirm. If it goes through, you're set." — not a literal "the room is reserved for you" promise. The tripwire tests pin the "If it goes through" half (see decision #270)
+- [x] **Per IMT-01 (2026-10-13): the "Pick a new room" CTA re-rolls the `holdId` before rewriting the URL.** `holdId` is `const [holdId, setHoldId] = useState(() => generateHoldId())` in both `BookingPage.tsx` and `CorporateBookingPage.tsx`; the CTA calls `setHoldId(generateHoldId())` **before** `setSearchParams(next, { replace: true })`. Ordering is load-bearing — `continueParams` is rebuilt from `holdId` on the next render, so rolling after the navigation would still ship the dead id. `continueParams` is a render-body statement (not memoized) in both pages; a `useMemo` with a dep array missing `holdId` would reinstate the bug via a stale closure.
+
+- [x] **Per IMT-02 (2026-10-14): extension is additive, never a reset.** `computeExtendedInFlowHoldExpiresAt(holdMinutes, currentExpiresAt, now)` computes from `max(now, currentExpiresAt)`. A reset-from-now would silently destroy the remaining window of a still-ticking hold — the opposite of "I need more time". Pinned by runtime tests in `shared/__tests__/in-flow-hold-extend.test.ts`, verified by mutation (flipping to reset semantics fails 3 tests).
+- [x] **Per IMT-02: the extension window comes from the hold doc, never the request.** `ExtendBookingHoldSchema` is `.strict()` and accepts `holdId` + `reservationId` only. A client-supplied `minutes` would be an unauthenticated way to pin a doc `"active"` indefinitely and would defeat `MAX_IN_FLOW_HOLD_EXTENSIONS` entirely. Pinned by runtime Zod tests, not source text.
+- [x] **Per IMT-02: `canExtendInFlowHold` is the single gate** for status + cap. `"consumed"` is never extendable (a committed booking's hold must not be resurrectable from a stale `?hold=` link); `"active"` and `"expired"` are; anything else is refused fail-closed. A negative or non-numeric `extensionCount` (hand-edited doc) is refused rather than coerced to 0.
+- [x] **Per IMT-02: the extend path writes through a `runTransaction`** with all reads before writes (GOTCHAS FOL-03), exactly one read, and the post-update state constructed in JS — a transaction cannot observe the doc it just wrote. `createdAt` is carried through untouched: extending the window does not restart the attempt's history.
+- [x] **Per IMT-02: no new Vercel function, no Firestore rules change.** `holds/extend` is a branch in the existing catch-all. `bookingHolds` has no `match` block (default-deny for all clients, staff included); every write goes through the Admin SDK.
+- [x] **Per IMT-03: the "I need more time" CTA appears on BOTH states.** Secondary beside the *Time left* pill while the hold is running (the guest gets more room than the full window without ever hitting zero), and the **primary** action on the expired state, where "Pick a new room" demotes to a secondary button — a guest watching the timer hit 0:00 wants to continue, not restart. Both stay one tap; only the emphasis moves.
+- [x] **Per IMT-03: the CTA hides at the cap instead of letting the guest tap a 409.** `canExtend` is delegated from the hook to the shared `canExtendInFlowHold`; the component hardcodes neither the cap number nor the status rules. When the cap is spent the expired state's copy changes to say so honestly rather than offering a button that cannot work.
+- [x] **Per IMT-03: hard UI rules.** `rounded-lg` (8px), `min-h-11` (44px touch height), `disabled:cursor-not-allowed disabled:opacity-60` while in flight. The button disables *and* the hook guards on `isExtending`, because the cap is finite — a fast double-tap must not burn two extensions.
+- [x] **Per IMT-03: extension outcome is announced, and the announcement is not the countdown.** The success message goes through a dedicated `sr-only` `role="status" aria-live="polite"` region carrying the server's new deadline. A failed extend shows inline `extendError` copy and **never** disturbs the running countdown — the hook leaves `hold` untouched on every failure path.
+- [x] **Per IMT-03 (accessibility defect fixed in passing):** the ticking active-state container was `role="status" aria-live="polite"` while re-rendering **every second** — a screen reader was being handed a text mutation once per second, and any extension announcement would have been drowned by it. The container is now a plain `role="region"` with an `aria-label`; the countdown pill keeps its own `aria-label` for on-demand reading. This is why the announcement needed its own region rather than reusing the existing one.
+- [x] **Per IMT-03: no per-page wiring.** Both `/book` and `/corporate/book` already mount this one component, so the CTA ships to the corporate flow at the same time as the public one.
+- [x] **Per IMT-03 follow-up (2026-10-14): on the ACTIVE state the CTA reveals only when the timer is urgent** (`HOLD_EXTEND_CTA_REVEAL_SECONDS = 60`). It used to sit beside the countdown for the whole window, which made it compete with the banner's message and invited reflex taps; revealing it as the deadline nears makes it read as "this is the moment to ask", and an extension drops `secondsLeft` back to a full window so it hides again and has to re-arm. **60s, not a tighter window:** the feature exists for a guest mid-payment on a slow connection or mid-terms read, and those are exactly the flows that blow past 15 seconds without looking up — a 15s reveal would drop them into the expired state, the *worse* experience, when extending while still calm was available. 60s is also the countdown pill's own red-tier boundary, so the button appears at the instant the timer already *looks* alarming rather than introducing a fourth arbitrary threshold. **The EXPIRED state still offers it unconditionally** — that is what makes a narrow reveal safe. A guest who misses the window is not stranded; the button is waiting for them as the red banner's primary action. The cap and status gate remain the server's (`canExtendInFlowHold`); this is purely when the affordance is shown.
+- [x] **Per IMT-05 (2026-10-14): the banner is brand-rebrandable.** The active state was painted in Tailwind `indigo-*` — verified to appear in **zero** other guest-app components, i.e. an unbranded orphan rather than a house convention, which meant a white-label client changing `colors.primary` still got a blue booking banner. It now uses the `primary*` tokens (`bg-primary-light` surface, `primary` / `primary-dark` accents). CTAs go through `primary` per the hard rule, including the expired state's primary action, which was `bg-red-600`.
+- [x] **Per IMT-05: the danger + warning surfaces stay semantic, on purpose.** Expired (red) and error (amber) are *state signals*, not brand color, and both already match established app patterns (`border-amber-200 bg-amber-50` is the house warning banner; `bg-red-600` is the house danger action). Rebranding "your hold expired" to orange when a client changes their brand would destroy the meaning. The countdown pill keeps its amber/red urgency tiers and drops brand color from the normal tier, so "time is running out" stays legible.
+- [x] **Per IMT-05: brand color never carries reading text.** Measured contrast drove the choices — `text-primary` on `primary-light` is **2.35:1** and unusable for copy, so headings and body stay gray and brand color is confined to accents (icon, border, button fill). A pin enforces that any element using `text-primary` is `aria-hidden`.
+- [x] **Per IMT-05: the CTAs use `text-gray-900`, not the app-wide `text-white`.** `#EA8A1A` on white is **2.58:1** and fails WCAG AA; on gray-900 it is **6.88:1**. The codebase-wide `bg-primary text-white` issue (~125 uses) is filed separately as **CRT-01** — it was not fixed here, because restyling 25+ components is a different scope than this banner.
 
 ### Edge Cases
+
+- [x] **Per IMT-02: extending an already-expired hold revives it; extending a consumed one is refused.** Revival is the point — "I need more time" is most often said at 0:00 — and it is safe precisely because the hold is soft. A consumed hold belongs to a committed booking, so a stale link must not be able to revive a completed attempt (409).
+- [x] **Per IMT-02: the cap is enforced server-side and surfaced to the guest.** `MAX_IN_FLOW_HOLD_EXTENSIONS = 3` (working default pending CVQ-01). Past the cap the endpoint returns 409; `extensionCount` rides on the existing read payload so the banner hides the CTA rather than letting the guest click a button the server will reject.
+- [x] **Per IMT-02: an extend whose `reservationId` does not match the hold's is refused (409)** — the same anti-tamper bind the start endpoint uses on its idempotency guard. A hold doc with no stored `reservationId` (legacy write) is accepted.
+- [x] **Per IMT-02: the extension rate limit (10/IP/min) is tighter than start's 30.** Start is once per booking attempt; extend is the call that extends doc lifetime, so it gets the tighter budget. The two bounds (rate limit + cap) together keep unauthenticated doc growth finite.
+
+- [x] **Per IMT-01 (2026-10-13): an expired hold is NOT an unrecoverable dead end — and revival is EXPLICIT-ONLY.** Before this fix, `holdId` was minted once per page instance and never re-rolled, `onPickNewRoom` only rewrote `?step=select-room`, and Step 1's `continueParams` re-added the same dead id. `/api/holds/read` answers **HTTP 200** with `status: "expired"` (read-time evaluation), so the hook's 404 → `POST /api/holds/start` branch never fired, and start's idempotency guard refuses the replay for *any* status. Net effect: expire → "Pick a new room" → re-pick → instantly-red banner, in a loop, escapable only with a hard reload. Now the CTA mints a fresh id, so re-entry 404s and the hook stamps a genuinely fresh hold. **The id is deliberately NOT re-rolled on a plain re-entry** (e.g. browser Back to Step 1): auto-reviving a dead hold would silently defeat the countdown, because a guest who sits on the expired banner and reloads would otherwise get a new window indefinitely. An expired banner stays red until the guest explicitly picks a new room or extends the hold (IMT-03). Two negative pins in `guest-app/tests/api/in-flow-hold.test.ts` enforce this — `setHoldId(` must appear exactly once per page, and `useInFlowHold` must keep auto-stamping only on a 404.
 
 - [x] Two guests starting holds for the same room — both see the banner ticking; the transaction picks the first commit
 - [x] User on Step 3 with the timer at 0:00 — the banner shows red, the Confirm button is **not** disabled (the transaction will simply conflict if the room is gone)
 - [x] User refreshes the page on Step 2 — the URL still carries `?hold=<id>`, the hook reads + re-starts the timer (idempotent, same `expiresAt` if the doc already exists)
-- [x] User navigates back to Step 1, changes the room type + dates, then re-enters Step 2 — the `holdId` is preserved (the start endpoint is idempotent on the same `holdId`), the banner continues from the original `expiresAt`. A future enhancement could detect a `roomType` / `checkIn` mismatch and start a fresh hold; for v1 the same hold is reused.
+- [x] ~~User navigates back to Step 1, changes the room type + dates, then re-enters Step 2 — the `holdId` is preserved (the start endpoint is idempotent on the same `holdId`), the banner continues from the original `expiresAt`. A future enhancement could detect a `roomType` / `checkIn` mismatch and start a fresh hold; for v1 the same hold is reused.~~ **SUPERSEDED by IMT-01 (2026-10-13).** The "reuse the same hold across a Step 1 round-trip" behaviour above was correct only while the hold was still active, and became the dead-end trap once it expired: the preserved id was then a *dead* id that the hook re-read as `expired` forever. The consequence is that hold identity is now scoped to a single attempt rather than to the page instance — "Pick a new room" mints a fresh `holdId`, so a room-type/date change after an expiry correctly produces a fresh hold instead of inheriting a lapsed one. **Still open, unchanged:** detecting a `roomType` / `checkIn` mismatch on a round-trip while the hold is *still active* is not implemented; an active hold is deliberately carried across the round-trip (no re-stamp, no clock restart), and only an expiry or an explicit CTA breaks the identity.
 - [x] Network blip on the `POST /api/holds/start` call — the hook shows the amber "We couldn't load the hold timer" state with a Retry button; the user can still submit the booking (the consume is best-effort)
 - [x] User on Step 2 with the timer ticking; the API endpoint returns 404 for the hold doc (e.g. the Janitor sweep cleaned it up) — the banner shows "This hold was not found. It may have expired — please return to Step 1 to pick a new room."
 - [x] The daily Janitor sweep (`POST /api/holds/sweep`, registered in `vercel.json §crons` with `0 2 * * *`) marks stale `"active"` holds past their `expiresAt` as `"expired"`. Per-doc Firestore transaction with a recheck (a hold consumed by a booking between the coarse query and the per-doc write is NOT re-marked `"expired"`). Idempotent — a re-fire of the same tick finds zero matches. Auth: same `CRON_SECRET` pattern as the PEX-06 expire cron. **Vercel Hobby-plan constraint:** the previous hourly schedule `0 * * * *` was rejected at deploy time with "Hobby accounts are limited to daily cron jobs" — see `fix/vercel-hobby-hourly-cron`. The 15-min `IN_FLOW_HOLD_MINUTES` window means a stale hold can be left in `"active"` for up to 24 hours before this sweep runs. The read-time evaluation already reports it as `"expired"` to the banner — the sweep is purely an on-disk cleanup so future reports + the `bookingHolds` collection size stay bounded. The daily cadence is acceptable for the soft-UX-signal use case.
@@ -248,7 +501,7 @@ The 4-step public booking flow at `/book`. Converts room interest into a confirm
 ## Audit Remediation (2026-07-17)
 
 - **G-01 (HIGH, fixed):** `/api/bookings/create` now strict-Zod validates the complete request. `guests` is a finite integer from 1–100, unknown fields are rejected, and computed totals have a final `Number.isFinite` guard before the booking write. The already-strict walk-in schema remains unchanged.
-- **G-02 (MED, fixed 2026-08-14):** The server now enforces `MAX_STAY_NIGHTS` (30) and `MAX_ADVANCE_DAYS` (365) in `handleCreateBooking` (lines 1418-1431). Both limits are defined in `shared/constants`. The client date picker surfaces the advance window. Walk-in creation is exempt from the advance-window check.
+- **G-02 (MED, fixed 2026-08-14, extended by MSL-01 2026-10-15):** The server enforces the maximum stay length and `MAX_ADVANCE_DAYS` (365) before any Firestore work. **MSL-01 moved the stay-length cap out of `shared/constants` and into `settings/hotelConfig.maxStayNights`** (0 = no limit, absent = 30-night default), read through `resolveMaxStayNights`. The advance window is still a constant. MSL-01 also closed a live bypass: the cap was enforced in `handleCreateBooking` and `handleCreateWalkin` but **not** `handleRescheduleBooking`, which only checked the lower bound — a front-desk user could stretch a legal 2-night booking to 200 nights. All three paths now enforce it. The client date picker surfaces both limits.
 
 ## References
 

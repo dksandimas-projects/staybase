@@ -18,7 +18,13 @@ describe("AdminContext.tsx — second concurrent call wins (decision #94)", () =
   });
 
   it("writes status: 'ended' to the previous call when a new active one arrives", () => {
-    expect(src).toMatch(/updateDoc\(\s*doc\(db\s*,\s*["']calls["']\s*,\s*previousRoomId\s*\)/);
+    // Per PR-AUDIT-B4 (2026-10-20): the superseded call is now
+    // addressed by its capability token when the call has one (the
+    // call document lives at `callSessions/{sessionToken}`), falling
+    // back to the legacy room-scoped path otherwise. The intent of
+    // the pin — the desk ends the previous call — is unchanged.
+    expect(src).toMatch(/updateDoc\(\s*[\s\S]{0,200}?doc\(db\s*,\s*["']callSessions["']\s*,\s*adminPreviousCallSessionTokenRef\.current\s*\)/);
+    expect(src).toMatch(/adminPreviousCallSessionTokenRef\s*=\s*useRef/);
   });
 
   it("records endedAt timestamp and endedReason on the superseded call", () => {

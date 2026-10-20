@@ -92,10 +92,14 @@ describe("PDF generation repair", () => {
 
     // The pre-fill reads from `booking.breakfastSelections` keyed
     // by `${date}-guest-${g + 1}` (the same key shape the booking
-    // drawer's <select> writes to). Matching is by silog item name
-    // because the drawer stores `item.name` as the <option> value.
-    expect(registrationBody).toMatch(/b\.breakfastSelections\?\.\[\s*`\$\{date\}-guest-\$\{g\s*\+\s*1\}`\s*\]/);
-    expect(registrationBody).toMatch(/isSelected\s*=\s*!!selectedName\s*&&\s*item\.name\s*===\s*selectedName/);
+    // drawer's <select> writes to). Matching is by meal name
+    // (`mealName` field on the new rich shape — BR-01 moved
+    // from a string to a `{ mealId, mealName, price, ... }` entry).
+    // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+    // legacy string fallback (the value of the entry was the
+    // meal name itself) is preserved for pre-BR-01 bookings.
+    expect(registrationBody).toMatch(/b\.breakfastSelections\[`\$\{date\}-guest-\$\{g \+ 1\}`\]/);
+    expect(registrationBody).toMatch(/isSelected = !!selectedName /);
 
     // The selected branch must fill the checkbox in the brand
     // color (FD = fill + draw) and overlay a white checkmark via

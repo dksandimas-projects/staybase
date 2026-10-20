@@ -162,7 +162,8 @@ Powers the public booking flow's Steps 2 + 3 countdown banner. The `bookingHolds
 | Route | Method | Auth | Purpose |
 |---|---|---|---|
 | `/api/holds/start` | POST | None (rate-limit only) | Stamp a fresh `bookingHolds/{holdId}` doc with `expiresAt = now + IN_FLOW_HOLD_MINUTES` (or the per-hotel `settings/hotelConfig.inFlowHoldMinutes` per IFH-01.2) and `status: "active"`. Idempotent on the same `holdId` — a second POST returns the existing doc unchanged (the `useInFlowHold` hook relies on this for retry-after-uncertain-response). Body validated against `StartBookingHoldSchema` (`shared/schemas/booking.ts`, strict): `holdId` (UUIDv4), `reservationId` (UUIDv4 from MRB-02), `roomType`, `checkIn` + `checkOut` (YYYY-MM-DD), `numNights`. Rate-limited at 30/IP/min. **No Turnstile gate** — the hook fires POST on Step 2 mount before the BookingPage's Turnstile widget (gated to `isReviewStep`) has loaded a token. The actual security gate is the booking transaction (`/api/bookings/create` IS Turnstile-gated); a hold is a soft UX signal that doesn't unlock anything. See `fix/holds-start-turnstile`. |
-| `/api/holds/read` | GET | None | Read a hold by `?holdId=<id>`. Returns the doc shape (id + reservationId + roomType + dates + numNights + expiresAt + status + holdMinutes) with a read-time evaluation: a hold past its `expiresAt` is reported as `"expired"` even if the Janitor hasn't run yet (the on-disk `status` stays `"active"` until the Janitor sweep). Returns 404 for a missing id. Rate-limited at 60/IP/min. The `useInFlowHold` hook fires this on mount + every 30 seconds (resync). |
+| `/api/holds/read` | GET | None | Read a hold by `?holdId=<id>`. Returns the doc shape (id + reservationId + roomType + dates + numNights + expiresAt + status + holdMinutes + **extensionCount**) with a read-time evaluation: a hold past its `expiresAt` is reported as `"expired"` even if the Janitor hasn't run yet (the on-disk `status` stays `"active"` until the Janitor sweep). Returns 404 for a missing id. Rate-limited at 60/IP/min. The `useInFlowHold` hook fires this on mount + every 30 seconds (resync). |
+| `/api/holds/extend` | POST | None (rate-limit only) | Per IMT-02 (2026-10-14) — the "I need more time" endpoint. Adds a window to an active hold, or revives an expired one. Body validated against `ExtendBookingHoldSchema` (`shared/schemas/booking.ts`, strict): `holdId` + `reservationId` **only** — no client-supplied duration, so the window always comes from the doc's own `holdMinutes` snapshot and a caller cannot ask for a longer hold than the hotel configured. Additive from `max(now, expiresAt)`: an active hold keeps its remaining time, an expired hold restarts from now. Runs in a `runTransaction` (read-then-write, GOTCHAS FOL-03) and increments `extensionCount`; refuses `"consumed"` (a committed booking's hold is never resurrectable) and any status outside `"active" \| "expired"`, fail-closed. `canExtendInFlowHold` enforces `MAX_IN_FLOW_HOLD_EXTENSIONS = 3`. Rate-limited at **10/IP/min** — tighter than start's 30, because extend is the call that extends doc lifetime. **No Turnstile gate**, same reason as start: the banner renders on Steps 2 + 3 and fires before the Step-3-only Turnstile widget has a token (`fix/holds-start-turnstile`). Extending a SOFT hold unlocks nothing — the authoritative boundary remains the Turnstile-gated `/api/bookings/create`. Registered inside the existing catch-all (no new Vercel function) and needs no Firestore rules change (`bookingHolds` has no `match` block; the write goes through the Admin SDK). |
 | `/api/holds/expire` | POST / GET | `CRON_SECRET` | Daily cleanup cron for expired `pending` payment holds (PEX-06). Same `CRON_SECRET` auth as the other Vercel cron handlers. Not related to the in-flow hold (which has its own lifecycle via `handleConsumeInFlowHold`); the in-flow hold Janitor is a future follow-up. |
 | `/api/holds/sweep` | POST / GET | `CRON_SECRET` | Daily Janitor sweep for stale guest `bookingHolds` and hard `staffInventoryHolds`. Queries each collection for `status == "active"` + `expiresAt < now`, then marks matches `"expired"` inside per-doc transactions with a fresh eligibility recheck. Runtime availability checks already ignore expired staff holds, so cron cadence does not extend a lock. Returns aggregate `{ swept, scanned, runAt }`. Registered as `0 2 * * *`. |
 
@@ -197,6 +198,33 @@ Both routes return the discount/rate details on success. Never expose full vouch
 | `/api/store/deliver-order` | POST | Staff | Atomically mark an out-for-delivery order delivered and append one deterministic direct-payment tender; Add to Bill creates no tender |
 
 Store order creation MUST use a Firestore transaction to prevent overselling.
+
+---
+
+### Intercom Routes (`/api/intercom/*`)
+
+| Route | Method | Auth | Purpose |
+|---|---|---|---|
+| `/api/intercom/verify-guest` | POST | None (last name or booking ID must match the room's `checked-in` booking) | Verify the guest's stay and ISSUE the session capability token |
+| `/api/intercom/send-message` | POST | Session capability token | Send a guest chat message; the server re-verifies the stay and writes to the guest's session thread |
+
+Per PR-AUDIT-B3/B6 (2026-10-20), the intercom uses a **capability-token**
+model because walk-in guests are not signed in and Firestore rules can only
+authorize against `request.auth`:
+
+- `POST /api/intercom/verify-guest` returns
+  `{ bookingId, bookingRef, guestName, checkIn, checkOut, sessionToken }`.
+  `sessionToken` is a random 32-hex value (128 bits) that is also stored on
+  the staff-only `intercoms/{roomId}` document as `currentStayToken`. It is
+  stable for the duration of the stay and regenerated when the stay changes.
+- The guest's chat thread lives at `intercomSessions/{sessionToken}/messages`
+  and the call session at `callSessions/{sessionToken}`. A caller who cannot
+  construct the path cannot read or forge the session.
+- `POST /api/intercom/send-message` REQUIRES `sessionToken` in the body. The
+  server resolves the booking from `currentStayId`, verifies that it belongs
+  to the room, that it is `checked-in`, and that `sessionToken` matches the
+  one issued for that room's current stay. **The request body's `guestName` is
+  ignored** — the name the desk sees comes from the booking.
 Store order cancellation MUST only allow `placed` orders and MUST use a transaction so stock restore is idempotent.
 Store order status MUST return only guest-safe metadata (`status`, `updatedAt`) and never expose `paymentProofUrl`, internal notes, or full order records.
 Store order delivery MUST use the authenticated server route. Direct-paid tenders are written under the store order so collection-group reports and Daily Close include them without settling the linked booking folio.
@@ -254,6 +282,7 @@ The bell + panel in the admin app read `notifications` via a **client-side `onSn
 | `/api/members/register` | POST | Signed-in guest | Enroll the authenticated guest in Spark Rewards, generate the sequential `memberNumber`, create or update `members/{uid}`, and link past bookings by email |
 | `/api/members/stays` | GET | Signed-in guest | Return the calling member's guest-safe booking history by `memberId == uid` or `guestEmail == token.email`. Response includes display fields only (`bookingRef`, `lookupToken`, room, dates, nights, total, status, breakfast flag) and never returns staff-only fields such as `paymentProofUrl`, `notes`, or `remarks`. |
 | `/api/members/redeem-points` | POST | Staff | Redeem member points against a booking; transactionally deducts member balance, lowers `booking.totalPrice`, rebuilds the locked rate breakdown, stores redemption fields, and appends a `pointsHistory` entry |
+| `/api/members/redeem-points-self` | POST | Signed-in guest (member) | **PR #9 (2026-10-13)**: Member self-service points redemption at booking Step 3. Gated by `rewardsConfig.allowMemberPointsRedemption` (admin opt-in toggle, default `false`). The handler verifies the Firebase ID token, enforces `booking.memberId === authUser.uid` ownership, then runs the same 9-guarded transaction as the staff path via the shared `applyPointsRedemption` helper. The `pointsRedeemedBy` field is set to `"self:{memberUid}"` so reports can distinguish self-applies from staff-applies. Rate-limited at the Vercel catch-all level. |
 | `/api/members/undo-redemption` | POST | Admin | Undo a points redemption while the booking is still `confirmed`; transactionally restores booking total and its locked breakdown, returns member points, clears redemption fields, and logs the reversal |
 | `/api/members/set-active` | POST | Admin | Suspend or reactivate a Spark Rewards member account; updates the member document and Firebase Auth disabled state together |
 | `/api/members/delete-account` | POST | Signed-in guest | Erase the calling member's account per RA 10173 right to erasure: anonymize every linked booking (write a no-PII audit record to `bookings/audit/records/{id}` first, then scrub `guestName` / `guestEmail` / `guestPhone` / `memberId`), recursively delete the `pointsHistory` subcollection, delete `members/{uid}`, and delete the Firebase Auth user. Body must include `{ confirmation: "erase-my-account" }`. |

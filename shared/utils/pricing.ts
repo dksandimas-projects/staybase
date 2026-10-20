@@ -1,14 +1,19 @@
 import type { BookingRateBreakdown } from "../types";
 import type { DiscountScope } from "./bookingDiscounts";
-import { calculateBreakfastAddOn } from "./bookingAddOns";
 import { calculateDiscountChain } from "./bookingDiscounts";
 
 export interface PriceInput {
   ratePerNight: number;
   numNights: number;
   numGuests?: number;
-  breakfastRate?: number;
-  hasBreakfast?: boolean;
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy flat-rate `breakfastRate: number` + `hasBreakfast:
+  // boolean` pair is deleted. The new meal-based model
+  // snapshots the breakfast total onto the booking doc
+  // (`booking.breakfastTotal`) — callers compose that into
+  // the discount chain directly instead of recomputing
+  // `breakfastRate × numGuests × numNights` here.
+  breakfastTotal?: number;
   discountPct?: number;
   voucherDiscount?: number;
   memberDiscountPct?: number;
@@ -40,12 +45,13 @@ export function calculateBookingTotal(input: PriceInput) {
   // to the flat `ratePerNight * numNights` for callers that don't
   // need weekend-aware pricing.
   const roomTotal = input.roomTotal ?? (input.ratePerNight * input.numNights);
-  // Per EXB-02 (2026-07-31): the inline `breakfastRate × numGuests × numNights`
-  // ternary now routes through the shared `calculateBreakfastAddOn` helper.
-  // Byte-equivalent output: the helper's `hasBreakfast` short-circuit replaces
-  // the original outer guard, and its defensive coercion on each operand
-  // (nullish / 0 → 0) is a strict superset of the historical truthy checks.
-  const breakfastTotal = calculateBreakfastAddOn(input);
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // breakfast subtotal is the snapshotted `booking.breakfastTotal`
+  // (computed by the BR-01 `calculateBreakfastMealsTotal` helper
+  // from `booking.breakfastSelections[key].price`). The legacy
+  // `breakfastRate × numGuests × numNights` recomputation is
+  // gone — the booking doc carries the single source of truth.
+  const breakfastTotal = Number(input.breakfastTotal) || 0;
   // Per EXB-01 (2026-07-31): extra-bed subtotal is the third
   // term in the pre-discount subtotal. Composed into the chain
   // so the senior/voucher/member percentages see the full

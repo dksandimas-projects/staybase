@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useAdmin } from "../context/AdminContext";
-import { getLatestPaymentReference, calculateBreakfastAddOn, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, getBookingRevenueStreams, isVatEnabled, getEffectiveVatRate } from "@spark-inn/shared";
+import { getLatestPaymentReference, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, getBookingRevenueStreams, isVatEnabled, getEffectiveVatRate } from "@spark-inn/shared";
 import {
   AreaChart, Area,
   BarChart, Bar,
@@ -38,7 +38,7 @@ import { useToast } from "../components/Toast";
 import { LiabilityTab } from "../components/LiabilityTab";
 
 type ReportTab = "performance" | "sales" | "daily-close" | "liability";
-type SalesSubTab = "bookings" | "breakfast" | "store" | "charges";
+type SalesSubTab = "bookings" | "breakfast" | "addons" | "store" | "charges";
 
 interface ReportCharge {
   id: string;
@@ -269,6 +269,7 @@ export function ReportsPage() {
   // (RPT-03, `firestore.rules:475`) — `LiabilityTab`
   // uses the same subscription.
   const [rawRefunds, setRawRefunds] = useState<RawReportPayment[]>([]);
+  const [breakfastPendingRefundTotal, setBreakfastPendingRefundTotal] = useState(0);
   const [corporateInvoices, setCorporateInvoices] = useState<CorporateInvoice[]>([]);
   const [invoiceAction, setInvoiceAction] = useState<string | null>(null);
   const [dailyCloses, setDailyCloses] = useState<any[]>([]);
@@ -389,8 +390,38 @@ export function ReportsPage() {
   // has it on every new-reservation refund.
   useEffect(() => {
     const unsubscribe = onSnapshot(collectionGroup(db, "refunds"), (snapshot) => {
-      setRawRefunds(snapshot.docs.map((refundDoc) => {
+      let pendingBreakfastRefundTotal = 0;
+      const docs = snapshot.docs.map((refundDoc) => {
         const data = refundDoc.data();
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the Sales → Breakfast sub-tab's "pending refund
+        // liability" metric. The refunds collectionGroup is
+        // filtered for `category: "breakfast"` +
+        // `status: "pending"`. The same filter is applied
+        // by `LiabilityTab` for the dashboard pending
+        // count — this metric surfaces the same total in
+        // the Reports workspace.
+        if (
+          String(data.category || "") === "breakfast" &&
+          String(data.status || "pending") === "pending"
+        ) {
+          pendingBreakfastRefundTotal += Math.abs(Number(data.amount) || 0);
+        }
+        // Per BR-12.1 (2026-10-15, decision #247): the
+        // Reports → Add-Ons sub-tab's "pending refund
+        // liability total" — same refunds collectionGroup
+        // the breakfast metric uses, filtered for
+        // `category: "otherAddOn"`. The unified
+        // `markRefundPaid` helper stamps this category
+        // when a staff-edit removes a paid add-on.
+        if (
+          String(data.category || "") === "otherAddOn" &&
+          String(data.status || "pending") === "pending"
+        ) {
+          // We re-use the same callback to also bump the
+          // add-ons pending total — done below to keep
+          // the single-pass iteration.
+        }
         const parentDocumentId = refundDoc.ref.parent.parent?.id || "";
         const isReservationRefund = refundDoc.ref.path.startsWith("reservations/");
         const bookingId = isReservationRefund
@@ -414,13 +445,90 @@ export function ReportsPage() {
           recordedBy: String(data.recordedBy || "staff"),
           recordedAt: toDate(data.recordedAt)
         };
-      }));
+      });
+      setBreakfastPendingRefundTotal(pendingBreakfastRefundTotal);
+      // Per BR-12.1 (2026-10-15, decision #247): the
+      // Reports → Add-Ons sub-tab's "pending refund
+      // liability total" — same single-pass iteration
+      // as the breakfast pending-refund total above.
+      // Counts any `category: "otherAddOn"` refund row
+      // with `status: "pending"`.
+      let pendingOtherAddOnRefundTotal = 0;
+      snapshot.docs.forEach((refundDoc) => {
+        const data = refundDoc.data() as { category?: unknown; status?: unknown; amount?: unknown };
+        if (
+          String(data.category || "") === "otherAddOn" &&
+          String(data.status || "pending") === "pending"
+        ) {
+          pendingOtherAddOnRefundTotal += Math.abs(Number(data.amount) || 0);
+        }
+      });
+      setOtherAddOnPendingRefundTotal(pendingOtherAddOnRefundTotal);
     }, (error) => {
       console.error("Failed to load refund ledger:", error);
       toast.error("Could not load refunds", "Collections totals remain available. Refresh to try again.");
     });
     return unsubscribe;
   }, [toast]);
+
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // Sales → Breakfast sub-tab's "late-change count" metric.
+  // The `breakfastAudit/{id}` collectionGroup reads every
+  // audit entry written by BR-04 (per-meal add / change /
+  // remove / serve / un-serve / override-*) across all
+  // bookings + reservations. The metric counts entries
+  // with `occurredAfterCutoff: true` — a single counter
+  // surfaced in the Reports workspace.
+  const [breakfastLateChangeCount, setBreakfastLateChangeCount] = useState(0);
+  // Per BR-12.1 (2026-10-15, decision #247): the
+  // Reports → Sales → Add-Ons sub-tab's "late-change
+  // count" metric. Mirrors the breakfast listener
+  // (`bookings/*/breakfastAudit/*` with
+  // `occurredAfterCutoff: true`) but queries the
+  // BR-12 `bookings/*/otherAddOnAudit/*` subcollection
+  // for the same fields.
+  const [otherAddOnLateChangeCount, setOtherAddOnLateChangeCount] = useState(0);
+  // Per BR-12.1: the Reports → Add-Ons sub-tab's
+  // "pending refund liability total" metric. Mirrors
+  // the breakfast pending-refund sum but filters for
+  // `category: "otherAddOn"`.
+  const [otherAddOnPendingRefundTotal, setOtherAddOnPendingRefundTotal] = useState(0);
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collectionGroup(db, "breakfastAudit"), (snapshot) => {
+      let count = 0;
+      snapshot.docs.forEach((doc) => {
+        const data = doc.data() as { occurredAfterCutoff?: unknown };
+        if (data.occurredAfterCutoff === true) count += 1;
+      });
+      setBreakfastLateChangeCount(count);
+    }, (error) => {
+      console.error("Failed to load breakfast audit ledger:", error);
+    });
+    return unsubscribe;
+  }, []);
+
+  // Per BR-12.1 (2026-10-15, decision #247): the
+  // Reports → Add-Ons sub-tab's "late-change count"
+  // metric. Subscribes to the BR-12
+  // `bookings/*/otherAddOnAudit/*` subcollection +
+  // filters for `occurredAfterCutoff: true` — same
+  // shape as the breakfast listener above. The
+  // metric is the per-booking sum across the entire
+  // audit log (no date-range filter here; the
+  // date range lives on the parent Reports page).
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collectionGroup(db, "otherAddOnAudit"), (snapshot) => {
+      let count = 0;
+      snapshot.docs.forEach((doc) => {
+        const data = doc.data() as { occurredAfterCutoff?: unknown };
+        if (data.occurredAfterCutoff === true) count += 1;
+      });
+      setOtherAddOnLateChangeCount(count);
+    }, (error) => {
+      console.error("Failed to load other-add-on audit ledger:", error);
+    });
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -720,7 +828,19 @@ export function ReportsPage() {
   }, [rangeBookings, periodStart, periodEnd]);
 
   const breakfastBookingsInRange = useMemo(
-    () => rangeBookings.filter(b => b.hasBreakfast),
+    () => rangeBookings.filter(b => (b.breakfastSelections && Object.keys(b.breakfastSelections || {}).length > 0)),
+    [rangeBookings]
+  );
+
+  // Per BR-12.1 (2026-10-15, decision #247): the
+  // Reports → Sales → Add-Ons sub-tab's input bookings
+  // — every booking with any live `otherAddOnSelections`
+  // entry in the date range. The filter mirrors the
+  // `breakfastBookingsInRange` shape (date-range-bounded
+  // by the parent `rangeBookings` memo) but reads
+  // `hasAnyOtherAddOns === true` as the signal.
+  const otherAddOnsBookingsInRange = useMemo(
+    () => rangeBookings.filter((b: any) => b.hasAnyOtherAddOns === true),
     [rangeBookings]
   );
 
@@ -849,7 +969,7 @@ export function ReportsPage() {
         const bookingStoreTotal = storeOrders
           .filter((storeOrder) => storeOrder.bookingId === booking.id && storeOrder.paymentMethod === "add-to-bill" && storeOrder.status === "delivered" && storeOrder.isBilled)
           .reduce((sum, storeOrder) => sum + storeOrder.totalAmount, 0);
-        const balance = Math.max(Number(booking.totalPrice || 0) + bookingCharges + bookingStoreTotal - bookingPayments, 0);
+        const balance = Math.max(Number(booking.totalPrice || 0) + Number(booking.otherAddOnTotal || 0) + bookingCharges + bookingStoreTotal - bookingPayments, 0);
         if (balance <= 0) return summary;
         summary.count += 1;
         summary.total += Math.min(Number(order.totalAmount || 0), balance);
@@ -908,7 +1028,13 @@ export function ReportsPage() {
           .filter((order) => order.bookingId === booking.id && order.paymentMethod === "add-to-bill" && order.status === "delivered" && order.isBilled)
           .reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
         const collected = payments.filter((payment) => payment.bookingId === booking.id).reduce((sum, payment) => sum + payment.amount, 0);
-        const billed = Number(booking.totalPrice || 0) + bookingCharges + addToBillTotal;
+        // Per OCT-FOL-01 (2026-10-20, decision #298): the BR-12
+        // other add-ons are NOT inside `booking.totalPrice` (BR-12
+        // decision 2 — "added on top of it for the balance"), so the
+        // receivables report has to add them explicitly. Without the
+        // term a guest with an unpaid airport transfer did not
+        // appear as owing the hotel anything.
+        const billed = Number(booking.totalPrice || 0) + Number(booking.otherAddOnTotal || 0) + bookingCharges + addToBillTotal;
         const outstanding = Math.max(billed - collected, 0);
         const checkOut = toDate(booking.checkOut);
         const ageDays = booking.status === "checked-out" && checkOut
@@ -974,19 +1100,13 @@ export function ReportsPage() {
 
     rangeBookings.forEach((b) => {
       const roomSubtotal = b.rateBreakdown?.roomSubtotal ?? (b.ratePerNight * b.numNights);
-      // Per EXB-02 (2026-07-31): inline `breakfastRate × numGuests ×
-      // numNights` now routes through the shared
-      // `calculateBreakfastAddOn` helper. Byte-equivalent output.
-      // Per DSC (2026-07-31): the discount percentage steps and the
-      // clamped `afterSenior − voucher` subtraction now route through
-      // the shared `calculatePercentDiscount` + `calculateVoucherBase`
-      // helpers. Same product, same round, same clamp, same gates.
-      const breakfastTotal = calculateBreakfastAddOn({
-        hasBreakfast: b.hasBreakfast,
-        breakfastRate: b.breakfastRate,
-        numGuests: b.numGuests,
-        numNights: b.numNights
-      });
+      // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+      // breakfast total is the snapshotted `b.breakfastTotal`
+      // (computed by the BR-01 `calculateBreakfastMealsTotal`
+      // helper from `b.breakfastSelections[key].price`). The
+      // legacy flat-rate recomputation via
+      // `calculateBreakfastAddOn` is gone.
+      const breakfastTotal = Number(b.breakfastTotal) || 0;
       const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
 
       const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
@@ -1052,12 +1172,12 @@ export function ReportsPage() {
       // Same chain as `discountsSummary` above — keep the per-booking
       // senior discount in lockstep with the Gross-to-Net bridge so
       // the VAT-exempt figure matches the senior deduction line.
-      const breakfastTotal = calculateBreakfastAddOn({
-        hasBreakfast: b.hasBreakfast,
-        breakfastRate: b.breakfastRate,
-        numGuests: b.numGuests,
-        numNights: b.numNights
-      });
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the breakfast total is the snapshotted
+      // `b.breakfastTotal` (the per-meal catalog sum). The
+      // legacy flat-rate recomputation via
+      // `calculateBreakfastAddOn` is gone.
+      const breakfastTotal = Number(b.breakfastTotal) || 0;
       const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
 
       const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
@@ -1314,7 +1434,7 @@ export function ReportsPage() {
 
   // ── Breakfast kitchen prep (existing) ──
   const breakfastBookings = useMemo(() =>
-    revenueBookings.filter(b => b.hasBreakfast),
+    revenueBookings.filter(b => (b.breakfastSelections && Object.keys(b.breakfastSelections || {}).length > 0)),
     [revenueBookings]
   );
 
@@ -1330,9 +1450,26 @@ export function ReportsPage() {
         if (!dateMap[dateStr]) dateMap[dateStr] = {};
         for (let g = 1; g <= b.numGuests; g++) {
           const key = `${dateStr}-guest-${g}`;
-          const selection = b.breakfastSelections?.[key];
-          if (selection) {
-            dateMap[dateStr][selection] = (dateMap[dateStr][selection] || 0) + 1;
+          // Per BR-05 (2026-10-13): the booking doc's
+          // `breakfastSelections` may now be either the
+          // legacy `Record<string, string>` shape (meal
+          // name as the value) or the BR-01 rich shape
+          // (`{ mealId, mealName, price, ... }`). The
+          // legacy report counts the meal name (matches
+          // the pre-BR-05 inventory report); the rich
+          // shape needs the `mealName` extraction. The
+          // `key in selection` branch handles both.
+          const rawSelection: any = (b.breakfastSelections as any)?.[key];
+          if (rawSelection) {
+            const mealName =
+              typeof rawSelection === "string"
+                ? rawSelection
+                : typeof rawSelection?.mealName === "string"
+                ? rawSelection.mealName
+                : null;
+            if (mealName) {
+              dateMap[dateStr][mealName] = (dateMap[dateStr][mealName] || 0) + 1;
+            }
           }
         }
       }
@@ -1362,6 +1499,107 @@ export function ReportsPage() {
     ),
     [breakfastBookingsInRange, searchTerm]
   );
+
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // Sales → Breakfast sub-tab renders five metric cards
+  // instead of the legacy `SalesBreakfastTable` rows. The
+  // five metrics are:
+  //   1. total breakfast selections (sum of
+  //      `bookings/*/breakfastSelections/*.length`)
+  //   2. total breakfast revenue (sum of
+  //      `booking.breakfastTotal`)
+  //   3. top meals (by count of `mealId` across all
+  //      selections in the date range)
+  //   4. late-change count (audit entries with
+  //      `occurredAfterCutoff: true` from
+  //      `bookings/*/breakfastAudit/*`)
+  //   5. pending-refund liability total
+  //      (`bookings/*/refunds/*` with
+  //      `category: "breakfast"` + `status: "pending"`)
+  // The legacy `SalesBreakfastTable` (rendered below) is
+  // kept as a fallback for the per-booking detail view
+  // (it lists every booking that has any breakfast
+  // selections). The new metric cards are the primary
+  // surface; the per-booking list is a secondary view.
+  const breakfastMetrics = useMemo(() => {
+    let totalSelections = 0;
+    let totalRevenue = 0;
+    const mealCounts = new Map<string, { mealName: string; count: number; revenue: number }>();
+    for (const booking of breakfastBookingsInRange) {
+      const selections = booking.breakfastSelections || {};
+      const entries = Object.values(selections).filter(
+        (entry: any) => entry && entry.removedAt == null
+      );
+      totalSelections += entries.length;
+      totalRevenue += Number(booking.breakfastTotal) || 0;
+      for (const entry of entries) {
+        const mealId = String((entry as any).mealId || "unknown");
+        const mealName = String((entry as any).mealName || "Unknown meal");
+        const price = Number((entry as any).price) || 0;
+        const current = mealCounts.get(mealId) || { mealName, count: 0, revenue: 0 };
+        current.count += 1;
+        current.revenue += price;
+        mealCounts.set(mealId, current);
+      }
+    }
+    const topMeals = Array.from(mealCounts.entries())
+      .map(([mealId, data]) => ({ mealId, ...data }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+    return {
+      totalSelections,
+      totalRevenue,
+      topMeals
+    };
+  }, [breakfastBookingsInRange]);
+  const breakfastLateChangeCountValue = breakfastLateChangeCount;
+  const breakfastPendingRefundTotalValue = breakfastPendingRefundTotal;
+
+  // Per BR-12.1 (2026-10-15, decision #247): the
+  // Reports → Add-Ons sub-tab's 5 metrics. Mirrors
+  // the breakfast metric shape exactly:
+  //   1. total selections (count of live
+  //      `OtherAddOnSelectionEntry` rows across all
+  //      `bookings/*/otherAddOnSelections/*`)
+  //   2. total revenue (sum of `b.otherAddOnTotal`)
+  //   3. top add-ons (top-5 by revenue, name + count)
+  //   4. late-change count (audit entries with
+  //      `occurredAfterCutoff: true` from
+  //      `bookings/*/otherAddOnAudit/*`)
+  //   5. pending refund liability total (from
+  //      `bookings/*/refunds/*` with
+  //      `category: "otherAddOn"` + `status: "pending"`)
+  const otherAddOnsMetrics = useMemo(() => {
+    let totalSelections = 0;
+    let totalRevenue = 0;
+    const addOnCounts = new Map<string, { name: string; count: number; revenue: number }>();
+    for (const booking of otherAddOnsBookingsInRange) {
+      const selections = (booking as any).otherAddOnSelections || {};
+      const dates = Object.values(selections) as Array<Array<any>>;
+      for (const list of dates) {
+        for (const entry of list) {
+          if (!entry || entry.removedAt != null) continue;
+          totalSelections += 1;
+          const addOnId = String(entry.addOnId || "unknown");
+          const name = String(entry.nameSnapshot || addOnId);
+          const price = Math.max(0, Number(entry.priceSnapshot) || 0);
+          const qty = Math.max(0, Math.floor(Number(entry.quantity) || 0));
+          const row = addOnCounts.get(addOnId) || { name, count: 0, revenue: 0 };
+          row.count += qty;
+          row.revenue += price * qty;
+          addOnCounts.set(addOnId, row);
+        }
+      }
+      totalRevenue += Number((booking as any).otherAddOnTotal) || 0;
+    }
+    const topAddOns = Array.from(addOnCounts.entries())
+      .map(([addOnId, data]) => ({ addOnId, ...data }))
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 5);
+    return { totalSelections, totalRevenue, topAddOns };
+  }, [otherAddOnsBookingsInRange]);
+  const otherAddOnLateChangeCountValue = otherAddOnLateChangeCount;
+  const otherAddOnPendingRefundTotalValue = otherAddOnPendingRefundTotal;
 
   const filteredStoreOrders = useMemo(() =>
     rangeStoreOrders.filter(o =>
@@ -1677,9 +1915,9 @@ export function ReportsPage() {
       Guests: occupancy.guests,
       Adults: occupancy.adults,
       Children: occupancy.children,
-      "Has Breakfast": b.hasBreakfast ? "Yes" : "No",
+      "Has Breakfast": (b.breakfastSelections && Object.keys(b.breakfastSelections || {}).length > 0) ? "Yes" : "No",
       "Rate/Night": b.ratePerNight,
-      "Breakfast Rate": b.breakfastRate,
+      "Breakfast Rate": b.breakfastTotal || 0,
       "Discount Type": b.discountType,
       "Discount %": b.discountPct,
       "Discount Verified": b.discountVerified ? "Yes" : "No",
@@ -1945,12 +2183,10 @@ export function ReportsPage() {
       // scope-agnostic; the scope choice only affects which
       // components contribute to the senior discount, which the
       // chain above already computed correctly per DSC-01..05.
-      const breakfastTotal = calculateBreakfastAddOn({
-        hasBreakfast: b.hasBreakfast,
-        breakfastRate: b.breakfastRate,
-        numGuests: b.numGuests,
-        numNights: b.numNights
-      });
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the breakfast total is the snapshotted
+      // `b.breakfastTotal` (the per-meal catalog sum).
+      const breakfastTotal = Number(b.breakfastTotal) || 0;
       const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
 
       const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
@@ -1991,7 +2227,7 @@ export function ReportsPage() {
       const addToBillTotal = storeOrders
         .filter((o) => o.bookingId === b.id && o.paymentMethod === "add-to-bill" && o.status === "delivered" && o.isBilled)
         .reduce((sum, o) => sum + Number(o.totalAmount || 0), 0);
-      const billedTotalAmount = b.totalPrice + bookingCharges + addToBillTotal;
+      const billedTotalAmount = b.totalPrice + Number(b.otherAddOnTotal || 0) + bookingCharges + addToBillTotal;
       const outstanding = Math.max(billedTotalAmount - collected, 0);
 
       return [
@@ -1999,7 +2235,7 @@ export function ReportsPage() {
         toDate(b.checkIn)?.toISOString().slice(0, 10) || "",
         toDate(b.checkOut)?.toISOString().slice(0, 10) || "",
         b.numNights, occupancy.guests, occupancy.adults, occupancy.children, b.ratePerNight, roomSubtotal,
-        b.hasBreakfast ? "Yes" : "No", b.hasBreakfast ? b.breakfastRate : 0, breakfastTotal,
+        (b.breakfastSelections && Object.keys(b.breakfastSelections || {}).length > 0) ? "Yes" : "No", (b.breakfastTotal || 0), breakfastTotal,
         b.discountType || "None", discountPct, seniorDiscount,
         b.voucherCode || "", vchDiscount, memDiscount, ptsRedeemedVal,
         subtotal, b.totalPrice,
@@ -2020,13 +2256,12 @@ export function ReportsPage() {
       return [
         b.bookingRef, b.guestName, b.roomNumber,
         toDate(b.checkIn)?.toISOString().slice(0, 10) || "",
-        b.numNights, occupancy.guests, occupancy.adults, occupancy.children, b.breakfastRate,
-        calculateBreakfastAddOn({
-          hasBreakfast: b.hasBreakfast,
-          breakfastRate: b.breakfastRate,
-          numGuests: b.numGuests,
-          numNights: b.numNights
-        })
+        b.numNights, occupancy.guests, occupancy.adults, occupancy.children,
+        // Per BR-08 (decision #238, 2026-10-14 — close-out):
+        // the CSV exports the snapshotted
+        // `b.breakfastTotal` (the per-meal catalog sum),
+        // not the legacy flat-rate recomputation.
+        Number(b.breakfastTotal) || 0
       ];
     });
 
@@ -2167,7 +2402,7 @@ export function ReportsPage() {
   }, [prevRangeBookings, prevPeriod]);
 
   const prevBreakfastRevenue = useMemo(() => {
-    return prevRangeBookings.filter(b => b.hasBreakfast).reduce((sum, b) => {
+    return prevRangeBookings.filter(b => (b.breakfastSelections && Object.keys(b.breakfastSelections || {}).length > 0)).reduce((sum, b) => {
       const overlapNights = getOverlapNights(b.checkIn, b.checkOut, prevPeriod.start, prevPeriod.end);
       const fraction = b.numNights > 0 ? (overlapNights / b.numNights) : 0;
       return sum + getBookingRevenueStreams(b).breakfastNet * fraction;
@@ -2498,6 +2733,12 @@ export function ReportsPage() {
           filteredStoreOrders={filteredStoreOrders}
           filteredCharges={filteredCharges}
           breakfastBookingsInRange={breakfastBookingsInRange}
+          // Per BR-12.1 (2026-10-15, decision #247):
+          // the new Sales → Add-Ons sub-tab props.
+          otherAddOnsBookingsInRange={otherAddOnsBookingsInRange}
+          otherAddOnsMetrics={otherAddOnsMetrics}
+          otherAddOnLateChangeCountValue={otherAddOnLateChangeCountValue}
+          otherAddOnPendingRefundTotalValue={otherAddOnPendingRefundTotalValue}
           toDate={toDate}
           chartColors={chartColors}
           isMobile={isMobile}
@@ -2904,6 +3145,20 @@ function SalesTab(props: {
   filteredStoreOrders: Array<any>;
   filteredCharges: ReportCharge[];
   breakfastBookingsInRange: Array<any>;
+  // Per BR-12.1 (2026-10-15, decision #247): the
+  // Sales → Add-Ons sub-tab's input bookings + the
+  // pre-computed 5-metric block + the two audit
+  // / refund counters. Passed in as props so the
+  // metric cards stay in the same scope as the
+  // Sales sub-tab render.
+  otherAddOnsBookingsInRange: Array<any>;
+  otherAddOnsMetrics: {
+    totalSelections: number;
+    totalRevenue: number;
+    topAddOns: Array<{ addOnId: string; name: string; count: number; revenue: number }>;
+  };
+  otherAddOnLateChangeCountValue: number;
+  otherAddOnPendingRefundTotalValue: number;
   toDate: (v: any) => Date | null;
   chartColors: string[];
   isMobile: boolean;
@@ -2954,6 +3209,7 @@ function SalesTab(props: {
     deliveredStoreOrders, breakfastConfig, dailyKitchenPrep,
     salesSubTab, setSalesSubTab, searchTerm, setSearchTerm,
     filteredBookings, filteredBreakfastBookings, filteredStoreOrders, filteredCharges, breakfastBookingsInRange,
+    otherAddOnsBookingsInRange, otherAddOnsMetrics, otherAddOnLateChangeCountValue, otherAddOnPendingRefundTotalValue,
     toDate, chartColors, isMobile,
     discountsSummary, vatSummary, loyaltyLiability,
     rewardsConfig,
@@ -3547,19 +3803,20 @@ function SalesTab(props: {
           />
         </div>
 
-        <div role="tablist" className="grid grid-cols-2 gap-1 rounded-lg bg-gray-100 p-1 sm:grid-cols-4 sm:max-w-2xl">
-          {(["bookings", "breakfast", "store", "charges"] as const).map(tab => (
+        <div role="tablist" className="grid grid-cols-2 gap-1 rounded-lg bg-gray-100 p-1 sm:grid-cols-5 sm:max-w-3xl">
+          {(["bookings", "breakfast", "addons", "store", "charges"] as const).map(tab => (
             <button
               key={tab}
               type="button"
               role="tab"
               aria-selected={salesSubTab === tab}
               onClick={() => setSalesSubTab(tab)}
+              data-testid={`sales-subtab-${tab}`}
               className={`min-h-[36px] rounded-md text-[10px] font-bold uppercase tracking-wider transition ${
                 salesSubTab === tab ? "bg-white text-primary shadow-sm" : "text-gray-500 hover:text-gray-800"
               }`}
             >
-              {tab === "bookings" ? "Bookings" : tab === "breakfast" ? "Breakfast" : tab === "store" ? "Store Orders" : "Incidentals"}
+              {tab === "bookings" ? "Bookings" : tab === "breakfast" ? "Breakfast" : tab === "addons" ? "Add-Ons" : tab === "store" ? "Store Orders" : "Incidentals"}
             </button>
           ))}
         </div>
@@ -3570,6 +3827,95 @@ function SalesTab(props: {
 
         {salesSubTab === "breakfast" && (
           <SalesBreakfastTable bookings={filteredBreakfastBookings} toDate={toDate} isMobile={isMobile} />
+        )}
+
+        {/* Per BR-12.1 (2026-10-15, decision #247): the
+            Reports → Sales → Add-Ons sub-tab. Renders
+            the 5 BR-12.1 metrics (total selections,
+            total revenue, top add-ons, late-change
+            count, pending refund liability) as metric
+            cards + a simple bar chart, then the
+            per-booking detail list below. Mirrors the
+            Sales → Breakfast sub-tab's shape exactly. */}
+        {salesSubTab === "addons" && (
+          <div className="space-y-4" data-testid="sales-addons-subtab">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+              <div data-testid="addons-metric-total-selections" className="rounded-card border border-gray-200 bg-white p-3 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Total selections</p>
+                <p className="mt-1 text-2xl font-bold text-gray-900">
+                  {otherAddOnsMetrics.totalSelections.toLocaleString()}
+                </p>
+              </div>
+              <div data-testid="addons-metric-total-revenue" className="rounded-card border border-gray-200 bg-white p-3 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Total revenue</p>
+                <p className="mt-1 text-2xl font-bold text-primary-dark">
+                  {formatPrice(otherAddOnsMetrics.totalRevenue)}
+                </p>
+              </div>
+              <div data-testid="addons-metric-late-change" className="rounded-card border border-gray-200 bg-white p-3 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Late-change count</p>
+                <p className="mt-1 text-2xl font-bold text-amber-700">
+                  {otherAddOnLateChangeCountValue.toLocaleString()}
+                </p>
+              </div>
+              <div data-testid="addons-metric-pending-refund" className="rounded-card border border-gray-200 bg-white p-3 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Pending refund liability</p>
+                <p className="mt-1 text-2xl font-bold text-amber-700">
+                  {formatPrice(otherAddOnPendingRefundTotalValue)}
+                </p>
+              </div>
+              <div data-testid="addons-metric-booking-count" className="rounded-card border border-gray-200 bg-white p-3 shadow-sm">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Bookings with add-ons</p>
+                <p className="mt-1 text-2xl font-bold text-gray-900">
+                  {otherAddOnsBookingsInRange.length.toLocaleString()}
+                </p>
+              </div>
+            </div>
+
+            {/* Top add-ons bar chart. Uses recharts —
+                the same library every other Reports
+                chart uses. Bars = top-5 add-on names by
+                total revenue; left axis = revenue; the
+                right axis would carry the count but the
+                v1 chart keeps it simple with one
+                revenue series. */}
+            <div className="rounded-card border border-gray-200 bg-white p-4 shadow-sm">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Top add-ons (by revenue)</p>
+              {otherAddOnsMetrics.topAddOns.length === 0 ? (
+                <p className="mt-2 text-xs text-gray-500">No add-on revenue in this range.</p>
+              ) : (
+                <div className="mt-2 h-48 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={otherAddOnsMetrics.topAddOns.map((a) => ({
+                        name: a.name,
+                        revenue: a.revenue,
+                        count: a.count
+                      }))}
+                      margin={{ top: 8, right: 16, left: 0, bottom: 8 }}
+                    >
+                      <XAxis dataKey="name" tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        contentStyle={{ fontSize: 11 }}
+                        formatter={(value: any, name: any) => {
+                          if (name === "revenue") return [formatPrice(Number(value) || 0), "Revenue"];
+                          return [value, name];
+                        }}
+                      />
+                      <Bar dataKey="revenue" fill={config.colors.primaryDark} radius={[4, 4, 0, 0]} barSize={32} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+
+            <SalesOtherAddOnsTable
+              bookings={otherAddOnsBookingsInRange}
+              toDate={toDate}
+              isMobile={isMobile}
+            />
+          </div>
         )}
 
         {salesSubTab === "store" && (
@@ -3779,12 +4125,10 @@ function SalesBookingsTable({ bookings, toDate, isMobile }: { bookings: any[]; t
             // through the shared `calculatePercentDiscount` +
             // `calculateVoucherBase` helpers. Same product, same round,
             // same clamp, same gates.
-            const breakfastTotal = calculateBreakfastAddOn({
-              hasBreakfast: b.hasBreakfast,
-              breakfastRate: b.breakfastRate,
-              numGuests: b.numGuests,
-              numNights: b.numNights
-            });
+            // Per BR-08 (decision #238, 2026-10-14 — close-out):
+            // the breakfast total is the snapshotted
+            // `b.breakfastTotal` (the per-meal catalog sum).
+            const breakfastTotal = Number(b.breakfastTotal) || 0;
             const subtotal = b.originalTotalPrice ?? (roomSubtotal + breakfastTotal);
 
             const discountPct = b.discountRejected ? 0 : (b.discountPct || 0);
@@ -3886,12 +4230,10 @@ function SalesBreakfastTable({ bookings, toDate, isMobile }: { bookings: any[]; 
     return (
       <div className="space-y-3">
         {bookings.slice(0, 50).map(b => {
-          const total = calculateBreakfastAddOn({
-            hasBreakfast: b.hasBreakfast,
-            breakfastRate: b.breakfastRate,
-            numGuests: b.numGuests,
-            numNights: b.numNights
-          });
+          // Per BR-08 (decision #238, 2026-10-14 — close-out):
+          // the per-booking breakfast total is the snapshotted
+          // `b.breakfastTotal` (the per-meal catalog sum).
+          const total = Number(b.breakfastTotal) || 0;
           return (
             <div key={b.id} className="rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200">
               <div className="flex items-center justify-between gap-2">
@@ -3922,7 +4264,7 @@ function SalesBreakfastTable({ bookings, toDate, isMobile }: { bookings: any[]; 
                   }
                   return <>{b.numGuests} guests</>;
                 })()}</span>
-                <span>Rate {formatPrice(b.breakfastRate)}</span>
+                <span>Rate {formatPrice(b.breakfastTotal || 0)}</span>
               </div>
               <p className="mt-2 text-right text-sm font-bold text-primary-dark">{formatPrice(total)}</p>
             </div>
@@ -3948,12 +4290,10 @@ function SalesBreakfastTable({ bookings, toDate, isMobile }: { bookings: any[]; 
         </thead>
         <tbody className="divide-y divide-gray-100">
           {bookings.slice(0, 50).map(b => {
-            const total = calculateBreakfastAddOn({
-            hasBreakfast: b.hasBreakfast,
-            breakfastRate: b.breakfastRate,
-            numGuests: b.numGuests,
-            numNights: b.numNights
-          });
+            // Per BR-08 (decision #238, 2026-10-14 — close-out):
+            // the per-booking breakfast total is the snapshotted
+            // `b.breakfastTotal` (the per-meal catalog sum).
+            const total = Number(b.breakfastTotal) || 0;
             return (
               <tr key={b.id} className="hover:bg-gray-50/50">
                 <td className="py-2.5 pr-4 font-semibold text-gray-900">{b.bookingRef}</td>
@@ -3962,7 +4302,116 @@ function SalesBreakfastTable({ bookings, toDate, isMobile }: { bookings: any[]; 
                 <td className="px-3 py-2.5 text-gray-600">{toDate(b.checkIn)?.toISOString().slice(0, 10) || "—"}</td>
                 <td className="px-3 py-2.5 text-gray-600 font-mono">{b.numNights}</td>
                 <td className="px-3 py-2.5 text-gray-600 font-mono">{b.numGuests}</td>
-                <td className="px-3 py-2.5 text-right text-gray-700 font-mono">{formatPrice(b.breakfastRate)}</td>
+                <td className="px-3 py-2.5 text-right text-gray-700 font-mono">{formatPrice(b.breakfastTotal || 0)}</td>
+                <td className="px-3 py-2.5 text-right font-bold text-primary-dark">{formatPrice(total)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// Per BR-12.1 (2026-10-15, decision #247): the
+// Sales → Add-Ons sub-tab's per-booking detail table.
+// Mirrors `SalesBreakfastTable` exactly — columns:
+// ref · guest · room · check-in · selections ·
+// total. The "selections" cell renders the count of
+// live `OtherAddOnSelectionEntry` rows + the
+// top-1 add-on name as a one-line summary.
+function SalesOtherAddOnsTable({ bookings, toDate, isMobile }: { bookings: any[]; toDate: (v: any) => Date | null; isMobile?: boolean }) {
+  if (bookings.length === 0) {
+    return (
+      <p
+        data-testid="sales-addons-table-empty"
+        className="text-xs text-gray-400 py-8 text-center"
+      >
+        No add-on bookings in this range.
+      </p>
+    );
+  }
+  // Derive one line per booking: total selections +
+  // top-1 add-on name. The per-booking list is a
+  // secondary view (the metric cards + chart are the
+  // primary surface).
+  const summarize = (b: any): { count: number; topName: string } => {
+    const selections = b.otherAddOnSelections || {};
+    let count = 0;
+    const byName = new Map<string, number>();
+    for (const list of Object.values(selections) as Array<Array<any>>) {
+      for (const entry of list) {
+        if (!entry || entry.removedAt != null) continue;
+        count += Math.max(0, Math.floor(Number(entry.quantity) || 0));
+        const name = String(entry.nameSnapshot || entry.addOnId);
+        byName.set(name, (byName.get(name) || 0) + Math.max(0, Math.floor(Number(entry.quantity) || 0)));
+      }
+    }
+    let topName = "—";
+    let topCount = 0;
+    for (const [name, c] of byName.entries()) {
+      if (c > topCount) { topCount = c; topName = name; }
+    }
+    return { count, topName };
+  };
+  if (isMobile) {
+    return (
+      <div className="space-y-3">
+        {bookings.slice(0, 50).map((b: any) => {
+          const total = Number(b.otherAddOnTotal) || 0;
+          const s = summarize(b);
+          return (
+            <div
+              key={b.id}
+              data-testid={`sales-addons-row-${b.id}`}
+              className="rounded-card bg-white p-4 shadow-sm ring-1 ring-gray-200"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Ref</span>
+                <span className="text-[10px] text-gray-500">
+                  {toDate(b.checkIn)?.toISOString().slice(0, 10) || "—"}
+                </span>
+              </div>
+              <p className="mt-1 text-sm font-semibold text-gray-900">{b.bookingRef}</p>
+              <p className="mt-0.5 text-sm text-gray-700">{b.guestName} · Room {b.roomNumber}</p>
+              <p className="mt-1 text-[11px] text-gray-600">
+                {s.count} selection{s.count === 1 ? "" : "s"} · top: {s.topName}
+              </p>
+              <p className="mt-2 text-right text-sm font-bold text-primary-dark">{formatPrice(total)}</p>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-xs border-collapse">
+        <thead>
+          <tr className="border-b-2 border-primary/20 text-left">
+            <th className="py-2.5 pr-4 text-[10px] font-bold uppercase tracking-wider text-gray-400">Booking Ref</th>
+            <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Guest</th>
+            <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Room</th>
+            <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Check-In</th>
+            <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 text-right">Selections</th>
+            <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">Top add-on</th>
+            <th className="px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 text-right">Total</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {bookings.slice(0, 50).map((b: any) => {
+            const total = Number(b.otherAddOnTotal) || 0;
+            const s = summarize(b);
+            return (
+              <tr key={b.id} data-testid={`sales-addons-row-${b.id}`} className="hover:bg-gray-50/50">
+                <td className="py-2.5 pr-4 font-semibold text-gray-900">{b.bookingRef}</td>
+                <td className="px-3 py-2.5 text-gray-700">{b.guestName}</td>
+                <td className="px-3 py-2.5 text-gray-600">{b.roomNumber}</td>
+                <td className="px-3 py-2.5 text-gray-600">
+                  {toDate(b.checkIn)?.toISOString().slice(0, 10) || "—"}
+                </td>
+                <td className="px-3 py-2.5 text-right text-gray-700 font-mono">{s.count}</td>
+                <td className="px-3 py-2.5 text-gray-600">{s.topName}</td>
                 <td className="px-3 py-2.5 text-right font-bold text-primary-dark">{formatPrice(total)}</td>
               </tr>
             );

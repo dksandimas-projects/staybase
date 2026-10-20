@@ -1,4 +1,13 @@
-import { calculateBreakfastAddOn, calculatePercentDiscount, calculateVoucherBase } from "@spark-inn/shared";
+import {
+  calculatePercentDiscount,
+  calculateVoucherBase,
+  // Per OCT-H1 (2026-10-20, decision #282): the breakfast
+  // rate-breakdown label contract lives in ONE place so
+  // `sumBreakfastRateLines` (which reads the breakfast portion
+  // back out of a stored breakdown) can never drift from the
+  // label this builder writes.
+  BREAKFAST_RATE_LINE_LABEL
+} from "@spark-inn/shared";
 import type {
   BookingRateAdjustmentLine,
   BookingRateBreakdown,
@@ -9,6 +18,19 @@ type BuildRateBreakdownInput = {
   roomLines: BookingRateLine[];
   roomSubtotal: number;
   breakfastTotal: number;
+  // Per BR-03 (2026-10-12, decision #232): the new
+  // per-date breakfast lines. When provided, the helper
+  // writes the per-date lines (one per breakfast date)
+  // into `addOns[]` instead of the single
+  // "Breakfast add-on" line. The sum of
+  // `breakfastLines[].amount` should equal `breakfastTotal`
+  // (caller invariant — the helper does NOT re-sum; the
+  // chain math reads `breakfastTotal` and the per-date
+  // lines are the receipt/PDF/email rendering). Optional
+  // — when absent, the helper falls back to the
+  // historical single-line behavior (back-compat with
+  // every existing call site).
+  breakfastLines?: BookingRateAdjustmentLine[];
   // Per EXB-08 (2026-08-01, per decision #156): the
   // extra-bed add-on term. The helper now writes the
   // "Extra bed add-on" line into `addOns[]` so the
@@ -147,10 +169,23 @@ export function buildRateBreakdown(input: BuildRateBreakdownInput): BookingRateB
   // multi-bed stays ("Extra bed add-on (2 beds × rate ×
   // nights)"); the count-agnostic label is the fallback
   // when either count or rate is missing.
-  const breakfastAddOn: BookingRateAdjustmentLine | null =
-    input.breakfastTotal > 0
-      ? { label: "Breakfast add-on", amount: input.breakfastTotal }
-      : null;
+  //
+  // Per BR-03 (2026-10-12, decision #232): the new
+  // per-date breakfast lines (`breakfastLines`) REPLACE
+  // the single "Breakfast add-on" entry when the caller
+  // passes them in. The caller is the create handler
+  // (via `buildBreakfastRateBreakdownLines`); legacy
+  // callers (the walkin modal per the BR-03 plan) keep
+  // the single-line behavior. The per-date lines are
+  // already defensive-coerced by the helper, so this
+  // function trusts them as-is and only filters out
+  // empty (`amount <= 0`) entries for parity with the
+  // legacy single-line path.
+  const breakfastAddOns: BookingRateAdjustmentLine[] = input.breakfastLines
+    ? input.breakfastLines.filter((line) => Number(line.amount) > 0)
+    : input.breakfastTotal > 0
+      ? [{ label: BREAKFAST_RATE_LINE_LABEL, amount: input.breakfastTotal }]
+      : [];
   const extraBedAddOn: BookingRateAdjustmentLine | null =
     (input.extraBedTotal ?? 0) > 0
       ? {
@@ -171,7 +206,7 @@ export function buildRateBreakdown(input: BuildRateBreakdownInput): BookingRateB
       : null;
   return composeRateBreakdown({
     ...input,
-    addOns: [breakfastAddOn, extraBedAddOn].filter(
+    addOns: [...breakfastAddOns, extraBedAddOn].filter(
       (line): line is BookingRateAdjustmentLine => line !== null
     ),
     pointsRedeemedValue: input.pointsRedeemedValue || 0
@@ -267,49 +302,19 @@ export function rebuildEarlyCheckoutRateBreakdown(
 
   const roomSubtotal = roomLines.reduce((sum, line) => sum + line.subtotal, 0);
   const addOnRatio = originalNights > 0 ? nights / originalNights : 1;
-  // Per EXB-02 (2026-07-31): the inline `breakfastRate × numGuests × nights`
-  // pattern now routes through the shared `calculateBreakfastAddOn` helper.
-  // Byte-equivalent output: the helper's defensive coercion is at least as
-  // strong as the historical `nonNegativeFinite` wrapper, and the
-  // `booking.hasBreakfast` gate is preserved by the surrounding ternary.
+  // Per BR-08 (decision #238, 2026-10-14 — close-out):
+  // the legacy `calculateBreakfastAddOn` helper is removed.
+  // The rate-breakdown rebuild reads the snapshotted
+  // `booking.breakfastTotal` directly (no per-meal recompute
+  // here — the new helper `calculateBreakfastMealsTotal` is
+  // only invoked on `breakfastSelections` writes).
   const addOns = existing
     ? (existing.addOns || []).map((line) => ({ ...line, amount: Math.round(nonNegativeFinite(line.amount) * addOnRatio * 100) / 100 }))
-    : booking.hasBreakfast
-      ? [{
-          label: "Breakfast add-on",
-          amount: calculateBreakfastAddOn({
-            hasBreakfast: booking.hasBreakfast,
-            breakfastRate: booking.breakfastRate,
-            numGuests: booking.numGuests,
-            numNights: nights,
-            // Per EXB-12 (2026-08-06, per decision #199):
-            // pass the extra-bed breakfast fields from
-            // the booking doc so the rebuild matches the
-            // create-time total. Nullish → no extra-bed
-            // breakfast (back-compat with older docs).
-            extraBedCount: booking.extraBedCount,
-            extraBedBreakfast: booking.extraBedBreakfast === true
-          })
-        }]
-      : [];
+    : [];
 
   const originalRoomSubtotal = existing?.roomSubtotal
     ?? nonNegativeFinite(booking.ratePerNight) * originalNights;
-  const originalAddOns = existing?.addOns
-    ?? (booking.hasBreakfast
-      ? [{
-          label: "Breakfast add-on",
-          amount: calculateBreakfastAddOn({
-            hasBreakfast: booking.hasBreakfast,
-            breakfastRate: booking.breakfastRate,
-            numGuests: booking.numGuests,
-            numNights: originalNights,
-            // Per EXB-12: same as above.
-            extraBedCount: booking.extraBedCount,
-            extraBedBreakfast: booking.extraBedBreakfast === true
-          })
-        }]
-      : []);
+  const originalAddOns = existing?.addOns ?? [];
   const originalPricing = composeRateBreakdown({
     roomLines: existing?.roomLines || roomLines,
     roomSubtotal: originalRoomSubtotal,

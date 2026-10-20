@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useAdmin, Voucher, CorporateCode } from "../context/AdminContext";
-import { getSeasonalRateForNight, isWeekendNight, DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT } from "@spark-inn/shared";
+import { getSeasonalRateForNight, isWeekendNight } from "@spark-inn/shared";
 import type { SeasonalRateOverride } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Modal } from "../components/Modal";
@@ -764,13 +764,17 @@ export function RatesPage() {
     }
   };
 
-  // Save breakfast pricing changes
-  const handleSaveBreakfastRate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await updateSettings("breakfastConfig", {
-      ...breakfastConfig,
-      ratePerPersonPerNight: parseFloat(bfRate) || DEFAULT_BREAKFAST_RATE_PER_PERSON_PER_NIGHT
-    });
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy flat-rate `ratePerPersonPerNight: number`
+  // save handler is deleted. The Settings page writes the
+  // new meal-based catalog (`breakfastConfig.meals[]`),
+  // not a flat-rate toggle. The `handleSaveBreakfastRate`
+  // function above stays as a stub for the existing form
+  // UI (it's now a no-op that the BR-02 Settings UI
+  // replaces with the per-meal catalog editor).
+  const handleSaveBreakfastRate = async (_e: React.FormEvent) => {
+    // Per BR-08: flat-rate `ratePerPersonPerNight` is gone.
+    // The new Settings UI edits the per-meal catalog.
     setBfRateDirty(false);
   };
 
@@ -787,6 +791,39 @@ export function RatesPage() {
   // Voucher Columns
   const voucherColumns: Array<DataTableColumn<Voucher>> = [
     { key: "code", header: "Voucher Code" },
+    // Per Phase 5 (2026-10-12): the "Kind" column distinguishes
+    // promo vouchers (admin-created) from reward vouchers
+    // (system-issued via tier trigger / welcome bonus). Reward
+    // vouchers get a distinct badge color so admins can scan-
+    // filter at a glance.
+    {
+      key: "kind",
+      header: "Kind",
+      render: (row) => (
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+          row.kind === "reward"
+            ? "bg-amber-100 text-amber-900"
+            : "bg-gray-100 text-gray-700"
+        }`}>
+          {row.kind === "reward"
+            ? row.valueType === "free-night" ? "Free Night" : "Reward"
+            : "Promo"}
+        </span>
+      )
+    },
+    // Member column — only populated for reward vouchers. The
+    // memberNumber (e.g. "SR-10023") is the stable identifier
+    // admin would use to look up the member on the Members
+    // page.
+    {
+      key: "memberNumber",
+      header: "Member",
+      render: (row) => (
+        <span className="text-xs text-gray-700">
+          {row.memberNumber ? row.memberNumber : <span className="text-gray-400">—</span>}
+        </span>
+      )
+    },
     {
       key: "discountValue",
       header: "Value",

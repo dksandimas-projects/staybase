@@ -12,6 +12,7 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  ArrowRight,
   ChevronRight,
   Coins,
   CreditCard,
@@ -35,6 +36,7 @@ import {
   calculateBookingTotal,
   compressImageFile,
   getDateKeyInTimezone,
+  normalizeStayRange,
   getNumNights,
   // Per EXB-07 (2026-08-01, per decision #155): the
   // capacity overflow rule (per decision #153) is the
@@ -89,6 +91,7 @@ import { DateRangePicker } from "../components/DateRangePicker";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
 import { StepIndicator } from "../components/StepIndicator";
+import { BookingStickyFooter } from "../components/BookingStickyFooter";
 import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { useTurnstileToken } from "../hooks/useTurnstileToken";
@@ -109,7 +112,17 @@ import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 import { HoldCountdownBanner } from "../components/HoldCountdownBanner";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
-const steps = ["Select Room", "Guest Details", "Review & Pay", "Confirmation"];
+// Per BR-09 (2026-10-14): the corporate flow renders
+// five steps in parity with the public booking flow
+// (Select Room → Add-ons → Guest Details → Review →
+// Confirmation). The corporate rate is a flat rate
+// with no per-date breakfast grid — the "Add-ons"
+// step renders a "no add-ons available" placeholder
+// and "Continue to guest details" so the step model is
+// identical across both flows. Future per-stay add-ons
+// (spa, parking, etc.) will drop into the same step
+// without renaming.
+const steps = ["Select Room", "Add-ons", "Guest Details", "Review & Pay", "Confirmation"];
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const ACCEPTED_UPLOAD_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
@@ -141,7 +154,25 @@ export function CorporateBookingPage() {
   // member's account email so the booking is always filed under the
   // correct identity.
   const { memberProfile } = useGuestAuth();
-  const currentStepKey = searchParams.get("step") ?? "gate";
+  // Per BR-09 (2026-10-14): the corporate flow uses
+// string step keys (`gate`, `select-room`, `add-ons`,
+// `guest-details`, `review`, `confirm`) plus a legacy
+// numeric back-compat map for any pre-BR-09 deep-links
+// that numbered the steps. The map mirrors the public
+// flow's `normalizeStepKey` — the gate stays the
+// default for the legacy `?step=1` case (no add-ons
+// back-compat applies before the room is picked).
+function normalizeCorporateStepKey(rawStep: string | null): string {
+  if (!rawStep) return "gate";
+  if (rawStep === "1") return "select-room";
+  if (rawStep === "2") return "add-ons";
+  if (rawStep === "3") return "guest-details";
+  if (rawStep === "4") return "review";
+  if (rawStep === "5") return "confirm";
+  return rawStep;
+}
+
+const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
   const [bookingId] = useState(() => doc(collection(getFirestore(), "bookings")).id);
   // Per MRB-02.x corporate (2026-08-02, per decision
   // #164): the reservation-level idempotency key,
@@ -167,7 +198,22 @@ export function CorporateBookingPage() {
   // `useInFlowHold` hook stamps the server-side doc on
   // first read; the booking transaction consumes the
   // hold best-effort after the booking commits.
-  const [holdId] = useState(() => generateHoldId());
+  //
+  // Per IMT-01 (2026-10-13): the setter is now live, so
+  // `onPickNewRoom` re-rolls the id and the corporate
+  // flow gets the same dead-end fix as the public `/book`
+  // flow. Without it, an expired hold re-read as HTTP 200
+  // `status: "expired"`, the hook's 404 → `POST
+  // /api/holds/start` branch never fired, and returning
+  // to Step 1 re-added the SAME dead id — a red-banner
+  // loop escapable only with a hard reload.
+  //
+  // Re-rolling happens on an EXPLICIT guest action only,
+  // never on a plain re-entry — auto-reviving a dead hold
+  // would silently defeat the countdown. See
+  // `plan/features/BOOKING-FLOW.md §In-flow Hold` +
+  // `plan/project/ROADMAP.md §IMT`.
+  const [holdId, setHoldId] = useState(() => generateHoldId());
 
   // Per BI-01 (booking-intercom audit 2026-07-06): two REAL
   // Turnstile challenges. The gate widget covers
@@ -214,20 +260,19 @@ export function CorporateBookingPage() {
   // value falls back to today's Manila date. The same
   // pattern guards `checkOut` (a missing URL value
   // previously landed as `null` → empty date input).
-  const initialCheckInParam = searchParams.get("checkIn");
-  const initialCheckOutParam = searchParams.get("checkOut");
-  const isValidDateKey = (value: string | null) =>
-    typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
-  const [checkIn, setCheckIn] = useState(
-    isValidDateKey(initialCheckInParam)
-      ? initialCheckInParam!
-      : getDateKeyInTimezone(config.timezone, 1)
-  );
-  const [checkOut, setCheckOut] = useState(
-    isValidDateKey(initialCheckOutParam)
-      ? initialCheckOutParam!
-      : getDateKeyInTimezone(config.timezone, 2)
-  );
+  // DR-01 (2026-10-14): the old `isValidDateKey` regex only checked
+  // the `YYYY-MM-DD` SHAPE — it happily accepted an inverted or
+  // past range from the URL. Route both params through
+  // `normalizeStayRange` so a shared corporate-booking link can't
+  // seed a 0-night stay.
+  const initialStayRange = normalizeStayRange({
+    checkIn: searchParams.get("checkIn"),
+    checkOut: searchParams.get("checkOut"),
+    minCheckIn: getDateKeyInTimezone(config.timezone),
+    defaultNights: 1
+  });
+  const [checkIn, setCheckIn] = useState(initialStayRange.checkIn);
+  const [checkOut, setCheckOut] = useState(initialStayRange.checkOut);
   // Per EXB-07 (2026-08-01, per decision #155): the
   // corporate /book page gains the same adult/child split
   // + extra bed count the guest /book page already has.
@@ -326,7 +371,9 @@ export function CorporateBookingPage() {
   // Live rooms from Firestore
   const { rooms, loading: roomsLoading } = useRooms();
   const { roomTypes, bedSetups, bookingPreferences } = useRoomTypes();
-  const { hotelCheckInTime } = usePublicSiteContent();
+  // Per MSL-01 (2026-10-15): `maxStayNights` is the admin's
+  // stay-length cap (raw; `null` = no field = 30-night default).
+  const { hotelCheckInTime, maxStayNights } = usePublicSiteContent();
 
   // Corporate specific details
   const [guestDetails, setGuestDetails] = useState({
@@ -901,14 +948,20 @@ export function CorporateBookingPage() {
   // to the server's `subtotal` for the whole
   // reservation. The two paths produce the same
   // number when the cart has a single stay.
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // corporate `calculateBookingTotal` call no longer passes
+  // the legacy `breakfastRate` + `hasBreakfast` flat-rate
+  // pair. The new meal-based model stamps the breakfast
+  // total onto the booking doc (`booking.breakfastTotal`),
+  // which the server's per-stay pricing consumes. The
+  // client preview here uses the pre-computed
+  // `breakfastTotal` (summed from `perStayPricing`).
   const total = distributedRoomCart.length <= 1
     ? calculateBookingTotal({
         ratePerNight,
         numNights: nights,
         roomTotal,
-        numGuests: guests,
-        breakfastRate: breakfastRatePerPerson,
-        hasBreakfast,
+        breakfastTotal: breakfastTotal,
         discountPct: 0, // discounts already applied to ratePerNight
         voucherDiscount: 0 // corporate flow doesn't use standard vouchers
       })
@@ -1171,8 +1224,16 @@ export function CorporateBookingPage() {
   }
 
   // Step transitions
+  // Per BR-09 (2026-10-14): the Step 1 "Continue"
+  // button now routes to the new "Add-ons" step
+  // (Step 2 in the 5-step corporate flow) so the
+  // corporate flow matches the public flow's step
+  // model. The corporate flat-rate has no per-day
+  // breakfast grid — the Add-ons step is a
+  // placeholder, but the step exists for parity so
+  // future add-ons can drop into the same step.
   const continueParams = new URLSearchParams({
-    step: "guest-details",
+    step: "add-ons",
     checkIn,
     checkOut,
     guests: String(guests),
@@ -1193,6 +1254,13 @@ export function CorporateBookingPage() {
     // the same cart via `parseBookingRoomCart`.
     rooms: serializeBookingRoomCart(distributedRoomCart.length > 0 ? distributedRoomCart : roomCart)
   });
+
+  // Per BR-09: the Add-ons "Continue" routes to the
+  // corporate guest-details step. The step 2 → step 3
+  // transition is always allowed (the corporate rate has
+  // no per-day breakfast grid to validate).
+  const corporateGuestDetailsParams = new URLSearchParams(continueParams);
+  corporateGuestDetailsParams.set("step", "guest-details");
 
   const reviewParams = new URLSearchParams(continueParams);
   reviewParams.set("step", "review");
@@ -1217,9 +1285,22 @@ export function CorporateBookingPage() {
   function getBackToPath() {
     if (currentStepKey === "confirm") return "/corporate";
     if (currentStepKey === "review") {
-      return `/corporate/book?${continueParams.toString()}`;
+      // Per BR-09 (2026-10-14): the back button on the
+      // corporate review step (new Step 4) returns to
+      // the corporate guest details (new Step 3) — the
+      // new "Add-ons" step doesn't carry data worth
+      // editing on the corporate path.
+      return `/corporate/book?${corporateGuestDetailsParams.toString()}`;
     }
     if (currentStepKey === "guest-details") {
+      // Per BR-09: back from the corporate guest
+      // details (new Step 3) returns to the corporate
+      // "Add-ons" step (new Step 2).
+      return `/corporate/book?${continueParams.toString()}`;
+    }
+    if (currentStepKey === "add-ons") {
+      // Per BR-09: back from the corporate "Add-ons"
+      // (new Step 2) returns to "Select Room" (new Step 1).
       const selectRoomParams = new URLSearchParams(continueParams);
       selectRoomParams.set("step", "select-room");
       return `/corporate/book?${selectRoomParams.toString()}`;
@@ -1309,17 +1390,17 @@ export function CorporateBookingPage() {
           numAdults: stay.numAdults,
           numChildren: stay.numChildren,
           extraBedCount: stay.extraBedCount,
-          hasBreakfast,
-          // Per CHD-10 (2026-07-31, per CVQ-01):
-          // the per-booking override for "include
-          // children in the breakfast charge".
-          // Shared across the whole corporate
-          // reservation (every stay uses the same
-          // breakfast config) — the server
-          // snapshots the value per-booking-doc
-          // for back-compat with the existing
-          // schema.
-          breakfastIncludesChildren: false
+          // Per BR-03 (2026-10-12, decision #232): the
+          // legacy per-stay `hasBreakfast` +
+          // `breakfastIncludesChildren` fields are
+          // GONE from the corporate create payload.
+          // The new `breakfastSelections` rich shape
+          // (sent below at the create body root)
+          // replaces them. The server still accepts
+          // the legacy fields for back-compat (older
+          // clients) but the create-path cleanup
+          // pins the new shape as the canonical
+          // way to express breakfast intent.
         })),
         checkIn,
         checkOut,
@@ -1337,7 +1418,19 @@ export function CorporateBookingPage() {
         numAdults: firstStay.numAdults,
         numChildren: firstStay.numChildren,
         extraBedCount: firstStay.extraBedCount,
-        hasBreakfast: hasBreakfast,
+        // Per BR-03 (2026-10-12, decision #232): the
+        // legacy top-level `hasBreakfast` field is
+        // GONE from the corporate create payload.
+        // The new `breakfastSelections` rich shape
+        // (empty `{}` for the corporate flow's
+        // "no per-guest grid yet" state) replaces
+        // it. A follow-up ticket adds the per-guest
+        // grid to the corporate Step 2; until then
+        // the corporate flow ships with an empty
+        // map (no breakfast add-on) and the server
+        // writes the legacy `hasBreakfast: false`
+        // field for the walk-in/older-clients path.
+        breakfastSelections: {},
         // Per SR-01..05 (2026-10-12): the corporate
         // booking carries the same special-requests
         // fields as the public `/book` flow. The
@@ -1512,8 +1605,11 @@ export function CorporateBookingPage() {
     }
   };
 
+  // Per MBUX-01: the bottom reserve matches the sticky footer's own
+  // safe-area padding, so the last interactive element is never
+  // hidden behind the fixed bar on a notched iPhone.
   const bookingShell = (content: React.ReactNode) => (
-    <main className="min-h-screen bg-gray-50 pb-32 font-body text-gray-900">
+    <main className="min-h-screen bg-gray-50 pb-[calc(8rem+env(safe-area-inset-bottom))] font-body text-gray-900">
       {/* Dark Corporate Header */}
       <header className="sticky top-0 z-40 border-b border-gray-800 bg-gray-950 px-4 py-4 shadow-sm backdrop-blur sm:px-6 text-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between">
@@ -1569,6 +1665,13 @@ export function CorporateBookingPage() {
           turnstileToken: reviewTurnstile.token || undefined
         }}
         onPickNewRoom={() => {
+          // Per IMT-01 (2026-10-13): re-roll the hold id
+          // BEFORE rewriting the URL — `continueParams`
+          // reads `hold: holdId` on the next "Continue to
+          // Step 2" (`:1186`), so minting first lets the
+          // hook stamp a fresh hold instead of re-reading
+          // the expired one.
+          setHoldId(generateHoldId());
           const next = new URLSearchParams();
           next.set("step", "select-room");
           setSearchParams(next, { replace: true });
@@ -1729,7 +1832,8 @@ export function CorporateBookingPage() {
             <StepIndicator steps={steps} currentStep={1} />
           </div>
           <div className="mt-10">
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 1 of 4</p>
+            {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 1 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Select Corporate Room</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Browse negotiated configurations and availability. Room rates shown are corporate rates matching your contract agreement.
@@ -1747,6 +1851,12 @@ export function CorporateBookingPage() {
                 <DateRangePicker
                   checkIn={checkIn}
                   checkOut={checkOut}
+                  maxStayNights={maxStayNights}
+                  onRangeChange={(nextCheckIn, nextCheckOut) => {
+                    setCheckIn(nextCheckIn);
+                    setCheckOut(nextCheckOut);
+                    updateDateParams(nextCheckIn, nextCheckOut, guests);
+                  }}
                   onCheckInChange={(value) => {
                     setCheckIn(value);
                     updateDateParams(value, checkOut, guests);
@@ -2092,32 +2202,51 @@ export function CorporateBookingPage() {
                         )}
                       </div>
 
-                      {/* Select Toggle */}
-                      <div className="mt-5 grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          className={cn(
-                            "h-10 rounded-lg text-xs font-semibold border transition flex items-center justify-center",
-                            rateChoice === "room-only" && isSelected
-                              ? "bg-primary-light border-primary text-primary"
-                              : "border-gray-200 hover:border-gray-300 text-gray-700"
-                          )}
-                          onClick={() => selectRoomType(type.value, "room-only")}
-                        >
-                          Room Only
-                        </button>
-                        <button
-                          type="button"
-                          className={cn(
-                            "h-10 rounded-lg text-xs font-semibold border transition flex items-center justify-center",
-                            rateChoice === "room-breakfast" && isSelected
-                              ? "bg-primary-light border-primary text-primary"
-                              : "border-gray-200 hover:border-gray-300 text-gray-700"
-                          )}
-                          onClick={() => selectRoomType(type.value, "room-breakfast")}
-                        >
-                          Room + Breakfast
-                        </button>
+                      {/* Per MBUX-09 (decision #261): the lone "Room Only"
+                          button is the same vestigial
+                          single-option panel MBUX-02 deleted
+                          on the public flow. BR-03 (decision
+                          #232) removed "Room + Breakfast" here
+                          TOO — see the note above — so this
+                          was never a rate CHOICE. It was a
+                          "select this room type" action
+                          dressed as a rate option, which gave
+                          the guest one control that did one
+                          thing.
+
+                          It becomes a plain, honest
+                          full-width select action and the CARD
+                          carries the selected state. Quantity
+                          is deliberately NOT added here:
+                          corporate distributes guests per room
+                          in a later step (`distributedRoomCart`),
+                          so a per-type stepper at this point
+                          would be a second, conflicting source
+                          of truth. `selectRoomType` is kept
+                          as-is because it owns the
+                          `roomType`/`checkIn`/`checkOut`/
+                          `guests` URL writes that deep-link
+                          and back-navigation depend on. */}
+                      <div className="mt-5">
+                        {isSelected ? (
+                          <div
+                            data-testid="corporate-room-selected"
+                            aria-current="true"
+                            className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-primary bg-primary-light px-4 text-sm font-semibold text-primary"
+                          >
+                            <Check size={16} aria-hidden="true" />
+                            Selected
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            data-testid="corporate-room-select"
+                            onClick={() => selectRoomType(type.value, "room-only")}
+                            className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-primary bg-primary px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                          >
+                            Select this room
+                          </button>
+                        )}
                       </div>
                     </div>
                   </motion.article>
@@ -2129,34 +2258,53 @@ export function CorporateBookingPage() {
         </section>
 
         {/* Footer sticky bar */}
-        <div className="fixed bottom-0 left-0 z-40 w-full border-t border-gray-200 bg-white/95 px-4 py-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur">
-          <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-xs text-gray-500">
-                {/* Per MRB-08 (2026-08-02, per decision #167):
-                    the sticky footer copy switches to a
-                    multi-room shape when the cart has
-                    more than one stay. The N=1 wording
-                    is preserved byte-equivalent. */}
-                {distributedRoomCart.length > 1
-                  ? `Corporate block of ${distributedRoomCart.length} rooms · ${nights} ${nights === 1 ? "night" : "nights"} · ${guests} guest${guests === 1 ? "" : "s"} total${hasBreakfast ? " (Breakfast included)" : ""}`
-                  : `Corporate rate for ${nights} ${nights === 1 ? "night" : "nights"}, ${guests} ${guests === 1 ? "guest" : "guests"}${hasBreakfast ? " (Breakfast included)" : ""}`}
-              </p>
-              <p className="text-xl font-bold text-gray-950">
-                {formatPrice(total)} <span className="text-xs font-normal text-gray-500">{distributedRoomCart.length > 1 ? "negotiated total" : "negotiated total"}</span>
-              </p>
-            </div>
-            <PrimaryButton to={`/corporate/book?${continueParams.toString()}`} className="sm:min-w-56">
-              Continue to Step 2
-            </PrimaryButton>
-          </div>
-        </div>
+        <BookingStickyFooter
+          summary={
+            <>
+          <p className="text-xs text-gray-500">
+            {/* Per MRB-08 (2026-08-02, per decision #167):
+                the sticky footer copy switches to a
+                multi-room shape when the cart has
+                more than one stay. The N=1 wording
+                is preserved byte-equivalent. */}
+            {distributedRoomCart.length > 1
+              ? `Corporate block of ${distributedRoomCart.length} rooms · ${nights} ${nights === 1 ? "night" : "nights"} · ${guests} guest${guests === 1 ? "" : "s"} total${hasBreakfast ? " (Breakfast included)" : ""}`
+              : `Corporate rate for ${nights} ${nights === 1 ? "night" : "nights"}, ${guests} ${guests === 1 ? "guest" : "guests"}${hasBreakfast ? " (Breakfast included)" : ""}`}
+          </p>
+          <p className="text-xl font-bold text-gray-950">
+            {formatPrice(total)} <span className="text-xs font-normal text-gray-500">{distributedRoomCart.length > 1 ? "negotiated total" : "negotiated total"}</span>
+          </p>
+            </>
+          }
+        >
+        <PrimaryButton to={`/corporate/book?${continueParams.toString()}`} className="sm:min-w-56">
+          {/* Per BR-09 (2026-10-14): the Step 1 →
+              Step 2 transition copy uses the
+              destination step name ("add-ons"), not
+              a numbered "Step N" reference. The
+              `continueParams` URL stamp already
+              points at `step=add-ons` (see
+              `continueParams` above). */}
+          Continue to add-ons
+        </PrimaryButton>
+        </BookingStickyFooter>
       </>
     );
   }
 
-  // ==================== STEP 2: GUEST DETAILS ====================
-  if (currentStepKey === "guest-details") {
+  // ==================== STEP 2: ADD-ONS ====================
+  // Per BR-09 (2026-10-14): the corporate flow now has a
+  // dedicated "Add-ons" step between Select Room and
+  // Guest Details. The corporate rate is a flat rate
+  // with no per-date breakfast grid, so this step is a
+  // short placeholder with a "Continue to guest details"
+  // CTA — the parity is intentional so both flows render
+  // the same 5-step model. Future per-stay add-ons (spa,
+  // parking, etc.) will drop into this step without
+  // renaming either page.
+  if (currentStepKey === "add-ons") {
+    const addOnsNext = new URLSearchParams(searchParams);
+    addOnsNext.set("step", "guest-details");
     return bookingShell(
       <>
         <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
@@ -2164,7 +2312,100 @@ export function CorporateBookingPage() {
             <StepIndicator steps={steps} currentStep={2} />
           </div>
           <div className="mt-10">
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 2 of 4</p>
+            {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 2 of 5</p>
+            <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Add-ons</h1>
+            <p className="mt-4 max-w-2xl leading-7 text-gray-600">
+              Optional extras for your stay. The negotiated corporate rate doesn&apos;t include per-day add-ons — continue to provide your employee and billing details.
+            </p>
+          </div>
+        </section>
+
+        <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-6 lg:px-8">
+          <div className="rounded-card border border-gray-200 bg-gray-50 p-6 text-sm text-gray-700">
+            <p className="font-semibold text-gray-900">No add-ons available for this rate</p>
+            <p className="mt-2 leading-6">
+              The negotiated corporate rate is a flat rate. Continue to provide employee details, billing setup, and any verification files required by your accounts team.
+            </p>
+          </div>
+        </section>
+
+        <BookingStickyFooter
+          summary={
+            <>
+          <p className="text-sm text-gray-600">Add-ons</p>
+          <p className="text-lg font-semibold text-gray-950">
+            Continue to provide employee + billing details.
+          </p>
+            </>
+          }
+        >
+        {/* Per BR-10 (decision #244 reserved, 2026-10-14
+            — Phase 14): parity with the public booking
+            Add-ons step — TWO parallel CTAs that both
+            advance to the same `guest-details` step.
+              - **Primary**  "Continue to guest details"
+                — mirrored from the pre-BR-10 single
+                button.
+              - **Ghost**    "No add-ons, continue"
+                — the skip affordance, kept consistent
+                with the public flow even though the
+                corporate Add-ons step has no
+                configurable meals (the rate is a flat
+                rate). The parity is intentional so
+                future per-stay add-ons (BR-12
+                airport transfer, etc.) drop into both
+                pages identically without renaming.
+            Both buttons target the identical
+            `/corporate/book?step=guest-details` URL, so
+            the URL-side guard + the per-step payload
+            validation are exercised by both paths. The
+            muted `bg-transparent text-gray-500
+            border border-gray-300 hover:bg-gray-50`
+            ghost recipe is the FRONTEND.md §Button
+            Variants — the existing `GhostButton`
+            component uses `border-primary text-primary`
+            which would visually compete with the
+            primary, so we inline the muted variant
+            here (matching the same call-site shape in
+            the public booking flow). */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <PrimaryButton
+            to={`/corporate/book?${addOnsNext.toString()}`}
+            className="sm:min-w-56"
+            data-testid="corporate-addons-continue-primary"
+          >
+            Continue to guest details <ArrowRight size={16} />
+          </PrimaryButton>
+          <Link
+            to={`/corporate/book?${addOnsNext.toString()}`}
+            data-testid="corporate-addons-skip-addons"
+            className="inline-flex w-full items-center justify-center gap-2 self-center rounded-lg border border-gray-300 bg-transparent px-5 py-2.5 text-sm font-semibold text-gray-500 transition hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:w-auto sm:min-w-56"
+          >
+            No add-ons, continue
+          </Link>
+        </div>
+        </BookingStickyFooter>
+      </>
+    );
+  }
+
+  // ==================== STEP 3: GUEST DETAILS ====================
+  // Per BR-09 (2026-10-14): the corporate guest details
+  // step moved from the old 4-step "Step 2" to the new
+  // 5-step "Step 3" to match the new public flow's step
+  // model (Select Room → Add-ons → Guest Details →
+  // Review → Confirmation).
+  if (currentStepKey === "guest-details") {
+    return bookingShell(
+      <>
+        <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-3xl">
+            <StepIndicator steps={steps} currentStep={3} />
+          </div>
+          <div className="mt-10">
+            {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 3 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Corporate details</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Provide employee guest details along with company references and billing arrangements.
@@ -2175,7 +2416,7 @@ export function CorporateBookingPage() {
         <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-16 sm:px-6 lg:grid-cols-[1fr_380px] lg:px-8">
           <motion.form
             animate="visible"
-            className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6"
+            className="order-2 lg:order-1 rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6"
             initial={shouldReduceMotion ? false : "hidden"}
             variants={staggerContainer}
             onSubmit={(e) => e.preventDefault()}
@@ -2219,7 +2460,10 @@ export function CorporateBookingPage() {
             </motion.div>
 
             <motion.div className="mt-5 grid gap-5 sm:grid-cols-2" variants={staggerChild}>
-              <div className="grid gap-2">
+              {/* Per fix(guest-details-field-alignment): `content-start`
+                  keeps the taller Email cell from stretching the Phone
+                  field's label row. */}
+              <div className="grid content-start gap-2">
                 <TextField
                   error={touchedFields.email ? guestErrors.email : ""}
                   icon={<Mail size={17} />}
@@ -2268,15 +2512,15 @@ export function CorporateBookingPage() {
 
             <motion.div className="grid gap-5 sm:grid-cols-2 mt-4" variants={staggerChild}>
               {/* Company Name */}
-              <label htmlFor="companyName" className="grid gap-2 text-sm font-medium text-gray-700">
+              <label htmlFor="companyName" className="grid content-start gap-2 text-sm font-medium text-gray-700">
                 Company Name
-                <span className="relative block">
-                  <Building size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-primary" />
+                <span className="relative flex items-center">
+                  <Building size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-primary" />
                   <input
                     id="companyName"
                     name="companyName"
                     className={cn(
-                      "min-h-11 w-full rounded-lg border py-2 pl-10 pr-3 text-gray-950 outline-none transition",
+                      "block min-h-11 w-full rounded-lg border py-2 pl-10 pr-3 text-gray-950 outline-none transition",
                       isFlatRate ? "border-gray-200 bg-white focus:border-primary focus:ring-2 focus:ring-primary-light" : "border-gray-100 bg-gray-50 text-gray-500 cursor-not-allowed"
                     )}
                     type="text"
@@ -2459,25 +2703,32 @@ export function CorporateBookingPage() {
         </section>
 
         {/* Footer sticky bar */}
-        <div className="fixed bottom-0 left-0 z-40 w-full border-t border-gray-200 bg-white/95 px-4 py-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur">
-          <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-xs text-gray-600">Company Billing Registration</p>
-              <p className="text-base font-semibold text-gray-950">
-                {canContinueToReview ? "Details verified" : "Fill details, complete consent"}
-              </p>
-            </div>
-            {canContinueToReview ? (
-              <PrimaryButton to={`/corporate/book?${reviewParams.toString()}`} className="sm:min-w-56">
-                Continue to Step 3
-              </PrimaryButton>
-            ) : (
-              <PrimaryButton disabled type="button" className="sm:min-w-56">
-                Continue to Step 3
-              </PrimaryButton>
-            )}
-          </div>
-        </div>
+        <BookingStickyFooter
+          summary={
+            <>
+          <p className="text-xs text-gray-600">Company Billing Registration</p>
+          <p className="text-base font-semibold text-gray-950">
+            {canContinueToReview ? "Details verified" : "Fill details, complete consent"}
+          </p>
+            </>
+          }
+        >
+        {canContinueToReview ? (
+          // Per BR-09 (2026-10-14): the corporate
+          // Step 3 → Step 4 transition copy uses the
+          // destination step name ("review"), not a
+          // numbered "Step N" reference. The
+          // 5-step refactor doesn't leave stale
+          // numbering in the CTA.
+          <PrimaryButton to={`/corporate/book?${reviewParams.toString()}`} className="sm:min-w-56">
+            Continue to review
+          </PrimaryButton>
+        ) : (
+          <PrimaryButton disabled type="button" className="sm:min-w-56">
+            Continue to review
+          </PrimaryButton>
+        )}
+        </BookingStickyFooter>
       </>
     );
   }
@@ -2501,10 +2752,16 @@ export function CorporateBookingPage() {
       <>
         <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-3xl">
-            <StepIndicator steps={steps} currentStep={3} />
+            {/* Per BR-09 (2026-10-14): the corporate review
+                step moved from the old 4-step "Step 3" to
+                the new 5-step "Step 4" — the new "Add-ons"
+                step sits between Select Room and Guest
+                Details. */}
+            <StepIndicator steps={steps} currentStep={4} />
           </div>
           <div className="mt-10">
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 3 of 4</p>
+            {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 4 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Review & pay</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Confirm your corporate profile details and upload the required verification files to complete the request.
@@ -2513,7 +2770,7 @@ export function CorporateBookingPage() {
         </section>
 
         <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-16 sm:px-6 lg:grid-cols-[1fr_380px] lg:px-8">
-          <div className="space-y-6">
+          <div className="order-2 lg:order-1 space-y-6">
             
             {/* Info review block */}
             <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
@@ -2760,49 +3017,56 @@ export function CorporateBookingPage() {
         </section>
 
         {/* Footer sticky bar */}
-        <div className="fixed bottom-0 left-0 z-40 w-full border-t border-gray-200 bg-white/95 px-4 py-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur">
-          <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-xs text-gray-600">
-                {isPersonalPay ? "Personal payment verification" : "Authorization via email after booking"}
-              </p>
-              <p className="text-sm font-semibold text-gray-950">
-                {isPersonalPay && uploadingProof
-                  ? "Uploading payment receipt..."
-                  : isPersonalPay && !proofUpload
-                  ? "Payment receipt upload required"
-                  : !termsConsent
-                  ? "Agree to the terms to continue"
-                  : !reviewTurnstile.token
-                  ? "Running a quick security check..."
-                  : isPersonalPay
-                  ? "Payment receipt uploaded"
-                  : "No LOU upload needed — accounts team will email you"}
-              </p>
-            </div>
-            {canConfirm ? (
-              <PrimaryButton 
-                type="button" 
-                className="sm:min-w-56" 
-                onClick={handleConfirmSubmit}
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? (
-                  <span className="flex items-center gap-2">
-                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                    Processing booking...
-                  </span>
-                ) : (
-                  "Confirm Corporate Booking"
-                )}
-              </PrimaryButton>
+        <BookingStickyFooter
+          summary={
+            <>
+          <p className="text-xs text-gray-600">
+            {isPersonalPay ? "Personal payment verification" : "Authorization via email after booking"}
+          </p>
+          <p className="text-sm font-semibold text-gray-950">
+            {isPersonalPay && uploadingProof
+              ? "Uploading payment receipt..."
+              : isPersonalPay && !proofUpload
+              ? "Payment receipt upload required"
+              : !termsConsent
+              ? "Agree to the terms to continue"
+              : !reviewTurnstile.token
+              ? "Running a quick security check..."
+              : isPersonalPay
+              ? "Payment receipt uploaded"
+              : "No LOU upload needed — accounts team will email you"}
+          </p>
+            </>
+          }
+        >
+        {canConfirm ? (
+          <PrimaryButton 
+            type="button" 
+            className="sm:min-w-56" 
+            onClick={handleConfirmSubmit}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? (
+              <span className="flex items-center gap-2">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                Processing booking...
+              </span>
             ) : (
-              <PrimaryButton disabled type="button" className="sm:min-w-56">
-                Confirm Corporate Booking
-              </PrimaryButton>
+              // Per BR-09 (2026-10-14): the
+              // corporate review-step CTA copy
+              // matches the public flow's
+              // "Place booking" wording so both
+              // flows land in the same mental
+              // model at the create-call moment.
+              "Place booking"
             )}
-          </div>
-        </div>
+          </PrimaryButton>
+        ) : (
+          <PrimaryButton disabled type="button" className="sm:min-w-56">
+            Place booking
+          </PrimaryButton>
+        )}
+        </BookingStickyFooter>
       </>
     );
   }
@@ -2925,17 +3189,22 @@ function TextField({
   readOnly = false
 }: TextFieldProps) {
   return (
-    <label htmlFor={id} className="grid gap-2 text-sm font-medium text-gray-700">
+    // Per fix(guest-details-field-alignment): same fix as the public
+    // BookingPage TextField — `content-start` stops the stretched grid cell
+    // from inflating the label + input rows (which offset the Phone field
+    // next to the taller Email cell), and the flex wrapper keeps the icon
+    // centred on the input box itself.
+    <label htmlFor={id} className="grid content-start gap-2 text-sm font-medium text-gray-700">
       {label}
       {required ? <span className="sr-only">required</span> : null}
-      <span className="relative block">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-primary">{icon}</span>
+      <span className="relative flex items-center">
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-primary">{icon}</span>
         <input
           id={id}
           name={name}
           autoComplete={autoComplete}
           className={cn(
-            "min-h-11 w-full rounded-lg border bg-white py-2 pl-10 pr-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light",
+            "block min-h-11 w-full rounded-lg border bg-white py-2 pl-10 pr-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light",
             error ? "border-red-300" : "border-gray-200",
             readOnly ? "cursor-default bg-gray-50 text-gray-700" : null
           )}
@@ -3003,8 +3272,14 @@ function BookingReviewAside({
   const roomTotal = ratePerNight * nights;
   const breakfastTotal = hasBreakfast ? breakfastRatePerPerson * guests * nights : 0;
 
+  // Per MBUX-09 (decision #261), mirroring MBUX-07 on the public
+  // flow: below `lg:` the grid is one column, so the summary — the
+  // thing the guest came to check — rendered BELOW the whole
+  // payment/verification form. CSS `order` moves ONE node; there is
+  // no second copy of the summary that could drift. The class lives
+  // on the <aside> itself so both review steps inherit it.
   return (
-    <aside className="lg:sticky lg:top-36 lg:self-start">
+    <aside className="order-1 lg:order-2 lg:sticky lg:top-36 lg:self-start">
       <div className="overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200">
         <img src={typeImageUrls[0]} alt={typeLabel} className="h-52 w-full object-cover" />
         <div className="p-5">

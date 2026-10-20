@@ -24,7 +24,7 @@ vi.mock("../../server/lib/firebase-admin", () => {
         doc: vi.fn().mockImplementation((docId = "history_1") => createDocRef(`${collectionName}/${docId}`))
       })),
       runTransaction: vi.fn().mockImplementation(async (callback) => {
-        await callback({
+        return callback({
           get: vi.fn().mockImplementation(async (ref: any) => {
             if (ref.path === "bookings/booking_1") return mockBookingDoc;
             if (ref.path === "members/member_1") return mockMemberDoc;

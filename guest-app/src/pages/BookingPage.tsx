@@ -1,8 +1,10 @@
 import {
   ArrowLeft,
+  ArrowRight,
   BedDouble,
   CalendarDays,
   Check,
+  ChevronDown,
   CheckCircle2,
   CreditCard,
   Info,
@@ -31,14 +33,23 @@ import {
   calculateSeasonalAwareRoomBreakdown,
   calculateSeasonalAwareRoomTotal,
   calculateVatBreakdown,
+  // Per OCT-H9 (2026-10-20, decision #283): the guest-side
+  // VAT surfaces must be gated on the admin's Tax (VAT)
+  // toggle. `PriceBreakdown.tsx` already consults
+  // `isVatEnabled`; the pre-submission live preview in
+  // `BookingReviewAside` did not, so a VAT-exempt hotel
+  // still saw the 12% VAT reconciliation on the booking
+  // page. Same helper, same default.
+  isVatEnabled,
+  calculateBreakfastMealsTotal,
   getDateKeyInTimezone,
   getNumNights,
+  normalizeStayRange,
   staggerChild,
   staggerContainer,
   compressImageFile,
   calculatePercentDiscount,
   calculateVoucherBase,
-  calculateBreakfastAddOn,
   // Per B-10 / B-10c / decision #223 (2026-08-19): the
   // upload-timeout helper. Wraps `uploadBytes(...)` on Firebase
   // Storage in a `Promise.race` so a hung connection (mobile
@@ -59,7 +70,18 @@ import {
 // in a separate block to keep the CHD-05 import-ordering guard
 // (which requires `calculateExtraBedAddOn` + `requiredExtraBedsFor`
 // to be adjacent in the same import) intact.
-import { deriveRoomTypeCapacityFit } from "@spark-inn/shared";
+import { deriveRoomTypeCapacityFit, computeBreakfastCutoffState, recomputeBreakfastTotal, buildBreakfastRateBreakdownLines, type BreakfastSelectionEntry } from "@spark-inn/shared";
+// Per OCT-M4 (2026-10-20, decision #297): the guest Step 2
+// "Other Add-Ons" grid + its draft helpers. BR-12 shipped the
+// catalog, the staff walk-in grid and the post-booking Manage page
+// — but the GUEST booking flow had none of it, so a guest could not
+// order an airport transfer at booking time at all.
+import {
+  buildOtherAddOnDraftSelections,
+  countOtherAddOnDraftSelections,
+  otherAddOnDraftKey,
+  recomputeOtherAddOnTotal
+} from "@spark-inn/shared";
 // Per MRB-02 (2026-08-02, per decision #164): the
 // reservation-level idempotency key, imported separately to
 // keep the CHD-05 import-ordering guard (which requires
@@ -90,7 +112,24 @@ import { DateRangePicker } from "../components/DateRangePicker";
 import { Modal } from "../components/Modal";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { PriceBreakdown } from "../components/PriceBreakdown";
+// Per OCT-M4 (2026-10-20, decision #297): the guest Step 2
+// other-add-ons section + the catalog hook.
+import { OtherAddOnsStep2Section } from "../components/OtherAddOnsStep2Section";
+import { useOtherAddOnsCatalog } from "../hooks/useOtherAddOnsCatalog";
 import { StepIndicator } from "../components/StepIndicator";
+import { BookingStickyFooter } from "../components/BookingStickyFooter";
+import { RoomCartLines } from "../components/RoomCartLines";
+import { RoomCartTray } from "../components/RoomCartTray";
+import { StaySummaryStrip } from "../components/StaySummaryStrip";
+import { EditStayDetailsSheet } from "../components/EditStayDetailsSheet";
+import { BreakfastMenuStrip } from "../components/BreakfastMenuStrip";
+import {
+  BREAKFAST_COPY_NOTICE_TIMEOUT_MS,
+  buildBreakfastCopyNotice,
+  copyBreakfastDateToRemaining,
+  shouldShowBreakfastCopyNotice,
+  type BreakfastCopyNotice
+} from "../utils/breakfastCopy";
 import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { useTurnstileToken } from "../hooks/useTurnstileToken";
@@ -117,6 +156,13 @@ import { useGuestAuth } from "../context/GuestAuthContext";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
+// Per OCT-L5 (2026-10-20, decision #299): the typed + normalized
+// read path for the booking page's local `breakfastConfig` state.
+import {
+  DEFAULT_BOOKING_BREAKFAST_CONFIG,
+  normalizeBreakfastConfig,
+  type BookingBreakfastConfig
+} from "../utils/breakfastConfig";
 import {
   parseBookingRoomCart,
   rebalanceGuestDistribution,
@@ -124,7 +170,60 @@ import {
   type BookingRoomCartItem
 } from "../utils/bookingRoomCart";
 
-const steps = ["Select Room", "Guest Details", "Review & Pay", "Confirmation"];
+// Per BR-09 (2026-10-14): the booking flow renders five
+// steps instead of four. The breakfast add-on (formerly
+// embedded in the old Step 2 "Guest Details") now has
+// its own dedicated "Add-ons" step BEFORE the guest
+// details step. The label is forward-thinking ("Add-ons"
+// not "Breakfast") so future per-stay add-ons (spa,
+// parking, etc.) share the same step without a rename.
+const steps = ["Select Room", "Add-ons", "Guest Details", "Review & Pay", "Confirmation"];
+// Per BR-09: the URL step-key contract. The legacy
+// numeric `?step=N` values (1-4 from the pre-BR-09
+// flow) are mapped to the new string keys in
+// `normalizeStepKey` below so old share-links still
+// land in the closest equivalent step. The `5` value
+// is the new "confirmation" affordance for pre-BR-09
+// links that explicitly numbered the confirmation page.
+const STEP_KEYS = {
+  selectRoom: "select-room",
+  addOns: "add-ons",
+  guestDetails: "guest-details",
+  review: "review",
+  confirmation: "confirmation"
+} as const;
+
+// Per BR-09: the soft backward-compat map for
+// pre-BR-09 numeric `?step=N` deep-links. The legacy
+// contract used `?step=2` for Guest Details, `?step=3`
+// for Review, `?step=4` for Confirmation. After the
+// refactor those numeric values land in the closest
+// equivalent step (1 → rooms, 2 → add-ons,
+// 3 → guest details, 4 → review, 5 → confirmation).
+// Users typically need to re-do the in-cart data —
+// documented in the spec change (BR-09 decision).
+function normalizeStepKey(rawStep: string | null): string {
+  if (!rawStep) return STEP_KEYS.selectRoom;
+  // Legacy numeric shape (?step=1..5).
+  if (rawStep === "1") return STEP_KEYS.selectRoom;
+  if (rawStep === "2") return STEP_KEYS.addOns;
+  if (rawStep === "3") return STEP_KEYS.guestDetails;
+  if (rawStep === "4") return STEP_KEYS.review;
+  if (rawStep === "5") return STEP_KEYS.confirmation;
+  // New string shape (?step=select-room|add-ons|
+  // guest-details|review|confirmation) — pass through.
+  if (
+    rawStep === STEP_KEYS.selectRoom ||
+    rawStep === STEP_KEYS.addOns ||
+    rawStep === STEP_KEYS.guestDetails ||
+    rawStep === STEP_KEYS.review ||
+    rawStep === STEP_KEYS.confirmation
+  ) {
+    return rawStep;
+  }
+  // Unknown value — fall back to Step 1.
+  return STEP_KEYS.selectRoom;
+}
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const ACCEPTED_UPLOAD_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const DISCOUNT_ID_COMPRESSION_OPTIONS = {
@@ -180,6 +279,97 @@ function formatStayDate(value: string) {
   }).format(new Date(`${value}T00:00:00`));
 }
 
+// Per BR-03 (2026-10-12, decision #232): the
+// breakfast-date list for the Step 2 section. N dates
+// for N nights (open item #1: a 3-night stay has 3
+// breakfasts, on the check-in + middle + check-out-1
+// dates). Defensive: returns an empty array when the
+// input is malformed (e.g. checkout <= checkin) so
+// the Step 2 section renders nothing rather than a
+// crash.
+//
+// Per OCT-H2 (2026-10-20, audit
+// `plan/project/AUDIT-OCTOBER-2026.md`): the `+ 'T00:00:00Z'`
+// UTC anchor is REQUIRED, not cosmetic. The previous
+// `+ 'T00:00:00'` parsed in the BROWSER's timezone and the
+// loop then formatted with `toISOString()` (UTC), so in any
+// UTC+ zone the list was shifted back one day. Reproduced:
+//
+//   TZ=Asia/Manila -> ["2026-10-13","2026-10-14","2026-10-15"]
+//
+// for a 2026-10-14 -> 2026-10-17 stay — the LAST breakfast
+// morning (Oct 16) was never offered, so it was never charged,
+// and the server's cut-off check ran against the wrong date.
+//
+// The two sibling implementations already use the Z anchor
+// (`ManageBreakfastPage.tsx:148` and
+// `WalkinBreakfastGrid.tsx:119`); this one was the outlier.
+function enumerateBreakfastDates(checkIn: string, checkOut: string): string[] {
+  if (!checkIn || !checkOut) return [];
+  const start = new Date(`${checkIn}T00:00:00Z`);
+  const end = new Date(`${checkOut}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
+  if (end <= start) return [];
+  const dates: string[] = [];
+  const cursor = new Date(start);
+  while (cursor < end) {
+    const iso = cursor.toISOString().slice(0, 10);
+    dates.push(iso);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return dates;
+}
+
+// Per BR-03: the per-guest slot list for the
+// breakfast grid. One slot per guest
+// (`Guest 1 (Adult)`, `Guest 2 (Adult)`, `Child 1
+// (age 7)`, ...). Sourced from the per-room
+// `numAdults` + `numChildren` from the cart (per
+// MRB-07). The slot id (`guest-0`, `guest-1`, ...)
+// is the key suffix for the
+// `${date}-${slotId}` selection entry; the server
+// uses the same id when it renders the email view
+// + receipt PDF.
+function enumerateGuestSlots(roomCart: Array<{ numAdults: number; numChildren?: number }>): Array<{ id: string; label: string }> {
+  const slots: Array<{ id: string; label: string }> = [];
+  let counter = 0;
+  for (const room of roomCart) {
+    const adults = Math.max(0, Number(room.numAdults) || 0);
+    for (let i = 0; i < adults; i += 1) {
+      slots.push({ id: `guest-${counter}`, label: `Guest ${counter + 1} (Adult)` });
+      counter += 1;
+    }
+    const children = Math.max(0, Number(room.numChildren) || 0);
+    for (let i = 0; i < children; i += 1) {
+      slots.push({ id: `guest-${counter}`, label: `Child ${i + 1}` });
+      counter += 1;
+    }
+  }
+  return slots;
+}
+
+// Per BR-03: the human-readable date label for the
+// Step 2 grid ("Oct 14 (Tue) — Order by Oct 13, 8:00 PM").
+// The day-of-week is the hotel's locale-configured
+// weekday; the formatter is shared with the existing
+// `formatStayDate` helper above.
+function formatBreakfastDateLabel(date: string): string {
+  const parsed = new Date(`${date}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  const weekday = new Intl.DateTimeFormat(config.locale, { weekday: "short", timeZone: "UTC" }).format(parsed);
+  const monthDay = new Intl.DateTimeFormat(config.locale, { month: "short", day: "numeric", timeZone: "UTC" }).format(parsed);
+  return `${monthDay} (${weekday})`;
+}
+
+// Per MBUX-16 (decision #269, 2026-10-16): the cut-off-time
+// formatter lives in its own utility module (so it can be
+// imported by the test suite directly without an indirection
+// through this file's compilation). The import is below the
+// existing `formatBreakfastDateLabel` helper; the function
+// signature + behaviour are pinned in
+// `tests/api/mbux-16-breakfast-cutoff-explanation.test.ts`.
+import { formatCutoffTime } from "../utils/formatCutoffTime";
+
 function createPrivateUploadFileName(fileName: string) {
   const extension = fileName.match(/\.[a-z0-9]+$/i)?.[0].toLowerCase() ?? "";
   return `${crypto.randomUUID()}${extension}`;
@@ -199,10 +389,20 @@ export function BookingPage() {
   // `feat/special-requests-redirect` contact override
   // read is retired. The contact hook is still used
   // for `hotelCheckInTime` (the arrival-time dropdown).
-  const { hotelCheckInTime } = usePublicSiteContent();
-  const currentStepKey = searchParams.get("step") ?? "select-room";
-  const isGuestDetailsStep = currentStepKey === "guest-details";
-  const isReviewStep = currentStepKey === "review";
+  // Per MSL-01 (2026-10-15): `maxStayNights` is the admin's
+  // stay-length cap (raw; `null` = no field = 30-night default).
+  const { hotelCheckInTime, maxStayNights, vatConfig } = usePublicSiteContent();
+  // Per OCT-H9 (2026-10-20, decision #283): the admin's Tax
+  // (VAT) toggle decides whether the guest-facing surfaces
+  // render the 12% VAT reconciliation at all. Default is
+  // `true` (BIR-compliant) when the snapshot is missing.
+  const vatEnabled = isVatEnabled(vatConfig);
+  const currentStepKey = normalizeStepKey(searchParams.get("step"));
+  const isSelectRoomStep = currentStepKey === STEP_KEYS.selectRoom;
+  const isAddOnsStep = currentStepKey === STEP_KEYS.addOns;
+  const isGuestDetailsStep = currentStepKey === STEP_KEYS.guestDetails;
+  const isReviewStep = currentStepKey === STEP_KEYS.review;
+  const isConfirmationStep = currentStepKey === STEP_KEYS.confirmation;
 
   // Spark Rewards member discount: the value is read from settings/rewardsConfig
   // and applied server-side in handleCreateBooking (per W2.2 / decision #90).
@@ -232,18 +432,64 @@ export function BookingPage() {
   // `useInFlowHold` hook stamps the server-side doc on
   // first read; the booking transaction consumes the
   // hold best-effort after the booking commits.
-  const [holdId] = useState(() => generateHoldId());
+  //
+  // Per IMT-01 (2026-10-13): the setter is now live. The
+  // `onPickNewRoom` callback re-rolls the id so that
+  // returning to Step 1 after the hold expires starts a
+  // genuinely fresh hold. Previously the id was minted
+  // once per page instance and never re-rolled, while
+  // `onPickNewRoom` only rewrote `?step=select-room` —
+  // so Step 1 re-added the SAME dead id via
+  // `continueParams`, `/api/holds/read` answered 200
+  // with `status: "expired"` (read-time evaluation), the
+  // hook's 404 → `POST /api/holds/start` branch therefore
+  // never fired, and the guest landed in a red-banner
+  // loop they could only escape with a hard reload.
+  //
+  // Re-rolling on an EXPLICIT guest action only. The id is
+  // deliberately NOT re-rolled on a plain re-entry (e.g.
+  // browser Back to Step 1): auto-reviving a dead hold
+  // would silently defeat the countdown, since a guest who
+  // sits on the expired banner and reloads would otherwise
+  // get a new window forever and the timer would stop
+  // meaning anything. An expired banner stays red until
+  // the guest asks for a new room or extends the hold
+  // (IMT-03). See `plan/features/BOOKING-FLOW.md
+  // §In-flow Hold` + `plan/project/ROADMAP.md §IMT`.
+  const [holdId, setHoldId] = useState(() => generateHoldId());
+
+  // Per MBUX-18 (decision #275, 2026-10-16): the mobile-only
+  // bottom sheet that the StaySummaryStrip's Edit pencil opens.
+  // Lives at the top of the component (not inside the
+  // isSelectRoomStep branch) because React hooks must run in
+  // the same order every render. Initial value `false` — the
+  // sheet never opens without an explicit Edit tap.
+  const [isEditStayDetailsOpen, setIsEditStayDetailsOpen] = useState(false);
 
   // Dynamic config states loaded from Firestore
-  const [breakfastConfig, setBreakfastConfig] = useState({
-    isEnabled: false,
-    ratePerPersonPerNight: 250,
-    // Per CHD-10 (2026-07-31, per CVQ-01): hotel-wide default for
-    // "include children in the breakfast charge". The booking-page
-    // toggle inherits this on first paint; the guest can override
-    // for the current booking. `true` is the historical default.
-    breakfastIncludesChildrenDefault: true
-  });
+  // Per BR-03 (2026-10-12, decision #232) + BR-08 (decision
+  // #238, 2026-10-14 — close-out): the local `breakfastConfig`
+  // state carries the new rich shape (isEnabled + cutoffTime
+  // + cutoffTimezone + defaultMealInstructions + meals[]).
+  // The legacy `ratePerPersonPerNight` +
+  // `breakfastIncludesChildrenDefault` fields were deleted
+  // from the type and from this state in BR-08; the Step 2
+  // section renders the per-meal picker instead of a flat-rate
+  // toggle. Loaded from `settings/breakfastConfig` via the
+  // Firestore doc (the same path the public
+  // `GET /api/bookings/breakfast/config` route returns).
+  // Defaults are the "breakfast is off" shape so the Step 2
+  // section renders nothing before the config loads.
+  //
+  // Per OCT-L5 (2026-10-20, decision #299): the state is TYPED
+  // and the read path NORMALIZES instead of casting. The old
+  // inline shape omitted `imageUrl` (the MBUX-04 meal thumbnail
+  // `BreakfastMenuStrip` renders) and the field survived only
+  // through an `as any` cast on the Firestore snapshot — one type
+  // edit away from silently dropping every meal photo.
+  const [breakfastConfig, setBreakfastConfig] = useState<BookingBreakfastConfig>(
+    DEFAULT_BOOKING_BREAKFAST_CONFIG
+  );
   const [rewardsConfig, setRewardsConfig] = useState<any>(null);
   const [hotelConfig, setHotelConfig] = useState<any>(null);
   const seniorPwdOnlineEnabled = hotelConfig?.seniorPwdOnlineEnabled !== false;
@@ -262,8 +508,19 @@ export function BookingPage() {
     ? Number(rewardsConfig?.memberDiscountPct) || 0
     : 0;
 
-  const [checkIn, setCheckIn] = useState(() => searchParams.get("checkIn") ?? getDateKeyInTimezone(config.timezone, 1));
-  const [checkOut, setCheckOut] = useState(() => searchParams.get("checkOut") ?? getDateKeyInTimezone(config.timezone, 2));
+  // DR-01 (2026-10-14): seed the range from the URL only through
+  // `normalizeStayRange`. Previously the params were trusted raw, so
+  // a shared or hand-edited `?checkIn=2026-10-16&checkOut=2026-10-09`
+  // opened the flow on an inverted range and the first availability
+  // query already used the bad dates.
+  const initialStayRange = normalizeStayRange({
+    checkIn: searchParams.get("checkIn"),
+    checkOut: searchParams.get("checkOut"),
+    minCheckIn: getDateKeyInTimezone(config.timezone),
+    defaultNights: 1
+  });
+  const [checkIn, setCheckIn] = useState(initialStayRange.checkIn);
+  const [checkOut, setCheckOut] = useState(initialStayRange.checkOut);
   // Per CHD-11.5 (2026-08-05, per decision #196): the picker
   // asks for Adults + Children directly, not Guests (total) +
   // Children. `adults` is the state; `guests` is derived as
@@ -289,14 +546,13 @@ export function BookingPage() {
   const [numChildren, setNumChildren] = useState(Number(searchParams.get("children") ?? 0));
   const numAdults = adults;
   const guests = numAdults + numChildren;
-  // The per-booking override for "include children in the breakfast
-  // charge". Defaults to the admin default from
-  // `settings/breakfastConfig.breakfastIncludesChildrenDefault`.
-  // The server snapshots this onto the booking doc — a later admin
-  // change does not rewrite existing bills.
-  const [breakfastIncludesChildren, setBreakfastIncludesChildren] = useState(
-    breakfastConfig.breakfastIncludesChildrenDefault !== false
-  );
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy `breakfastIncludesChildren: boolean` state is
+  // deleted. Children are ordinary meal slots in Step 2
+  // (the per-meal picker) — there's no children-included
+  // toggle to maintain. The `numChildren` count above is
+  // the source of truth for "how many extra meal slots the
+  // Step 2 section renders".
   // Per EXB-11 (2026-08-04, per decision #186): extra beds
   // are now a per-type user-set value, not a single global
   // counter. The user toggles the count on each room-type
@@ -332,7 +588,7 @@ export function BookingPage() {
     // re-book flow pins first/last/phone via the URL) so the member
     // cannot accidentally have a different value pinned by an old
     // link. The name fields are then rendered as readOnly below —
-    // see the first/last <TextField>s for the matching render-time
+    // see the first/last name inputs for the matching render-time
     // gate. Email is handled by the existing email-only block below;
     // phone stays editable (members may travel on a secondary phone
     // — per the autofill+lock UX decision 2026-08-20).
@@ -444,6 +700,25 @@ export function BookingPage() {
   const [voucherError, setVoucherError] = useState("");
   const [isValidatingVoucher, setIsValidatingVoucher] = useState(false);
 
+  // Per PR #9 fix (2026-10-13): member self-service points redemption
+  // at booking creation. The Apply button does NOT call the API
+  // — it just stores the desired points amount in local state
+  // and shows the discount in the UI preview. On submit,
+  // `handleConfirmBooking` passes `pointsToRedeem` to the
+  // server's `handleCreateBooking`, which applies the redemption
+  // atomically inside the create transaction. The booking is
+  // written with the already-discounted totalPrice — no refunds,
+  // no credit tracking, no post-payment reconciliation. The
+  // client-side toggle gate (`allowMemberPointsRedemption`) is
+  // UX, not security — the server's ownership guard inside the
+  // create transaction is the real authorization.
+  const [selfPointsInput, setSelfPointsInput] = useState("");
+  const [pendingPointsToRedeem, setPendingPointsToRedeem] = useState(0);
+  const [selfPointsError, setSelfPointsError] = useState("");
+  const [selfPointsApplied, setSelfPointsApplied] = useState(false);
+  const memberSelfRedeemEnabled = rewardsConfig?.allowMemberPointsRedemption === true;
+  const memberAvailablePoints = Number(memberProfile?.rewardsPoints || 0);
+
   const [discountType, setDiscountType] = useState<"none" | "senior" | "pwd">("none");
   // Per BF-30 (booking-flow audit 2026-06-26): the previous
   // shape was two parallel state vars (`discountIdFile` +
@@ -478,7 +753,33 @@ export function BookingPage() {
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
   const [paymentProofError, setPaymentProofError] = useState("");
 
-  const [termsConsent, setTermsConsent] = useState(false);
+  // Per BR-03 (2026-10-12, decision #232): the new
+  // per-guest × per-date `breakfastSelections` rich
+  // shape. Keyed by `${date}-${guestSlot}` (e.g.
+  // `2026-10-14-guest-0`). The Step 2 breakfast section
+  // populates this map; an empty `{}` means the guest
+  // skipped breakfast entirely. The server validates
+  // each entry (mealId exists, serviceDate not locked,
+  // price non-negative) and recomputes `breakfastTotal`
+  // from `recomputeBreakfastTotal(breakfastSelections)`.
+  // The create payload sends the map verbatim (the
+  // `BreakfastSelectionsEntry` shape is locked per BR-01).
+  const [breakfastSelections, setBreakfastSelections] = useState<Record<string, BreakfastSelectionEntry>>({});
+  // Per OCT-M4 (2026-10-20, decision #297): the guest's OTHER
+  // ADD-ONS draft for Step 2.
+  //
+  // The state is the QUANTITY per (service date × add-on) cell, keyed
+  // `yyyy-mm-dd-{addOnId}`. The full selection map
+  // (`OtherAddOnSelectionEntry[]` per date) is DERIVED from it by the
+  // shared `buildOtherAddOnDraftSelections` helper, so the price /
+  // name / unit snapshots always come from the catalog rather than
+  // from a second copy of the truth.
+  //
+  // The server REBUILDS every entry from the live catalog on create
+  // (the OCT-C2 price-authority rule), so these snapshots are
+  // advisory — they exist so the grid can quote a total that matches
+  // the bill.
+  const [otherAddOnQuantities, setOtherAddOnQuantities] = useState<Record<string, number>>({});
   // Per BI-03 (booking-intercom audit 2026-07-06): the widget is
   // rendered through the shared `useTurnstileToken` hook, gated on
   // the review step (the only step whose JSX contains the
@@ -640,6 +941,21 @@ export function BookingPage() {
     () => distributedRoomCart.reduce((sum, room) => sum + (room.extraBedCount || 0), 0),
     [distributedRoomCart]
   );
+  // Per BR-09 (2026-10-14, decision #239): the soft
+  // `?step=2` backward-compat (the old numeric shape
+  // for "Guest Details") lands on the new "Add-ons"
+  // step. If the user arrives with no valid rooms in
+  // the cart (a stale share-link), bounce to Step 1 so
+  // they start fresh instead of staring at an empty
+  // Add-ons step. Same guard mirrors the pre-existing
+  // Step 3 / Step 4 fall-through logic.
+  useEffect(() => {
+    if (!isAddOnsStep) return;
+    if (distributedRoomCart.length > 0) return;
+    const fallback = new URLSearchParams(searchParams);
+    fallback.delete("step");
+    setSearchParams(fallback, { replace: true });
+  }, [isAddOnsStep, distributedRoomCart, searchParams, setSearchParams]);
   const cartDistributionComplete =
     distributedRoomCart.length > 0
     && cartDistribution.unassignedAdults === 0
@@ -702,6 +1018,32 @@ export function BookingPage() {
     ? roomTypes.find((t) => t.value === firstFailingRoom.roomType)
     : null;
   const cartIsReady = cartHasAvailability && cartDistributionComplete && cartFitsGroup;
+  // Per MBUX-11 (decision #264, 2026-10-16): the cart-distribution
+  // failure message used to be a single generic sentence regardless
+  // of the actual cause. Branched into specific causes so the guest
+  // sees exactly why their selection doesn't fit. Precedence:
+  //   1. no rooms at all → "pick at least one room"
+  //   2. more rooms than guests can fill → "each room needs an adult"
+  //   3. unassigned adults remain → "...adults aren't assigned..."
+  //   4. unassigned children remain → "...children aren't assigned..."
+  //   5. legacy fallback (defensive; should not fire in normal use)
+  const cartDistributionErrorMessage = (() => {
+    if (distributedRoomCart.length === 0) {
+      return "Pick at least one room to start your stay.";
+    }
+    if (distributedRoomCart.length > guests) {
+      return `You have ${distributedRoomCart.length} rooms but only ${guests} ${guests === 1 ? "guest" : "guests"} — each room needs at least one adult. Remove a room or add another guest.`;
+    }
+    if (cartDistribution.unassignedAdults > 0) {
+      const n = cartDistribution.unassignedAdults;
+      return `${n} ${n === 1 ? "adult is" : "adults are"} not assigned to a room yet — pick a different room or remove a guest.`;
+    }
+    if (cartDistribution.unassignedChildren > 0) {
+      const n = cartDistribution.unassignedChildren;
+      return `${n} ${n === 1 ? "child is" : "children are"} not assigned to a room yet — pick a different room or remove a child.`;
+    }
+    return "Add enough available rooms to fit every guest, with at least one adult assigned to each room.";
+  })();
   const selectedTypeIsAvailable = Boolean(
     selectedTypeEntry
     && availableRoomTypes.some((entry) => entry.type.value === selectedTypeEntry.value)
@@ -771,8 +1113,16 @@ export function BookingPage() {
     }
     return highest;
   }, [adults, selectedMaxExtraBeds, selectedTypeEntry]);
-  const hasBreakfast = breakfastConfig.isEnabled && rateChoice === "room-breakfast";
-  const breakfastRate = breakfastConfig.isEnabled ? (breakfastConfig.ratePerPersonPerNight || 250) : 0;
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy flat-rate `hasBreakfast: boolean` +
+  // `breakfastRate: number` pair is gone. The Step 2
+  // breakfast section populates the rich
+  // `breakfastSelections` shape; the live preview total
+  // sums those snapshots via the BR-01
+  // `calculateBreakfastMealsTotal` helper. The cart still
+  // carries a `rateChoice` per room ("room-only" vs
+  // "room-breakfast") for the meal-picker gating; the
+  // legacy `breakfastRate` constant is gone.
 
   // Calculate room total client-side, incorporating weekend rates (Saturdays and Sundays)
   const roomTotal = useMemo(() => {
@@ -791,36 +1141,27 @@ export function BookingPage() {
   }, [distributedRoomCart, roomTypes, checkIn, checkOut, seasonalRateOverrides]);
 
   const discountPct = discountType === "none" ? 0 : 20;
-  // Per CHD-10 (2026-07-31, per CVQ-01): the inline
-  // `breakfastRate * guests * nights` pattern now routes through the
-  // shared `calculateBreakfastAddOn` helper. When the guest has
-  // children and the toggle is off, the helper uses `numAdults`
-  // (the cheaper line). The `breakfastIncludesChildren` default
-  // (true) matches the historical "children pay the full rate" math.
-  const breakfastTotal = distributedRoomCart.reduce((sum, room) => sum + calculateBreakfastAddOn({
-    hasBreakfast: breakfastConfig.isEnabled && room.rateChoice === "room-breakfast",
-    breakfastRate,
-    numGuests: room.numAdults + room.numChildren,
-    numAdults: room.numAdults,
-    numChildren: room.numChildren,
-    numNights: nights,
-    breakfastIncludesChildren,
-    // Per EXB-12 (2026-08-06, per decision #199): when the
-    // guest opts in to breakfast for the extra-bed
-    // occupant(s), the helper counts `extraBedCount` toward
-    // the breakfast total. The user opts in via the toggle
-    // on the Extras sub-section. The server validates the
-    // invariant `extraBedBreakfast implies extraBedCount > 0`.
-    extraBedCount: room.extraBedCount,
-    extraBedBreakfast: room.extraBedBreakfast === true
-  }), 0);
-  // Per CHD-10: the effective breakfast occupancy, exposed for
-  // the rate-card per-night label. When the toggle is on, this
-  // equals `guests`; when off, it equals `numAdults`. Matches
-  // the helper's internal `effectiveOccupancy` derivation.
-  const effectiveBreakfastOccupancy = numChildren > 0 && !breakfastIncludesChildren
-    ? numAdults
-    : guests;
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // breakfast total is the sum of the snapshotted prices in
+  // `breakfastSelections`. The legacy
+  // `breakfastRate × numGuests × numNights` inline math is
+  // gone — the per-meal picker stamps each entry's `price`
+  // snapshot at capture time, so a later meal-name / price
+  // change in the admin Settings catalog never rewrites an
+  // in-flight booking.
+  const breakfastTotal = useMemo(
+    () => calculateBreakfastMealsTotal(breakfastSelections),
+    [breakfastSelections]
+  );
+  // Per BR-08: the effective breakfast occupancy is
+  // `breakfastSelections` count ÷ nights — every entry is
+  // a meal slot. Exposed for the rate-card per-night label.
+  const effectiveBreakfastOccupancy = useMemo(() => {
+    const slotCount = Object.values(breakfastSelections || {}).filter(
+      (entry) => entry && entry.removedAt == null
+    ).length;
+    return slotCount > 0 && nights > 0 ? Math.round(slotCount / nights) : guests;
+  }, [breakfastSelections, nights, guests]);
   // Per EXB-01 (2026-07-31): the extra-bed add-on term. Reads the
   // rate from the selected room type; nullish / 0 inputs
   // short-circuit to 0 via the helper.
@@ -856,6 +1197,23 @@ export function BookingPage() {
   const total = distributedRoomCart.length > 0
     ? Math.max(afterVoucher - memberDiscount, 0)
     : 0;
+  // Per PR #9 fix (2026-10-13): the member has queued
+  // `pendingPointsToRedeem` points for redemption at booking
+  // creation. Mirror the server's `Math.round(validation.value)`
+  // math (where `validation.value = (points / 100) *
+  // pointsRedemptionRate`) so the displayed total reflects the
+  // same number the server will subtract atomically at submit.
+  // Byte-equivalent when `pendingPointsToRedeem === 0`:
+  // `displayTotal === total`.
+  const pendingRedemptionValue = useMemo(() => {
+    if (pendingPointsToRedeem <= 0) return 0;
+    const rate = Number(rewardsConfig?.pointsRedemptionRate || 0);
+    if (rate <= 0) return 0;
+    return Math.round((pendingPointsToRedeem * rate) / 100);
+  }, [pendingPointsToRedeem, rewardsConfig?.pointsRedemptionRate]);
+  const displayTotal = distributedRoomCart.length > 0
+    ? Math.max(total - pendingRedemptionValue, 0)
+    : 0;
 
   const rateBreakdown = useMemo(() => {
     if (distributedRoomCart.length === 0) return null;
@@ -879,7 +1237,13 @@ export function BookingPage() {
       voucherApplied,
       voucherDiscount,
       memberDiscountPct,
-      finalTotal: total
+      finalTotal: displayTotal,
+      // Per PR #9 fix (2026-10-13): surface the pending points
+      // redemption as a deductions line so the member sees the
+      // breakdown match the queued discount. The server applies
+      // it at booking creation via `applyPointsRedemption`.
+      pendingRedemptionPoints: pendingPointsToRedeem,
+      pendingRedemptionValue
     });
   }, [
     distributedRoomCart,
@@ -895,11 +1259,20 @@ export function BookingPage() {
     voucherApplied,
     voucherDiscount,
     memberDiscountPct,
-    total
+    total,
+    displayTotal,
+    pendingPointsToRedeem,
+    pendingRedemptionValue
   ]);
 
   const continueParams = new URLSearchParams({
-    step: "guest-details",
+    // Per BR-09 (2026-10-14): the Step 1 "Continue"
+    // button now routes to the new "Add-ons" step
+    // (Step 2 in the 5-step flow). The breakfast
+    // add-on was extracted from the old Step 2
+    // "Guest Details" and gets its own dedicated step
+    // before the guest details form.
+    step: STEP_KEYS.addOns,
     checkIn,
     checkOut,
     // Per CHD-11.5: the picker URL is `?adults=N&children=N`
@@ -911,7 +1284,15 @@ export function BookingPage() {
     guests: String(guests),
     children: String(numChildren),
     roomType: selectedTypeEntry?.value ?? "",
-    breakfast: hasBreakfast ? "yes" : "no",
+    // Per BR-08 (decision #238, 2026-10-14 — close-out):
+    // the legacy "yes/no" breakfast flag in the deep link
+    // is replaced by the `breakfastSelections` rich shape
+    // sent in the create payload. The deep link's
+    // `?breakfast=yes` query is kept (read by
+    // `RateChoice` initial value via `parseBookingRoomCart`)
+    // for the per-room `rateChoice` gate — the legacy
+    // `hasBreakfast` derivation is gone.
+    breakfast: rateChoice === "room-breakfast" ? "yes" : "no",
     // In-flow hold id — the Step 2 / Step 3 banner reads
     // this and the `useInFlowHold` hook stamps the
     // server-side doc on first read. Optional in the URL
@@ -920,8 +1301,14 @@ export function BookingPage() {
     hold: holdId
   });
   continueParams.set("rooms", serializeBookingRoomCart(distributedRoomCart));
-  const reviewParams = new URLSearchParams(continueParams);
-  reviewParams.set("step", "review");
+  // Per BR-09: the Add-ons "Continue" routes to the
+  // guest details step. The Step 2 → Step 3 transition
+  // is always allowed (the user can skip breakfast and
+  // proceed — see the state machine in the spec).
+  const guestDetailsParams = new URLSearchParams(continueParams);
+  guestDetailsParams.set("step", STEP_KEYS.guestDetails);
+  const reviewParams = new URLSearchParams(guestDetailsParams);
+  reviewParams.set("step", STEP_KEYS.review);
   reviewParams.set("firstName", guestDetails.firstName);
   reviewParams.set("lastName", guestDetails.lastName);
   reviewParams.set("email", guestDetails.email);
@@ -953,8 +1340,30 @@ export function BookingPage() {
   };
   const canContinueToReview =
     Object.values(guestErrors).every((error) => !error) && guestDetails.consent && cartIsReady;
+  // Per MBUX-06: the footer summary names the FIRST outstanding
+  // correction instead of the generic "Complete required fields and
+  // consent", which told a guest nothing about what to do next. The
+  // order matches `focusFirstGuestDetailCorrection` so the summary and
+  // the focus target can never disagree.
+  const firstGuestDetailCorrectionLabel = (() => {
+    if (guestErrors.firstName) return "First name is required";
+    if (guestErrors.lastName) return "Last name is required";
+    if (guestErrors.email) return "Enter a valid email address";
+    if (guestErrors.phone) return "Phone number is required";
+    if (guestErrors.guestCount) return "Assign every guest to a room on the previous step";
+    if (!guestDetails.consent) return "Accept the privacy and terms consent below";
+    return "Complete required fields and consent";
+  })();
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy per-night `breakfastRate × guests` display is gone.
+  // The Step 2 breakfast section shows the per-meal picker
+  // (the snapshotted `breakfastSelections[key].price` sums),
+  // so a flat-rate nightly hint would double-count. The
+  // `nightlyTotal` for the room card is just the per-night
+  // room rate (the breakfast add-on shows up in the Step 2
+  // sidebar separately).
   const nightlyTotal = selectedRoomRates
-    ? selectedRoomRates.pricePerNight + (hasBreakfast ? breakfastRate * guests : 0)
+    ? selectedRoomRates.pricePerNight
     : 0;
 
   // Per EXB-11.4 (2026-08-06, per decision #197): no auto-init.
@@ -978,7 +1387,11 @@ export function BookingPage() {
       try {
         const bSnap = await getDoc(doc(db, "settings", "breakfastConfig"));
         if (bSnap.exists()) {
-          setBreakfastConfig(bSnap.data() as any);
+          // Per OCT-L5 (2026-10-20, decision #299): normalized, not
+          // cast. The typed shape carries `imageUrl`, so the MBUX-04
+          // meal thumbnails reach `BreakfastMenuStrip` on a typed
+          // path instead of surviving through an `as any`.
+          setBreakfastConfig(normalizeBreakfastConfig(bSnap.data()));
         }
         const rSnap = await getDoc(doc(db, "settings", "rewardsConfig"));
         if (rSnap.exists()) {
@@ -1191,102 +1604,50 @@ export function BookingPage() {
       return null;
     });
   }
-
-  // Per EXB-11.5 (2026-08-06, per decision #198): the rate
-  // option is a per-type toggle. Click to add 1 of that type
-  // to the cart (with the chosen rate); click the same rate
-  // again to remove all rooms of that type from the cart;
-  // click a different rate to switch the rate in place. The
-  // user is in full control of the room-type selection, same
-  // shape as the extra-bed toggle in EXB-11.4. The
-  // `selectedRoomType` / `rateChoice` state sync is skipped
-  // on the untick path — the `useEffect` at `BookingPage.tsx:865`
-  // picks another type (or clears) when the current selection
-  // is no longer in the cart. The `setSearchParams` call
-  // stays inside the `setRoomCart` callback to match the
-  // existing pattern (idempotent in React 18 StrictMode).
-  function selectRoomType(typeValue: string, nextRateChoice: RateChoice) {
-    let shouldSyncSelection = false;
-    setRoomCart((current) => {
-      const existingRoom = current.find((room) => room.roomType === typeValue);
-      let next;
-      if (!existingRoom) {
-        // Type not in cart: add 1 room with the chosen rate.
-        shouldSyncSelection = true;
-        next = [
-          ...current,
-          {
-            bookingId: doc(collection(db, "bookings")).id,
-            roomType: typeValue,
-            rateChoice: nextRateChoice,
-            numAdults: 0,
-            numChildren: 0,
-            extraBedCount: 0,
-            // Per EXB-12: default to `false` — the guest opts
-            // in to breakfast for extra beds via the toggle
-            // on the Extras sub-section.
-            extraBedBreakfast: false
-          }
-        ];
-      } else if (existingRoom.rateChoice === nextRateChoice) {
-        // Type in cart with the same rate: untick (per-type
-        // toggle) — remove ALL rooms of this type. Don't
-        // sync `selectedRoomType` / `rateChoice` here; the
-        // useEffect at `BookingPage.tsx:865` will pick
-        // another type (or clear) when the current selection
-        // is no longer in the cart.
-        next = current.filter((room) => room.roomType !== typeValue);
-      } else {
-        // Type in cart with a different rate: switch the
-        // rate in place (update every room of this type).
-        shouldSyncSelection = true;
-        next = current.map((room) =>
-          room.roomType === typeValue
-            ? { ...room, rateChoice: nextRateChoice }
-            : room
-        );
-      }
-      const nextParams = new URLSearchParams(searchParams);
-      nextParams.set("rooms", serializeBookingRoomCart(next));
-      setSearchParams(nextParams, { replace: true });
-      return next;
-    });
-    if (shouldSyncSelection) {
-      setSelectedRoomType(typeValue);
-      setRateChoice(nextRateChoice);
-    }
-  }
-
   function updateRoomQuantity(typeValue: string, nextQuantity: number, maxQuantity: number) {
     const safeQuantity = Math.min(Math.max(Math.floor(nextQuantity), 0), maxQuantity);
     setSelectedRoomType(typeValue);
-    setRoomCart((current) => {
-      const matching = current.filter((room) => room.roomType === typeValue);
-      const other = current.filter((room) => room.roomType !== typeValue);
-      const templateChoice = matching[0]?.rateChoice ?? rateChoice;
-      // Per EXB-12: preserve the extra-bed breakfast toggle
-      // from the first matching room (the user's pick applies
-      // to every room of this type — same per-type mirror
-      // pattern as `extraBedCount` and `rateChoice`).
-      const templateExtraBedBreakfast = matching[0]?.extraBedBreakfast === true;
-      const resized = Array.from({ length: safeQuantity }, (_, index) =>
-        matching[index] ?? {
-          bookingId: doc(collection(db, "bookings")).id,
-          roomType: typeValue,
-          rateChoice: templateChoice,
-          numAdults: 0,
-          numChildren: 0,
-          extraBedCount: 0,
-          extraBedBreakfast: templateExtraBedBreakfast
-        }
-      );
-      const next = [...other, ...resized];
-      const nextParams = new URLSearchParams(searchParams);
-      nextParams.set("rooms", serializeBookingRoomCart(next));
-      nextParams.set("roomType", typeValue);
-      setSearchParams(nextParams, { replace: true });
-      return next;
-    });
+    // Per OCT-L2 (2026-10-20, decision #299): the URL write moved
+    // OUT of the state updater.
+    //
+    // The previous shape called `setSearchParams` from inside the
+    // `setRoomCart` updater. A state updater runs during React's
+    // render phase, so dispatching a router update from one is a
+    // render-phase side effect: React 19 warns about it, and the
+    // app runs `<React.StrictMode>`, which double-invokes the
+    // updater in dev (the URL write is idempotent, so nothing
+    // corrupted — but the warning and the double-invocation sat on
+    // the hot quantity-change path).
+    //
+    // Both writes now happen in the event handler: the cart is
+    // derived from the current `roomCart` value, then the cart and
+    // the URL are written in that order.
+    const matching = roomCart.filter((room) => room.roomType === typeValue);
+    const other = roomCart.filter((room) => room.roomType !== typeValue);
+    const templateChoice = matching[0]?.rateChoice ?? rateChoice;
+    // Per EXB-12: preserve the extra-bed breakfast toggle
+    // from the first matching room (the user's pick applies
+    // to every room of this type — same per-type mirror
+    // pattern as `extraBedCount` and `rateChoice`).
+    const resized = Array.from({ length: safeQuantity }, (_, index) =>
+      matching[index] ?? {
+        bookingId: doc(collection(db, "bookings")).id,
+        roomType: typeValue,
+        rateChoice: templateChoice,
+        numAdults: 0,
+        numChildren: 0,
+        extraBedCount: 0
+        // Per BR-08: `extraBedBreakfast` removed from the
+        // cart shape (extra-bed occupants are ordinary meal
+        // slots in Step 2).
+      }
+    );
+    const next = [...other, ...resized];
+    setRoomCart(next);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("rooms", serializeBookingRoomCart(next));
+    nextParams.set("roomType", typeValue);
+    setSearchParams(nextParams, { replace: true });
   }
 
   // Per EXB-11 (2026-08-04, per decision #186): the per-type
@@ -1306,55 +1667,34 @@ export function BookingPage() {
   // is needed.
   function updateExtraBedCount(typeValue: string, nextCount: number, maxCount: number) {
     const safeCount = Math.min(Math.max(Math.floor(nextCount), 0), Math.max(0, Math.floor(maxCount)));
-    setRoomCart((current) => {
-      if (!current.some((room) => room.roomType === typeValue)) return current;
-      const next = current.map((room) =>
-        room.roomType === typeValue
-          ? { ...room, extraBedCount: safeCount }
-          : room
-      );
-      const nextParams = new URLSearchParams(searchParams);
-      nextParams.set("rooms", serializeBookingRoomCart(next));
-      setSearchParams(nextParams, { replace: true });
-      return next;
-    });
+    // Per OCT-L2 (2026-10-20, decision #299): the URL write moved
+    // OUT of the state updater — see `updateRoomQuantity` above.
+    if (!roomCart.some((room) => room.roomType === typeValue)) return;
+    const next = roomCart.map((room) =>
+      room.roomType === typeValue
+        ? { ...room, extraBedCount: safeCount }
+        : room
+    );
+    setRoomCart(next);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("rooms", serializeBookingRoomCart(next));
+    setSearchParams(nextParams, { replace: true });
   }
 
-  // Per EXB-12 (2026-08-06, per decision #199): the
-  // extra-bed breakfast toggle. The user opts in to
-  // breakfast for the extra-bed occupant(s) — all
-  // `extraBedCount` beds in the room are then counted toward
-  // the breakfast total. The toggle is per-type (mirrored
-  // onto every room of the type, same pattern as the extra-
-  // bed count + rate choice). When the extra-bed count drops
-  // to 0, the toggle is forced off (no breakfast for
-  // extra beds when there are no extra beds). The user can
-  // also explicitly turn it off; both paths set
-  // `extraBedBreakfast = false`.
-  function updateExtraBedBreakfast(typeValue: string, nextEnabled: boolean) {
-    setRoomCart((current) => {
-      if (!current.some((room) => room.roomType === typeValue)) return current;
-      const next = current.map((room) => {
-        if (room.roomType !== typeValue) return room;
-        // Per EXB-12: if the extra-bed count is 0, force the
-        // toggle off. No extra beds = no extra-bed breakfast.
-        // Same invariant the server validates: `extraBedBreakfast
-        // implies extraBedCount > 0`.
-        const safeEnabled = nextEnabled && (room.extraBedCount || 0) > 0;
-        return { ...room, extraBedBreakfast: safeEnabled };
-      });
-      const nextParams = new URLSearchParams(searchParams);
-      nextParams.set("rooms", serializeBookingRoomCart(next));
-      setSearchParams(nextParams, { replace: true });
-      return next;
-    });
-  }
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy EXB-12 `updateExtraBedBreakfast` toggle handler
+  // is deleted. Extra-bed occupants are ordinary meal slots
+  // in Step 2 (the per-meal picker) — there's no
+  // cart-level toggle to maintain. The guest populates
+  // meal slots in `breakfastSelections` directly via the
+  // Step 2 section. The `updateExtraBedCount` function above
+  // stays (the bed count itself is unchanged).
 
   function updateGuestDetail(field: keyof typeof guestDetails, value: string | boolean) {
     // Per feature/booking-autofill-member-email + member-name:
     // when the guest is signed in as a Spark Rewards member the
     // identity-anchored fields (email + first/last name) are locked
-    // to the member's account. The <TextField>s render `readOnly`
+    // to the member's account. The name inputs render `readOnly`
     // below so the standard UI can't change them; this no-op guards
     // the programmatic path (a paste, a dev-tools edit, or any
     // future caller of `updateGuestDetail(...)`) so the server-side
@@ -1627,21 +1967,14 @@ export function BookingPage() {
             numAdults: room.numAdults,
             numChildren: room.numChildren,
             extraBedCount: room.extraBedCount,
-            // Per EXB-12 (2026-08-06, per decision #199):
-            // whether the guest wants breakfast for the
-            // extra-bed occupant(s). The server validates
-            // the invariant `extraBedBreakfast implies
-            // extraBedCount > 0`.
-            extraBedBreakfast: room.extraBedBreakfast === true,
-            hasBreakfast: breakfastConfig.isEnabled && room.rateChoice === "room-breakfast",
-            breakfastIncludesChildren,
-            // Per SR-01..05 (2026-10-12): the
-            // per-room bed-set-up choice. Empty
-            // string means "no preference" (the
-            // guest left the radios untouched).
-            // The server validates the value
-            // against the room type's
-            // `bedSetupValues` subset.
+            // Per BR-08 (decision #238, 2026-10-14 — close-out):
+            // the legacy EXB-12 `extraBedBreakfast: boolean`
+            // toggle is deleted. Extra-bed occupants are
+            // ordinary meal slots in Step 2 (the per-meal
+            // picker) — the create payload no longer carries
+            // a per-room breakfast flag for them. The
+            // `breakfastSelections` rich map (sent below at
+            // the create body root) is the source of truth.
             bedSetup: bedSelections[index] ?? ""
           })),
           // Per SR-01..05 (2026-10-12): the
@@ -1657,6 +1990,15 @@ export function BookingPage() {
           additionalPreferences,
           additionalRequest: additionalRequest.trim(),
           expectedArrivalTime,
+          // Per PR #9 fix (2026-10-13): the member's pending
+          // points amount from the Step 3 control. `0` (the
+          // default) preserves pre-PR-9 behavior exactly. The
+          // server's `handleCreateBooking` applies the
+          // redemption atomically inside the create
+          // transaction — the booking is written with the
+          // already-discounted totalPrice so the member pays
+          // the lower amount.
+          pointsToRedeem: pendingPointsToRedeem,
           checkIn,
           checkOut,
           // Per BI-09 (booking-intercom audit 2026-07-06): the
@@ -1670,14 +2012,38 @@ export function BookingPage() {
           // (split). We send the total from the Step 2 field
           // (or the derived `guests = adults + numChildren`).
           guests: Number(guestDetails.guestCount) || guests,
-          hasBreakfast: breakfastConfig.isEnabled && firstRoomSelection.rateChoice === "room-breakfast",
-          // Per CHD-10 (2026-07-31, per CVQ-01): the per-booking
-          // override for "include children in the breakfast
-          // charge". The server snapshots this onto the booking
-          // doc; when undefined (older clients), the admin default
-          // from `settings/breakfastConfig.breakfastIncludesChildrenDefault`
-          // applies.
-          breakfastIncludesChildren,
+          // Per BR-03 (2026-10-12, decision #232): the
+          // legacy top-level `hasBreakfast` +
+          // `breakfastIncludesChildren` fields are NOT
+          // sent. The new `breakfastSelections` rich
+          // shape (sent below) replaces them. The
+          // server still accepts the legacy fields
+          // for back-compat (the walkin modal +
+          // older clients) but the create-path
+          // cleanup pins the new shape as the
+          // canonical way to express breakfast
+          // intent.
+          // Per BR-03 (2026-10-12, decision #232): the
+          // new per-guest × per-date `breakfastSelections`
+          // rich shape. The Step 2 breakfast section
+          // populates this map (one entry per
+          // guest × per-date slot, empty string for
+          // "skip"). The server validates each entry
+          // (mealId exists in the live catalog,
+          // serviceDate not locked, price non-negative)
+          // and recomputes `breakfastTotal` from
+          // `recomputeBreakfastTotal(breakfastSelections)`.
+          breakfastSelections,
+          // Per OCT-M4 (2026-10-20, decision #297): the guest's
+          // other-add-ons draft (per service date × per add-on).
+          //
+          // The values are ADVISORY: the server rebuilds every entry
+          // from the live `addOns` catalog (catalog price + name +
+          // unit), so a client-supplied price is never persisted and
+          // an add-on that is no longer on sale is refused. The
+          // client snapshots exist so the Step 2 grid can quote a
+          // total that matches the bill.
+          otherAddOnSelections: otherAddOnDraft,
           // Per CHD-10: the adult/child split. `numAdults` is
           // derived from `guests - numChildren` in the client.
           // The server uses these to compute the breakfast total
@@ -1689,14 +2055,14 @@ export function BookingPage() {
           // validates against the room type's `maxExtraBeds` and
           // snapshots the rate onto the booking doc.
           extraBedCount: firstRoomSelection.extraBedCount,
-          // Per EXB-12 (2026-08-06, per decision #199): whether
-          // the guest wants breakfast for the extra-bed
-          // occupant(s). The server validates the invariant
-          // `extraBedBreakfast implies extraBedCount > 0` and
-          // counts the extra beds toward the breakfast total
-          // when truthy. Optional — when absent, the server
-          // treats it as `false` (no breakfast for extra beds).
-          extraBedBreakfast: firstRoomSelection.extraBedBreakfast === true,
+          // Per BR-08 (decision #238, 2026-10-14 — close-out):
+          // the legacy EXB-12 `extraBedBreakfast: boolean`
+          // toggle is deleted from the create payload. Extra-bed
+          // occupants are ordinary meal slots in Step 2 (the
+          // per-meal picker). The `breakfastSelections` rich map
+          // (sent earlier in this body) is the single source of
+          // truth for which meal slots the guest picked, including
+          // any extra-bed slots.
           guestDetails: {
             firstName: guestDetails.firstName,
             lastName: guestDetails.lastName,
@@ -1709,7 +2075,13 @@ export function BookingPage() {
             // untouched (back-compat for any third-party
             // caller that still posts it) but the client
             // doesn't carry the input anymore.
-            consent: termsConsent
+            // Per MBUX-06 (decision #258): `guestDetails.consent`
+            // (the Step 3 checkbox) is the single authoritative
+            // consent value. The Step 4 duplicate is gone, so the wire
+            // field is written from the same source the server
+            // validates — `handleCreateBooking` throws a 400 when
+            // `guestDetails.consent` is false.
+            consent: guestDetails.consent
           },
           discountType: discountType === "none" ? "" : discountType,
           discountIdPhotoUrl: null,
@@ -1843,11 +2215,62 @@ export function BookingPage() {
     }));
   }
 
+  // Per MBUX-06 (decision #258): when the guest taps Continue with
+  // something still missing, identify the FIRST correction, reveal its
+  // inline error, and move focus there.
+  //
+  // The pre-MBUX-06 footer rendered a permanently `disabled` Continue
+  // button. A disabled button is unfocusable, so a keyboard or screen
+  // reader user could not reach it at all, and a tapping user got a
+  // dead control and no explanation — the only feedback was a footer
+  // summary line several scroll-heights away. The button now always
+  // reads "Continue to review"; when the form is incomplete it becomes
+  // an actionable button instead of a dead one.
+  //
+  // Field order matches visual/DOM order so focus moves to the first
+  // thing a sighted guest would fix first. The consent checkbox is
+  // last because it sits below the whole form.
+  function focusFirstGuestDetailCorrection(): void {
+    const candidates: Array<{ field: GuestField; elementId: string }> = [
+      { field: "firstName", elementId: "firstName" },
+      { field: "lastName", elementId: "lastName" },
+      { field: "email", elementId: "email" },
+      { field: "phone", elementId: "phone" },
+      // `guestCount` has no focusable control on this step — the cart
+      // lives on Step 1 — so it is surfaced through the inline guest
+      // label instead of by stealing focus.
+      { field: "guestCount", elementId: "guest-count-label" }
+    ];
+    const firstBadField = candidates.find((candidate) => guestErrors[candidate.field]);
+    if (firstBadField) {
+      markTouched(firstBadField.field);
+      const el = document.getElementById(firstBadField.elementId);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      el?.focus({ preventScroll: true });
+      return;
+    }
+    // Every field is valid, so the blocker must be consent.
+    const consentEl = document.getElementById("consentStep2");
+    consentEl?.scrollIntoView({ behavior: "smooth", block: "center" });
+    consentEl?.focus({ preventScroll: true });
+  }
+
   const getBackToPath = () => {
     if (isReviewStep) {
-      return `/book?${continueParams.toString()}`;
+      // Per BR-09 (2026-10-14): the back button on the
+      // Review step (new Step 4) returns to Guest Details
+      // (new Step 3) instead of jumping straight to Step 1.
+      return `/book?${guestDetailsParams.toString()}`;
     }
     if (isGuestDetailsStep) {
+      // Per BR-09: back from the new Step 3 ("Guest
+      // Details") returns to the new Step 2 ("Add-ons").
+      return `/book?${continueParams.toString()}`;
+    }
+    if (isAddOnsStep) {
+      // Per BR-09: back from the new Step 2 ("Add-ons")
+      // drops the `step=` param so the URL defaults to
+      // Step 1 (the room picker).
       const step1Params = new URLSearchParams(continueParams);
       step1Params.delete("step");
       return `/book?${step1Params.toString()}`;
@@ -1855,8 +2278,23 @@ export function BookingPage() {
     return "/rooms";
   };
 
+  // Per MBUX-01: the bottom reserve matches the sticky footer's
+  // own safe-area padding, so the last interactive element is never
+  // hidden behind the fixed bar on a notched iPhone.
+  //
+  // Per OCT-L1 (2026-10-20, decision #299): Step 1's footer carries
+  // the mobile cart tray, so it is ~5rem taller than the other steps'
+  // footers. The reserve has to grow with it — otherwise the fixed
+  // bar covers the last room card on a phone.
   const bookingShell = (content: React.ReactNode) => (
-    <main className="min-h-screen bg-gray-50 pb-32 font-body text-gray-900">
+    <main
+      className={cn(
+        "min-h-screen bg-gray-50 font-body text-gray-900",
+        isSelectRoomStep
+          ? "pb-[calc(13rem+env(safe-area-inset-bottom))]"
+          : "pb-[calc(8rem+env(safe-area-inset-bottom))]"
+      )}
+    >
       <BookingHeader backTo={getBackToPath()} />
       {/* In-flow hold (Steps 2 + 3 countdown banner). Only
           renders when the user is past Step 1 and the URL
@@ -1867,7 +2305,7 @@ export function BookingPage() {
           to Step 1 with a fresh holdId so the cycle
           restarts cleanly. */}
       <HoldCountdownBanner
-        holdId={isGuestDetailsStep || isReviewStep ? searchParams.get("hold") : null}
+        holdId={isAddOnsStep || isGuestDetailsStep || isReviewStep ? searchParams.get("hold") : null}
         startInput={{
           reservationId,
           roomType: selectedTypeEntry?.value ?? "",
@@ -1877,6 +2315,15 @@ export function BookingPage() {
           turnstileToken: turnstileToken || undefined
         }}
         onPickNewRoom={() => {
+          // Per IMT-01 (2026-10-13): re-roll the hold id
+          // BEFORE rewriting the URL. The id is what
+          // `continueParams` reads on the next "Continue to
+          // Step 2" (`hold: holdId`), so minting it first
+          // means the guest re-enters Step 2 with a fresh id
+          // that the hook's 404 → `POST /api/holds/start`
+          // branch can stamp — instead of re-reading the
+          // expired doc and getting an instantly-red banner.
+          setHoldId(generateHoldId());
           const next = new URLSearchParams();
           next.set("step", "select-room");
           setSearchParams(next, { replace: true });
@@ -1900,6 +2347,102 @@ export function BookingPage() {
     </main>
   );
 
+// Per MBUX-05: the confirmation for the copy-to-remaining-days action.
+// `null` = nothing to say yet.
+//
+// REACT HOOKS RULE (this is load-bearing): every useState/useEffect/
+// useMemo/useCallback/useRef in BookingPage MUST sit above the
+// loading-skeleton early return below. On the first render
+// `isScreenLoading` is true and that early return fires, so any hook
+// declared AFTER it would only be called on the second render — which
+// is exactly the "Rendered more hooks than during the previous render"
+// (#310) crash.
+//
+// Per OCT-M8 (2026-10-20, decision #294): the notice used to be a
+// bare string that was NEVER cleared (the comment above claimed a
+// clearing effect existed "further down" — it did not) and it was
+// rendered INSIDE the per-date map, so on a 3-night stay the guest
+// saw "Applied these choices to 2 remaining days." THREE times, in
+// three different date cards, and it stayed for the rest of the
+// session — including after the guest edited a meal, where it falsely
+// implied the copy was still in effect.
+//
+// The notice now carries the DATE it belongs to, so it renders
+// exactly ONCE (in the card the guest acted on) and it is cleared
+// after a short delay or as soon as the guest changes a meal.
+const [breakfastCopyNotice, setBreakfastCopyNotice] = useState<
+  BreakfastCopyNotice | null
+>(null);
+
+// Per OCT-M8 (2026-10-20, decision #294): auto-clear the copy
+// confirmation. Declared ABOVE the loading early return (per the
+// REACT HOOKS RULE above) so the hook order never changes between
+// renders.
+useEffect(() => {
+  if (!breakfastCopyNotice) return;
+  const timer = window.setTimeout(
+    () => setBreakfastCopyNotice(null),
+    BREAKFAST_COPY_NOTICE_TIMEOUT_MS
+  );
+  return () => window.clearTimeout(timer);
+}, [breakfastCopyNotice]);
+
+// Per OCT-M4 (2026-10-20, decision #297): the guest's other-add-ons
+// catalog + draft.
+//
+// The catalog comes from the PUBLIC endpoint
+// `GET /api/bookings/addons/config` (the Admin-SDK read path — the
+// guest app never reads the `addOns` collection directly, per the
+// Firestore rules). That endpoint honours the hotel-wide
+// "Add-ons enabled" master switch (OCT-M1, decision #295): when the
+// hotel has taken other add-ons off sale it returns an EMPTY catalog,
+// so the Step 2 grid disappears entirely rather than offering
+// something the guest cannot buy.
+const otherAddOnsCatalog = useOtherAddOnsCatalog();
+
+// The stay's service dates — one per night. The same helper the
+// breakfast section uses, so both grids cover exactly the same days.
+const otherAddOnDates = useMemo(
+  () => enumerateBreakfastDates(checkIn, checkOut),
+  [checkIn, checkOut]
+);
+
+// The draft selection map derived from the quantities.
+const otherAddOnDraft = useMemo(
+  () =>
+    buildOtherAddOnDraftSelections({
+      catalog: otherAddOnsCatalog.addOns,
+      dates: otherAddOnDates,
+      quantities: otherAddOnQuantities,
+      guestCount: guests
+    }),
+  [otherAddOnsCatalog.addOns, otherAddOnDates, otherAddOnQuantities, guests]
+);
+
+// The other-add-ons total + how many (date × add-on) rows carry a
+// quantity. Both feed the union CTA.
+const otherAddOnTotal = useMemo(
+  () => recomputeOtherAddOnTotal(otherAddOnDraft),
+  [otherAddOnDraft]
+);
+const otherAddOnCount = useMemo(
+  () => countOtherAddOnDraftSelections(otherAddOnDraft),
+  [otherAddOnDraft]
+);
+
+// Per MBUX-05 (decision #257): the number of breakfast SLOTS chosen.
+//
+// Per OCT-M4 (decision #297) the Step 2 CTA now covers the UNION of
+// breakfast AND other add-ons — the BR-10 dual-button pattern was
+// never scoped to breakfast alone, and the "without add-ons" branch
+// of the CTA has to mean "without add-ons of ANY kind".
+const breakfastAddOnCount = Object.keys(breakfastSelections).length;
+const addOnCount = breakfastAddOnCount + otherAddOnCount;
+// The quoted figure is the ADD-ONS total (breakfast + other
+// add-ons) — the same convention the CTA used before other add-ons
+// existed. It is NOT the room bill; the review step shows that.
+const addOnsTotal = breakfastTotal + otherAddOnTotal;
+
   const isScreenLoading = roomsLoading || settingsLoading;
 
   if (isScreenLoading) {
@@ -1913,7 +2456,442 @@ export function BookingPage() {
     );
   }
 
-  if (isGuestDetailsStep) {
+  const renderBreakfastSection = () => (
+    /* Per BR-03 (2026-10-12, decision #232): the
+        new "Breakfast" section. Renders ONLY when
+        `breakfastConfig.isEnabled === true`. For
+        each breakfast date in the stay (N dates for
+        N nights) × each guest slot (lead +
+        companions + per-room occupancy), shows a
+        `<select>` of active meals. Selecting a
+        meal populates `breakfastSelections[key]`
+        via `recomputeBreakfastTotal`. Locked
+        dates render a disabled dropdown +
+        a compact "Past cut-off" pill (per
+        MBUX-17 + MBUX-17.1, decisions #272 +
+        #273). The server is authoritative — a
+        clock-mismatched client is still rejected
+        at create time (per open item #7). */
+    breakfastConfig.isEnabled ? (() => {
+      const dates = enumerateBreakfastDates(checkIn, checkOut);
+      const slots = enumerateGuestSlots(distributedRoomCart);
+      if (dates.length === 0 || slots.length === 0) return null;
+      // Per MBUX-05: the menu strip renders the SAME active, ordered
+      // catalogue the selectors read, so a photo can never appear for
+      // a meal that cannot actually be chosen.
+      const activeBreakfastMeals = [...(breakfastConfig.meals || [])]
+        .filter((meal) => meal.isActive !== false)
+        .sort(
+          (a, b) =>
+            (Number(a.displayOrder) || 0) - (Number(b.displayOrder) || 0) ||
+            String(a.name || "").localeCompare(String(b.name || ""))
+        );
+      return (
+        <motion.div className="mb-6 rounded-card border border-primary/20 bg-primary/5 p-5" variants={staggerChild}>
+          <h2 className="font-heading text-xl text-gray-950">Breakfast</h2>
+          {/* Per MBUX-05 (decision #257): ONE short instruction owns the
+              first screen. The longer hotel-configured text is kept but
+              demoted below the fold of this card — on a phone it was
+              pushing the first date card out of view. */}
+          <p className="mt-1 text-sm text-gray-600">Choose breakfast for each guest.</p>
+          {breakfastConfig.defaultMealInstructions ? (
+            <details className="mt-2 group">
+              <summary className="min-h-11 cursor-pointer text-xs font-semibold text-primary">
+                Breakfast notes
+              </summary>
+              <p className="mt-1 text-xs leading-5 text-gray-600">
+                {breakfastConfig.defaultMealInstructions}
+              </p>
+            </details>
+          ) : null}
+          {/* Per MBUX-04 + MBUX-05: the optional meal photos render here,
+              ABOVE the selectors, never inside a native <option>. */}
+          <BreakfastMenuStrip
+            meals={activeBreakfastMeals}
+            formatPrice={formatPrice}
+          />
+          {/* Per MBUX-16 (decision #269, 2026-10-16) + MBUX-17
+              (decision #272, 2026-10-16): when at least one date
+              in the stay has crossed the cut-off, show a one-line
+              help text that names the cut-off TIME so the guest
+              doesn't have to guess what "cut-off" means in their
+              timezone. The text is amber-700 (the existing cut-off
+              / Fits-invalidity accent) and only appears when
+              needed — when every date is still open, the "Order
+              by 24 Oct, 8:00 PM" per-date headers already carry
+              the deadline signal and the help text would be noise.
+
+              The "still editable" suffix is important — without
+              it a guest might think the WHOLE breakfast flow is
+              locked, when actually only the one past-deadline
+              date is. MBUX-17 paired this help text with the
+              compact per-date cut-off pill below so the cut-off
+              time appears exactly ONCE on the page (here), not
+              also inside every locked
+              date card. */}
+          {dates.some((d) => {
+            const c = computeBreakfastCutoffState({
+              serviceDate: d,
+              now: new Date(),
+              cutoffTime: breakfastConfig.cutoffTime || "20:00",
+              timezone: breakfastConfig.cutoffTimezone || "Asia/Manila",
+              cutoffsEnabled: breakfastConfig.cutoffsEnabled !== false
+            });
+            return c.isLocked;
+          }) ? (
+            <p
+              className="mt-5 text-xs text-amber-700"
+              data-testid="breakfast-cutoff-help"
+            >
+              {/* Per MBUX-17.2 (decision #274, 2026-10-16): the
+                  pre-MBUX-17.2 first-sentence policy + em-dash
+                  hedge (a subordinate clause that warned the
+                  guest the menu locks per date) is replaced with
+                  a second sentence that turns the hedge into a
+                  guest-facing ACTION: "If you booked beyond the
+                  cut-off time, you may not be able to order —
+                  but you can still order breakfast for other
+                  days." The first sentence ("Breakfast has a
+                  per-day cut-off ({time} the day before)") is
+                  preserved verbatim — it carries the cut-off TIME
+                  (interpolated via `formatCutoffTime` so the
+                  rendered time always matches the admin-configured
+                  value) AND tells the guest WHEN the cut-off fires
+                  relative to the service date. The em-dash in the
+                  second sentence carries the contrast ("can't for
+                  this date" → "but can for other dates") more
+                  cheaply than the pre-MBUX-17.2 subordinate clause
+                  did.
+
+                  Owner's verbatim ask: "kindly enhance" the help
+                  text into two sentences — the first is the policy
+                  (kept), the second is the consequence the guest
+                  can act on (added). The MBUX-17.2 copy is
+                  light-edited from the owner's words: typos fixed
+                  ("beyonf" → "beyond", "other day's" → "other
+                  days'"), a missing modal verb restored ("you CAN
+                  still order" rather than "you may still order"),
+                  and the comma splice between the consequence and
+                  the contrast replaced with an em-dash to match
+                  the file's existing em-dash usage. The rendered
+                  copy is:
+
+                    Breakfast has a per-day cut-off ({time} the
+                    day before). If you booked beyond the cut-off
+                    time, you may not be able to order — but you
+                    can still order breakfast for other days.
+
+                  Pill (`Past cut-off`, per MBUX-17.1 decision
+                  #273) is unchanged — MBUX-17.2 is help-text only.
+                  The pill is the per-date state marker; the help
+                  text is the policy anchor. */}
+              {`Breakfast has a per-day cut-off (${formatCutoffTime(breakfastConfig.cutoffTime || "20:00")} the day before). If you booked beyond the cut-off time, you may not be able to order — but you can still order breakfast for other days.`}
+            </p>
+          ) : null}
+
+          {/* Per MBUX-17 (decision #272, 2026-10-16): the
+              pre-MBUX-17 one-line reassurance above the date cards
+              (the line that read like a sentence reminding guests
+              that skipping is OK) is REMOVED. The default `<option>`
+              on every guest slot is the no-meal choice (the first
+              entry in the meal list), so the instruction was
+              redundant — a guest who never opens a dropdown already
+              gets the no-meal option for that guest/date. Saying it
+              again above the date cards added an extra sentence of
+              mobile real estate without changing any outcome. The
+              mbux-16 help text (above) keeps the `mt-5` slot it
+              took; the spacing downstream of it is unchanged. */}
+          <div className="mt-4 space-y-4">
+            {dates.map((date) => {
+              const cutoff = computeBreakfastCutoffState({
+                serviceDate: date,
+                now: new Date(),
+                cutoffTime: breakfastConfig.cutoffTime || "20:00",
+                timezone: breakfastConfig.cutoffTimezone || "Asia/Manila",
+                // Per BR-10 (2026-10-14, decision #244 reserved —
+                // Phase 14): thread the cut-off enforcement toggle
+                // through to the helper. When the admin has the
+                // toggle off, every date is rendered as open —
+                // the meal picker is enabled and the countdown
+                // banner collapses.
+                cutoffsEnabled: breakfastConfig.cutoffsEnabled !== false
+              });
+              return (
+                <div key={date} className="rounded-lg bg-white p-4 ring-1 ring-gray-200">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-semibold text-gray-950">{formatBreakfastDateLabel(date)}</p>
+                    {/* Per MBUX-17 (decision #272, 2026-10-16): the
+                        pre-MBUX-17 two-line stack (a status title +
+                        an amber sub-line that named the cut-off time
+                        AND the workarounds) is replaced with a single
+                        compact pill — see the
+                        `<div className="text-right">` block below. The
+                        unlocked-state line stays byte-equivalent
+                        ("Order by Oct 24"). The cut-off TIME used to
+                        appear here AND in the top-of-section help
+                        text, which was the duplication the owner
+                        flagged; the pill carries the reason inline
+                        and the
+                        help text is the single source for the time. */}
+                    <div className="text-right">
+                      {/* Per MBUX-17 (decision #272, 2026-10-16) +
+                          MBUX-17.1 (decision #273, 2026-10-16): the
+                          locked-date marker is a single compact pill
+                          whose copy reads as a two-word short-form
+                          state label instead of the
+                          pre-MBUX-17 two-line stack (a status title
+                          + an amber sub-line that named the cut-off
+                          time AND listed the workarounds). The pill
+                          carries the reason inline; the top-of-
+                          section help text already names the cut-off
+                          time, so duplicating it per-date was
+                          noise. MBUX-17.1 shortened the pill text
+                          from the pre-MBUX-17.1 four-word copy
+                          (which wrapped to two lines on a 375px
+                          phone) to a two-word short-form copy that
+                          fits one line on every viewport +
+                          added `whitespace-nowrap` as a guard so a
+                          future copy edit cannot reintroduce the
+                          wrap.
+
+                          Style mirrors the in-file "Tight — at the
+                          cap" / "Doesn't fit your group" pills (same
+                          rounded-full + amber-100 / amber-800 pair)
+                          so the cut-off indicator reads as part of
+                          the same vocabulary rather than a separate
+                          one-off element. Unlocked dates stay
+                          byte-equivalent (the "Order by Oct 24"
+                          deadline line). */}
+                      {cutoff.isLocked ? (
+                        <span
+                          data-testid="breakfast-cutoff-pill"
+                          className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800"
+                        >
+                          Past cut-off
+                        </span>
+                      ) : (
+                        <p className="text-xs text-gray-600">
+                          {`Order by ${formatStayDate(date)}`}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  {/* Per MBUX-05 (decision #257): "Use these choices for
+                      all remaining days". A multi-night stay repeats the
+                      same guest matrix N times, which is the most tedious
+                      thing in the booking flow on a phone.
+
+                      Placement rules:
+                      - only on the FIRST date that has at least one
+                        explicit selection (a guest who has not chosen
+                        anything has nothing to copy);
+                      - only when at least one LATER date is still
+                        editable (a single-night stay has nothing to
+                        copy onto);
+                      - the targets exclude locked dates, so a copy can
+                        never overwrite a closed cut-off.
+
+                      The helper returns how many dates actually CHANGED
+                      (a target that already held the same choices is
+                      not counted), so the confirmation never overstates
+                      what happened. Copied dates stay fully editable —
+                      this writes the same map the selectors write. */}
+                  {(() => {
+                    const sourceHasChoice = slots.some((slot) =>
+                      Boolean(breakfastSelections[`${date}-${slot.id}`])
+                    );
+                    if (!sourceHasChoice || cutoff.isLocked) return null;
+                    const laterEditableDates = dates.filter((later) => {
+                      if (later <= date) return false;
+                      const laterCutoff = computeBreakfastCutoffState({
+                        serviceDate: later,
+                        now: new Date(),
+                        cutoffTime: breakfastConfig.cutoffTime || "20:00",
+                        timezone: breakfastConfig.cutoffTimezone || "Asia/Manila",
+                        cutoffsEnabled: breakfastConfig.cutoffsEnabled !== false
+                      });
+                      return !laterCutoff.isLocked;
+                    });
+                    if (laterEditableDates.length === 0) return null;
+                    return (
+                      <button
+                        type="button"
+                        data-testid={`breakfast-copy-to-remaining-${date}`}
+                        className="mt-2 inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-primary px-3 text-xs font-semibold text-primary hover:bg-primary-light sm:w-auto"
+                        onClick={() => {
+                          const result = copyBreakfastDateToRemaining({
+                            selections: breakfastSelections,
+                            sourceDate: date,
+                            targetDates: laterEditableDates,
+                            slotIds: slots.map((slot) => slot.id),
+                            now: new Date().toISOString()
+                          });
+                          setBreakfastSelections(result.selections);
+                          // The guest app has no toast system (per
+                          // `FRONTEND.md`), so the confirmation is an
+                          // inline `role="status"` message. It reports the
+                          // number of dates that ACTUALLY changed, so it
+                          // can never overstate what the tap did.
+                          setBreakfastCopyNotice(
+                            buildBreakfastCopyNotice(date, result.updatedDates)
+                          );
+                        }}
+                      >
+                        Use these choices for all remaining days
+                      </button>
+                    );
+                  })()}
+                  {shouldShowBreakfastCopyNotice(breakfastCopyNotice, date) ? (
+                    <p
+                      role="status"
+                      aria-live="polite"
+                      data-testid={`breakfast-copy-notice-${date}`}
+                      className="mt-2 text-xs font-medium text-gray-700"
+                    >
+                      {breakfastCopyNotice.message}
+                    </p>
+                  ) : null}
+                  <div className="mt-3 space-y-2">
+                    {slots.map((slot) => {
+                      const key = `${date}-${slot.id}`;
+                      const selected = breakfastSelections[key]?.mealId || "";
+                      // Per MBUX-05: the pre-MBUX-05 row was a fixed
+                      // `min-w-[160px]` label beside a `flex-1` select. At
+                      // 360px that left the native select roughly 150px
+                      // wide, so the option text truncated and the whole
+                      // control read as broken. Stacked on mobile (label
+                      // above, full-width select) and side-by-side from
+                      // `sm:` up, where there is room for the old shape.
+                      return (
+                        <div key={key} className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-3">
+                          <label className="text-sm text-gray-700 sm:min-w-[160px]" htmlFor={`bf-${key}`}>
+                            {slot.label}
+                          </label>
+                          <select
+                            id={`bf-${key}`}
+                            data-testid={`breakfast-select-${key}`}
+                            className="h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50 sm:flex-1"
+                            value={selected}
+                            disabled={cutoff.isLocked}
+                            onChange={(event) => {
+                              const mealId = event.target.value;
+                              // Per OCT-M8 (decision #294): editing a
+                              // meal invalidates the copy confirmation
+                              // — it would otherwise imply the copy is
+                              // still in effect for the other days.
+                              setBreakfastCopyNotice(null);
+                              setBreakfastSelections((prev) => {
+                                const next = { ...prev };
+                                if (!mealId) {
+                                  delete next[key];
+                                } else {
+                                  const meal = (breakfastConfig.meals || []).find((m) => m.id === mealId);
+                                  if (!meal) return prev;
+                                  // Per BR-01 (2026-10-12, decision
+                                  // #231): the `serviceDate` and
+                                  // `guestSlot` live in the
+                                  // composite KEY (`${date}-${slot.id}`),
+                                  // NOT in the entry. The entry
+                                  // carries the snapshot
+                                  // (`mealId` + `mealName` +
+                                  // `price`) + the audit fields.
+                                  // The server parses the date +
+                                  // slot from the key when it
+                                  // validates / recomputes.
+                                  const nowIso = new Date().toISOString();
+                                  next[key] = {
+                                    mealId: meal.id,
+                                    mealName: meal.name,
+                                    price: meal.price,
+                                    addedBy: "guest",
+                                    addedAt: nowIso,
+                                    lastModifiedAt: nowIso,
+                                    lastModifiedBy: "guest",
+                                    removedAt: null,
+                                    removedBy: null,
+                                    overrideCutoff: false,
+                                    overrideReason: null
+                                  };
+                                }
+                                return next;
+                              });
+                            }}
+                          >
+                            <option value="">No breakfast</option>
+                            {(breakfastConfig.meals || []).map((meal) => (
+                              <option key={meal.id} value={meal.id}>
+                                {meal.name} — {formatPrice(meal.price)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </motion.div>
+      );
+    })() : null
+  );
+
+  // Per BR-09: the muted per-guest label replacing
+  // the legacy bold "Number of guests" input. The
+  // label reads from the per-room `numAdults` +
+  // `numChildren` so the user always sees the
+  // current cart shape (no editable input). When
+  // the cart is empty the line still renders as a
+  // muted hint so the layout doesn't shift. The
+  // derived `guestDetails.guestCount` field is
+  // still maintained by `setOccupancy` (the create
+  // payload uses it) — only the bold input UI is
+  // gone.
+  const renderGuestCountLabel = () => {
+    const totalAdults = distributedRoomCart.reduce(
+      (sum, room) => sum + Math.max(0, Number(room.numAdults) || 0),
+      0
+    );
+    const totalChildren = distributedRoomCart.reduce(
+      (sum, room) => sum + Math.max(0, Number(room.numChildren) || 0),
+      0
+    );
+    const totalGuests = totalAdults + totalChildren;
+    if (totalGuests === 0) {
+      return (
+        <p className="text-xs text-gray-500" data-testid="guest-count-label">
+          Pick a room to see the guest breakdown.
+        </p>
+      );
+    }
+    const parts: string[] = [];
+    parts.push(`${totalAdults} adult${totalAdults === 1 ? "" : "s"}`);
+    if (totalChildren > 0) {
+      parts.push(`${totalChildren} child${totalChildren === 1 ? "" : "ren"}`);
+    }
+    parts.push(`(${totalGuests} total)`);
+    const roomsLabel = distributedRoomCart.length === 1
+      ? "1 room"
+      : `${distributedRoomCart.length} rooms`;
+    return (
+      <p className="text-xs text-gray-500" data-testid="guest-count-label">
+        {roomsLabel} · {parts.join(" · ")}
+      </p>
+    );
+  };
+
+  if (isAddOnsStep) {
+    // Per BR-09 (2026-10-14): the new Step 2
+    // ("Add-ons"). Hosts the breakfast per-date ×
+    // per-guest meal grid extracted from the old
+    // Step 2. The step is forward-thinking — the
+    // label is "Add-ons" (not "Breakfast") so
+    // future per-stay add-ons (spa, parking, etc.)
+    // share the same step without a rename. When
+    // `breakfastConfig.isEnabled === false`, the
+    // section renders a friendly empty card so the
+    // step still flows the user to Guest Details.
     return bookingShell(
       <>
         <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
@@ -1921,7 +2899,220 @@ export function BookingPage() {
             <StepIndicator steps={steps} currentStep={2} />
           </div>
           <div className="mt-10">
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 2 of 4</p>
+            {/* Per MBUX-01: hidden on mobile because the compact
+                stepper now states the position once, in its
+                `Step N of 5 · Name` caption. Retained from
+                `sm:` up, where the stepper shows every label. */}
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 2 of 5</p>
+            <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Add-ons</h1>
+            <p className="mt-4 max-w-2xl leading-7 text-gray-600">
+              Optional extras for your stay.
+            </p>
+          </div>
+        </section>
+
+        <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-16 sm:px-6 lg:grid-cols-[1fr_380px] lg:px-8">
+          <motion.form
+            animate="visible"
+            className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6"
+            initial={shouldReduceMotion ? false : "hidden"}
+            variants={staggerContainer}
+          >
+            {breakfastConfig.isEnabled ? renderBreakfastSection() : (
+              <motion.div className="rounded-card border border-gray-200 bg-gray-50 p-5" variants={staggerChild}>
+                <h2 className="font-heading text-xl text-gray-950">No add-ons available</h2>
+                <p className="mt-1 text-sm text-gray-600">
+                  The hotel hasn&apos;t configured any optional add-ons for this stay. Continue to guest details.
+                </p>
+              </motion.div>
+            )}
+            {/* Per OCT-M4 (2026-10-20, decision #297): the guest
+                Step 2 "Other Add-Ons" grid.
+
+                BR-12 shipped the catalog, the staff walk-in grid and
+                the post-booking "Manage Other Add-Ons" page — but
+                the GUEST booking flow never had one. `BookingPage`
+                contained ZERO occurrences of "otherAddOn", so a
+                guest could not order an airport transfer at booking
+                time at all and the spec's headline BR-12 flow was
+                unreachable.
+
+                Per `OTHER-ADD-ONS.md` the grid renders BELOW the
+                breakfast section, and the BR-10 dual-button pattern
+                covers both kinds of add-on — the "without add-ons"
+                branch means the union, not breakfast alone.
+
+                The section renders NOTHING when the catalog is empty
+                or the hotel has taken other add-ons off sale
+                (OCT-M1) — an empty grid under a heading reads as a
+                broken page. */}
+            <OtherAddOnsStep2Section
+              addOns={otherAddOnsCatalog.addOns}
+              dates={otherAddOnDates}
+              checkIn={checkIn}
+              guestCount={guests}
+              quantities={otherAddOnQuantities}
+              onQuantityChange={(date, addOnId, quantity) => {
+                const key = otherAddOnDraftKey(date, addOnId);
+                setOtherAddOnQuantities((prev) => {
+                  const next = { ...prev };
+                  if (quantity <= 0) delete next[key];
+                  else next[key] = quantity;
+                  return next;
+                });
+              }}
+              formatPrice={formatPrice}
+              formatDateLabel={formatBreakfastDateLabel}
+              isLoading={otherAddOnsCatalog.isLoading}
+              error={otherAddOnsCatalog.error}
+            />
+          </motion.form>
+
+          <BookingReviewAside
+            checkIn={checkIn}
+            checkOut={checkOut}
+            guests={guests}
+            nights={nights}
+            // Per BR-08 (decision #238, 2026-10-14 — close-out):
+            // the legacy `hasBreakfast` +
+            // `breakfastIncludesChildren` +
+            // `setBreakfastIncludesChildren` +
+            // `breakfastRate` props are gone. The sidebar
+            // reads the new `breakfastSelections` rich
+            // shape only. The adult/child split
+            // (`numAdults` + `numChildren`) stays so the
+            // per-room summary can render the split.
+            numAdults={numAdults}
+            numChildren={numChildren}
+            // Per EXB-11 (2026-08-04, per decision #186): the
+            // per-cart total extra-bed count (sum of each
+            // room's `extraBedCount`). Replaces the old single
+            // `extraBedCount` state — the user now toggles the
+            // count per type on the room-type card, and the
+            // cart is the source of truth.
+            extraBedCount={totalExtraBeds}
+            extraBedRate={extraBedRate}
+            typeLabel={distributedRoomCart.length > 1 ? `${distributedRoomCart.length} rooms` : (selectedTypeEntry?.label ?? "")}
+            roomSummary={distributedRoomCart.map((room, index) => ({
+              label: roomTypes.find((type) => type.value === room.roomType)?.label || room.roomType,
+              position: index + 1,
+              numAdults: room.numAdults,
+              numChildren: room.numChildren,
+              extraBedCount: room.extraBedCount,
+              // Per BR-08 (decision #238, 2026-10-14 — close-out):
+              // the legacy `hasBreakfast: boolean` per-room
+              // flag is gone. The per-meal breakdown (rendered
+              // below the room summary) shows the meal count for
+              // the whole stay.
+              breakfastCount: Object.keys(breakfastSelections || {}).length > 0
+                ? Math.ceil(Object.keys(breakfastSelections).length / Math.max(distributedRoomCart.length, 1))
+                : 0
+            }))}
+            typeValue={selectedTypeEntry?.value ?? ""}
+            typeImageUrls={selectedTypeEntry ? getRoomTypeImages(roomTypes, selectedTypeEntry.value) : []}
+            typeRates={selectedRoomRates}
+            typeDescription={selectedTypeEntry?.description ?? ""}
+            total={total}
+            seasonalRateOverrides={seasonalRateOverrides}
+            discountPct={discountPct}
+            discountType={discountType}
+            voucherDiscount={voucherDiscount}
+            voucherApplied={voucherApplied}
+            memberDiscountPct={memberDiscountPct}
+            isMember={!!memberProfile}
+            rateBreakdown={rateBreakdown}
+            // Per BR-03 (2026-10-12, decision #232):
+            // thread the new `breakfastSelections` rich
+            // shape into the Step 3 review sidebar
+            // (same pattern as the Step 2 sidebar
+            // above). The Step 3 page reads the same
+            // cart state, so the per-date breakdown
+            // is identical.
+            breakfastSelections={breakfastSelections}
+            // Per OCT-H9 (2026-10-20, decision #283): gate the
+            // guest-side VAT lines on the admin's Tax toggle.
+            vatEnabled={vatEnabled}
+          />
+        </section>
+
+        {/* Per MBUX-01: the shell is standardised. Per MBUX-05 the
+            BR-10 dual CTA is consolidated into the one context-aware
+            action below. */}
+        <BookingStickyFooter
+          summary={
+            <>
+              <p className="text-sm text-gray-600">Add-ons</p>
+              <p className="text-lg font-semibold text-gray-950">
+                {addOnCount === 0
+                  ? "No add-ons selected"
+                  : `${addOnCount} add-on${addOnCount === 1 ? "" : "s"} selected · ${formatPrice(addOnsTotal)}`}
+              </p>
+            </>
+          }
+        >
+            {/* Per MBUX-05 (decision #257): the BR-10 pair of parallel
+                CTAs is RETIRED in favour of ONE context-aware action.
+                Both BR-10 buttons advanced to the identical
+                `/book?step=guest-details` URL and differed only in
+                visual style + label, so the pair told a guest who had
+                skipped breakfast that there was a special "skip" button
+                — implying the other one would do something different
+                with their choices. It would not. One action whose label
+                states what will actually happen:
+
+                  - no selections  -> "Continue without add-ons"
+                  - any selections -> "Continue with N add-ons · total"
+
+                The count and the figure cover the UNION of breakfast
+                AND other add-ons.
+
+                Per OCT-M4 (2026-10-20, decision #297) the count is
+                the breakfast SLOTS chosen plus the other-add-on
+                (date × add-on) rows, and the figure is
+                `breakfastTotal + otherAddOnTotal` — the SAME values
+                the create payload carries, so the CTA can never
+                quote a total that differs from the bill.
+
+                Per BR-12 the other add-ons are NOT inside the room
+                bill: they are added on top of it for the balance
+                (`plan/features/OTHER-ADD-ONS.md` decision 2), so the
+                figure quoted here is the ADD-ONS total, not the
+                whole stay — the same convention the CTA used before
+                other add-ons existed.
+
+                SCOPE: this is the public `/book` flow only. The
+                corporate flow keeps its BR-10 pair until MBUX-09 does
+                the parity pass — `br-10-dual-add-ons-buttons.test.ts`
+                pins that distinction deliberately. */}
+            <PrimaryButton
+              to={`/book?${guestDetailsParams.toString()}`}
+              className="sm:min-w-56"
+              data-testid="booking-addons-continue-primary"
+            >
+              {addOnCount === 0 ? (
+                "Continue without add-ons"
+              ) : (
+                <>
+                  Continue with {addOnCount} add-on{addOnCount === 1 ? "" : "s"} ·{" "}
+                  {formatPrice(addOnsTotal)}
+                </>
+              )}
+            </PrimaryButton>
+        </BookingStickyFooter>
+      </>
+    );
+  }
+
+  if (isGuestDetailsStep) {
+    return bookingShell(
+      <>
+        <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-3xl">
+            <StepIndicator steps={steps} currentStep={3} />
+          </div>
+          <div className="mt-10">
+            {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 3 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Guest details</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Add the guest information for this stay. Required fields show inline validation once touched.
@@ -1936,7 +3127,20 @@ export function BookingPage() {
             initial={shouldReduceMotion ? false : "hidden"}
             variants={staggerContainer}
           >
-            <motion.div className="grid gap-5 sm:grid-cols-2" variants={staggerChild}>
+            {/* Per BR-09: the per-guest count is now a
+                MUTED label (text-xs text-gray-500) instead
+                of the legacy bold "Number of guests"
+                input. The summary line ("X adults + Y
+                children + Z total") is gone — the cart is
+                the single source of truth for occupancy
+                (changed on Step 1 via the room picker +
+                adult/child steppers). The internal
+                `guestDetails.guestCount` is still derived
+                by `setOccupancy` so the create payload +
+                the booking-write validation stay
+                unchanged. */}
+            {renderGuestCountLabel()}
+            <motion.div className="mt-4 grid gap-5 sm:grid-cols-2" variants={staggerChild}>
               <TextField
                 error={touchedFields.firstName ? guestErrors.firstName : ""}
                 icon={<UserRound size={17} />}
@@ -1974,7 +3178,11 @@ export function BookingPage() {
             </motion.div>
 
             <motion.div className="mt-5 grid gap-5 sm:grid-cols-2" variants={staggerChild}>
-              <div className="grid gap-2">
+              {/* Per fix(guest-details-field-alignment): `content-start`
+                  keeps the two-cell row packed to the top so the taller
+                  Email cell (it carries the helper line) can't stretch the
+                  Phone field's label row and offset its input. */}
+              <div className="grid content-start gap-2">
                 <TextField
                   error={touchedFields.email ? guestErrors.email : ""}
                   icon={<Mail size={17} />}
@@ -2017,24 +3225,11 @@ export function BookingPage() {
               />
             </motion.div>
 
-            <motion.div className="mt-5 grid items-start gap-5 sm:grid-cols-[220px_1fr]" variants={staggerChild}>
-              <TextField
-                error={touchedFields.guestCount ? guestErrors.guestCount : ""}
-                icon={<Users size={17} />}
-                label="Number of guests"
-                onBlur={() => markTouched("guestCount")}
-                onChange={(value) => updateGuestDetail("guestCount", value)}
-                placeholder="2"
-                required
-                type="number"
-                value={guestDetails.guestCount}
-                id="guestCount"
-                name="guestCount"
-              />
+            <motion.div className="mt-5" variants={staggerChild}>
               {/* Per SR-01..05 (2026-10-12): the special-requests
                   block. Replaces the `feat/special-requests-redirect`
                   card (which is retired in SR-05). The block is
-                  always rendered on Step 2 — the bed set-up section
+                  always rendered on Step 3 — the bed set-up section
                   renders only when the picked room type offers
                   choices; the additional preferences are gated by
                   the (admin-configured) catalog being non-empty. */}
@@ -2064,6 +3259,13 @@ export function BookingPage() {
                   `SpecialRequestsBlock` above. */}
             </motion.div>
 
+            {/* Per MBUX-06 (decision #258): this is the SINGLE
+                authoritative booking consent control for the whole flow.
+                The duplicate Step 4 checkbox is deleted, and the create
+                payload + the Confirm gate both read `guestDetails.consent`
+                — the same field the server's `guestDetailsSchema`
+                validates. Keeping one control means a guest cannot tick
+                one box and be silently rejected on the other. */}
             <motion.div className="mt-6 rounded-card bg-primary-light p-4" variants={staggerChild}>
               <label htmlFor="consentStep2" className="flex items-start gap-3 text-sm leading-6 text-gray-700 cursor-pointer">
                 <input
@@ -2082,15 +3284,25 @@ export function BookingPage() {
                   and{" "}
                   <Link className="font-semibold text-primary underline" target="_blank" to="/terms">
                     Terms of Service
-                  </Link>{" "}
-                  and consent to the collection of my personal data for booking purposes.
+                  </Link>
+                  , and consent to my details being used to process this booking.
                 </span>
               </label>
             </motion.div>
 
-            <motion.div className="mt-6 flex gap-3 rounded-lg bg-gray-50 p-4 text-sm text-gray-700" variants={staggerChild}>
-              <ShieldCheck size={18} className="mt-0.5 shrink-0 text-primary" />
-              <p>Your personal details are collected securely in accordance with the Data Privacy Act of 2012.</p>
+            {/* Per MBUX-06: the spec's "large privacy explanation"
+                becomes a COMPACT secure-handling line. The consent
+                checkbox above now carries the whole obligation in one
+                sentence, so a second four-line paragraph repeating it
+                was pure weight on a phone. The RA 10173 reference is
+                kept — it is the compliance-relevant fact — but the
+                layout is a single inline line rather than a boxed
+                paragraph. */}
+            <motion.div className="mt-4 flex items-center gap-2 text-xs text-gray-600" variants={staggerChild}>
+              <ShieldCheck size={14} className="shrink-0 text-primary" aria-hidden />
+              <p data-testid="booking-secure-handling-note">
+                Details are stored securely under the Data Privacy Act of 2012.
+              </p>
             </motion.div>
           </motion.form>
 
@@ -2098,15 +3310,18 @@ export function BookingPage() {
             checkIn={checkIn}
             checkOut={checkOut}
             guests={Number(guestDetails.guestCount) || guests}
-            hasBreakfast={hasBreakfast}
             nights={nights}
-            // Per CHD-10 (2026-07-31, per CVQ-01): the adult/child
-            // split and the "include children" toggle thread
-            // through to the aside.
+            // Per BR-08 (decision #238, 2026-10-14 — close-out):
+            // the legacy `hasBreakfast` +
+            // `breakfastIncludesChildren` +
+            // `setBreakfastIncludesChildren` +
+            // `breakfastRate` props are gone. The sidebar
+            // reads the new `breakfastSelections` rich
+            // shape only. The adult/child split
+            // (`numAdults` + `numChildren`) stays so the
+            // per-room summary can render the split.
             numAdults={numAdults}
             numChildren={numChildren}
-            breakfastIncludesChildren={breakfastIncludesChildren}
-            setBreakfastIncludesChildren={setBreakfastIncludesChildren}
             // Per EXB-11 (2026-08-04, per decision #186): the
             // per-cart total extra-bed count (sum of each
             // room's `extraBedCount`). Replaces the old single
@@ -2122,14 +3337,20 @@ export function BookingPage() {
               numAdults: room.numAdults,
               numChildren: room.numChildren,
               extraBedCount: room.extraBedCount,
-              hasBreakfast: breakfastConfig.isEnabled && room.rateChoice === "room-breakfast"
+              // Per BR-08 (decision #238, 2026-10-14 — close-out):
+              // the legacy `hasBreakfast: boolean` per-room
+              // flag is gone. The per-meal breakdown (rendered
+              // below the room summary) shows the meal count for
+              // the whole stay.
+              breakfastCount: Object.keys(breakfastSelections || {}).length > 0
+                ? Math.ceil(Object.keys(breakfastSelections).length / Math.max(distributedRoomCart.length, 1))
+                : 0
             }))}
             typeValue={selectedTypeEntry?.value ?? ""}
             typeImageUrls={selectedTypeEntry ? getRoomTypeImages(roomTypes, selectedTypeEntry.value) : []}
             typeRates={selectedRoomRates}
             typeDescription={selectedTypeEntry?.description ?? ""}
             total={total}
-            breakfastRate={breakfastRate}
             seasonalRateOverrides={seasonalRateOverrides}
             discountPct={discountPct}
             discountType={discountType}
@@ -2138,28 +3359,57 @@ export function BookingPage() {
             memberDiscountPct={memberDiscountPct}
             isMember={!!memberProfile}
             rateBreakdown={rateBreakdown}
+            // Per BR-03 (2026-10-12, decision #232):
+            // thread the new `breakfastSelections` rich
+            // shape into the Step 2 sidebar so the
+            // per-date breakfast breakdown renders
+            // alongside the room subtotal + extra-bed
+            // line. The Step 3 page reads the same
+            // cart state (separate call site below),
+            // so both sidebars render the same shape.
+            breakfastSelections={breakfastSelections}
+            // Per OCT-H9 (2026-10-20, decision #283): gate the
+            // guest-side VAT lines on the admin's Tax toggle.
+            vatEnabled={vatEnabled}
           />
         </section>
 
-        <div className="fixed bottom-0 left-0 z-40 w-full border-t border-gray-200 bg-white/95 px-4 py-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur">
-          <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
+        <BookingStickyFooter
+          summary={
+            <>
               <p className="text-sm text-gray-600">Guest details</p>
               <p className="text-lg font-semibold text-gray-950">
-                {canContinueToReview ? "Ready for review and payment" : "Complete required fields and consent"}
+                {canContinueToReview
+                  ? "Ready for review and payment"
+                  : firstGuestDetailCorrectionLabel}
               </p>
-            </div>
+            </>
+          }
+        >
             {canContinueToReview ? (
+              // Per BR-09 (2026-10-14): the step-3 →
+              // step-4 transition copy uses the
+              // destination step name ("review"), not a
+              // numbered "Step N" reference, so the
+              // 5-step refactor doesn't leave stale
+              // numbering in the CTA.
               <PrimaryButton to={`/book?${reviewParams.toString()}`} className="sm:min-w-56">
-                Continue to Step 3
+                Continue to review
               </PrimaryButton>
             ) : (
-              <PrimaryButton disabled type="button" className="sm:min-w-56">
-                Continue to Step 3
+              // Per MBUX-06: NOT disabled. An unreachable control that
+              // silently does nothing is worse than one that says what
+              // is wrong and takes you there.
+              <PrimaryButton
+                type="button"
+                onClick={focusFirstGuestDetailCorrection}
+                className="sm:min-w-56"
+                data-testid="booking-guest-details-continue"
+              >
+                Continue to review
               </PrimaryButton>
             )}
-          </div>
-        </div>
+        </BookingStickyFooter>
       </>
     );
   }
@@ -2171,30 +3421,50 @@ export function BookingPage() {
     // until the Turnstile token has been received — submitting
     // without one is a guaranteed 400 now that the server bypass
     // is gone (BI-02).
-    // Per NBS-2026-08-08 (F5, booking-flow audit 2026-08-08):
-    // the previous `canConfirm` only read `termsConsent` (the
-    // Step 3 checkbox), but the server's `guestDetailsSchema`
-    // validates `guestDetails.consent` (the Step 2 consent
-    // field) — `handleCreateBooking:1364` throws a 400
-    // "Privacy policy consent is required." when the Step 2
-    // box is unchecked and the Step 3 box is checked. The
-    // gate now ANDs both checkboxes so the guest sees the
-    // missing-consent CTA on Step 3 instead of a server
-    // 400. The duplicate-checkbox UX (Step 2 + Step 3 both
-    // ask the same question) is a pre-existing smell — a
-    // future refactor should consolidate to a single source
-    // of truth; the fix here is the minimum that prevents
-    // the silent server 400.
-    const canConfirm = guestDetails.consent && termsConsent && !isIdUploadRequired && !isPaymentProofRequired && cartIsReady && Boolean(turnstileToken);
+    // HISTORY, kept because the trap it describes is still live.
+    //
+    // NBS-2026-08-08 (F5) found that the server's
+    // `guestDetailsSchema` validates `guestDetails.consent`, while
+    // the client gate was reading a DIFFERENT checkbox — so ticking
+    // the client one passed the UI and still produced a server 400
+    // ("Privacy policy consent is required."). The temporary fix
+    // was to AND both checkboxes together.
+    //
+    // MBUX-06 (decision #258) completes the consolidation that
+    // comment asked for: the duplicate checkbox is deleted and
+    // `guestDetails.consent` — the value the SERVER validates — is
+    // the single source of truth for the UI gate, the create payload,
+    // and the "confirm your consent" CTA copy.
+    //
+    // The lesson generalises: whenever the client gates on a value
+    // the server does not validate, the gate is decorative. There is
+    // now exactly one consent value and the server reads the same one.
+    const canConfirm = guestDetails.consent && !isIdUploadRequired && !isPaymentProofRequired && cartIsReady && Boolean(turnstileToken);
+
+    // Per MBUX-07 (decision #259): which optional savings are ACTUALLY
+    // applied, so the collapsed disclosure can state them.
+    //
+    // The disclosure is collapsed by default, and that creates a
+    // hazard the spec calls out directly: a guest who applied a
+    // voucher must still SEE that it is applied while the section is
+    // shut. Hiding that would invite them to apply a second code, or
+    // to conclude their discount vanished when they reach payment.
+    const appliedSavingsLabels = [
+      voucherApplied ? `Voucher ${voucherCode.trim().toUpperCase()}` : "",
+      pendingPointsToRedeem > 0 ? `${pendingPointsToRedeem.toLocaleString()} points` : "",
+      discountType === "senior" ? "Senior Citizen discount" : "",
+      discountType === "pwd" ? "PWD discount" : ""
+    ].filter(Boolean);
 
     return bookingShell(
       <>
         <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-3xl">
-            <StepIndicator steps={steps} currentStep={3} />
+            <StepIndicator steps={steps} currentStep={4} />
           </div>
           <div className="mt-10">
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 3 of 4</p>
+            {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 4 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Review & Pay</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Review your details, select a discount or enter a voucher, and choose your payment method.
@@ -2203,7 +3473,93 @@ export function BookingPage() {
         </section>
 
         <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-16 sm:px-6 lg:grid-cols-[1fr_380px] lg:px-8">
-          <div className="space-y-6">
+          {/* Per MBUX-07 (decision #259): MOBILE ORDER IS SUMMARY FIRST. The
+              sidebar below this column carries the full booking summary, and
+              in a single-column grid it used to render AFTER every control —
+              so a guest had to scroll past payment, uploads, and optional
+              savings to discover what they were paying for.
+
+              CSS `order` is the fix: it applies in a single-column grid
+              (mobile) and is overridden at `lg:`, where the two-column
+              layout must keep controls on the left and summary on the
+              right. No DOM reorder, no duplicate summary component, so the
+              desktop sidebar cannot drift from the mobile card. */}
+          <div className="order-2 space-y-6 lg:order-1">
+            {/* Payment Method Section — dynamic, per
+                `plan/features/SETTINGS.md §Payment Methods`. The
+                list is sourced from
+                `settings/hotelConfig.paymentMethods[]` and filtered
+                to `isEnabled`. The "Pay at Hotel" method is just
+                another entry — there is no separate global
+                `payAtHotelEnabled` flag. If no methods are enabled
+                (or the config hasn't loaded), the booking is
+                blocked at the Confirm button. */}
+
+            {/* Per MBUX-13 (decision #266, 2026-10-16): the
+                optional-savings disclosure moved ABOVE the
+                payment method card (was BELOW the payment proof
+                upload). On mobile the pre-MBUX-13 order put the
+                "Click to upload receipt photo" button BEFORE the
+                "Have a voucher, points, or discount?" disclosure,
+                so a guest who already sent payment via QR + uploaded
+                the receipt had nothing to gain by then opening the
+                disclosure. The fix puts the disclosure FIRST so
+                the guest sees "you might have a discount / voucher"
+                BEFORE they commit to "sending payment". MBUX-07
+                (decision #259) still applies: the disclosure stays
+                collapsed by default — this slice only reorders
+                the placement, not the collapse-vs-expand state. */}
+            <details
+              // Per MBUX-14 (decision #267, 2026-10-16): the
+              // disclosure is now OPEN by default. MBUX-13
+              // deferred this state change (it was a placement
+              // slice only); MBUX-14 picks up the deferred
+              // state flip. Pre-MBUX-14 the guest had to tap
+              // "Have a voucher, points, or discount?" to
+              // even see the picker; on mobile this hid the
+              // Senior/PWD + voucher + points options from
+              // guests in a hurry, who would submit their
+              // booking without realizing a discount was
+              // available. MBUX-07 (decision #259) introduced
+              // the collapsed-by-default shape to keep the
+              // desktop Step 4 form compact; MBUX-13 reversed
+              // the placement to put the disclosure ABOVE the
+              // payment method card (so guests see it before
+              // committing to a payment path); MBUX-14 flips
+              // the default state so the disclosure is visible
+              // without an extra tap. The disclosure's outer
+              // style, chevron rotation, `appliedSavingsLabels`
+              // line, and inner content are unchanged; only
+              // the `open` attribute is added.
+              //
+              // Trade-off accepted: on desktop Step 4 the
+              // expanded disclosure makes the form ~3 cards
+              // longer. The added length is justified because
+              // a missed discount is a worse outcome than a
+              // longer form. The disclosure still collapses on
+              // tap (chevron rotates back), so a guest who has
+              // already applied nothing and doesn't want to
+              // can collapse it.
+              open
+              className="group rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6"
+              data-testid="optional-savings-disclosure"
+            >
+              <summary
+                className="flex min-h-11 cursor-pointer list-none items-center justify-between font-semibold text-gray-950"
+                data-testid="optional-savings-summary"
+              >
+                <span>Have a voucher, points, or discount?</span>
+                <ChevronDown size={18} aria-hidden className="transition-transform group-open:rotate-180" />
+              </summary>
+              {appliedSavingsLabels.length > 0 ? (
+                <p
+                  className="mt-2 text-sm font-medium text-gray-700"
+                  data-testid="optional-savings-applied"
+                >
+                  Applied: {appliedSavingsLabels.join(", ")}
+                </p>
+              ) : null}
+              <div className="mt-5 space-y-6">
             {/* Voucher Section */}
             <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
               <h3 className="text-lg font-semibold text-gray-950">Voucher or Promo Code</h3>
@@ -2260,16 +3616,128 @@ export function BookingPage() {
               )}
             </div>
 
-            {/* Discount Section */}
-            <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
+            {/* Points Redemption Section (PR #9) — only renders when
+                the admin toggle is on AND the signed-in member has a
+                positive balance. Same 7 guards run server-side via the
+                shared `applyPointsRedemption` helper. */}
+            {memberSelfRedeemEnabled && memberAvailablePoints > 0 && (
+              <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
+                <h3 className="text-lg font-semibold text-gray-950">Apply Your Points</h3>
+                <p className="mt-1 text-sm text-gray-600">
+                  You have <span className="font-bold text-primary">{memberAvailablePoints.toLocaleString()}</span> points available.
+                  {rewardsConfig?.pointsRedemptionRate ? (
+                    <> Each 100 points = ₱{Number(rewardsConfig.pointsRedemptionRate).toLocaleString()} off your booking total.</>
+                  ) : null}
+                </p>
+
+                {selfPointsApplied ? (
+                  <div className="mt-4 flex items-center justify-between rounded-lg bg-status-green-bg p-3 text-sm font-medium text-status-green-text">
+                    <span className="flex flex-col gap-0.5">
+                      <span className="flex items-center gap-1.5">
+                        <CheckCircle2 size={16} />
+                        {pendingPointsToRedeem.toLocaleString()} points · ₱{pendingRedemptionValue.toLocaleString()} off
+                      </span>
+                      <span className="ml-6 text-xs font-normal text-status-green-text/80">
+                        New total ₱{displayTotal.toLocaleString()} — applied at booking submission
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPendingPointsToRedeem(0);
+                        setSelfPointsInput("");
+                        setSelfPointsApplied(false);
+                        setSelfPointsError("");
+                      }}
+                      className="rounded-lg border border-gray-200 px-4 py-2 text-xs font-semibold text-gray-700 transition hover:bg-gray-100"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                    <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
+                      Points to apply
+                      <input
+                        type="number"
+                        min={1}
+                        max={memberAvailablePoints}
+                        value={selfPointsInput}
+                        onChange={(e) => {
+                          setSelfPointsInput(e.target.value);
+                          setSelfPointsError("");
+                        }}
+                        className="min-h-11 rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light"
+                      />
+                      {(() => {
+                        const entered = Math.max(0, Math.floor(Number(selfPointsInput) || 0));
+                        const rate = Number(rewardsConfig?.pointsRedemptionRate || 0);
+                        const value = entered > 0 && rate > 0 ? Math.round((entered * rate) / 100) : 0;
+                        if (value <= 0) return null;
+                        return (
+                          <span className="font-normal text-gray-500">
+                            Preview: ₱{value.toLocaleString()} off ·{" "}
+                            {rewardsConfig?.minPointsToRedeem && entered < Number(rewardsConfig.minPointsToRedeem)
+                              ? `below the ${rewardsConfig.minPointsToRedeem}-point minimum`
+                              : `new total ₱${Math.max(0, total - value).toLocaleString()}`}
+                          </span>
+                        );
+                      })()}
+                    </label>
+                    <button
+                      type="button"
+                      disabled={
+                        !selfPointsInput.trim() ||
+                        Number(selfPointsInput) <= 0 ||
+                        Number(selfPointsInput) > memberAvailablePoints
+                      }
+                      onClick={() => {
+                        const entered = Math.max(0, Math.floor(Number(selfPointsInput) || 0));
+                        if (entered <= 0) {
+                          setSelfPointsError("Enter a positive number of points to apply.");
+                          return;
+                        }
+                        if (entered > memberAvailablePoints) {
+                          setSelfPointsError(`You only have ${memberAvailablePoints.toLocaleString()} points available.`);
+                          return;
+                        }
+                        setPendingPointsToRedeem(entered);
+                        setSelfPointsApplied(true);
+                        setSelfPointsError("");
+                      }}
+                      className="min-h-11 rounded-lg bg-primary px-5 text-sm font-semibold text-white transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Apply at Booking
+                    </button>
+                  </div>
+                )}
+
+                {selfPointsError && (
+                  <div className="mt-3 flex gap-2 rounded-lg bg-red-50 p-3 text-sm font-medium text-red-700">
+                    <Info size={16} className="mt-0.5 shrink-0" />
+                    <p>{selfPointsError}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Discount Section — rendered only while the online
+                Senior/PWD claim path is enabled
+                (`settings/hotelConfig.seniorPwdOnlineEnabled`).
+                Per owner request 2026-10-13 (decision #231): when
+                the toggle is off the whole card is dropped — no
+                heading, no selector, and no "claims unavailable"
+                note. The discount itself is unaffected: staff
+                still apply the 20% at the front desk when an
+                eligible guest presents a valid ID (RA 9994 /
+                RA 10754). */}
+            {seniorPwdOnlineEnabled && <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
               <h3 className="text-lg font-semibold text-gray-950">Discount Options</h3>
               <p className="mt-1 text-sm text-gray-600">
-                {seniorPwdOnlineEnabled
-                  ? "Select if you are eligible for government-mandated discounts. A valid ID must be uploaded."
-                  : "Senior/PWD online claims are currently unavailable. Eligible guests may present a valid ID at check-in to receive the mandated discount."}
+                Select if you are eligible for government-mandated discounts. A valid ID must be uploaded.
               </p>
-              
-              {seniorPwdOnlineEnabled && <div className="mt-4 grid gap-3 sm:grid-cols-3">
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
                 {(["none", "senior", "pwd"] as const).map((type) => {
                   // Per the per-individual discount guard:
                   // the senior / PWD buttons are disabled
@@ -2306,14 +3774,14 @@ export function BookingPage() {
                     </button>
                   );
                 })}
-              </div>}
-              {seniorPwdOnlineEnabled && cartIsMultiRoom && (
+              </div>
+              {cartIsMultiRoom && (
                 <p className="mt-3 text-xs text-amber-700">
                   Senior Citizen and PWD discounts are per-individual entitlements and apply to a single room. If you need a senior or PWD discount, please book that guest's room in a separate booking — the additional rooms can be added to the same reservation from the front desk at check-in.
                 </p>
               )}
 
-              {seniorPwdOnlineEnabled && discountType !== "none" && (
+              {discountType !== "none" && (
                 <div className="mt-5">
                   <p className="text-sm font-semibold text-gray-700">
                     {discountType === "senior" ? "Upload OSCA Card Photo" : "Upload PWD ID Card Photo"} <span className="text-red-500">*</span>
@@ -2375,17 +3843,11 @@ export function BookingPage() {
                   </div>
                   </div>
                 )}
-            </div>
+            </div>}
 
-            {/* Payment Method Section — dynamic, per
-                `plan/features/SETTINGS.md §Payment Methods`. The
-                list is sourced from
-                `settings/hotelConfig.paymentMethods[]` and filtered
-                to `isEnabled`. The "Pay at Hotel" method is just
-                another entry — there is no separate global
-                `payAtHotelEnabled` flag. If no methods are enabled
-                (or the config hasn't loaded), the booking is
-                blocked at the Confirm button. */}
+              </div>
+            </details>
+
             <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 sm:p-6">
               <h3 className="text-lg font-semibold text-gray-950">Payment Method</h3>
               <p className="mt-1 text-sm text-gray-600">Select how you would like to pay for your reservation.</p>
@@ -2399,7 +3861,44 @@ export function BookingPage() {
                 </div>
               ) : (
                 <>
-                  <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  {/* Per UX-DESK-01 (2026-10-16, decision #270):
+                      adaptive columns based on the count of
+                      payment methods. The pre-UX-DESK-01 grid
+                      was `sm:grid-cols-2 lg:grid-cols-4`
+                      (added by BF-10 to fit PayPal as a 4th
+                      method). With the typical 2-method
+                      config (GCash + Bank Transfer), `lg:grid-cols-4`
+                      forced each button into 25% of the
+                      container width — in the pre-UX-DESK-01
+                      Step 4 sidebar (380px) that worked out to
+                      ~80px per button, where "Bank Transfer"
+                      wrapped onto three lines and the buttons
+                      became visually unreadable. After the
+                      Step 4 layout flip (UX-DESK-01) the
+                      controls column is ~800px wide, but a
+                      4-col grid with only 2 items still
+                      leaves 2 dead columns on the right.
+
+                      Rules: 1 method → 1 col (full-width
+                      button); 2 methods → 2 cols at sm+; 3
+                      methods → 2 cols at sm, 3 cols at lg; 4+
+                      methods → 2 cols at sm, 4 cols at lg.
+                      Tailwind needs the full class names in
+                      source for the JIT to pick them up, so
+                      each `lg:grid-cols-N` is gated by an
+                      explicit count predicate rather than a
+                      dynamic template-literal class. The
+                      `sm:grid-cols-2` fallback covers the
+                      typical 2-method config without any
+                      additional predicate. */}
+                  <div
+                    className={cn(
+                      "mt-4 grid gap-4",
+                      availablePaymentMethods.length >= 2 && "sm:grid-cols-2",
+                      availablePaymentMethods.length === 3 && "lg:grid-cols-3",
+                      availablePaymentMethods.length >= 4 && "lg:grid-cols-4"
+                    )}
+                  >
                     {availablePaymentMethods.map((pm) => {
                       const Icon =
                         pm.method === "gcash" || pm.method === "maya"
@@ -2473,7 +3972,7 @@ export function BookingPage() {
                         <div className="sm:col-span-3 p-5 flex flex-col justify-center">
                           <h4 className="font-semibold text-primary text-base">{currentPaymentMethod.label} Payment Details</h4>
                               <p className="mt-1 text-xs text-gray-600 leading-relaxed">
-                                Please send your payment of <span className="font-bold text-gray-800">{formatPrice(total)}</span> via {currentPaymentMethod.label}. The recipient name is <span className="font-bold text-gray-800">{currentPaymentMethod.accountName || config.legalName}</span>.
+                                Please send your payment of <span className="font-bold text-gray-800">{formatPrice(displayTotal)}</span> via {currentPaymentMethod.label}. The recipient name is <span className="font-bold text-gray-800">{currentPaymentMethod.accountName || config.legalName}</span>.
                               </p>
                           {currentPaymentMethod.accountNumber && (
                             <p className="mt-1 text-xs font-semibold text-gray-800">
@@ -2588,31 +4087,21 @@ export function BookingPage() {
                 </div>
               </details>
             </div>
+            {/* Per MBUX-06 (decision #258): the duplicate Step 4 terms
+                checkbox is REMOVED. Step 3's `guestDetails.consent` is
+                now the single authoritative consent control — see the
+                `canConfirm` note above.
 
-            {/* Terms and conditions */}
-            <div className="mt-6">
-              <label htmlFor="termsConsent" className="flex items-start gap-3 cursor-pointer text-sm leading-6 text-gray-700">
-                <input
-                  id="termsConsent"
-                  name="termsConsent"
-                  type="checkbox"
-                  checked={termsConsent}
-                  onChange={(e) => setTermsConsent(e.target.checked)}
-                  className="mt-1 h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary"
-                />
-                <span>
-                  I have read and agree to {config.brandName}'s{" "}
-                  <Link to="/privacy" target="_blank" className="font-semibold text-primary underline">
-                    Privacy Policy
-                  </Link>{" "}
-                  and{" "}
-                  <Link to="/terms" target="_blank" className="font-semibold text-primary underline">
-                    Terms of Service
-                  </Link>
-                  . I understand that my booking is subject to the cancellation policy selected.
-                </span>
-              </label>
-            </div>
+                The line this checkbox carried that Step 3 does NOT have
+                — "I understand that my booking is subject to the
+                cancellation policy selected" — is not silently lost:
+                the cancellation-policy disclosure sits directly above
+                and is always rendered. The guest READS the policy
+                there; they do not tick it a second time.
+
+                Kept intact: the Cloudflare Turnstile challenge below, the
+                proof-of-payment upload, and the payment-method panel.
+                None of them were part of the consent question. */}
 
             {/* Cloudflare Turnstile Challenge */}
             <div
@@ -2681,15 +4170,18 @@ export function BookingPage() {
             checkIn={checkIn}
             checkOut={checkOut}
             guests={guests}
-            hasBreakfast={hasBreakfast}
             nights={nights}
-            // Per CHD-10 (2026-07-31, per CVQ-01): the adult/child
-            // split and the "include children" toggle thread
-            // through to the aside.
+            // Per BR-08 (decision #238, 2026-10-14 — close-out):
+            // the legacy `hasBreakfast` +
+            // `breakfastIncludesChildren` +
+            // `setBreakfastIncludesChildren` +
+            // `breakfastRate` props are gone. The sidebar
+            // reads the new `breakfastSelections` rich
+            // shape only. The adult/child split
+            // (`numAdults` + `numChildren`) stays so the
+            // per-room summary can render the split.
             numAdults={numAdults}
             numChildren={numChildren}
-            breakfastIncludesChildren={breakfastIncludesChildren}
-            setBreakfastIncludesChildren={setBreakfastIncludesChildren}
             // Per EXB-11 (2026-08-04, per decision #186): the
             // per-cart total extra-bed count (sum of each
             // room's `extraBedCount`). Replaces the old single
@@ -2705,29 +4197,46 @@ export function BookingPage() {
               numAdults: room.numAdults,
               numChildren: room.numChildren,
               extraBedCount: room.extraBedCount,
-              hasBreakfast: breakfastConfig.isEnabled && room.rateChoice === "room-breakfast"
+              // Per BR-08 (decision #238, 2026-10-14 — close-out):
+              // the legacy `hasBreakfast: boolean` per-room
+              // flag is gone. The per-meal breakdown (rendered
+              // below the room summary) shows the meal count for
+              // the whole stay.
+              breakfastCount: Object.keys(breakfastSelections || {}).length > 0
+                ? Math.ceil(Object.keys(breakfastSelections).length / Math.max(distributedRoomCart.length, 1))
+                : 0
             }))}
             typeValue={selectedTypeEntry?.value ?? ""}
             typeImageUrls={selectedTypeEntry ? getRoomTypeImages(roomTypes, selectedTypeEntry.value) : []}
             typeRates={selectedRoomRates}
             typeDescription={selectedTypeEntry?.description ?? ""}
-            total={total}
+            total={displayTotal}
             discountPct={discountPct}
             voucherDiscount={voucherDiscount}
             discountType={discountType}
             voucherApplied={voucherApplied}
-            breakfastRate={breakfastRate}
             memberDiscountPct={memberDiscountPct}
             seasonalRateOverrides={seasonalRateOverrides}
             isMember={!!memberProfile}
             rateBreakdown={rateBreakdown}
+            // Per BR-03 (2026-10-12, decision #232):
+            // thread the new `breakfastSelections` rich
+            // shape into the Step 3 review sidebar
+            // (same pattern as the Step 2 sidebar
+            // above). The Step 3 page reads the same
+            // cart state, so the per-date breakdown
+            // is identical.
+            breakfastSelections={breakfastSelections}
+            // Per OCT-H9 (2026-10-20, decision #283): gate the
+            // guest-side VAT lines on the admin's Tax toggle.
+            vatEnabled={vatEnabled}
           />
         </section>
 
-        <div className="fixed bottom-0 left-0 z-40 w-full border-t border-gray-200 bg-white/95 px-4 py-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur">
-          <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm text-gray-600">Review & Pay</p>
+        <BookingStickyFooter
+          summary={
+            <>
+              <p className="text-sm text-gray-600">Total due</p>
               <p className="text-lg font-semibold text-gray-950">
                 {isSubmitting
                   ? "Processing booking request..."
@@ -2742,27 +4251,34 @@ export function BookingPage() {
                   // trip on the server.
                   : !guestDetails.consent
                   ? "Confirm your guest details consent on the previous step"
-                  : !termsConsent
-                  ? "Agree to terms and conditions"
                   : isIdUploadRequired
                   ? "Please upload your Senior/PWD ID"
                   : isPaymentProofRequired
                   ? "Please upload proof of payment"
                   : !turnstileToken
                   ? "Running a quick security check..."
-                  : "Ready to confirm booking"}
+                  : `Ready to confirm · ${formatPrice(displayTotal)}`}
               </p>
-            </div>
-            <button
-              type="button"
-              onClick={handleConfirmBooking}
-              disabled={!canConfirm || isSubmitting || uploadingDiscountId || uploadingPaymentProof}
-              className="flex min-h-11 items-center justify-center rounded-lg bg-primary text-white font-semibold px-6 hover:bg-primary-dark transition disabled:bg-gray-300 disabled:text-gray-500 sm:min-w-56"
-            >
-              {isSubmitting ? "Processing..." : "Confirm Booking"}
-            </button>
-          </div>
-        </div>
+            </>
+          }
+        >
+          <button
+            type="button"
+            onClick={handleConfirmBooking}
+            disabled={!canConfirm || isSubmitting || uploadingDiscountId || uploadingPaymentProof}
+            className="flex min-h-11 w-full items-center justify-center rounded-lg bg-primary text-white font-semibold px-6 hover:bg-primary-dark transition disabled:bg-gray-300 disabled:text-gray-500 sm:min-w-56"
+          >
+            {/* Per MBUX-07 (decision #259): the action names the amount
+                it commits to. A guest confirming a booking should not
+                have to travel back up the page to remember the figure.
+                It is `displayTotal` — the SAME value the summary card,
+                the sidebar, and the create payload use, so the button
+                can never quote a total that differs from the bill. */}
+            {isSubmitting
+              ? "Processing..."
+              : `Place booking · ${formatPrice(displayTotal)}`}
+          </button>
+        </BookingStickyFooter>
       </>
     );
   }
@@ -2775,123 +4291,258 @@ export function BookingPage() {
         </div>
         <div className="mt-10 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary">Step 1 of 4</p>
+            {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 1 of 5</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Select your stay</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Choose dates, guests, and a room option. We will show room types available for your stay.
             </p>
           </div>
-          <div className="rounded-card bg-white p-4 text-sm shadow-sm ring-1 ring-gray-200">
-            <p className="font-semibold text-gray-950">{formatStayDate(checkIn)} - {formatStayDate(checkOut)}</p>
-            <p className="mt-1 text-gray-600">
-              {nights} {nights === 1 ? "night" : "nights"}, {guests} {guests === 1 ? "guest" : "guests"}
-            </p>
-          </div>
+          {/* Per MBUX-11 (decision #264, 2026-10-16): the
+              inline date strip is gone. The mobile-first
+              StaySummaryStrip below renders directly under
+              the StepIndicator on mobile (the user wanted the
+              summary "on top part of the page for mobile" +
+              an "Edit" affordance). On `lg:` the strip is
+              hidden — the sidebar becomes the primary surface
+              and the user already interacts with the picker
+              there, so no Edit affordance is needed. The
+              `lg:hidden` Tailwind utility on the strip
+              prevents duplicate surfaces. */}
+          <StaySummaryStrip
+            checkIn={checkIn}
+            checkOut={checkOut}
+            nights={nights}
+            guests={guests}
+            // Per MBUX-18 (decision #275, 2026-10-16): the
+            // Edit pencil opens the mobile bottom sheet
+            // instead of smooth-scrolling to the aside. The
+            // sheet is rendered just below this strip so the
+            // open/close state lives next to the trigger in
+            // the source tree.
+            onEdit={() => setIsEditStayDetailsOpen(true)}
+          />
+          {/* Per MBUX-18 (decision #275, 2026-10-16): the
+              mobile-only bottom sheet that the StaySummaryStrip's
+              Edit pencil opens. The component is `lg:hidden`-
+              guarded internally so the parent doesn't need to
+              gate the render — on desktop the strip itself is
+              hidden, so the sheet never opens. Threads the same
+              state + handlers the aside uses so the live
+              adults/children/date writes don't fork into a
+              separate code path. */}
+          <EditStayDetailsSheet
+            open={isEditStayDetailsOpen}
+            onClose={() => setIsEditStayDetailsOpen(false)}
+            checkIn={checkIn}
+            checkOut={checkOut}
+            maxStayNights={maxStayNights}
+            onRangeChange={(nextCheckIn, nextCheckOut) => {
+              setCheckIn(nextCheckIn);
+              setCheckOut(nextCheckOut);
+              updateDateParams(nextCheckIn, nextCheckOut, adults);
+            }}
+            onCheckInChange={(value) => {
+              setCheckIn(value);
+              updateDateParams(value, checkOut, adults);
+            }}
+            onCheckOutChange={(value) => {
+              setCheckOut(value);
+              updateDateParams(checkIn, value, adults);
+            }}
+            adults={adults}
+            maxGuestCapacity={maxGuestCapacity}
+            onAdultsChange={updateAdults}
+            numChildren={numChildren}
+            onChildrenChange={updateChildren}
+          />
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-16 sm:px-6 lg:grid-cols-[320px_1fr] lg:px-8">
-        <aside className="lg:sticky lg:top-28 lg:self-start">
+      {/* Per UX-DESK-01 (2026-10-16, decision #270): the lg
+          grid template swapped from `[320px_1fr]` to
+          `[1fr_320px]`. The pre-UX-DESK-01 template put the
+          320px column on column 1 and the 1fr column on
+          column 2. Combined with the aside's `lg:order-2`
+          (which puts the Stay details aside second → column 2)
+          and the room-cards `<div>` (default `order: 0` →
+          first → column 1), the room cards ended up in the
+          320px column — `md:grid-cols-[280px_1fr]` inside
+          each card then reserved 280px for the image and only
+          ~40px for the text, so room type names like
+          "Standard Room" wrapped to one letter per line and
+          the desktop column went visually unreadable.
+          Flipping the template makes the aside land in the
+          320px column (column 2, RIGHT sidebar) and the room
+          cards in the 1fr column (column 1, LEFT main), so
+          each card has the full ~800px width the original
+          design intended. Mobile behaviour is unchanged:
+          below `lg:` the section collapses to a single column
+          and the existing `order-1` / default `order: 0`
+          stack (room cards first, Stay details below) still
+          applies. */}
+      <section className="mx-auto grid max-w-7xl gap-8 px-4 pb-16 sm:px-6 lg:grid-cols-[1fr_320px] lg:px-8">
+        {/* Per MBUX-07: `order-1` puts the summary above the controls on
+            mobile; `lg:order-2` restores the right-hand sidebar.
+            Per MBUX-11 (decision #264, 2026-10-16): the `id` is the
+            scroll target for the StaySummaryStrip's Edit button on
+            mobile (the strip is hidden on `lg:` so the user uses the
+            sidebar directly on desktop, no Edit affordance needed).
+            Per MBUX-18 (decision #275, 2026-10-16): the Edit pencil
+            no longer scrolls here — it opens the EditStayDetailsSheet
+            mobile bottom sheet instead. The `id` + `scroll-mt-32`
+            remain as a defensive fallback for any deep link that
+            jumps straight to the aside (the BookingStickyFooter's
+            URL-driven scroll, accessibility tools, etc.) so a future
+            regression that drops the id would still surface. */}
+        <aside id="booking-stay-details-aside" className="order-1 lg:order-2 lg:sticky lg:top-28 lg:self-start scroll-mt-32">
           <div className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200">
             <h2 className="text-lg font-semibold text-gray-950">Stay details</h2>
             <div className="mt-5 space-y-6">
-              <DateRangePicker
-                checkIn={checkIn}
-                checkOut={checkOut}
-                onCheckInChange={(value) => {
-                  setCheckIn(value);
-                  updateDateParams(value, checkOut, adults);
-                }}
-                onCheckOutChange={(value) => {
-                  setCheckOut(value);
-                  updateDateParams(checkIn, value, adults);
-                }}
-              />
+              {/* Per MBUX-19 (decision #276, 2026-10-16): the
+                  aside's three editable blocks (DateRangePicker
+                  + Adults stepper + Children stepper) are
+                  `hidden lg:contents` on mobile because the
+                  MBUX-18 mobile bottom sheet (`EditStayDetailsSheet`,
+                  decision #275) is now the canonical edit
+                  surface there — keeping them visible would
+                  duplicate the same `<DateRangePicker>` +
+                  steppers in two surfaces (the strip's Edit
+                  pencil at the top, the aside below it), which
+                  the BOOKING-MOBILE-UX.md:139 rule explicitly
+                  forbids (*"The page does not repeat the same
+                  stay summary in both a header card and sidebar
+                  card."*). On `lg:` the strip itself is
+                  `lg:hidden`, so the sheet cannot open on
+                  desktop, and the aside becomes the edit
+                  surface there — the controls stay visible
+                  because nothing else exposes them.
 
-              <label className="grid gap-2 text-sm font-medium text-gray-700">
-                Adults
-                <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
-                  <button
-                    aria-label="Remove one adult"
-                    className="flex h-11 w-11 items-center justify-center rounded bg-gray-100 text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
-                    disabled={adults <= 1}
-                    type="button"
-                    onClick={() => updateAdults(adults - 1)}
-                  >
-                    <Minus size={16} />
-                  </button>
-                  <span className="flex items-center gap-2 text-sm text-gray-700">
-                    <Users size={16} className="text-primary" />
-                    {adults} {adults === 1 ? "adult" : "adults"}
-                  </span>
-                  <button
-                    aria-label="Add one adult"
-                    className="flex h-11 w-11 items-center justify-center rounded bg-gray-100 text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
-                    disabled={adults >= maxGuestCapacity}
-                    type="button"
-                    onClick={() => updateAdults(adults + 1)}
-                  >
-                    <Plus size={16} />
-                  </button>
-                </div>
-              </label>
+                  Why a wrapper `<div>` with `hidden lg:contents`
+                  rather than `hidden lg:block`:
+                  - `hidden lg:block` would change the wrapper's
+                    `display` to `block`, which breaks the
+                    parent's `space-y-6` stacking context (a
+                    `<div>` becoming `display: block` is the
+                    same as its default but introduces an extra
+                    anonymous box that adds spacing).
+                  - `hidden lg:contents` removes the wrapper
+                    entirely from the layout on `lg:`, so the
+                    three editable controls slot back into the
+                    parent's `space-y-6` stacking context
+                    without an extra wrapper box.
+                  - On `< lg:` the wrapper is `display: none`,
+                    which removes all three blocks together — a
+                    single CSS rule does the work.
+                  - `lg:contents` is the right primitive for
+                    "invisible wrapper at the narrow viewport,
+                    gone at the next one" without the layout-shift
+                    risk of a `display: block` swap. */}
+              <div className="hidden lg:contents">
+                <DateRangePicker
+                  checkIn={checkIn}
+                  checkOut={checkOut}
+                  maxStayNights={maxStayNights}
+                  onRangeChange={(nextCheckIn, nextCheckOut) => {
+                    setCheckIn(nextCheckIn);
+                    setCheckOut(nextCheckOut);
+                    updateDateParams(nextCheckIn, nextCheckOut, adults);
+                  }}
+                  onCheckInChange={(value) => {
+                    setCheckIn(value);
+                    updateDateParams(value, checkOut, adults);
+                  }}
+                  onCheckOutChange={(value) => {
+                    setCheckOut(value);
+                    updateDateParams(checkIn, value, adults);
+                  }}
+                />
 
-              {/* Per CHD-11 (2026-08-04, per decision #184): the
-                  children picker is no longer bounded by the
-                  per-type `maxChildren` cap. The hard cap was a
-                  dead-end at the exploration stage — the guest
-                  is still choosing room type and/or quantity,
-                  and the cap belongs at the commit surface
-                  (the Step 1 → Step 2 submit gate + the
-                  room-type card's Fits/Tight/Doesn't fit
-                  indicator), not at the picker. Per CHD-11.2
-                  (decision #193): the soft cap is `10` (a
-                  sanity guard, not a domain constraint). Per
-                  CHD-11.5 (decision #196): the picker is
-                  Adults + Children directly; the children
-                  cap of 10 stays (the historical "at least
-                  one adult" floor is no longer needed — the
-                  Adults stepper's min 1 enforces the rule). */}
-              <label className="grid gap-2 text-sm font-medium text-gray-700">
-                Children (0–11)
-                <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
-                  <button
-                    className="flex h-11 w-11 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-45"
-                    type="button"
-                    aria-label="Decrease children count"
-                    onClick={() => updateChildren(numChildren - 1)}
-                    disabled={numChildren <= 0}
-                  >
-                    <Minus size={16} />
-                  </button>
-                  <span className="flex items-center gap-2 text-sm text-gray-700">
-                    {numChildren} {numChildren === 1 ? "child" : "children"}
-                  </span>
-                  <button
-                    className="flex h-11 w-11 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-45"
-                    type="button"
-                    aria-label="Increase children count"
-                    onClick={() => updateChildren(numChildren + 1)}
-                    // Per CHD-11.2 (2026-08-05, per decision
-                    // #193): the cap is the soft 10 (the
-                    // CHD-11 sanity guard, not a domain
-                    // constraint). The pre-CHD-11.2 shape
-                    // capped at the room's
-                    // `selectedMaxSelectableChildren` (per
-                    // CHD-11.1), which made the picker an
-                    // enforcement layer instead of an
-                    // exploration layer. The "Fits your
-                    // group" chip + the submit gate are the
-                    // commit surfaces — the picker is the
-                    // exploration surface. The user can pick
-                    // any number up to 10; the chip + submit
-                    // gate tell them if it works.
-                    disabled={numChildren >= 10}
-                  >
-                    <Plus size={16} />
-                  </button>
-                </div>
-              </label>
+                <label className="grid gap-2 text-sm font-medium text-gray-700">
+                  Adults
+                  <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
+                    <button
+                      aria-label="Remove one adult"
+                      className="flex h-11 w-11 items-center justify-center rounded bg-gray-100 text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
+                      disabled={adults <= 1}
+                      type="button"
+                      onClick={() => updateAdults(adults - 1)}
+                    >
+                      <Minus size={16} />
+                    </button>
+                    <span className="flex items-center gap-2 text-sm text-gray-700">
+                      <Users size={16} className="text-primary" />
+                      {adults} {adults === 1 ? "adult" : "adults"}
+                    </span>
+                    <button
+                      aria-label="Add one adult"
+                      className="flex h-11 w-11 items-center justify-center rounded bg-gray-100 text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
+                      disabled={adults >= maxGuestCapacity}
+                      type="button"
+                      onClick={() => updateAdults(adults + 1)}
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
+                </label>
+
+                {/* Per CHD-11 (2026-08-04, per decision #184): the
+                    children picker is no longer bounded by the
+                    per-type `maxChildren` cap. The hard cap was a
+                    dead-end at the exploration stage — the guest
+                    is still choosing room type and/or quantity,
+                    and the cap belongs at the commit surface
+                    (the Step 1 → Step 2 submit gate + the
+                    room-type card's Fits/Tight/Doesn't fit
+                    indicator), not at the picker. Per CHD-11.2
+                    (decision #193): the soft cap is `10` (a
+                    sanity guard, not a domain constraint). Per
+                    CHD-11.5 (decision #196): the picker is
+                    Adults + Children directly; the children
+                    cap of 10 stays (the historical "at least
+                    one adult" floor is no longer needed — the
+                    Adults stepper's min 1 enforces the rule). */}
+                <label className="grid gap-2 text-sm font-medium text-gray-700">
+                  Children (0–11)
+                  <div className="flex min-h-11 items-center justify-between rounded-lg border border-gray-200 px-3">
+                    <button
+                      className="flex h-11 w-11 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-45"
+                      type="button"
+                      aria-label="Decrease children count"
+                      onClick={() => updateChildren(numChildren - 1)}
+                      disabled={numChildren <= 0}
+                    >
+                      <Minus size={16} />
+                    </button>
+                    <span className="flex items-center gap-2 text-sm text-gray-700">
+                      {numChildren} {numChildren === 1 ? "child" : "children"}
+                    </span>
+                    <button
+                      className="flex h-11 w-11 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-45"
+                      type="button"
+                      aria-label="Increase children count"
+                      onClick={() => updateChildren(numChildren + 1)}
+                      // Per CHD-11.2 (2026-08-05, per decision
+                      // #193): the cap is the soft 10 (the
+                      // CHD-11 sanity guard, not a domain
+                      // constraint). The pre-CHD-11.2 shape
+                      // capped at the room's
+                      // `selectedMaxSelectableChildren` (per
+                      // CHD-11.1), which made the picker an
+                      // enforcement layer instead of an
+                      // exploration layer. The "Fits your
+                      // group" chip + the submit gate are the
+                      // commit surfaces — the picker is the
+                      // exploration surface. The user can pick
+                      // any number up to 10; the chip + submit
+                      // gate tell them if it works.
+                      disabled={numChildren >= 10}
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
+                </label>
+              </div>
 
               {/* Per CHD-12 (2026-08-04, per decision #185):
                   cart-style summary that lists one line per
@@ -2908,61 +4559,17 @@ export function BookingPage() {
                   (per CHD-11) is wired below on each card. */}
               <div className="rounded-card border border-gray-200 bg-gray-50 p-4">
                 <p className="text-sm font-semibold text-gray-950">Your cart</p>
-                {distributedRoomCart.length > 0 ? (
-                  <div className="mt-3 space-y-2">
-                    {(() => {
-                      // Group distributedRoomCart by roomType.
-                      // Per-type: quantity + sum(numAdults) +
-                      // sum(numChildren) + sum(extraBedCount).
-                      // Re-derives the per-type capacity
-                      // indicator from the same helper the
-                      // room-type card uses (per CHD-11 +
-                      // CHD-12 composition).
-                      const byType = new Map<string, { quantity: number; adults: number; children: number; extraBeds: number; label: string }>();
-                      for (const room of distributedRoomCart) {
-                        const entry = byType.get(room.roomType) || { quantity: 0, adults: 0, children: 0, extraBeds: 0, label: "" };
-                        const type = roomTypes.find((t) => t.value === room.roomType);
-                        entry.quantity += 1;
-                        entry.adults += room.numAdults;
-                        entry.children += room.numChildren;
-                        entry.extraBeds += room.extraBedCount || 0;
-                        if (!entry.label && type) entry.label = type.label;
-                        byType.set(room.roomType, entry);
-                      }
-                      return Array.from(byType.entries()).map(([roomType, agg]) => {
-                        const fit = deriveRoomTypeCapacityFit({
-                          type: roomTypes.find((t) => t.value === roomType) || { maxCapacity: 0, maxChildren: 0, maxExtraBeds: 0 },
-                          numAdults: agg.adults,
-                          numChildren: agg.children,
-                          currentCartCount: agg.quantity
-                        });
-                        const fitChip =
-                          fit.state === "fits"
-                            ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Fits</span>
-                            : fit.state === "tight"
-                              ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">Tight</span>
-                              : <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700">Doesn't fit</span>;
-                        return (
-                          <div key={roomType} className="flex items-start justify-between gap-3 rounded-lg bg-white px-3 py-2 text-xs text-gray-600">
-                            <span className="flex-1">
-                              <span className="block font-semibold text-gray-900">
-                                {agg.quantity}× {agg.label || roomType} {fitChip}
-                              </span>
-                              {agg.adults} adult{agg.adults === 1 ? "" : "s"}{agg.children > 0 ? ` · ${agg.children} child${agg.children === 1 ? "" : "ren"}` : ""}
-                            </span>
-                            {agg.extraBeds > 0 ? (
-                              <span className="rounded-full bg-primary-light px-2 py-1 font-semibold text-primary">
-                                {agg.extraBeds} extra bed{agg.extraBeds === 1 ? "" : "s"}
-                              </span>
-                            ) : null}
-                          </div>
-                        );
-                      });
-                    })()}
-                  </div>
-                ) : (
-                  <p className="mt-2 text-xs text-gray-500">Add at least one room to begin.</p>
-                )}
+                {/* Per MBUX-03: the grouping moved into the shared
+                    `<RoomCartLines>` so the desktop sidebar and the new
+                    mobile tray cannot drift. The single
+                    `deriveRoomTypeCapacityFit` helper still drives both
+                    this surface and the room-type card's Fits / Tight /
+                    Doesn't fit chip (CHD-11 + CHD-12 composition). */}
+                <RoomCartLines
+                  rooms={distributedRoomCart}
+                  roomTypes={roomTypes}
+                  idPrefix="cart-line"
+                />
                 {!cartDistributionComplete ? (
                   <p className="mt-3 text-xs font-medium text-amber-700" role="status" aria-live="polite">
                     Add enough rooms to place every guest. Each room must include at least one adult.
@@ -2983,7 +4590,12 @@ export function BookingPage() {
             <p className="font-semibold text-gray-950">
               {availableRoomTypes.length} {availableRoomTypes.length === 1 ? "room type" : "room types"} available
             </p>
-            <p className="text-sm text-gray-600">Click a rate to add a room. Click the same rate again to remove it.</p>
+            {/* Per MBUX-02: the pre-MBUX-02 hint taught a control that
+                no longer exists. The selection action is now on the
+                card itself. */}
+            <p className="text-sm text-gray-600">
+              Choose a room to add it to your stay. Use the stepper on a selected room to change how many you need.
+            </p>
           </div>
 
           {availableRoomTypes.length > 0 ? (
@@ -3007,9 +4619,14 @@ export function BookingPage() {
                 // `breakfastConfig` (loaded from Firestore). The
                 // previous module-level constant `350` ignored
                 // the admin's configured rate.
-                const liveBreakfastRate = breakfastConfig.isEnabled
-                  ? (breakfastConfig.ratePerPersonPerNight || 0)
-                  : 0;
+                // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+                // legacy `liveBreakfastRate` flat-rate derivation
+                // is gone. The per-meal picker (Step 2) reads
+                // each meal's snapshotted `price` from the
+                // catalog; the room-card preview shows the
+                // room rate only (the breakfast add-on is
+                // computed in Step 2 via the rich
+                // `breakfastSelections` shape).
                 const typeRoomBreakdown = calculateTypeRoomBreakdown(type, checkIn, checkOut, seasonalRateOverrides);
                 const roomLines = typeRoomBreakdown.roomLines;
                 // Per WRV-01 (2026-08-01): the rate panel must show whenever
@@ -3037,23 +4654,28 @@ export function BookingPage() {
                   ?? Math.min(numChildren, type.maxChildren ?? 0, Math.max(typeMaxCapacity - 1, 0));
                 const previewAdults = selectedTypeRooms[0]?.numAdults
                   ?? Math.min(Math.max(numAdults, 1), Math.max(typeMaxCapacity - previewChildren, 1));
-                const previewBreakfastOccupancy = breakfastIncludesChildren
-                  ? previewAdults + previewChildren
-                  : previewAdults;
-                const breakfastOptionTotal = roomOnlyTotal + calculateBreakfastAddOn({
-                  hasBreakfast: true,
-                  breakfastRate: liveBreakfastRate,
-                  numGuests: previewAdults + previewChildren,
-                  numAdults: previewAdults,
-                  numChildren: previewChildren,
-                  numNights: nights,
-                  breakfastIncludesChildren
-                });
+                // Per BR-08 (decision #238, 2026-10-14 — close-out):
+                // the legacy `previewBreakfastOccupancy` derivation
+                // + `calculateBreakfastAddOn` flat-rate preview
+                // are gone. The Step 1 room-card preview shows
+                // the room rate only; the per-meal breakfast
+                // total is computed in Step 2 via the rich
+                // `breakfastSelections` shape (which the user
+                // populates per-date × per-guest).
+                const breakfastOptionTotal = roomOnlyTotal;
 
                 return (
                   <motion.article
                     key={type.value}
-                    className="overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200"
+                    // Per MBUX-02: the selected card gets a primary
+                    // border + shadow so the selection state is visible
+                    // on the card itself, not only inside the action
+                    // block. `aria-current` is deliberately NOT used
+                    // here — this is not a navigation position.
+                    aria-current={isSelected ? "true" : undefined}
+                    className={`overflow-hidden rounded-card bg-white shadow-sm ring-1 ${
+                      isSelected ? "ring-primary shadow-md" : "ring-gray-200"
+                    }`}
                     variants={staggerChild}
                     whileHover={shouldReduceMotion ? undefined : { y: -4 }}
                     transition={{ duration: 0.2, ease: "easeOut" }}
@@ -3075,10 +4697,11 @@ export function BookingPage() {
                       <div className="p-5 sm:p-6">
                         <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
                           <div>
-                            <span className="rounded-full bg-primary-light px-3 py-1 text-xs font-semibold text-primary">
-                              {type.label}
-                            </span>
-                            <h2 className="mt-3 text-2xl font-semibold text-gray-950">{type.label}</h2>
+                            {/* Per MBUX-02: the type pill is GONE. It
+                                rendered the same `type.label` string as
+                                the heading directly beneath it, twice in
+                                a row, for no added meaning. */}
+                            <h2 className="text-2xl font-semibold text-gray-950">{type.label}</h2>
                             <p className="mt-3 max-w-xl text-sm leading-6 text-gray-600">{type.description || ""}</p>
                           </div>
                           <div className="sm:text-right">
@@ -3152,66 +4775,103 @@ export function BookingPage() {
                           );
                         })()}
 
+                        {/* Per MBUX-02: the CARD is the selection target.
+                            Pre-MBUX-02 this card showed two controls for one
+                            decision — a "Rooms" quantity stepper AND a
+                            "Room Only" `RateOption`. Since BR-03 (decision
+                            #232) removed the "Room + Breakfast" alternative,
+                            `Room Only` was the only rate option left and so
+                            represented no choice at all; the panel merely
+                            duplicated the stepper. `Room Only` survives as
+                            the INTERNAL `rateChoice` on the cart item
+                            (unchanged — API + backward compatibility); only
+                            its visible panel is gone.
+
+                            `updateRoomQuantity` is now the single mutation
+                            path for add/remove. The pre-MBUX-02
+                            `selectRoomType` handler is deleted with the
+                            panel: with a single rate option its "untick"
+                            branch was reachable only by clicking the same
+                            lone panel twice, and its "switch rate in
+                            place" branch had become unreachable entirely.
+
+                            Per EXB-11.3 (decision #197) the EXB-11.3
+                            invariant survives unchanged: NO room is
+                            pre-selected on load. `Select this room` is the
+                            user-explicit action that adds the first one. */}
                         <div className="mt-6 grid gap-3">
-                          <div className="flex min-h-14 items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4">
-                            <span>
-                              <span className="block text-sm font-semibold text-gray-950">Rooms</span>
-                              <span className="block text-xs text-gray-500">Up to {entry.availableCount} available</span>
-                            </span>
-                            <span className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                aria-label={`Remove one ${type.label} room`}
-                                className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
-                                disabled={typeQuantity === 0}
-                                onClick={() => updateRoomQuantity(type.value, typeQuantity - 1, entry.availableCount)}
-                              >
-                                <Minus size={16} />
-                              </button>
-                              <span className="min-w-8 text-center text-lg font-semibold text-gray-950" aria-live="polite">
-                                {typeQuantity}
+                          {isSelected ? (
+                            <div
+                              className="flex min-h-14 items-center justify-between gap-3 rounded-lg border border-primary bg-primary-light px-4"
+                              data-testid={`room-type-selected-${type.value}`}
+                            >
+                              <span className="min-w-0">
+                                <span className="block text-sm font-semibold text-gray-950">
+                                  {typeQuantity} selected
+                                </span>
+                                <span className="block text-xs text-gray-600">
+                                  {formatPrice(roomOnlyTotal)} × {typeQuantity} for {nights}{" "}
+                                  {nights === 1 ? "night" : "nights"}
+                                </span>
                               </span>
-                              <button
+                              <span className="flex shrink-0 items-center gap-2">
+                                <button
+                                  type="button"
+                                  aria-label={`Remove one ${type.label} room`}
+                                  className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary"
+                                  onClick={() => updateRoomQuantity(type.value, typeQuantity - 1, entry.availableCount)}
+                                >
+                                  <Minus size={16} />
+                                </button>
+                                <span
+                                  className="min-w-8 text-center text-lg font-semibold text-gray-950"
+                                  aria-live="polite"
+                                  data-testid={`room-type-quantity-${type.value}`}
+                                >
+                                  {typeQuantity}
+                                </span>
+                                <button
+                                  type="button"
+                                  aria-label={`Add one ${type.label} room`}
+                                  className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
+                                  disabled={typeQuantity >= entry.availableCount}
+                                  onClick={() => updateRoomQuantity(type.value, typeQuantity + 1, entry.availableCount)}
+                                >
+                                  <Plus size={16} />
+                                </button>
+                              </span>
+                            </div>
+                          ) : (
+                            <>
+                              <p className="text-sm text-gray-600">
+                                {formatPrice(roomOnlyTotal)} for {nights} {nights === 1 ? "night" : "nights"} ·
+                                up to {typeMaxCapacity} adult{typeMaxCapacity === 1 ? "" : "s"} ·{" "}
+                                {entry.availableCount} available
+                              </p>
+                              <PrimaryButton
                                 type="button"
-                                aria-label={`Add one ${type.label} room`}
-                                className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
-                                disabled={typeQuantity >= entry.availableCount}
-                                onClick={() => updateRoomQuantity(type.value, typeQuantity + 1, entry.availableCount)}
+                                onClick={() => updateRoomQuantity(type.value, 1, entry.availableCount)}
+                                className="w-full"
+                                data-testid={`select-room-${type.value}`}
                               >
-                                <Plus size={16} />
-                              </button>
-                            </span>
-                          </div>
-                          <RateOption
-                            active={isSelected && selectedTypeRateChoice === "room-only"}
-                            label="Room Only"
-                            helper="Simple stay, flexible payment at the hotel"
-                            // Per WRV-02: the option price matches the
-                            // selected stay — the single source's nightly
-                            // amount for a one-source stay, or a "From"
-                            // prefix for a multi-source stay.
-                            priceLabel={`${optionRatePrefix}${formatPrice(optionNightlyRate)} / night`}
-                            totalLabel={`${formatPrice(roomOnlyTotal)} total`}
-                            onSelect={() => selectRoomType(type.value, "room-only")}
-                          />
-                          {breakfastConfig.isEnabled ? (
-                            <RateOption
-                              active={isSelected && selectedTypeRateChoice === "room-breakfast"}
-                              label="Room + Breakfast"
-                              helper={
-                                numChildren > 0 && !breakfastIncludesChildren
-                                  ? `Includes daily local breakfast for ${numAdults} adult${numAdults === 1 ? "" : "s"} (children excluded)`
-                                  : "Includes daily local breakfast for selected guests"
-                              }
-                              // Per BF-26: live rate + (per-CHD-10) the
-                              // effective breakfast occupancy. Per WRV-02:
-                              // option price tracks the selected stay.
-                              priceLabel={`${optionRatePrefix}${formatPrice(optionNightlyRate + liveBreakfastRate * previewBreakfastOccupancy)} / night`}
-                              totalLabel={`${formatPrice(breakfastOptionTotal)} per room`}
-                              onSelect={() => selectRoomType(type.value, "room-breakfast")}
-                            />
-                          ) : null}
+                                Select this room
+                              </PrimaryButton>
+                            </>
+                          )}
                         </div>
+                          {/* Per BR-03 (2026-10-12, decision
+                              #232): the legacy "Room + Breakfast"
+                              toggle is GONE. The flat-rate
+                              breakfast model is replaced by the
+                              per-guest × per-date `breakfastSelections`
+                              rich shape — guests pick their meals
+                              (or skip) on a per-day grid in Step 2
+                              instead of an all-or-nothing toggle
+                              here. The Step 2 section also shows
+                              the live meal catalog from
+                              `usePublicSiteContent().breakfastConfig`
+                              so the guest sees the per-meal prices
+                              before they get to Step 2. */}
                         {hasNonRegularRate ? (
                           <div className="mt-4 rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
                             {isSingleSource ? (
@@ -3399,48 +5059,22 @@ export function BookingPage() {
                                     className="h-5 w-5 rounded border-gray-300 text-primary focus:ring-primary"
                                   />
                                 </label>
-                                {/* Per EXB-12 (2026-08-06, per
-                                    decision #199): the extra-bed
-                                    breakfast toggle. When the
-                                    guest opts in, all
-                                    `extraBedCount` beds in the
-                                    room are counted toward the
-                                    breakfast total. The toggle
-                                    is disabled when there are no
-                                    extra beds (the invariant
-                                    `extraBedBreakfast implies
-                                    extraBedCount > 0`). The
-                                    price hint (+ ₱X / bed /
-                                    night) is shown only when the
-                                    toggle is meaningful (extra
-                                    beds present + breakfast
-                                    config enabled). The toggle
-                                    only renders when the
-                                    breakfast config is enabled
-                                    (no point offering breakfast
-                                    for extra beds when
-                                    breakfast is globally off). */}
-                                {typeQuantity > 0 && breakfastConfig.isEnabled ? (
-                                  <label
-                                    className="flex items-center gap-2 text-xs text-gray-700"
-                                    data-testid={`extras-breakfast-toggle-${type.value}`}
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={userExtraBeds > 0 && selectedTypeRooms[0]?.extraBedBreakfast === true}
-                                      disabled={userExtraBeds === 0}
-                                      onChange={(e) => updateExtraBedBreakfast(type.value, e.target.checked)}
-                                      className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                                    />
-                                    <span>Include breakfast for the extra bed{userExtraBeds === 1 ? "" : "s"}</span>
-                                    {userExtraBeds > 0 && typeExtraBedRate > 0 ? null : null}
-                                    {userExtraBeds > 0 && breakfastRate > 0 ? (
-                                      <span className="text-gray-500">
-                                        + {formatPrice(breakfastRate)} / bed / night
-                                      </span>
-                                    ) : null}
-                                  </label>
-                                ) : null}
+                                {/* Per BR-08 (decision #238, 2026-10-14 — close-out):
+                                    the legacy EXB-12 extra-bed
+                                    breakfast toggle is deleted.
+                                    Extra-bed occupants are ordinary
+                                    meal slots in Step 2 (the
+                                    per-meal picker) — the Step 2
+                                    sidebar renders a meal dropdown
+                                    for every guest slot, including
+                                    any extra-bed slots. The price
+                                    hint "+ ₱X / bed / night" is
+                                    gone (the per-meal picker shows
+                                    the actual price snapshot). */}
+                                {/* The legacy `extras-breakfast-toggle`
+                                    surface was a stub kept alive for
+                                    the BR-05 close-out — the BR-08
+                                    close-out removes it entirely. */}
                                 {/* Stay total + soft-floor
                                     warning (shared with the
                                     counter branch). The
@@ -3526,38 +5160,22 @@ export function BookingPage() {
                                   </button>
                                 </span>
                               </div>
-                              {/* Per EXB-12 (2026-08-06, per
-                                  decision #199): the extra-bed
-                                  breakfast toggle (counter
-                                  branch). Same shape as the
-                                  checkbox branch above. The
-                                  toggle is disabled when there
-                                  are no extra beds; the price
-                                  hint (+ ₱X / bed / night) is
-                                  shown only when the toggle is
-                                  meaningful. The toggle only
-                                  renders when the breakfast
-                                  config is enabled. */}
-                              {typeQuantity > 0 && breakfastConfig.isEnabled ? (
-                                <label
-                                  className="flex items-center gap-2 text-xs text-gray-700"
-                                  data-testid={`extras-breakfast-toggle-${type.value}`}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={userExtraBeds > 0 && selectedTypeRooms[0]?.extraBedBreakfast === true}
-                                    disabled={userExtraBeds === 0}
-                                    onChange={(e) => updateExtraBedBreakfast(type.value, e.target.checked)}
-                                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                                  />
-                                  <span>Include breakfast for the extra bed{userExtraBeds === 1 ? "" : "s"}</span>
-                                  {userExtraBeds > 0 && breakfastRate > 0 ? (
-                                    <span className="text-gray-500">
-                                      + {formatPrice(breakfastRate)} / bed / night
-                                    </span>
-                                  ) : null}
-                                </label>
-                              ) : null}
+                              {/* Per BR-08 (decision #238, 2026-10-14 — close-out):
+                                  the legacy EXB-12 extra-bed
+                                  breakfast toggle is deleted.
+                                  Extra-bed occupants are ordinary
+                                  meal slots in Step 2 (the
+                                  per-meal picker). The price
+                                  hint "+ ₱X / bed / night" is
+                                  gone (the Step 2 sidebar shows
+                                  the per-meal price snapshot for
+                                  any extra-bed slots). */}
+                              {/* The counter-branch
+                                  `extras-breakfast-toggle`
+                                  surface was a stub kept alive
+                                  for the BR-05 close-out — the
+                                  BR-08 close-out removes it
+                                  entirely. */}
                               {typeQuantity > 0 && userExtraBeds > 0 ? (
                                 <p
                                   className="text-xs text-gray-600"
@@ -3595,72 +5213,115 @@ export function BookingPage() {
         </div>
       </section>
 
-      <div className="fixed bottom-0 left-0 z-40 w-full border-t border-gray-200 bg-white/95 px-4 py-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur">
-        <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
+      {/* Per OCT-L1 (2026-10-20, decision #299): the mobile
+          multi-room cart tray (MBUX-03) now renders INSIDE the
+          fixed sticky footer, via the footer's `aboveAction` slot.
+
+          It used to be the last element of this page body. The
+          footer is `fixed`, so the tray scrolled away while the
+          footer stayed pinned — on a phone with 4+ room types the
+          guest tapped "+" and got no aggregate feedback near the
+          thumb. The tray's own docstring already claimed it lived
+          "above the sticky footer"; this makes that true.
+
+          It stays gated to `lg:hidden` because from `lg:` up the
+          sticky sidebar already renders the full cart — showing
+          both would put the same lines on screen twice. */}
+      <BookingStickyFooter
+        aboveAction={
+          <div className="lg:hidden">
+            <RoomCartTray
+              rooms={distributedRoomCart}
+              roomTypes={roomTypes}
+              formatTotal={formatPrice}
+              aggregateTotal={displayTotal}
+              fitComplete={cartDistributionComplete}
+            />
+          </div>
+        }
+        summary={
+          <>
             <p className="text-sm text-gray-600">
               Total for {distributedRoomCart.length} {distributedRoomCart.length === 1 ? "room" : "rooms"},{" "}
               {nights} {nights === 1 ? "night" : "nights"}, {guests} {guests === 1 ? "guest" : "guests"}
             </p>
             <p className="text-2xl font-semibold text-gray-950">
-              {formatPrice(total)} <span className="text-sm font-normal text-gray-500">including selected options</span>
+              {formatPrice(displayTotal)} <span className="text-sm font-normal text-gray-500">including selected options</span>
             </p>
-          </div>
-	          {cartIsReady ? (
-	            <PrimaryButton to={`/book?${continueParams.toString()}`} className="sm:min-w-56">
-	              Continue to Step 2
-	            </PrimaryButton>
-	          ) : (
-	            <PrimaryButton
-	              type="button"
-	              disabled
-	              aria-describedby="step-one-occupancy-error"
-	              className="sm:min-w-56"
-	            >
-	              {!cartFitsGroup
-	                ? "Adjust room"
-	                : distributedRoomCart.length > 0
-	                  ? "Assign every guest"
-	                  : "Add at least one room"}
-	            </PrimaryButton>
-	          )}
-	        </div>
-	        {!cartIsReady ? (
-          // Per CHD-11 (2026-08-04, per decision #184):
-          // the error message references the type label
-          // (matching the CHD-12 cart-style summary) plus
-          // a three-action "Adjust room" CTA that scrolls
-          // to and highlights the offending room-type
-          // card. The legacy "Add enough available rooms..."
-          // text stays for the cart-distribution failure
-          // case.
-          firstFailingType && firstFailingRoom ? (
-            <p id="step-one-occupancy-error" className="mx-auto mt-2 max-w-7xl text-right text-xs font-medium text-amber-700" role="alert">
-              {firstFailingType.label} maxes at {firstFailingType.maxChildren} child{firstFailingType.maxChildren === 1 ? "" : "ren"}.{" "}
-              <button
-                type="button"
-                className="underline hover:text-amber-900"
-                data-testid="adjust-room-cta"
-                onClick={() => {
-                  const el = document.querySelector(
-                    `[data-testid="room-type-fit-${firstFailingType.value}"]`
-                  );
-                  el?.scrollIntoView({ behavior: "smooth", block: "center" });
-                  el?.classList.add("ring-2", "ring-amber-400");
-                  setTimeout(() => el?.classList.remove("ring-2", "ring-amber-400"), 2000);
-                }}
+          </>
+}
+        detail={
+          !cartIsReady ? (
+            // Per CHD-11 (2026-08-04, per decision #184):
+            // the error message references the type label
+            // (matching the CHD-12 cart-style summary) plus
+            // a three-action "Adjust room" CTA that scrolls
+            // to and highlights the offending room-type
+            // card. The legacy "Add enough available rooms..."
+            // text stays for the cart-distribution failure
+            // case.
+            firstFailingType && firstFailingRoom ? (
+              <p
+                id="step-one-occupancy-error"
+                className="mx-auto mt-2 max-w-7xl text-right text-xs font-medium text-amber-700"
+                role="alert"
               >
-                Adjust room
-              </button>
-              {" "}or pick a different room type, or remove a guest.
-            </p>
-          ) : (
-            <p id="step-one-occupancy-error" className="mx-auto mt-2 max-w-7xl text-right text-xs font-medium text-amber-700">
-              Add enough available rooms to fit every guest, with at least one adult assigned to each room.
-            </p>
-          )
-	        ) : null}
-	      </div>
+                {firstFailingType.label} maxes at {firstFailingType.maxChildren} child{firstFailingType.maxChildren === 1 ? "" : "ren"}.{" "}
+                <button
+                  type="button"
+                  className="underline hover:text-amber-900"
+                  data-testid="adjust-room-cta"
+                  onClick={() => {
+                    const el = document.querySelector(
+                      `[data-testid="room-type-fit-${firstFailingType.value}"]`
+                    );
+                    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    el?.classList.add("ring-2", "ring-amber-400");
+                    setTimeout(() => el?.classList.remove("ring-2", "ring-amber-400"), 2000);
+                  }}
+                >
+                  Adjust room
+                </button>
+                {" "}or pick a different room type, or remove a guest.
+              </p>
+            ) : (
+              <p
+                id="step-one-occupancy-error"
+                role="alert"
+                className="mx-auto mt-2 max-w-7xl text-right text-xs font-medium text-amber-700"
+              >
+                {cartDistributionErrorMessage}
+              </p>
+            )
+          ) : null
+        }
+      >
+        {cartIsReady ? (
+          // Per BR-09 (2026-10-14): the Step 1 →
+          // Step 2 transition copy now uses the
+          // destination step name ("add-ons"), not a
+          // numbered "Step N" reference. The
+          // `continueParams` URL stamp already points
+          // at `step=add-ons` (see `continueParams`
+          // above).
+          <PrimaryButton to={`/book?${continueParams.toString()}`} className="sm:min-w-56">
+            Continue to add-ons
+          </PrimaryButton>
+        ) : (
+          <PrimaryButton
+            type="button"
+            disabled
+            aria-describedby="step-one-occupancy-error"
+            className="sm:min-w-56"
+          >
+            {!cartFitsGroup
+              ? "Adjust room"
+              : distributedRoomCart.length > 0
+                ? "Assign every guest"
+                : "Add at least one room"}
+          </PrimaryButton>
+        )}
+      </BookingStickyFooter>
     </>
   );
 }
@@ -3692,6 +5353,12 @@ function buildGuestRateBreakdown(input: {
   voucherDiscount: number;
   memberDiscountPct: number;
   finalTotal: number;
+  // Per PR #9 fix (2026-10-13): the queued points redemption the
+  // member applied via the BookingPage control. Surfaces as a
+  // deductions line so the breakdown matches the discount the
+  // server will subtract at booking creation.
+  pendingRedemptionPoints?: number;
+  pendingRedemptionValue?: number;
 }): BookingRateBreakdown {
   const addOns = [
     ...(input.breakfastTotal > 0
@@ -3710,6 +5377,8 @@ function buildGuestRateBreakdown(input: {
   const afterSeniorPwd = subtotal - seniorPwdDiscount;
   const afterVoucher = afterSeniorPwd - input.voucherDiscount;
   const memberDiscount = Math.round(calculatePercentDiscount(afterVoucher, input.memberDiscountPct));
+  const pendingPts = Number(input.pendingRedemptionPoints || 0);
+  const pendingVal = Number(input.pendingRedemptionValue || 0);
   const deductions = [
     ...(seniorPwdDiscount > 0
       ? [{
@@ -3722,6 +5391,19 @@ function buildGuestRateBreakdown(input: {
       : []),
     ...(memberDiscount > 0
       ? [{ label: `Spark Rewards member discount (${input.memberDiscountPct}%)`, amount: memberDiscount }]
+      : []),
+    // Per PR #9 fix (2026-10-13): the queued points redemption
+    // line. Same shape as the other deductions — label + amount
+    // — so the PriceBreakdown renders it consistently. Only
+    // surfaced when the member has actually applied points (both
+    // fields > 0); the rateBreakdown useMemo also depends on
+    // `pendingPointsToRedeem`, so removing the redemption clears
+    // this line.
+    ...(pendingPts > 0 && pendingVal > 0
+      ? [{
+          label: `Spark Rewards points (${pendingPts.toLocaleString()} pts)`,
+          amount: pendingVal
+        }]
       : [])
   ];
 
@@ -3791,17 +5473,24 @@ function TextField({
   readOnly = false
 }: TextFieldProps) {
   return (
-    <label htmlFor={id} className="grid gap-2 text-sm font-medium text-gray-700">
+    // Per fix(guest-details-field-alignment): `content-start` keeps the
+    // label's grid rows at their natural size. Without it, the default
+    // `align-content: stretch` distributes any extra cell height (e.g. the
+    // taller Email cell, which carries the "Linked to your ... account"
+    // helper line) into the label row AND the input row — pushing the
+    // sibling Phone input down by half the delta. The icon was centred on
+    // the wrapper (not the input), so it drifted too.
+    <label htmlFor={id} className="grid content-start gap-2 text-sm font-medium text-gray-700">
       {label}
       {required ? <span className="sr-only">required</span> : null}
-      <span className="relative block">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-primary">{icon}</span>
+      <span className="relative flex items-center">
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-primary">{icon}</span>
         <input
           id={id}
           name={name}
           autoComplete={autoComplete}
           className={cn(
-            "min-h-11 w-full rounded-lg border bg-white py-2 pl-10 pr-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light",
+            "block min-h-11 w-full rounded-lg border bg-white py-2 pl-10 pr-3 text-gray-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary-light",
             error ? "border-red-300" : "border-gray-200",
             readOnly ? "cursor-default bg-gray-50 text-gray-700" : null
           )}
@@ -3823,16 +5512,16 @@ interface BookingReviewAsideProps {
   checkIn: string;
   checkOut: string;
   guests: number;
-  hasBreakfast: boolean;
   nights: number;
-  // Per CHD-10 (2026-07-31, per CVQ-01): the adult/child split
-  // and the "include children" toggle, threaded through so the
-  // aside can show the toggle and recompute the breakfast total
-  // when it changes.
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // legacy `breakfastIncludesChildren: boolean` +
+  // `setBreakfastIncludesChildren` toggle is deleted. Children
+  // are ordinary meal slots in Step 2 (the per-meal picker) —
+  // there's no "include children" toggle to thread through to
+  // the sidebar. The `numAdults` + `numChildren` props stay so
+  // the room-summary line can show the adult/child split.
   numAdults: number;
   numChildren: number;
-  breakfastIncludesChildren: boolean;
-  setBreakfastIncludesChildren: (value: boolean) => void;
   // Per EXB-01 (2026-07-31): the extra-bed count + rate, threaded
   // through so the aside can show the add-on line.
   extraBedCount: number;
@@ -3847,7 +5536,12 @@ interface BookingReviewAsideProps {
     numAdults: number;
     numChildren: number;
     extraBedCount: number;
-    hasBreakfast: boolean;
+    // Per BR-08 (decision #238, 2026-10-14 — close-out):
+    // the per-room `hasBreakfast: boolean` summary line is
+    // gone. The per-room summary shows the per-room
+    // breakfast count (the length of the rich
+    // `breakfastSelections` map) instead.
+    breakfastCount?: number;
   }>;
   typeValue: string;
   assignedRoomNumber?: string;
@@ -3861,18 +5555,33 @@ interface BookingReviewAsideProps {
   voucherDiscount?: number;
   discountType?: "none" | "senior" | "pwd";
   voucherApplied?: boolean;
-  breakfastRate?: number;
   memberDiscountPct?: number;
   seasonalRateOverrides?: ReturnType<typeof useRoomTypes>["seasonalRateOverrides"];
   isMember?: boolean;
   rateBreakdown?: BookingRateBreakdown | null;
+  // Per BR-03 (2026-10-12, decision #232) + BR-08 (decision
+  // #238, 2026-10-14 — close-out): the new per-guest ×
+  // per-date `breakfastSelections` rich shape. When
+  // non-null, the aside renders the per-date breakdown
+  // (one line per date) and recomputes the total via
+  // `recomputeBreakfastTotal`. The legacy `breakfastRate`
+  // prop is gone — the per-meal picker stamps each
+  // entry's `price` snapshot at capture time.
+  // plan).
+  breakfastSelections?: Record<string, BreakfastSelectionEntry> | null;
+  // Per OCT-H9 (2026-10-20, decision #283): whether the
+  // admin's Tax (VAT) toggle is ON. Threaded down from
+  // `BookingPage` (which owns the `usePublicSiteContent`
+  // subscription) so the aside does not open a second
+  // one. Defaults to `true` — the BIR-compliant default
+  // when the snapshot is missing.
+  vatEnabled?: boolean;
 }
 
 function BookingReviewAside({
   checkIn,
   checkOut,
   guests,
-  hasBreakfast,
   nights,
   typeLabel,
   roomSummary = [],
@@ -3886,18 +5595,23 @@ function BookingReviewAside({
   voucherDiscount = 0,
   discountType = "none",
   voucherApplied = false,
-  breakfastRate,
   memberDiscountPct = 0,
   seasonalRateOverrides = [],
   isMember = false,
   rateBreakdown = null,
-  numAdults,
-  numChildren,
-  breakfastIncludesChildren,
-  setBreakfastIncludesChildren,
   // Per EXB-01 (2026-07-31).
   extraBedCount,
-  extraBedRate
+  extraBedRate,
+  // Per BR-03 (2026-10-12, decision #232) + BR-08 (decision
+  // #238, 2026-10-14 — close-out): the new per-guest ×
+  // per-date `breakfastSelections` rich shape (see
+  // `BookingReviewAsideProps`). The legacy `hasBreakfast:
+  // boolean` + `breakfastRate: number` +
+  // `breakfastIncludesChildren: boolean` props are deleted;
+  // the sidebar reads the new shape only.
+  breakfastSelections = null,
+  // Per OCT-H9 (2026-10-20, decision #283).
+  vatEnabled = true
 }: BookingReviewAsideProps) {
   const roomTotal = useMemo(() => {
     if (!typeRates || !typeValue) return 0;
@@ -3913,23 +5627,19 @@ function BookingReviewAside({
 
   if (!typeLabel) return null;
 
-  const activeBreakfastRate = breakfastRate ?? 350;
-  // Per CHD-10 (2026-07-31, per CVQ-01): the inline
-  // `activeBreakfastRate * guests * nights` pattern now routes
-  // through the shared `calculateBreakfastAddOn` helper. When
-  // children are present and the toggle is off, the helper uses
-  // `numAdults` (the cheaper line). When the toggle is on or
-  // there are no children, it falls back to `numGuests` —
-  // byte-equivalent to the historical shape.
-  const breakfastTotal = calculateBreakfastAddOn({
-    hasBreakfast,
-    breakfastRate: activeBreakfastRate,
-    numGuests: guests,
-    numAdults,
-    numChildren,
-    numNights: nights,
-    breakfastIncludesChildren
-  });
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // sidebar's breakfast math reads the new
+  // `breakfastSelections` rich shape. The legacy fallback
+  // to `calculateBreakfastAddOn` is gone — the new shape is
+  // the single source of truth. A booking with no breakfast
+  // selections reads as `breakfastTotal: 0` and renders no
+  // per-date lines.
+  const perDateBreakfastLines = breakfastSelections
+    ? buildBreakfastRateBreakdownLines(breakfastSelections)
+    : [];
+  const breakfastTotal = breakfastSelections
+    ? recomputeBreakfastTotal(breakfastSelections)
+    : 0;
   // Per EXB-01 (2026-07-31): the extra-bed add-on term in the
   // summary panel. Reads the rate from the type entry; nullish
   // / 0 inputs short-circuit to 0 via the helper.
@@ -3951,8 +5661,41 @@ function BookingReviewAside({
   const afterVoucher = afterSeniorPwd - voucherDiscount;
   const memberDiscountAmount = calculatePercentDiscount(afterVoucher, memberDiscountPct);
 
+  // Per UX-DESK-01 (2026-10-16, decision #270): the summary
+  // aside gets `order-1 lg:order-2` to mirror the controls
+  // column's `order-2 lg:order-1` (per MBUX-07,
+  // BOOKING-FLOW.md:356). Without these classes the aside
+  // defaulted to `order: 0`, which is LOWER than the
+  // controls' `lg:order-1` (= 1) — so the auto-placement rule
+  // "lower order → column 1" sent the aside into the 1fr main
+  // column and the payment column into the 380px sidebar,
+  // inverting the desktop layout the spec calls for. With
+  // `order-1 lg:order-2`:
+  //
+  //   - Mobile (single column): aside (1) FIRST → TOP,
+  //     controls (2) SECOND → BELOW. Matches MBUX-07's
+  //     "summary first on mobile" rule.
+  //   - `lg:` (two-column grid): aside (2) SECOND → column 2
+  //     (380px RIGHT sidebar), controls (1) FIRST → column 1
+  //     (1fr LEFT main). The controls + payment + upload now
+  //     own the wide main column where the guest commits the
+  //     booking, and the room summary is the reference
+  //     sidebar on the right.
+  //
+  // The pre-UX-DESK-01 code only had the matching classes on
+  // the controls column; the summary aside was missing its
+  // half, which is what produced the inverted layout on
+  // `/book` Step 4.
+  //
+  // Safe for Steps 2 + 3 (which render the same aside)
+  // because their forms come first in DOM order with default
+  // `order: 0`; the aside at order 2 on lg still lands in
+  // column 2 the way it did before, and at mobile the aside
+  // at order 1 still lands below the form (form-first, not
+  // summary-first, on Steps 2 + 3 — matches existing design;
+  // only Step 4 needed "summary first on mobile").
   return (
-    <aside className="lg:sticky lg:top-28 lg:self-start">
+    <aside className="order-1 lg:order-2 lg:sticky lg:top-28 lg:self-start">
       <div className="overflow-hidden rounded-card bg-white shadow-sm ring-1 ring-gray-200">
         <img src={typeImageUrls[0]} alt={typeLabel} className="h-52 w-full object-cover" />
         <div className="p-5">
@@ -3970,7 +5713,12 @@ function BookingReviewAside({
                     {room.numAdults} adult{room.numAdults === 1 ? "" : "s"} ·{" "}
                     {room.numChildren} child{room.numChildren === 1 ? "" : "ren"}
                     {room.extraBedCount > 0 ? ` · ${room.extraBedCount} extra bed${room.extraBedCount === 1 ? "" : "s"}` : ""}
-                    {room.hasBreakfast ? " · Breakfast" : ""}
+                    {/* Per BR-08 (decision #238, 2026-10-14 — close-out):
+                        the legacy `hasBreakfast: boolean` flag is gone.
+                        The per-room summary shows the per-room breakfast
+                        count (the length of the rich
+                        `breakfastSelections` map) instead. */}
+                    {(room.breakfastCount ?? 0) > 0 ? ` · ${room.breakfastCount} meal${room.breakfastCount === 1 ? "" : "s"}` : ""}
                   </span>
                 </div>
               ))}
@@ -3983,15 +5731,12 @@ function BookingReviewAside({
             <SummaryCell alignEnd label="Duration" value={`${nights} ${nights === 1 ? "night" : "nights"}`} />
           </div>
 	          <div className="mt-5 space-y-3 text-sm text-gray-600">
-	            {numChildren > 0 ? (
-	              <div className="flex items-start justify-between gap-4 rounded-lg bg-status-green-bg px-3 py-2 text-status-green-text">
-	                <span>
-	                  Children’s room charge
-	                  <span className="block text-xs font-normal">Included at no extra room cost</span>
-	                </span>
-	                <span className="font-semibold">{formatPrice(0)}</span>
-	              </div>
-	            ) : null}
+            {/* Per BR-08 (decision #238, 2026-10-14 — close-out):
+                the "Children's room charge" line is gone
+                (children are ordinary meal slots in Step 2
+                — there's no children-included toggle to
+                surface here). The room subtotal already
+                reflects the adult/child split per room. */}
 	            {rateBreakdown ? (
               <PriceBreakdown breakdown={rateBreakdown} total={total} />
             ) : (
@@ -4000,42 +5745,35 @@ function BookingReviewAside({
                   <span>Room rate</span>
                   <span>{formatPrice(roomTotal)}</span>
                 </div>
-                {hasBreakfast ? (
+                {perDateBreakfastLines.length > 0 || breakfastTotal > 0 ? (
                   <>
-                    <div className="flex justify-between">
-                      <span>Breakfast add-on</span>
-                      <span>{formatPrice(breakfastTotal)}</span>
-                    </div>
-                    {/* Per CHD-10 (2026-07-31, per CVQ-01): the
-                        "include children" toggle. Only shown when
-                        the guest has at least one child (otherwise
-                        the toggle has no effect). Server snapshots
-                        this onto the booking doc on create. */}
-                    {numChildren > 0 ? (
-                      <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-700 cursor-pointer">
-                        <span>
-                          Include {numChildren} {numChildren === 1 ? "child" : "children"} in breakfast
-                          <span className="block text-[11px] text-gray-500">
-                            {breakfastIncludesChildren
-                              ? `+${formatPrice((breakfastRate ?? 0) * numChildren * nights)} added for children`
-                              : "Children stay free of the breakfast charge"}
-                          </span>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setBreakfastIncludesChildren(!breakfastIncludesChildren)}
-                          aria-pressed={breakfastIncludesChildren}
-                          aria-label="Include children in the breakfast charge"
-                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${
-                            breakfastIncludesChildren ? "bg-primary" : "bg-gray-300"
-                          }`}
-                        >
-                          <div className={`h-4 w-4 rounded-full bg-white transition shadow-sm transform ${
-                            breakfastIncludesChildren ? "translate-x-4" : "translate-x-0"
-                          }`} />
-                        </button>
-                      </label>
-                    ) : null}
+                    {/* Per BR-03 (2026-10-12, decision
+                        #232) + BR-08 (decision #238,
+                        2026-10-14 — close-out): the
+                        per-date breakfast breakdown
+                        from the rich
+                        `breakfastSelections` shape.
+                        One line per date, aggregated
+                        so the sidebar reads naturally
+                        for a 3-night stay (3 lines,
+                        not N×guest lines). The legacy
+                        "include children" toggle is
+                        gone — children are ordinary
+                        meal slots in Step 2 (the
+                        per-meal picker). */}
+                    {perDateBreakfastLines.length > 0 ? (
+                      perDateBreakfastLines.map((line, index) => (
+                        <div key={`bf-${index}`} className="flex justify-between">
+                          <span>{line.label}</span>
+                          <span>{formatPrice(line.amount)}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="flex justify-between">
+                        <span>Breakfast add-on</span>
+                        <span>{formatPrice(breakfastTotal)}</span>
+                      </div>
+                    )}
                   </>
                 ) : null}
                 {discountPct > 0 ? (
@@ -4068,11 +5806,27 @@ function BookingReviewAside({
                     (RA 9994) is the VAT-exempt portion when
                     the booking carried one. Mirrors the same
                     three lines on the receipt PDF + XLSX
-                    export + admin booking drawer. */}
-                {(() => {
+                    export + admin booking drawer.
+
+                    Per OCT-H9 (2026-10-20, decision #283): this
+                    block was NOT gated on the admin's Tax (VAT)
+                    toggle, so a hotel that had switched VAT off
+                    still saw "VATable Sales / VAT-Exempt Sales /
+                    VAT Amount (12% × VATable)" on the guest's
+                    booking page — the ONE surface VAT-01's
+                    "must not display on any bill surface"
+                    requirement missed. The sibling
+                    `<PriceBreakdown>` component was already
+                    gated (`PriceBreakdown.tsx:102`); this
+                    fallback branch is the PRE-SUBMISSION live
+                    preview, so it was the one the guest actually
+                    sees before booking. Both are now gated on
+                    `isVatEnabled(vatConfig)`. */}
+                {vatEnabled ? (() => {
                   const vat = calculateVatBreakdown({
                     totalPrice: total,
-                    seniorDiscountAmount: discountPct > 0 ? discountAmount : 0
+                    seniorDiscountAmount: discountPct > 0 ? discountAmount : 0,
+                    vatRate: vatEnabled ? 0.12 : 0
                   });
                   return (
                     <div className="mt-2 space-y-1 border-t border-dashed border-gray-200 pt-2 text-[11px] text-gray-500">
@@ -4090,7 +5844,7 @@ function BookingReviewAside({
                       </div>
                     </div>
                   );
-                })()}
+                })() : null}
               </>
             )}
           </div>
@@ -4113,43 +5867,3 @@ function SummaryCell({ alignEnd, label, value }: { alignEnd?: boolean; label: st
   );
 }
 
-interface RateOptionProps {
-  active: boolean;
-  label: string;
-  helper: string;
-  priceLabel: string;
-  totalLabel: string;
-  onSelect: () => void;
-}
-
-function RateOption({ active, label, helper, priceLabel, totalLabel, onSelect }: RateOptionProps) {
-  return (
-    <button
-      className={cn(
-        "flex min-h-20 w-full items-start justify-between gap-4 rounded-lg border p-4 text-left transition",
-        active ? "border-primary bg-primary-light ring-1 ring-primary" : "border-gray-200 bg-white hover:border-primary"
-      )}
-      type="button"
-      onClick={onSelect}
-    >
-      <span className="flex gap-3">
-        <span
-          className={cn(
-            "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border",
-            active ? "border-primary bg-primary text-white" : "border-gray-300"
-          )}
-        >
-          {active ? <Check size={13} /> : null}
-        </span>
-        <span>
-          <span className="block text-sm font-semibold text-gray-950">{label}</span>
-          <span className="mt-1 block text-sm text-gray-600">{helper}</span>
-        </span>
-      </span>
-      <span className="shrink-0 text-right">
-        <span className="block text-sm font-semibold text-gray-950">{priceLabel}</span>
-        <span className="mt-1 block text-xs text-gray-500">{totalLabel}</span>
-      </span>
-    </button>
-  );
-}

@@ -8,6 +8,7 @@ export * from "./schemas/websiteContent";
 export * from "./schemas/seo";
 export * from "./types";
 export * from "./utils/bookingDates";
+export * from "./utils/stayRange";
 export * from "./utils/bookingFolio";
 export * from "./utils/bookingAddOns";
 export * from "./utils/bookingDiscounts";
@@ -43,4 +44,68 @@ export * from "./utils/uploads";
 // the public Step 2 arrival-time dropdown +
 // server-side validation).
 export * from "./utils/bookingPreferences";
+
+// Per BR-01 (Phase 13 — Breakfast Redesign, decision
+// #231, 2026-10-12): the breakfast cut-off state
+// helper (`computeBreakfastCutoffState`) + the
+// breakfast-total recompute helper
+// (`recomputeBreakfastTotal`). Both are used by the
+// guest app's Manage Booking page, the admin app's
+// booking drawer, and the server's write-side gate.
+export * from "./utils/breakfastCutoff";
+export * from "./utils/breakfastTotal";
+
+// Per OCT-H8 (2026-10-20, decision #288): the pure re-dating /
+// auto-cancel logic for a booking whose stay window moved (or was
+// cancelled). The reschedule + cancel handlers use it to drop the
+// add-on selections that fell outside the stay and to open the
+// refund liabilities the spec requires.
+export * from "./utils/bookingAddOnReschedule";
+
+// Per OCT-H5 (2026-10-20, decision #283): the deep strip of
+// `undefined`-valued keys applied to every admin settings write.
+// The Firestore SDK rejects `undefined` outright
+// (`Unsupported field value: undefined`) and the admin app does not
+// set `ignoreUndefinedProperties`, so one stray undefined-valued key
+// inside a settings payload made every save of that section fail.
+export * from "./utils/firestorePayload";
+
+// Per BR-03 (Phase 13 — Breakfast Redesign, decision
+// #232, 2026-10-12): the public breakfast-config
+// normalizer (`normalizeBreakfastConfig`) used by
+// `GET /api/bookings/breakfast/config` to strip
+// admin-only fields before serving the config to the
+// guest app's Step 2 UI.
+export * from "./utils/breakfastConfig";
+
+// Per BR-12 (Phase 14 — Other Add-Ons, decision #245
+// reserved, 2026-10-14): the per-add-on cut-off helper
+// (`computeOtherAddOnCutoffState`) + the total
+// recompute + breakdown helpers (`recomputeOtherAddOnTotal`,
+// `otherAddOnBreakdownByDate`, `hasAnyOtherAddOns`,
+// `buildOtherAddOnSelectionKey`, `parseOtherAddOnSelectionKey`)
+// + the catalog normalizer + enabler filter
+// (`normalizeAddOn`, `getEnabledAddOnsByHotel`,
+// `sortAddOnsByDisplayOrder`, `AIRPORT_TRANSFER_PRESEED`).
+// Mirrors the BR-01 + BR-03 export pattern; both the
+// guest-app Step 2 + Manage Other Add-Ons page AND the
+// admin-app booking drawer + Settings tab consume from
+// here.
+export * from "./utils/otherAddOnCutoff";
+export * from "./utils/otherAddOnTotal";
+export * from "./utils/otherAddOnDrafts";
+export * from "./utils/addOns";
+
+// Per OCT-L3 (2026-10-20, decision #299): the single shared
+// money-rounding rule (`roundToTwoDecimals`). Lives in its own module
+// so the other-add-on path, the refund liability and the breakfast
+// path can never drift onto different rounding rules again.
+export * from "./utils/money";
+
+// Per Phase 2 of the Spark Rewards tier system (2026-10-12,
+// decision pending): Zod schema + inferred types for the
+// `settings/rewardsConfig` document + `LevelDef` row. Used by
+// the Settings save route to validate admin edits before
+// writing to Firestore.
+export * from "./schemas/rewardsConfig";
 

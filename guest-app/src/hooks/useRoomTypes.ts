@@ -104,14 +104,48 @@ export function useRoomTypes(): UseRoomTypesResult {
                 corporateRate: Number(entry.corporateRate) || fallback?.corporateRate || 0,
                 maxExtraBeds: entry.maxExtraBeds ?? fallback?.maxExtraBeds,
                 extraBedRate: entry.extraBedRate ?? fallback?.extraBedRate,
-                // Per SR-01..05 (2026-10-12): the
-                // per-type bed-set-up subset. `applyRoomTypeDefaults`
+                // Per SR-01..05 (2026-10-12): the per-type
+                // bed-set-up subset. `applyRoomTypeDefaults`
                 // also normalizes this field — pass it through
                 // explicitly here so the local mapping + the
                 // helper agree on the wire shape.
+                //
+                // Per OCT-M2 (2026-10-20, decision #290): this
+                // field must NOT fall back to the
+                // `DEFAULT_ROOM_TYPES` seed. The seed was the one
+                // place the guest client and the server
+                // disagreed:
+                //
+                //   | Surface            | Field absent → |
+                //   |--------------------|---------------|
+                //   | Guest `useRoomTypes` | seed defaults |
+                //   | Shared normalizer   | `[]`          |
+                //   | Admin mapper        | `[]`          |
+                //   | Server              | `[]`          |
+                //
+                // The server VALIDATES the guest's choice against
+                // the STORED type's subset, so for a room type
+                // saved before SR-01 shipped (2026-10-12) the guest
+                // was offered `large-bed` / `twin-beds` and the
+                // server rejected BOTH with a 400 — and because the
+                // radio group had no "no preference" escape, every
+                // option 400'd and the guest was stuck with a
+                // filled-in form they could not submit.
+                //
+                // The guest now matches the server (and the admin
+                // mapper, and the shared normalizer): a stored type
+                // with no `bedSetupValues` offers NO bed set-up
+                // options, so the group does not render at all and
+                // the guest can never pick an un-offered value.
+                //
+                // The `raw.length === 0` branch above is a
+                // different case — the hotel has no stored room
+                // types at all, so the whole catalog is the
+                // seed — and it keeps the seed's own
+                // `bedSetupValues`.
                 bedSetupValues: Array.isArray(entry.bedSetupValues)
                   ? (entry.bedSetupValues as unknown[]).filter((v): v is string => typeof v === "string")
-                  : (fallback?.bedSetupValues ?? [])
+                  : []
               });
             })
             .filter((t) => t.value.length > 0);

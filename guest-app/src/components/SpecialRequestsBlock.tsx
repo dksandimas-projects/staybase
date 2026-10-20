@@ -149,12 +149,26 @@ export function SpecialRequestsBlock({
               ) : null}
             </legend>
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
-              {options.map((option) => {
+              {/* Per OCT-M2 (2026-10-20, decision #290): an
+                  explicit "No preference" option. The server
+                  always accepts the empty string (it only
+                  validates a NON-empty `selection.bedSetup`),
+                  so this is the escape hatch that guarantees the
+                  guest can always submit the form — even if the
+                  catalog changed between the page load and the
+                  submit, or the stored type's subset does not
+                  cover one of the options the guest was shown. */}
+              {[{ value: "", label: "No preference" }, ...options].map((option) => {
                 const checked = currentValue === option.value;
-                const radioId = `bed-setup-${type.value}-${option.value}`;
+                // Per OCT-M2: the "No preference" option has an
+                // empty VALUE, so its React key + DOM id get an
+                // explicit suffix (an empty key / a trailing dash
+                // would be fragile).
+                const optionKey = option.value || "no-preference";
+                const radioId = `bed-setup-${type.value}-${optionKey}`;
                 return (
                   <label
-                    key={option.value}
+                    key={optionKey}
                     htmlFor={radioId}
                     className={`flex min-h-[44px] cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
                       checked

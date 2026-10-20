@@ -44,7 +44,11 @@ export function CorporateInquiriesPage() {
   const [convertCheckIn, setConvertCheckIn] = useState("");
   const [convertCheckOut, setConvertCheckOut] = useState("");
   const [convertGuests, setConvertGuests] = useState(2);
-  const [convertHasBreakfast, setConvertHasBreakfast] = useState(false);
+  // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+  // corporate-inquiry conversion's `hasBreakfast` toggle is
+  // removed. Corporate groups negotiate their own catering
+  // separately from the room rate; the inquiry conversion
+  // no longer carries an "Include daily breakfast" checkbox.
   const [convertPaymentMethod, setConvertPaymentMethod] = useState("chargeback");
   const [convertRateOverride, setConvertRateOverride] = useState("");
   const [convertSubmitting, setConvertSubmitting] = useState(false);
@@ -166,7 +170,6 @@ export function CorporateInquiriesPage() {
     setConvertCheckIn(selectedInquiry.preferredDates?.from || "");
     setConvertCheckOut(selectedInquiry.preferredDates?.to || "");
     setConvertGuests(Math.max(1, Number(selectedInquiry.numRooms) || 2));
-    setConvertHasBreakfast(false);
     setConvertPaymentMethod("chargeback");
     setConvertRateOverride("");
     setConvertError("");
@@ -205,7 +208,6 @@ export function CorporateInquiriesPage() {
       checkIn: convertCheckIn,
       checkOut: convertCheckOut,
       guests: convertGuests,
-      hasBreakfast: convertHasBreakfast,
       paymentMethod: convertPaymentMethod,
       ratePerNightOverride: rateOverride
     });
@@ -628,16 +630,6 @@ export function CorporateInquiriesPage() {
                   <option value="chargeback">Chargeback to Company</option>
                   <option value="pay-at-hotel">Pay at Hotel (Guest)</option>
                 </select>
-              </label>
-
-              <label className="flex min-h-[44px] items-center gap-2 rounded-lg border border-gray-200 bg-white px-2.5 text-[10px] font-bold text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={convertHasBreakfast}
-                  onChange={(e) => setConvertHasBreakfast(e.target.checked)}
-                  className="h-4 w-4 accent-primary"
-                />
-                Include daily breakfast
               </label>
 
               <label className="flex flex-col gap-1.5 text-[10px] font-bold text-gray-500">

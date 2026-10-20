@@ -24,14 +24,39 @@ service firebase.storage {
       allow write: if isStaff();
     }
 
+    // Per PR-AUDIT-B7 (2026-10-20): the guest-uploaded proof paths
+    // were `allow write: if true` — ANY anonymous caller could upload
+    // to ANY of these paths (the guest controls the `bookingId` /
+    // `roomNumber` path segment) with NO size or content-type bound.
+    // That is an unbounded storage-abuse / quota vector, and it
+    // defeats the client-side validation entirely (a client check is
+    // a UX affordance, not an access control).
+    //
+    // The fix binds the write to the same contract the client
+    // enforces — `image/jpeg` | `image/png` | `image/webp`, ≤ 5 MB
+    // (`MAX_UPLOAD_BYTES` in `BookingPage.tsx` + `IntercomPage.tsx`).
+    // `request.resource.size` and `request.resource.contentType` are
+    // available on Storage writes (the JS SDK always sends the
+    // metadata), so the rule is evaluated server-side by Firebase.
+    // Reads stay staff-only — a guest can never read back a proof.
+    //
+    // NOT yet addressed: scoping the write to the OWNING booking
+    // (the guest could still write into another booking's path).
+    // That needs a server-issued upload token carried in the upload
+    // metadata, per `plan/docs/SECURITY.md` — tracked, not shipped
+    // here. Its practical impact is low: the admin renders proofs
+    // from the URL stored ON THE BOOKING DOC, never by listing the
+    // folder, so a planted object is never surfaced in the UI.
     match /bookings/{bookingId}/payment-proof/{fileName} {
       allow read: if isStaff();
-      allow write: if true;
+      allow write: if request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType in ["image/jpeg", "image/png", "image/webp"];
     }
 
     match /bookings/{bookingId}/discount-id/{fileName} {
       allow read: if isStaff();
-      allow write: if true;
+      allow write: if request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType in ["image/jpeg", "image/png", "image/webp"];
     }
 
     match /bookings/{bookingId}/guest-id/{fileName} {
@@ -84,6 +109,18 @@ service firebase.storage {
       allow write: if isStaff();
     }
 
+    // Per MBUX-04 (decision #256, 2026-10-15): optional breakfast
+    // meal thumbnails, uploaded from Settings → Dining. Public read —
+    // the guest Step 2 add-ons menu strip renders them inline, and
+    // the reference is a normal Firebase download URL. Staff-only
+    // write. The `{mealId}` segment scopes each meal's folder so a
+    // replace on one meal can never overwrite another meal's object
+    // (the same discipline the payment-method QR path uses).
+    match /breakfast-meals/{mealId}/{fileName} {
+      allow read: if true;
+      allow write: if isStaff();
+    }
+
     match /store-items/{itemId}/{fileName} {
       allow read: if true;
       allow write: if isStaff();
@@ -95,7 +132,8 @@ service firebase.storage {
     // guest-app/src/pages/IntercomPage.tsx).
     match /store-orders/{roomNumber}/payment-proof/{fileName} {
       allow read: if isStaff();
-      allow write: if true;
+      allow write: if request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType in ["image/jpeg", "image/png", "image/webp"];
     }
   }
 }

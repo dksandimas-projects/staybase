@@ -209,7 +209,23 @@ export async function handleCreateStoreOrder(req: any, res: any) {
   if (paymentProofPath && (!paymentProofPath.startsWith(expectedProofPrefix) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(proofFileName))) {
     return res.status(400).json({ success: false, error: "Invalid payment proof path." });
   }
-  if (isOnlinePaymentMethod && !paymentProofPath && !body.paymentProofUrl) {
+  // Per PR-AUDIT-B7 (2026-10-20): `paymentProofPath` is prefix-validated
+  // (above), but `paymentProofUrl` was written to the order doc
+  // VERBATIM — while the admin renders that field as a link, so a
+  // caller could plant an arbitrary URL in an order the desk is
+  // looking at. The current guest client never sends `paymentProofUrl`
+  // at all (it sends only the path — `IntercomPage.tsx`), so this
+  // field is legacy-only on the write path. Validate it to a
+  // Firebase Storage download URL under THIS room's proof folder and
+  // drop it otherwise — an untrusted URL must never reach the desk.
+  const rawPaymentProofUrl = typeof body.paymentProofUrl === "string" ? body.paymentProofUrl.trim() : "";
+  const encodedProofPrefix = encodeURIComponent(expectedProofPrefix);
+  const paymentProofUrl =
+    rawPaymentProofUrl.startsWith("https://firebasestorage.googleapis.com/") &&
+    rawPaymentProofUrl.includes(encodedProofPrefix)
+      ? rawPaymentProofUrl
+      : "";
+  if (isOnlinePaymentMethod && !paymentProofPath && !paymentProofUrl) {
     return res.status(400).json({ success: false, error: "Payment proof is required for this method." });
   }
 
@@ -327,7 +343,7 @@ export async function handleCreateStoreOrder(req: any, res: any) {
         items: orderItems,
         totalAmount,
         paymentMethod: body.paymentMethod,
-        paymentProofUrl: body.paymentProofUrl || "",
+        paymentProofUrl: paymentProofUrl || "",
         paymentProofPath: paymentProofPath || "",
         status: "placed",
         stockRestoredAt: null,
