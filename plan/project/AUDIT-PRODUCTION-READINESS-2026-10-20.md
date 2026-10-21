@@ -142,6 +142,44 @@ standard `JavaVirtualMachines` locations → `java` on PATH) and, if none is
 found, **fails loudly with an actionable message** instead of letting the
 gate be skipped. A missing JVM must never look like a passing gate.
 
+### Post-release finding — a rule defect that the 74-test suite could not see
+
+The rules fix itself shipped a defect. Found on 2026-10-21, **after**
+`intercomSessions/{token}/messages` was live in production (VERSION 2.18.5).
+
+**The bug:** the block shipped `allow create: if false`. The desk's reply is
+a client-side `addDoc` into that exact collection
+(`AdminContext` — `collection(db, "intercomSessions", sessionToken,
+"messages")`). `create` and `update` are **distinct** operations, so
+`allow update: if isStaff()` did not admit a new reply document. Every desk
+reply came back `PERMISSION_DENIED`: the guest's message arrived (the server
+writes it), the desk saw it in the inbox, and the reply was rejected. The
+guest-facing intercom was one-way.
+
+A second, quieter defect in the same block: `callSessions/{token}` shipped
+`allow read, write: if true` next to `allow delete: if isStaff()`. In
+Firestore rules `write` is shorthand for `create` + `update` + `delete`, and
+matching allows are OR'd — so the unconditional `write` granted delete and
+the staff-only delete line was **dead code**. The real behaviour was the
+opposite of the stated intent (the guest legitimately deletes its own call
+session on hang-up).
+
+**Why the suite missed it:** all 74 assertions were shaped around
+*collections* ("the guest cannot read `intercoms/{room}/messages`"), not
+around *writers*. Nothing created a message the way the desk does. A rule is
+a contract with a writer, not a shape — and no test exercised the desk's
+actual client call.
+
+**Fixed and pinned.** `allow create: if isStaff()` (the guest path is
+unaffected — the server writes through the Admin SDK, which bypasses rules
+entirely), and the call-session blocks now spell out
+`allow read, create, update, delete: if true` so the intent matches the
+behaviour. New file
+`firebase/tests/intercom-session-write-paths.emulator.test.ts` (5 tests)
+exercises the desk's create, the guest's `isRead`-only update, the guest's
+hang-up delete, and the ICE-candidate writes. **Suite: 79 tests, 79 passed,
+9 files.** Decision #309 records the two rule-language facts.
+
 
 ---
 

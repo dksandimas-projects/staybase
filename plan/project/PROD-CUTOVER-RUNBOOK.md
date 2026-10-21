@@ -221,3 +221,28 @@ is lost, it is only not yet visible to the desk.
 2. **`settings/breakfastConfig` and `settings/rewardsConfig` are still in the 1.x shape.** `breakfastConfig` has `silogItems` (not `meals`) and no `cutoffTime` / `servedGraceMinutes`; `rewardsConfig` has no `levels[]`, so the Spark Rewards tier system has no tiers configured. Both degrade gracefully (the admin app hydrates the legacy `silogItems` shape and falls back to defaults), but the hotel should re-save both in admin Settings to write the 2.x shape.
 3. **No `qrToken` on any production room** (see PC-06 above).
 4. **`npm run preflight` fails on the documentation audit** (the 18-error `docs:audit` baseline). It is a standing gate and the doc budget is 3.5× over — worth a compaction pass.
+
+### Hotfix 2026-10-21 — the desk could not reply in the session thread
+
+**Found, fixed and re-deployed the same day.** The capability-session rules
+that shipped in 2.18.5 set `intercomSessions/{token}/messages` to
+`allow create: if false`. The desk's reply is a client-side `addDoc` into
+that collection, and `create` is a **distinct** operation from `update`, so
+`allow update: if isStaff()` did not cover it. **Every desk reply was
+rejected with `PERMISSION_DENIED`** — the guest's message arrived, the desk
+saw it in the inbox, and the reply failed. The intercom was one-way.
+
+Fixed to `allow create: if isStaff()` (the guest path is unaffected: the
+server writes through the Admin SDK, which bypasses rules entirely), and the
+`callSessions` blocks now spell out `allow read, create, update, delete: if
+true` — a neighbouring `allow delete: if isStaff()` had been **dead code**
+(`write` ⊇ create + update + delete, and matching allows are OR'd), while the
+real intent is that the token holder owns the session and deletes it on
+hang-up.
+
+Pinned by `firebase/tests/intercom-session-write-paths.emulator.test.ts`
+(5 tests). **Suite: 79 tests, 79 passed, 9 files.** Decision #309. The
+generalisable lesson, now in the audit report: *a rule is a contract with a
+WRITER, not a shape — every writer path needs a test that exercises the
+actual client call.* The 74-assertion suite asserted collection shapes and
+never created a message the way the desk does.

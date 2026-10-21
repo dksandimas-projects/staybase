@@ -184,8 +184,12 @@ Full rules in `firebase/firestore.rules`. Summary and intent:
   cannot read the next guest's messages.
 - Read: allowed (capability). Create: the guest cannot create message
   documents — `POST /api/intercom/send-message` writes them through the Admin
-  SDK after verifying the stay server-side. Update: the guest may set
-  `isRead` in their own thread, nothing else. Delete: staff.
+  SDK after verifying the stay server-side. **Staff CAN create** — the desk's
+  reply is a client-side `addDoc` into this same collection, and `create` is a
+  distinct operation from `update`, so denying `create` outright denied every
+  desk reply (live bug, found and fixed 2026-10-21 after 2.18.5 shipped).
+  Update: the guest may set `isRead` in their own thread, nothing else; staff
+  may update any field. Delete: staff.
 - The desk's inbox reads BOTH paths with one collection-group query over
   `messages` (`match /{path=**}/messages/{messageId}` grants staff read).
 
@@ -207,7 +211,11 @@ Full rules in `firebase/firestore.rules`. Summary and intent:
   32-hex session token, so an anonymous caller can neither read nor forge a
   call session without holding it. The token is the same
   `intercoms/{roomId}.currentStayToken` the desk already reads.
-- Read/Write: allowed (capability). Delete: staff.
+- Read/Write/Delete: allowed (capability). The token holder owns the session
+  document, **including delete** — the guest cleans up its own call session on
+  hang-up. (A separate `allow delete: if isStaff()` next to an unconditional
+  `allow write: if true` is dead code: `write` is shorthand for create +
+  update + delete and matching allows are OR'd.)
 - Staff trained not to share PII (booking refs, payment details) via intercom chat
 
 ---

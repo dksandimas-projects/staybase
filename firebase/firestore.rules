@@ -591,9 +591,23 @@ service cloud.firestore {
       match /messages/{messageId} {
         // Capability read — see the block comment above.
         allow read: if true;
-        // Guest messages are written by the server endpoint only
-        // (it verifies the stay and stamps the guest's identity).
-        allow create: if false;
+        // Guest messages are written by the SERVER endpoint only (it
+        // verifies the stay and stamps the guest's identity). The
+        // server uses the Admin SDK, which bypasses rules entirely, so
+        // this branch never needs to admit a guest client.
+        //
+        // STAFF create is REQUIRED, and was a live production bug:
+        // the desk's reply is a client-side `addDoc` into this same
+        // collection (AdminContext — `collection(db, "intercomSessions",
+        // sessionToken, "messages")`). `create` and `update` are
+        // DISTINCT operations, so `allow update: if isStaff()` does not
+        // cover a new reply document. A blanket `allow create: if
+        // false` therefore denied EVERY desk reply with
+        // PERMISSION_DENIED — the guest's message arrived (the server
+        // writes it), the desk saw it in the inbox, and the reply was
+        // rejected. Proven in the emulator on 2026-10-21, against the
+        // rule that shipped live in 2.18.5.
+        allow create: if isStaff();
         // The guest marks the desk's messages as read in their own
         // thread; no other field may be touched.
         allow update: if isStaff()
@@ -606,12 +620,22 @@ service cloud.firestore {
       // Capability read/write — see the block comment above. The
       // guest writes the WebRTC offer and ICE candidates; the desk
       // writes the answer. Both sides hold the same token.
-      allow read, write: if true;
-      allow delete: if isStaff();
+      //
+      // DELETE is included DELIBERATELY: the guest cleans up its own
+      // call session on hang-up (`deleteDoc(doc(db, "callSessions",
+      // sessionToken))` in IntercomPage.tsx). A separate
+      // `allow delete: if isStaff()` here was DEAD CODE — in Firestore
+      // rules `write` is shorthand for create + update + delete, and
+      // matching allow statements are OR'd, so the unconditional
+      // `write` granted delete regardless of what the delete line
+      // said. The token holder owns this document; spelling the
+      // operations out states that intent instead of contradicting it.
+      allow read, create, update, delete: if true;
 
       match /iceCandidates/{candidateId} {
-        allow read, write: if true;
-        allow delete: if isStaff();
+        // Same ownership model as the parent session document — the
+        // token holder adds and removes its own ICE candidates.
+        allow read, create, update, delete: if true;
       }
     }
 
