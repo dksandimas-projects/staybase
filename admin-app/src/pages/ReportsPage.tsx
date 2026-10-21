@@ -14,6 +14,11 @@ import {
 import { formatPrice } from "../utils/format";
 import { useBreakpoint } from "../utils/useBreakpoint";
 import { getReportOccupancySplit } from "../utils/reportOccupancy";
+// Per RPT-13 (QA pass 2026-10-21): the single resolver for "which
+// booking does this incidental charge belong to?". The live listener
+// and the XLSX export both use it, so the receivables table and the
+// backup sheet can no longer disagree.
+import { resolveChargeBookingId } from "../utils/chargeBookingId";
 import {
   AlertTriangle, BarChart3, Download, DollarSign, Users, Home,
   TrendingUp, Utensils, Coffee, Package, ShoppingBag, FileSpreadsheet,
@@ -279,7 +284,14 @@ export function ReportsPage() {
     const unsubscribe = onSnapshot(collectionGroup(db, "charges"), (snapshot) => {
       setRawCharges(snapshot.docs.map((chargeDoc) => {
         const data = chargeDoc.data();
-        const bookingId = chargeDoc.ref.parent.parent?.id || "";
+        // Per RPT-13 (QA pass 2026-10-21): the booking a charge
+        // belongs to is the STAMPED `data.bookingId`, not the path's
+        // parent id. A reservation-scope charge
+        // (`reservations/{rid}/charges/{cid}`) has the RESERVATION as
+        // its path parent, so the old path-parent lookup never
+        // matched a booking — every charge dropped out of the
+        // receivables report (₱1,350 invisible in production).
+        const bookingId = resolveChargeBookingId(chargeDoc.ref.path, data);
         return {
           id: chargeDoc.id,
           bookingId,
@@ -1868,22 +1880,15 @@ export function ReportsPage() {
         // #159): incidental charges for new reservations
         // live at `reservations/{id}/charges/{chargeId}`
         // — a SEPARATE subcollection from the booking's
-        // `charges/`. The pre-RPT-05 resolution used the
-        // path's parent id directly as the bookingId,
-        // which is wrong for reservation-scope charges
-        // (parent = reservationId, not bookingId), leaving
-        // the Booking Ref + Room cells blank in the Full
-        // Backup XLSX Charges sheet. Prefer the stamped
-        // `data.bookingId` (written by every new-reservation
-        // charge handler), fall back to the path's parent
-        // for the legacy path. The bookingRef resolution
-        // is the same `bookings.find(...)` lookup the
-        // refunds + new-reservation-payments loops use.
-        const pathParentId = chargeDoc.ref.parent.parent?.id || "";
-        const isReservationCharge = chargeDoc.ref.path.startsWith("reservations/");
-        const bookingId = isReservationCharge
-          ? String(charge.bookingId || pathParentId)
-          : pathParentId;
+        // `charges/`.
+        //
+        // Per RPT-13 (QA pass 2026-10-21): both this export loop AND
+        // the live listener now resolve the booking through the
+        // shared `resolveChargeBookingId` helper. The export path was
+        // already correct (it preferred the stamped `data.bookingId`);
+        // the live listener was not, so the page had two resolvers
+        // that disagreed and the receivables table lost every charge.
+        const bookingId = resolveChargeBookingId(chargeDoc.ref.path, charge);
         const booking = bookings.find((item) => item.id === bookingId);
         chargeRows.push({
           "Booking Ref": booking?.bookingRef || bookingId,

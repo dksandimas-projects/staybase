@@ -31,6 +31,7 @@
 
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
+import { resolveChargeBookingId } from "../utils/chargeBookingId";
 import { resolve } from "node:path";
 
 const reports = readFileSync(resolve(__dirname, "../pages/ReportsPage.tsx"), "utf8");
@@ -101,9 +102,15 @@ describe("RPT-05 — Full Backup XLSX reads reservation-scope payments + charges
     // charge, leaving the Booking Ref + Room cells
     // blank in the spreadsheet. The fix prefers the
     // stamped `data.bookingId` for reservation paths.
-    expect(exportSource).toMatch(/const isReservationCharge = chargeDoc\.ref\.path\.startsWith\("reservations\/"\)/);
+    //
+    // Per RPT-13 (QA pass 2026-10-21): the export and the LIVE
+    // listener now share one resolver — `resolveChargeBookingId` —
+    // because the live listener had the pre-RPT-05 bug and dropped
+    // every charge out of the receivables report. The behaviour is
+    // unchanged here (prefer the stamp); only the shape moved into
+    // the shared helper so the two cannot drift apart again.
     expect(exportSource).toMatch(
-      /const bookingId = isReservationCharge\s*\n?\s*\? String\(charge\.bookingId \|\| pathParentId\)\s*\n?\s*: pathParentId/
+      /const bookingId = resolveChargeBookingId\(chargeDoc\.ref\.path, charge\);/
     );
   });
 
@@ -258,11 +265,14 @@ describe("RPT-05 — runtime assertion (the durable guard the regex tests miss)"
       }
     };
 
-    const pathParentId = reservationChargeFixture.parentDocumentId;
-    const isReservationCharge = reservationChargeFixture.refPath.startsWith("reservations/");
-    const bookingId = isReservationCharge
-      ? String(reservationChargeFixture.data.bookingId || pathParentId)
-      : pathParentId;
+    // Per RPT-13 (QA pass 2026-10-21): exercise the SHIPPED resolver
+    // rather than a copy of its logic. The previous inline
+    // re-implementation was exactly the drift pattern that let the
+    // live listener and the export disagree.
+    const bookingId = resolveChargeBookingId(
+      reservationChargeFixture.refPath,
+      reservationChargeFixture.data
+    );
     const booking = bookings.find((item) => item.id === bookingId);
 
     chargeRows.push({
