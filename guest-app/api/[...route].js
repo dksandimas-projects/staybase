@@ -221220,7 +221220,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.18.6";
+    VERSION2 = "2.18.8";
   }
 });
 
@@ -223739,9 +223739,18 @@ function deriveRoomTypeCapacityFit(input) {
   const numAdults = Math.max(0, Math.floor(Number(input.numAdults) || 0));
   const numChildren = Math.max(0, Math.floor(Number(input.numChildren) || 0));
   const currentCartCount = Math.max(0, Math.floor(Number(input.currentCartCount) || 0));
-  const totalAdultCap = currentCartCount * maxCapacity;
-  const totalChildrenCap = currentCartCount * maxChildren;
-  const totalExtraBeds = currentCartCount * maxExtraBeds;
+  const safeAdultCap = Math.max(1, maxCapacity);
+  const safeChildrenCap = Math.max(1, maxChildren);
+  const roomsNeeded = Math.max(
+    1,
+    Math.ceil(numAdults / safeAdultCap),
+    Math.ceil(numChildren / safeChildrenCap)
+  );
+  const basis = input.basis === "type" ? "type" : "cart";
+  const evaluatedCartCount = basis === "type" ? Math.max(currentCartCount, roomsNeeded) : currentCartCount;
+  const totalAdultCap = evaluatedCartCount * maxCapacity;
+  const totalChildrenCap = evaluatedCartCount * maxChildren;
+  const totalExtraBeds = evaluatedCartCount * maxExtraBeds;
   const overflowAdults = Math.max(0, numAdults - totalAdultCap);
   const overflowChildren = Math.max(0, numChildren - totalChildrenCap);
   const totalOverflow = overflowAdults + overflowChildren;
@@ -223757,13 +223766,6 @@ function deriveRoomTypeCapacityFit(input) {
   } else {
     state = "tight";
   }
-  const safeAdultCap = Math.max(1, maxCapacity);
-  const safeChildrenCap = Math.max(1, maxChildren);
-  const roomsNeeded = Math.max(
-    1,
-    Math.ceil(numAdults / safeAdultCap),
-    Math.ceil(numChildren / safeChildrenCap)
-  );
   const extraBedsNeeded = totalOverflow > 0 && totalOverflow <= totalExtraBeds ? totalOverflow : 0;
   return { state, roomsNeeded, extraBedsNeeded };
 }
@@ -230151,14 +230153,14 @@ function computeRefundPaidAmountDelta(currentPaidAmount, refundAmountPositive) {
   const safeRefund = Number.isFinite(refundAmountPositive) ? refundAmountPositive : 0;
   return safe - Math.max(0, safeRefund);
 }
-function resolveRefundDocParent(transaction, bookingId, category, reservationId) {
-  const bookingRef2 = transaction.firestore.collection("bookings").doc(bookingId);
+function resolveRefundDocParent(db, bookingId, category, reservationId) {
+  const bookingRef2 = db.collection("bookings").doc(bookingId);
   if (category === "breakfast" || category === "otherAddOn") {
     return { parent: bookingRef2, collection: "refunds" };
   }
   if (reservationId && String(reservationId).trim().length > 0) {
     return {
-      parent: transaction.firestore.collection("reservations").doc(String(reservationId)),
+      parent: db.collection("reservations").doc(String(reservationId)),
       collection: "refunds"
     };
   }
@@ -230175,6 +230177,7 @@ function markRefundPaid(input) {
     reason,
     actor,
     transaction,
+    db,
     category,
     slotKey,
     mealSnapshot,
@@ -230188,8 +230191,8 @@ function markRefundPaid(input) {
   const safeReason = trimOrNull(reason, 500);
   const safeAmount = Number.isFinite(amount) && amount > 0 ? amount : 0;
   const currentPaid = Number.isFinite(currentPaidAmount) ? Number(currentPaidAmount) || 0 : 0;
-  const pathParent = resolveRefundDocParent(transaction, bookingId, category, reservationId);
-  const bookingRef2 = transaction.firestore.collection("bookings").doc(bookingId);
+  const pathParent = resolveRefundDocParent(db, bookingId, category, reservationId);
+  const bookingRef2 = db.collection("bookings").doc(bookingId);
   const refundRef = pathParent.parent.collection(pathParent.collection).doc(refundId);
   if (category === "breakfast" || category === "otherAddOn") {
     if (!existingDoc || !existingDoc.exists) {
@@ -236438,6 +236441,7 @@ async function handleAddRefund(req, res) {
         note: safeReason,
         actor: { uid: String(req.staff.uid || "admin"), role: "admin" },
         transaction,
+        db: adminDb,
         existingDoc: refundDocSnap,
         currentPaidAmount: Number(bookingData2.paidAmount || 0),
         reservationId: bookingReservationId2.length > 0 ? bookingReservationId2 : null
@@ -239611,7 +239615,32 @@ var InquiryPreferredDatesSchema = external_exports.object({
 });
 var inquirySchema = external_exports.object({
   companyName: external_exports.string().trim().min(1).max(120),
-  contactPerson: external_exports.string().trim().min(1).max(120),
+  // Per CORP-INQ-01 (QA pass 2026-10-21): `contactPerson` is
+  // OPTIONAL, not required.
+  //
+  // The public corporate form (`guest-app/src/pages/CorporateStaysPage.tsx`,
+  // the "Request Corporate Rates" block) collects the contact's FIRST
+  // and LAST name as two separate fields and sends
+  // `{ firstName, lastName, ... }` — it never sends a flat
+  // `contactPerson`. The form's own comment claimed "`contactPerson`
+  // is derived server-side as `${firstName} ${lastName}`", but NO such
+  // derivation existed: the schema below required `contactPerson`, so
+  // EVERY inquiry submitted through the public form failed Zod
+  // validation and the endpoint answered HTTP 400 "Please check the
+  // inquiry form and try again.".
+  //
+  // Confirmed in production on 2026-10-21: the `corporateInquiries`
+  // collection was EMPTY (0 docs) — no corporate lead had ever
+  // reached the pipeline through the public form. The admin-side
+  // inquiry fixtures that did exist were written directly.
+  //
+  // The handler now derives `contactPerson` from the structured
+  // names before storing, so legacy readers (the email templates, the
+  // convert path's `contactPerson` split fallback) still see the flat
+  // field. The change is strictly MORE PERMISSIVE than before: a
+  // client that sent `contactPerson` still works unchanged, and a
+  // client that sends `firstName` + `lastName` now works too.
+  contactPerson: external_exports.string().trim().min(1).max(120).optional(),
   email: external_exports.string().trim().email().max(160),
   phone: external_exports.string().trim().min(6).max(40),
   numRooms: external_exports.coerce.number().int().min(1).max(500),
@@ -239626,7 +239655,10 @@ var inquirySchema = external_exports.object({
   // that only send `contactPerson`.
   firstName: external_exports.string().trim().min(1).max(80).optional(),
   lastName: external_exports.string().trim().min(1).max(80).optional()
-}).strict();
+}).strict().refine(
+  (value) => Boolean(value.contactPerson) || Boolean(value.firstName) || Boolean(value.lastName),
+  { message: "A contact name is required (contactPerson, or firstName + lastName)." }
+);
 var convertInquirySchema = external_exports.object({
   inquiryId: external_exports.string().trim().min(1).max(160),
   bookingId: external_exports.string().trim().min(1).max(120),
@@ -239654,8 +239686,10 @@ async function handleCreateCorporateInquiry(req, res) {
       error: "Please check the inquiry form and try again."
     });
   }
+  const derivedContactPerson = parsed2.data.contactPerson || [parsed2.data.firstName, parsed2.data.lastName].filter(Boolean).join(" ") || "";
   const inquiry = {
     ...parsed2.data,
+    contactPerson: derivedContactPerson,
     status: "new",
     handler: "",
     notes: [],
@@ -240359,11 +240393,6 @@ async function handleRegisterMember(req, res) {
       const counterDoc = await transaction.get(counterRef);
       const sequence = counterDoc.exists ? (counterDoc.data()?.count || 0) + 1 : 1;
       memberNumber = generateMemberNumber(hotel_config_default.memberNumberPrefix || "SR", sequence);
-      if (counterDoc.exists) {
-        transaction.update(counterRef, { count: sequence, updatedAt: now });
-      } else {
-        transaction.set(counterRef, { count: sequence, createdAt: now, updatedAt: now });
-      }
       const fullName = parsed2.data.fullName || authUser.name || email.split("@")[0];
       const photoUrl = parsed2.data.photoUrl || authUser.picture || "";
       const rewardsDoc = await adminDb.collection("settings").doc("rewardsConfig").get();
@@ -240382,6 +240411,11 @@ async function handleRegisterMember(req, res) {
         }
       }
       const initialRewardsPoints = (Number(existingMember?.rewardsPoints) || 0) + welcomeAmount;
+      if (counterDoc.exists) {
+        transaction.update(counterRef, { count: sequence, updatedAt: now });
+      } else {
+        transaction.set(counterRef, { count: sequence, createdAt: now, updatedAt: now });
+      }
       transaction.set(memberRef, {
         fullName,
         email,
@@ -244000,6 +244034,7 @@ async function handleMarkRefundPaid(req, res) {
           note: trimmedNote,
           actor: { uid: staff.uid, role: staff.role },
           transaction,
+          db: adminDb,
           existingDoc: refundSnap,
           currentPaidAmount: Number(bookingSnap.data()?.paidAmount || 0),
           slotKey: String(refundSnap.data()?.slotKey || "")
@@ -245193,6 +245228,7 @@ async function handleMarkRefundPaidAddOns(req, res) {
           note: trimmedNote,
           actor: { uid: staff.uid, role: staff.role },
           transaction,
+          db: adminDb,
           existingDoc: refundSnap,
           currentPaidAmount: Number(bookingData2.paidAmount || 0),
           slotKey: selectionKey
@@ -245708,6 +245744,7 @@ async function handleMarkRefundPaidStandalone(req, res) {
           note: trimmedNote,
           actor: { uid: staff.uid, role: staff.role },
           transaction,
+          db: adminDb,
           existingDoc: refundSnap,
           currentPaidAmount: Number(bookingSnap.data()?.paidAmount || 0),
           slotKey: String(refundSnap.data()?.slotKey || "")

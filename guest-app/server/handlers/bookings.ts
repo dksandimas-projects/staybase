@@ -9772,6 +9772,8 @@ export async function handleAddRefund(req: any, res: any) {
         note: safeReason,
         actor: { uid: String(req.staff.uid || "admin"), role: "admin" },
         transaction,
+
+        db: adminDb,
         existingDoc: refundDocSnap,
         currentPaidAmount: Number((bookingData as any).paidAmount || 0),
         reservationId: bookingReservationId.length > 0 ? bookingReservationId : null
