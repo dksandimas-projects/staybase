@@ -135,6 +135,7 @@
 - ⬜ **H7 — failed emails have no retry path** — the DLQ exists and is correctly admin-read-only, but there is no retry route and no retry button; `retryCount` is always 0.
 - ⬜ **H8 — no recurring finance reconciliation** — `scripts/finance-integrity-scan.ts` is a manual one-off CLI; nothing reconciles the ledger against bookings nightly.
 - ⬜ **H9 — the launch QA gates below are untouched** (Phase 8 intercom QA · Phase 10 security · Phase 11 staging + cutover · Phase 11.7 admin mobile matrix · BDUX). **The intercom refactor in decision #306 has never been exercised end-to-end** — no guest + desk + WebRTC pass has been run against the new session paths, which makes the Phase 8 QA list above a hard prerequisite, not a formality.
+- ✅ **Shipped to production 2026-10-21** (`dev` → `main`, VERSION 1.11.0 → 2.18.5, merge `ba405b5`). App deployed first, rules shipped second (GOTCHAS.md §Firebase / INC-01). Live prod rules verified byte-identical to the repo (49 blocks); prod finance scan 0 findings; both apps confirmed live at 2.18.5. **Full record + the 4 owner-action findings: `plan/project/PROD-CUTOVER-RUNBOOK.md §Production release 2026-10-21`.**
 
 ---
 
@@ -147,27 +148,27 @@
 ## Phase 11 — Staging & Launch
 
 ### Staging (25% payment milestone)
-- ⬜ `dev` branch merged to `main` at `v0.9.0` — operational step after client approval
+- ✅ `dev` branch merged to `main` — **done 2026-10-21** at VERSION 2.18.5 (merge `ba405b5`; the earlier `v0.9.0` milestone is superseded). App deployed first, rules shipped second, per GOTCHAS.md §Firebase (INC-01)
 - ⬜ Staging URLs live and shared with client — operational
 - ⬜ Client review session — bookings, dashboard, intercom — operational
 - ⬜ Feedback collected and addressed — operational
 - ⬜ Firestore rules tested with real client data — operational
 - ✅ Production launch procedure documented — `plan/project/DEPLOY.md`
-- ✅ Pre-launch verification script — `npm run preflight`
+- ✅ Pre-launch verification script — `npm run preflight` *(currently FAILS on §10 — the 18-error `docs:audit` baseline; see the release record in `PROD-CUTOVER-RUNBOOK.md`)*
 
 ### Production Launch & Cutover (PC-05..06)
-- ⬜ Domain `sparkinnbohol.com` purchased and configured — operational
-- ⬜ Vercel custom domains set (`www.sparkinnbohol.com`, `admin.sparkinnbohol.com`) — operational
-- ⬜ VERSION bumped to `v1.0.0` via `release:` commit — operational
-- ⬜ Final `dev` → `main` merge — operational
-- ⬜ All 14 rooms seeded with real data + photos — operational
+- ✅ Domain `sparkinnbohol.com` configured — the live site serves from `www.sparkinnbohol.com` against the `spark-inn-prod` Firebase project (verified 2026-10-21)
+- ✅ Vercel custom domains live (`www.sparkinnbohol.com`, `admin.sparkinnbohol.com`) — both verified serving VERSION 2.18.5 on 2026-10-21
+- ⬜ VERSION bumped to `v1.0.0` via `release:` commit — operational *(the 2.0.0 MAJOR cutover already shipped on `dev`; a `release:` tag for the 2.x line is still outstanding)*
+- ✅ Final `dev` → `main` merge — **done 2026-10-21** (`ba405b5`)
+- ⬜ All 14 rooms seeded with real data + photos — operational *(14 rooms exist; room-type photos and payment-method QR images were never uploaded in either environment)*
 - ⬜ Hotel config + website content finalized by client — operational
 - ⬜ First admin account created for hotel owner — operational
 - ⬜ Client training session (booking management, settings, intercom) — operational
-- ⬜ Deployment confirmed live on both domains — operational
-- ⬜ **PC-05 — Archive + data carry-over** — Full Backup XLSX + `gcloud firestore export` archive, then recreate active staff accounts in production Auth/Firestore.
-- ⬜ **PC-06 — Cutover + smoke test** — freeze window, Production redeploy, preflight, end-to-end smoke booking on prod (then cancel/refund), email triggers, integrity scan, rules verification, QR spot-check, local key file deleted, first real Daily Close.
-- ⬜ Verify live: a GCash test booking passes Step 3 with proof upload; a guest intercom message + quick request deliver to the admin inbox
+- ✅ Deployment confirmed live on both domains — **done 2026-10-21**; VERSION 2.18.5 on both, old 1.11.0 absent
+- ⬜ **PC-05 — Archive + data carry-over** — Full Backup XLSX + `gcloud firestore export` archive, then recreate active staff accounts in production Auth/Firestore. *(Runbook marks PC-05 done 2026-07-14, clean slate per decision #119.)*
+- 🔶 **PC-06 — Cutover + smoke test** — **partially done 2026-10-21.** ✅ Production redeploy · ✅ rules deploy + live-vs-repo verification (byte-identical, 49 blocks) · ✅ `finance-integrity-scan.ts` against prod (0 findings) · ✅ local service-account key confirmed absent from `~/Downloads` · ✅ intercom QR URL resolves (doc-ID fallback). ❌ freeze window not announced · ❌ staff sign-in not verified · ❌ end-to-end smoke booking not run · ❌ email triggers not verified · ⚠️ preflight fails on the docs audit · ❌ first real Daily Close. **Full record: `plan/project/PROD-CUTOVER-RUNBOOK.md §Production release 2026-10-21`.**
+- ⬜ Verify live: a GCash test booking passes Step 3 with proof upload; a guest intercom message + quick request deliver to the admin inbox — **still open, and now the single most important unverified path** (the intercom refactor in decision #306 has never been exercised end-to-end against production)
 - ⬜ Confirm no stuck bookings/guests during the breakage window (check Resend logs / booking creation rate between the 2026-07-17 rules deploy and PR #118)
 
 ---

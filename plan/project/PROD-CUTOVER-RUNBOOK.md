@@ -162,20 +162,62 @@ catalog + any real vouchers/corporate codes directly on prod when needed.
 
 ## PC-06 — Cutover + smoke test
 
-- [ ] Announce a short freeze window (no new bookings taken at the desk)
-- [ ] Verify staff accounts can log in on production (PC-05)
-- [ ] Redeploy both Vercel projects on Production (activates the prod env vars saved in PC-04)
-- [x] `node scripts/preflight.mjs` green *(done 2026-07-14 — 35/35 passed)*
-- [ ] One end-to-end smoke booking **on production**: book → pay →
-  incidental charge → store order (direct-paid + add-to-bill) → check-in →
-  checkout → Daily Close preview → exports — then cancel/refund the test
-  booking so the clean books stay explainable
-- [ ] Email triggers verified from production (booking-submitted,
-  staff-new-booking)
-- [ ] `finance-integrity-scan.ts` against prod: zero findings
-- [ ] Verify live prod rules still match repo (final check)
-- [ ] Intercom QR codes in rooms confirmed working (they should, if room
-  doc IDs were preserved in PC-03)
-- [ ] Delete the local service-account JSON from `~/Downloads`
+> **Release 2026-10-21 — `dev` → `main` (VERSION 1.11.0 → 2.18.5).** See
+> §Production release 2026-10-21 below for what was executed and what was
+> verified. Items left unchecked are open.
+
+- [ ] Announce a short freeze window (no new bookings taken at the desk) — **not announced for the 2026-10-21 release.** The window was short and outside desk hours, but the rules deploy did create a brief guest-intercom read gap (old rules + new client). Do this before the next release.
+- [ ] Verify staff accounts can log in on production (PC-05) — **not verified in the 2026-10-21 release** (needs a real sign-in, not an unauthenticated probe)
+- [x] Redeploy both Vercel projects on Production (activates the prod env vars saved in PC-04) — **done 2026-10-21**: Vercel auto-deployed on the `main` push; both apps verified live at VERSION 2.18.5 (`www` bundle `index-CPVtIjCK.js`, admin bundle `index-Dckh4qKg.js`; the old `1.11.0` is absent from both)
+- [x] `node scripts/preflight.mjs` green — **re-run 2026-10-21: 34 passed, 1 warning, 1 FAILURE.** The failure is §10 (documentation audit), which is the pre-existing 18-error `docs:audit` baseline — not a new break. The 2026-07-14 run was 35/35; the doc budget has drifted since. **This box is the standing gate for the next release.**
+- [ ] One end-to-end smoke booking **on production**: book → pay → incidental charge → store order (direct-paid + add-to-bill) → check-in → checkout → Daily Close preview → exports — then cancel/refund the test booking so the clean books stay explainable — **NOT done 2026-10-21.** What WAS verified mechanically: the live Firestore rules match the repo byte-for-byte (49 match blocks); per-rule behaviour probed unauthenticated against prod (`intercoms/{room}` 403, `intercoms/{room}/messages` 403, `intercomSessions/{tok}/messages` 200, `callSessions/{tok}` 404 = allowed-but-absent, `vouchers/{code}` 403, `settings/.../breakfastConfigChangeLog` 403, `rooms/room-101` 200, `settings/hotelConfig` 200); `GET /api/rooms/availability` 200; `POST /api/intercom/verify-guest` 400 on an empty body; guest + admin sites and `/rooms` + `/my-booking` all 200. **The full booking lifecycle is still unexercised.**
+- [ ] Email triggers verified from production (booking-submitted, staff-new-booking) — **not done 2026-10-21**
+- [x] `finance-integrity-scan.ts` against prod: zero findings — **done 2026-10-21**: reviewed 3 bookings + 0 store orders, **0 findings** (read-only `--output` mode; no Firestore writes)
+- [x] Verify live prod rules still match repo (final check) — **done 2026-10-21**, verified mechanically rather than by eye: `scripts/capture-live-rules.mjs` pulled the live ruleset via the Rules REST API. Before the deploy the live ruleset was **byte-identical to `main`** (no console drift) and 11 match blocks behind the repo; after the deploy it is **byte-identical to the repo** (49 blocks). Rollback copy kept in `tmp/prod-rules-backup/` (gitignored).
+- [ ] Intercom QR codes in rooms confirmed working — **PARTIAL 2026-10-21.** The intercom URL resolves in production (`/intercom/room-101` → 200, `/intercom/101` → 200) via the room **doc-ID** fallback. **But production rooms have NO `qrToken`** (0 of 14) while staging has 2 of 14 — so PC-03's "identical doc IDs and `qrToken`s" claim does not hold for production. Consequence: the QR URL is guessable from the room number (a second factor still applies — `/api/intercom/verify-guest` requires the guest's last name from the booking, and every send re-verifies the stay), and any in-room card printed from a staging `qrToken` would not resolve in production. **Fix: regenerate QR tokens in admin → QR Management, then reprint.**
+- [x] Delete the local service-account JSON from `~/Downloads` — **confirmed 2026-10-21**: no `*adminsdk*.json` / `*fbsvc*.json` present
 - [ ] First real Daily Close on the clean database — clean books from day
-  one for the accountant (ties into the FLR-05 handover)
+  one for the accountant (ties into the FLR-05 handover) — **not done; owner action**
+
+---
+
+## Production release 2026-10-21 — `dev` → `main` (VERSION 1.11.0 → 2.18.5)
+
+**What shipped.** The 2026-10-20 production-readiness audit remediation (7 blockers
+B1–B7, decisions #306–#308), together with the 2.x line it was built on: the
+October 2026 feature audit (5 Criticals / 11 Highs / 8 Mediums), the breakfast
+redesign 2.0.0 data-model cutover, the other-add-ons feature, and the mobile
+booking UX rebuild. Merge commit `ba405b5` (`chore(merge): dev to main`).
+
+**Release order — app first, rules second.** Per `plan/docs/GOTCHAS.md §Firebase`
+(INC-01, 2026-07-17): *never deploy the rules ahead of the app build that
+depends on them*. The order was therefore:
+
+1. `git merge --no-ff dev` into `main`, push → Vercel auto-deployed both apps.
+2. Waited for the new build to be live (verified by the VERSION string embedded
+   in each served bundle — not by a timer).
+3. `firebase deploy --only firestore:rules,storage:app --project production`.
+
+Deploying the rules second is what makes the window safe. New rules + old app
+would have made `intercoms/{roomId}/messages` staff-only, killing guest
+intercom outright (the INC-01 failure mode). New app + old rules only denies
+the *new* session-path reads for the length of the deploy window, and the
+server still writes every guest message (Admin SDK bypasses rules) — so nothing
+is lost, it is only not yet visible to the desk.
+
+**Pre-flight checks run before the merge.**
+
+| Check | Result |
+|---|---|
+| Live prod rules vs repo (before) | byte-identical to `main` — no console drift; repo 11 blocks ahead |
+| `firestore.indexes.json` `main..dev` | unchanged — no index deploy needed |
+| Storage rules vs client upload contract | client `ACCEPTED_UPLOAD_TYPES` = `image/jpeg,png,webp` and `MAX_UPLOAD_BYTES` = 5 MB **exactly match** the new rule gate on all three proof paths — no INC-01 risk |
+| Production Firestore state | 3 bookings · 7 reservations · 4 guests · 7 notifications · 1 roomBlock · 4 bookingHolds · 0 members · 0 vouchers · 0 storeOrders |
+| `scripts/clean-prelive-bookings.ts` (dry run) | would delete 3 bookings + 7 notifications + 2 test runs + reset 3 counters; **preserves** settings, guests, rooms metadata, storeItems, vouchers |
+
+**Findings that need an owner decision (not blockers for the release).**
+
+1. **3 production bookings carry the legacy flat-rate breakfast fields** (`breakfastRate`, `hasBreakfast`) that the 2.0.0 cutover deleted from the schema, so their folio will no longer show a breakfast line. They are test bookings, and the pre-live cleanup script would delete them — but **the script does not touch `reservations`**, so running it as-is would leave 7 reservation headers behind. Either clean bookings *and* reservations together, or leave both.
+2. **`settings/breakfastConfig` and `settings/rewardsConfig` are still in the 1.x shape.** `breakfastConfig` has `silogItems` (not `meals`) and no `cutoffTime` / `servedGraceMinutes`; `rewardsConfig` has no `levels[]`, so the Spark Rewards tier system has no tiers configured. Both degrade gracefully (the admin app hydrates the legacy `silogItems` shape and falls back to defaults), but the hotel should re-save both in admin Settings to write the 2.x shape.
+3. **No `qrToken` on any production room** (see PC-06 above).
+4. **`npm run preflight` fails on the documentation audit** (the 18-error `docs:audit` baseline). It is a standing gate and the doc budget is 3.5× over — worth a compaction pass.
