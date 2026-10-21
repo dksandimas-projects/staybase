@@ -152,6 +152,22 @@ import { getApiBaseUrl } from "../utils/apiBaseUrl";
 import { useAudioRouting, type AudioSurface } from "../hooks/useAudioRouting";
 import { setSinkIdSafe } from "../utils/audioOutputDevices";
 import { renderRingtoneWav } from "../utils/renderRingtoneWav";
+// Per RPT-01 (QA pass 2026-10-21): the canonical payment ledger
+// resolver. The booking doc's denormalized `onsitePayments[]` array
+// is never written by the server, so the row "Paid" pill, the
+// payment-state filter, the dashboard pending-payments card and the
+// reference search all read ₱0 paid. These helpers rebuild the
+// per-booking ledger from the payments/refunds subcollections the
+// server actually writes to. See
+// `admin-app/src/utils/bookingPaymentEntries.ts` for the full
+// rationale.
+import {
+  buildBookingPaymentIndex,
+  normalizeLedgerDoc,
+  resolveBookingOnsitePayments,
+  sameLedgerPayments,
+  type PaymentLedgerDoc,
+} from "../utils/bookingPaymentEntries";
 import type { AudioRouting as AudioRoutingShape } from "@spark-inn/shared";
 
 type StaffRole = "front-desk" | "admin";
@@ -1775,6 +1791,33 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   // the Bookings table reservation row for `listReservationBalance`.
   const [reservationPaidAmount, setReservationPaidAmount] = useState<Record<string, number>>({});
 
+  // Per RPT-01 (QA pass 2026-10-21): the canonical payment ledger,
+  // read once for the whole app and projected per booking.
+  //
+  // The `payments` + `refunds` collection groups are the ONLY place
+  // the money actually lives: the booking doc's denormalized
+  // `onsitePayments[]` array is never written by the server (0 of 67
+  // production bookings carried it on 2026-10-21), so every admin
+  // surface that read it saw ₱0 paid.
+  //
+  // `paymentIndex` maps a booking id to its ledger entries. It is
+  // derived (never written) so it can never drift from the docs.
+  const [paymentLedgerDocs, setPaymentLedgerDocs] = useState<PaymentLedgerDoc[]>([]);
+  const [refundLedgerDocs, setRefundLedgerDocs] = useState<PaymentLedgerDoc[]>([]);
+  const paymentIndex = useMemo(
+    () => buildBookingPaymentIndex([...paymentLedgerDocs, ...refundLedgerDocs]),
+    [paymentLedgerDocs, refundLedgerDocs]
+  );
+  // The mapper runs inside the bookings `onSnapshot` callback, which
+  // cannot read React state that changes independently of it. The ref
+  // carries the latest index into that callback; the re-hydration
+  // effect below keeps the two in step.
+  const paymentIndexRef = useRef<Record<string, OnsitePayment[]>>({});
+  // The booking doc's own denormalized array, kept per booking as the
+  // FALLBACK ledger for a booking whose payments are not in any
+  // subcollection the index reads.
+  const legacyOnsitePaymentsRef = useRef<Record<string, OnsitePayment[]>>({});
+
   useEffect(() => {
     if (!currentUser) {
       setBookings([]);
@@ -1865,6 +1908,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
               (otherAddOnTotalHydrated > 0 ||
                 hasAnyOtherAddOns(otherAddOnSelectionsHydrated)));
 
+          const bookingIndex = bookingsData.length;
           bookingsData.push({
             id: docSnap.id,
             bookingRef: data.bookingRef || "",
@@ -2111,6 +2155,31 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
                     : ""
                 }))
               : [],
+            // Per ETR-05 (QA pass 2026-10-21): hydrate the
+            // environment-test-run markers from the snapshot.
+            //
+            // The `Booking` type has declared `isTestData` and
+            // `testRunId` since the ETR feature shipped, and the
+            // badge components read them
+            // (`BookingsPage.tsx:1788,2424,2501,2546,2623`,
+            // `BookingDrawerWorkspace.tsx:221,7453`), but the mapper
+            // NEVER read them off the Firestore doc. The field was
+            // therefore always `undefined`, so the TEST DATA badge
+            // could never render for any row — tagged or untagged.
+            //
+            // This matters operationally: without the badge, a
+            // test-run booking is indistinguishable from a live one
+            // in the admin UI, so the staff cannot tell which rows
+            // are real guests. It also means the `isTestData` filter
+            // had nothing to filter on.
+            //
+            // The server writes `isTestData: true` + `testRunId` on
+            // every booking created inside a test run (guest create,
+            // walk-in, and the admin walk-in endpoint all thread
+            // `testRunId` through), so the source data is already
+            // there — only the read was missing.
+            isTestData: data.isTestData === true,
+            testRunId: data.testRunId ? String(data.testRunId) : null,
             createdAt: parseDateTimeString(data.createdAt),
             guestRegistration: data.guestRegistration || null,
             breakfastSelections: breakfastSelectionsHydrated,
@@ -2229,6 +2298,35 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             // was missing the read.
             earlyCheckIn: data.earlyCheckIn ?? null,
           });
+
+          // Per RPT-01 (QA pass 2026-10-21): resolve the booking's
+          // payment ledger from the CANONICAL source.
+          //
+          // The `onsitePayments` field hydrated above is the booking
+          // doc's own denormalized array. The server never writes it
+          // (0 of 67 production bookings carried it on 2026-10-21),
+          // so it is always `[]` and every surface that reads it —
+          // the row's "Paid" pill, the payment-state filter, the
+          // dashboard's pending-payments card, the reference search —
+          // reported ₱0 paid for every booking.
+          //
+          // The real ledger lives in the payments/refunds
+          // subcollections, and the server stamps `bookingId` on every
+          // entry precisely so a room can be attributed. The index
+          // WINS whenever it has entries; the denormalized array is
+          // only the fallback for a booking whose payments are not in
+          // any subcollection the index reads.
+          //
+          // The denormalized array is stashed in a ref first so the
+          // re-hydration effect can fall back to it later without
+          // re-reading the booking doc.
+          const mappedBooking = bookingsData[bookingIndex];
+          legacyOnsitePaymentsRef.current[docSnap.id] = mappedBooking.onsitePayments ?? [];
+          mappedBooking.onsitePayments = resolveBookingOnsitePayments(
+            docSnap.id,
+            mappedBooking.onsitePayments ?? [],
+            paymentIndexRef.current
+          ) as OnsitePayment[];
         });
 
         await Promise.all(bookingsData.map(async (booking) => {
@@ -2306,6 +2404,45 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       unsubscribe();
     };
   }, [currentUser]);
+
+  // Per RPT-01 (QA pass 2026-10-21): re-hydrate `onsitePayments`
+  // whenever the canonical ledger changes.
+  //
+  // The mapper above resolves the ledger from `paymentIndexRef`, but
+  // the bookings snapshot and the payments snapshot are INDEPENDENT
+  // listeners — a payment recorded after the bookings snapshot landed
+  // would not reach the booking row until the next booking write.
+  // That is the normal case: the staff records a payment and the row
+  // must flip to "Paid" immediately.
+  //
+  // This effect closes the gap. It also keeps the ref in step with
+  // the derived index so the mapper picks up the freshest value on
+  // the next snapshot.
+  //
+  // The write is a no-op when nothing changed (the resolver returns
+  // the previous array identity), so this can never loop.
+  useEffect(() => {
+    if (!currentUser) {
+      paymentIndexRef.current = {};
+      return;
+    }
+    paymentIndexRef.current = paymentIndex;
+    setBookings((prev) => {
+      if (!prev.length) return prev;
+      let changed = false;
+      const next = prev.map((booking) => {
+        const resolved = resolveBookingOnsitePayments(
+          booking.id,
+          legacyOnsitePaymentsRef.current[booking.id] ?? booking.onsitePayments ?? [],
+          paymentIndex
+        ) as OnsitePayment[];
+        if (sameLedgerPayments(resolved, booking.onsitePayments)) return booking;
+        changed = true;
+        return { ...booking, onsitePayments: resolved };
+      });
+      return changed ? next : prev;
+    });
+  }, [paymentIndex, currentUser]);
 
   // Per MRB-12 (2026-08-03, per decision #179 — proposed):
   // subscribe to the `reservations` collection and hydrate
@@ -2539,9 +2676,59 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           paidByReservation[reservationId] = (paidByReservation[reservationId] || 0) + amount;
         }
         setReservationPaidAmount(paidByReservation);
+
+        // Per RPT-01 (QA pass 2026-10-21): the same snapshot also
+        // feeds the per-booking ledger index. The reservation
+        // aggregate above is unchanged (it deliberately excludes the
+        // legacy per-booking path); this is a second, independent
+        // projection of the SAME docs onto the booking they belong
+        // to. Store-order tenders are excluded by the path filter
+        // inside `buildBookingPaymentIndex` — they are not room
+        // folio payments.
+        setPaymentLedgerDocs(
+          snapshot.docs.map((paymentDoc) =>
+            normalizeLedgerDoc(paymentDoc.ref.path, paymentDoc.data() as Record<string, unknown>)
+          )
+        );
       },
       (error) => {
         console.error("Error listening to reservation payments collectionGroup:", error);
+      }
+    );
+
+    return unsubscribe;
+  }, [currentUser]);
+
+  // Per RPT-01 (QA pass 2026-10-21): the refunds collection group.
+  //
+  // Refunds are the OTHER half of the ledger. Per CRL-01 they are
+  // NEGATIVE-amount entries, so a booking that was paid ₱5,400 and
+  // refunded ₱1,000 is ₱4,400 collected — and the row's "Paid" pill
+  // has to see the negative entry or it would report the guest as
+  // overpaid. The canonical refund source is
+  // `reservations/{id}/refunds/` (the `handleAddRefund` writer);
+  // the legacy path is `bookings/{id}/refunds/`. Both are read.
+  //
+  // The `refunds` collection group has its own staff-read rule in
+  // `firebase/firestore.rules` (the `match /{path=**}/refunds/...`
+  // group rule), so the admin client can read it directly.
+  useEffect(() => {
+    if (!currentUser) {
+      setRefundLedgerDocs([]);
+      return;
+    }
+
+    const unsubscribe = onSnapshot(
+      collectionGroup(db, "refunds"),
+      (snapshot) => {
+        setRefundLedgerDocs(
+          snapshot.docs.map((refundDoc) =>
+            normalizeLedgerDoc(refundDoc.ref.path, refundDoc.data() as Record<string, unknown>)
+          )
+        );
+      },
+      (error) => {
+        console.error("Error listening to refunds collectionGroup:", error);
       }
     );
 
@@ -5943,6 +6130,13 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
             deliveredAt: data.deliveredAt ? formatStoreDate(data.deliveredAt) : null,
             isBilled: !!data.isBilled,
             billedAt: data.billedAt ? formatStoreDate(data.billedAt) : null,
+            // Per ETR-05 (QA pass 2026-10-21): same gap as the
+            // booking mapper — the `StoreOrder` type declared
+            // `isTestData` / `testRunId` but the snapshot mapper
+            // never read them, so a test-run store order was
+            // indistinguishable from a live one.
+            isTestData: data.isTestData === true,
+            testRunId: data.testRunId ? String(data.testRunId) : null,
             cancellationReason: data.cancellationReason || "",
             handledBy: data.handledBy || "",
             notes: data.notes || "",
