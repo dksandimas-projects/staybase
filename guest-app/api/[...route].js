@@ -28119,15 +28119,15 @@ var require_root = __commonJS({
             self2.setOptions(source.options).addJSON(source.nested);
           else {
             parse5.filename = filename2;
-            var parsed2 = parse5(source, self2, options), resolved2, i3 = 0;
-            if (parsed2.imports) {
-              for (; i3 < parsed2.imports.length; ++i3)
-                if (resolved2 = getBundledFileName(parsed2.imports[i3]) || self2.resolvePath(filename2, parsed2.imports[i3]))
+            var parsed = parse5(source, self2, options), resolved2, i3 = 0;
+            if (parsed.imports) {
+              for (; i3 < parsed.imports.length; ++i3)
+                if (resolved2 = getBundledFileName(parsed.imports[i3]) || self2.resolvePath(filename2, parsed.imports[i3]))
                   fetch4(resolved2, false, depth + 1);
             }
-            if (parsed2.weakImports) {
-              for (i3 = 0; i3 < parsed2.weakImports.length; ++i3)
-                if (resolved2 = getBundledFileName(parsed2.weakImports[i3]) || self2.resolvePath(filename2, parsed2.weakImports[i3]))
+            if (parsed.weakImports) {
+              for (i3 = 0; i3 < parsed.weakImports.length; ++i3)
+                if (resolved2 = getBundledFileName(parsed.weakImports[i3]) || self2.resolvePath(filename2, parsed.weakImports[i3]))
                   fetch4(resolved2, true, depth + 1);
             }
           }
@@ -60124,13 +60124,13 @@ var require_validate = __commonJS({
       if (!validateOptional(value, options)) {
         validateString(arg, value);
         const urlString = `http://${value}/`;
-        let parsed2;
+        let parsed;
         try {
-          parsed2 = new url_1.URL(urlString);
+          parsed = new url_1.URL(urlString);
         } catch (e3) {
           throw new Error(invalidArgumentMessage(arg, "host"));
         }
-        if (parsed2.search !== "" || parsed2.pathname !== "/" || parsed2.username !== "") {
+        if (parsed.search !== "" || parsed.pathname !== "/" || parsed.username !== "") {
           throw new Error(invalidArgumentMessage(arg, "host"));
         }
       }
@@ -103391,18 +103391,18 @@ var require_multipart = __commonJS({
         part.on("header", function(header) {
           let contype;
           let fieldname;
-          let parsed2;
+          let parsed;
           let charset;
           let encoding;
           let filename;
           let nsize = 0;
           if (header["content-type"]) {
-            parsed2 = parseParams(header["content-type"][0]);
-            if (parsed2[0]) {
-              contype = parsed2[0].toLowerCase();
-              for (i2 = 0, len = parsed2.length; i2 < len; ++i2) {
-                if (RE_CHARSET.test(parsed2[i2][0])) {
-                  charset = parsed2[i2][1].toLowerCase();
+            parsed = parseParams(header["content-type"][0]);
+            if (parsed[0]) {
+              contype = parsed[0].toLowerCase();
+              for (i2 = 0, len = parsed.length; i2 < len; ++i2) {
+                if (RE_CHARSET.test(parsed[i2][0])) {
+                  charset = parsed[i2][1].toLowerCase();
                   break;
                 }
               }
@@ -103415,15 +103415,15 @@ var require_multipart = __commonJS({
             charset = defCharset;
           }
           if (header["content-disposition"]) {
-            parsed2 = parseParams(header["content-disposition"][0]);
-            if (!RE_FIELD.test(parsed2[0])) {
+            parsed = parseParams(header["content-disposition"][0]);
+            if (!RE_FIELD.test(parsed[0])) {
               return skipPart(part);
             }
-            for (i2 = 0, len = parsed2.length; i2 < len; ++i2) {
-              if (RE_NAME.test(parsed2[i2][0])) {
-                fieldname = parsed2[i2][1];
-              } else if (RE_FILENAME.test(parsed2[i2][0])) {
-                filename = parsed2[i2][1];
+            for (i2 = 0, len = parsed.length; i2 < len; ++i2) {
+              if (RE_NAME.test(parsed[i2][0])) {
+                fieldname = parsed[i2][1];
+              } else if (RE_FILENAME.test(parsed[i2][0])) {
+                filename = parsed[i2][1];
                 if (!preservePath) {
                   filename = basename2(filename);
                 }
@@ -104023,7 +104023,7 @@ var require_main = __commonJS({
       WritableStream2.prototype.emit.apply(this, arguments);
     };
     Busboy.prototype.getParserByHeaders = function(headers) {
-      const parsed2 = parseParams(headers["content-type"]);
+      const parsed = parseParams(headers["content-type"]);
       const cfg = {
         defCharset: this.opts.defCharset,
         fileHwm: this.opts.fileHwm,
@@ -104031,13 +104031,13 @@ var require_main = __commonJS({
         highWaterMark: this.opts.highWaterMark,
         isPartAFile: this.opts.isPartAFile,
         limits: this.opts.limits,
-        parsedConType: parsed2,
+        parsedConType: parsed,
         preservePath: this.opts.preservePath
       };
-      if (MultipartParser3.detect.test(parsed2[0])) {
+      if (MultipartParser3.detect.test(parsed[0])) {
         return new MultipartParser3(this, cfg);
       }
-      if (UrlencodedParser.detect.test(parsed2[0])) {
+      if (UrlencodedParser.detect.test(parsed[0])) {
         return new UrlencodedParser(this, cfg);
       }
       throw new Error("Unsupported Content-Type.");
@@ -104718,18 +104718,18 @@ var require_api_request = __commonJS({
         return this.httpConfig.httpAgent;
       }
       buildRequestOptions() {
-        const parsed2 = this.buildUrl();
-        const protocol = parsed2.protocol;
-        let port = parsed2.port;
+        const parsed = this.buildUrl();
+        const protocol = parsed.protocol;
+        let port = parsed.port;
         if (!port) {
           const isHttps = protocol === "https:";
           port = isHttps ? "443" : "80";
         }
         return {
           protocol,
-          hostname: parsed2.hostname,
+          hostname: parsed.hostname,
           port,
-          path: parsed2.path,
+          path: parsed.path,
           method: this.method,
           agent: this.httpAgent,
           headers: Object.assign({}, this.headers)
@@ -104745,11 +104745,11 @@ var require_api_request = __commonJS({
         return this.http2Config.http2SessionHandler;
       }
       buildRequestOptions() {
-        const parsed2 = this.buildUrl();
-        const protocol = parsed2.protocol;
+        const parsed = this.buildUrl();
+        const protocol = parsed.protocol;
         return {
           protocol,
-          path: parsed2.path,
+          path: parsed.path,
           method: this.method,
           headers: Object.assign({}, this.headers)
         };
@@ -109343,8 +109343,8 @@ var require_prerelease = __commonJS({
     "use strict";
     var parse5 = require_parse3();
     var prerelease = (version6, options) => {
-      const parsed2 = parse5(version6, options);
-      return parsed2 && parsed2.prerelease.length ? parsed2.prerelease : null;
+      const parsed = parse5(version6, options);
+      return parsed && parsed.prerelease.length ? parsed.prerelease : null;
     };
     module2.exports = prerelease;
   }
@@ -127955,20 +127955,20 @@ var require_agent = __commonJS({
       callback(req, opts) {
         return __awaiter(this, void 0, void 0, function* () {
           const { proxy, secureProxy } = this;
-          const parsed2 = url_1.default.parse(req.path);
-          if (!parsed2.protocol) {
-            parsed2.protocol = "http:";
+          const parsed = url_1.default.parse(req.path);
+          if (!parsed.protocol) {
+            parsed.protocol = "http:";
           }
-          if (!parsed2.hostname) {
-            parsed2.hostname = opts.hostname || opts.host || null;
+          if (!parsed.hostname) {
+            parsed.hostname = opts.hostname || opts.host || null;
           }
-          if (parsed2.port == null && typeof opts.port) {
-            parsed2.port = String(opts.port);
+          if (parsed.port == null && typeof opts.port) {
+            parsed.port = String(opts.port);
           }
-          if (parsed2.port === "80") {
-            parsed2.port = "";
+          if (parsed.port === "80") {
+            parsed.port = "";
           }
-          req.path = url_1.default.format(parsed2);
+          req.path = url_1.default.format(parsed);
           if (proxy.auth) {
             req.setHeader("Proxy-Authorization", `Basic ${Buffer.from(proxy.auth).toString("base64")}`);
           }
@@ -221220,7 +221220,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.18.8";
+    VERSION2 = "2.18.10";
   }
 });
 
@@ -221269,7 +221269,7 @@ var init_animations = __esm({
 });
 
 // ../shared/constants/index.ts
-var BOOKING_STATUSES, BOOKING_SOURCES, DEFAULT_BOOKING_SOURCES, PROTECTED_BOOKING_SOURCES, ROOM_STATUSES, HOUSEKEEPING_STATUSES, DEFAULT_ROOM_TYPES2, DEFAULT_BED_SETUPS, DEFAULT_BOOKING_PREFERENCES, ADDITIONAL_REQUEST_MAX_LENGTH, ARRIVAL_WINDOW_HOURS, MAX_ROOM_TYPE_PHOTOS, DEFAULT_BREAKFAST_CUTOFF_TIME, DEFAULT_BREAKFAST_CUTOFF_TIMEZONE, DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES, MIN_BREAKFAST_OVERRIDE_REASON_LENGTH, DEFAULT_CORPORATE_PERKS, KNOWN_CONTENT_ICONS, DEFAULT_CORPORATE_PAGE_CONTENT, MAX_FEATURED_TYPES, MAX_FEATURED_ROOMS, SUPPORTED_PAYMENT_METHODS, UNSUPPORTED_PAYMENT_METHODS, PROTECTED_PAYMENT_METHODS, MAX_PAYMENT_METHOD_QR_BYTES, MAX_BREAKFAST_MEAL_IMAGE_BYTES, BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES, MAX_STAY_NIGHTS, MAX_ADVANCE_DAYS, PUBLIC_SITE_CONTENT_CACHE_KEY, PUBLIC_SITE_CONTENT_CACHE_TTL_MS, PUBLIC_SITE_CONTENT_CACHE_BUST_KEY, DEFAULT_TERMS_VERSION, TERMS_BODY_MAX_LENGTH;
+var BOOKING_STATUSES, BOOKING_SOURCES, DEFAULT_BOOKING_SOURCES, PROTECTED_BOOKING_SOURCES, ROOM_STATUSES, HOUSEKEEPING_STATUSES, DEFAULT_ROOM_TYPES, DEFAULT_BED_SETUPS, DEFAULT_BOOKING_PREFERENCES, ADDITIONAL_REQUEST_MAX_LENGTH, ARRIVAL_WINDOW_HOURS, MAX_ROOM_TYPE_PHOTOS, DEFAULT_BREAKFAST_CUTOFF_TIME, DEFAULT_BREAKFAST_CUTOFF_TIMEZONE, DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES, MIN_BREAKFAST_OVERRIDE_REASON_LENGTH, DEFAULT_CORPORATE_PERKS, KNOWN_CONTENT_ICONS, DEFAULT_CORPORATE_PAGE_CONTENT, MAX_FEATURED_TYPES, MAX_FEATURED_ROOMS, SUPPORTED_PAYMENT_METHODS, UNSUPPORTED_PAYMENT_METHODS, PROTECTED_PAYMENT_METHODS, MAX_PAYMENT_METHOD_QR_BYTES, MAX_BREAKFAST_MEAL_IMAGE_BYTES, BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES, MAX_STAY_NIGHTS, MAX_ADVANCE_DAYS, PUBLIC_SITE_CONTENT_CACHE_KEY, PUBLIC_SITE_CONTENT_CACHE_TTL_MS, PUBLIC_SITE_CONTENT_CACHE_BUST_KEY, DEFAULT_TERMS_VERSION, TERMS_BODY_MAX_LENGTH;
 var init_constants = __esm({
   "../shared/constants/index.ts"() {
     "use strict";
@@ -221294,7 +221294,7 @@ var init_constants = __esm({
     PROTECTED_BOOKING_SOURCES = ["online", "walk-in", "corporate"];
     ROOM_STATUSES = ["available", "occupied", "blocked"];
     HOUSEKEEPING_STATUSES = ["clean", "dirty", "in-progress"];
-    DEFAULT_ROOM_TYPES2 = [
+    DEFAULT_ROOM_TYPES = [
       // Per SR-01..05 (2026-10-12): `bedSetupValues` is the per-type
       // subset of `HotelConfig.bedSetups[].value` offered to the guest on
       // the booking Step 2. The seed below mirrors the original
@@ -221533,9 +221533,9 @@ function computeInFlowHoldExpiresAt(minutes, now = /* @__PURE__ */ new Date()) {
 function computeExtendedInFlowHoldExpiresAt(minutes, currentExpiresAt, now = /* @__PURE__ */ new Date()) {
   let base = now;
   if (currentExpiresAt) {
-    const parsed2 = currentExpiresAt instanceof Date ? currentExpiresAt : new Date(currentExpiresAt);
-    if (!isNaN(parsed2.getTime()) && parsed2.getTime() > now.getTime()) {
-      base = parsed2;
+    const parsed = currentExpiresAt instanceof Date ? currentExpiresAt : new Date(currentExpiresAt);
+    if (!isNaN(parsed.getTime()) && parsed.getTime() > now.getTime()) {
+      base = parsed;
     }
   }
   return computeInFlowHoldExpiresAt(minutes, base);
@@ -222001,19 +222001,40 @@ var init_booking = __esm({
       lookupToken: external_exports.string().trim().min(8).max(200),
       turnstileToken: external_exports.string().optional(),
       clientBatchId: external_exports.string().trim().min(8).max(80),
+      // Per RPT-04 (QA pass 2026-10-21): `selections` is OPTIONAL.
+      //
+      // It was REQUIRED, but the mutation contract this schema guards
+      // is the OP list (`add` / `change` / `remove`) — both handlers
+      // read the ops off the raw body via `readOps(body)` and never
+      // read `selections` at all. The guest client
+      // (`ManageOtherAddOnsPage.tsx`) and the staff drawer send the
+      // ops and no `selections`, so `safeParse` failed on the missing
+      // field and the endpoint answered
+      // "Invalid other-add-ons update payload." (HTTP 400) on EVERY
+      // save: the whole BR-12 other-add-ons write path was dead, for
+      // guests and staff alike.
+      //
+      // The field is kept (optional) so a caller that DOES send a
+      // `selections` map still validates it, and so the schema keeps
+      // describing the full write shape.
       selections: external_exports.record(
         external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "serviceDate format"),
         external_exports.array(OtherAddOnSelectionEntrySchema)
-      ),
+      ).optional(),
       removedKeys: external_exports.array(external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/)).default([])
     }).passthrough();
     StaffOtherAddOnUpdateSchema = external_exports.object({
       bookingId: external_exports.string().trim().min(8).max(80),
       turnstileToken: external_exports.string().optional(),
+      // Per RPT-04 (QA pass 2026-10-21): `selections` is OPTIONAL for
+      // the same reason as `OtherAddOnUpdateSchema` above — the staff
+      // handler reads the `add` / `change` / `remove` ops off the raw
+      // body and never reads `selections`, so requiring it rejected
+      // every real staff save with a 400.
       selections: external_exports.record(
         external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "serviceDate format"),
         external_exports.array(OtherAddOnSelectionEntrySchema)
-      ),
+      ).optional(),
       removedKeys: external_exports.array(external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/)).default([]),
       overrideReason: external_exports.string().trim().min(8).max(280).optional()
     }).passthrough();
@@ -222350,9 +222371,9 @@ var init_bookingDates = __esm({
 // ../shared/utils/stayRange.ts
 function isValidIsoDate(value) {
   if (typeof value !== "string" || !ISO_DATE_PATTERN.test(value)) return false;
-  const parsed2 = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
-  if (Number.isNaN(parsed2.getTime())) return false;
-  return parsed2.toISOString().slice(0, 10) === value;
+  const parsed = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return false;
+  return parsed.toISOString().slice(0, 10) === value;
 }
 function addDaysToIsoDate(value, days, fallback = "") {
   if (!isValidIsoDate(value)) return fallback;
@@ -222869,10 +222890,10 @@ function buildBreakfastRateBreakdownLines(selections) {
     const { count, total } = byDate.get(date);
     let dateLabel = date;
     try {
-      const parsed2 = /* @__PURE__ */ new Date(`${date}T00:00:00Z`);
-      if (!Number.isNaN(parsed2.getTime())) {
-        const month = parsed2.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
-        const day = parsed2.getUTCDate();
+      const parsed = /* @__PURE__ */ new Date(`${date}T00:00:00Z`);
+      if (!Number.isNaN(parsed.getTime())) {
+        const month = parsed.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
+        const day = parsed.getUTCDate();
         dateLabel = `${month} ${day}`;
       }
     } catch {
@@ -223085,14 +223106,14 @@ function readCacheWithTtl(key, ttlMs, now = Date.now()) {
     return null;
   }
   if (!raw) return null;
-  let parsed2;
+  let parsed;
   try {
-    parsed2 = JSON.parse(raw);
+    parsed = JSON.parse(raw);
   } catch {
     return null;
   }
-  if (!parsed2 || typeof parsed2 !== "object") return null;
-  const envelope = parsed2;
+  if (!parsed || typeof parsed !== "object") return null;
+  const envelope = parsed;
   if (typeof envelope.fetchedAt !== "number") return null;
   if (now - envelope.fetchedAt > ttlMs) return null;
   return envelope.value ?? null;
@@ -223552,8 +223573,8 @@ function readPublicSiteContentBustTimestamp() {
   try {
     const raw = window.localStorage.getItem(PUBLIC_SITE_CONTENT_CACHE_BUST_KEY);
     if (!raw) return 0;
-    const parsed2 = Number.parseInt(raw, 10);
-    return Number.isFinite(parsed2) ? parsed2 : 0;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) ? parsed : 0;
   } catch {
     return 0;
   }
@@ -224520,6 +224541,17 @@ var init_uploads = __esm({
 });
 
 // ../shared/utils/bookingPreferences.ts
+function resolveBookingPreferenceValues(raw) {
+  const values = [];
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      if (!entry || typeof entry !== "object") continue;
+      const value = entry.value;
+      if (typeof value === "string" && value) values.push(value);
+    }
+  }
+  return values.length > 0 ? values : DEFAULT_BOOKING_PREFERENCES.map((option2) => option2.value);
+}
 function parseCheckInTimeToPair(timeStr) {
   const normalized = timeStr.trim().toLowerCase();
   if (!normalized) return { hours: 14, minutes: 0 };
@@ -224988,8 +225020,8 @@ function safeBool(value, fallback) {
 function safeImageUrl(value) {
   if (typeof value !== "string" || value.length === 0) return void 0;
   try {
-    const parsed2 = new URL(value);
-    if (parsed2.protocol !== "https:" && parsed2.protocol !== "http:") return void 0;
+    const parsed = new URL(value);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return void 0;
     return value;
   } catch {
     return void 0;
@@ -225334,7 +225366,7 @@ __export(shared_exports, {
   DEFAULT_IN_FLOW_HOLD_MINUTES: () => DEFAULT_IN_FLOW_HOLD_MINUTES,
   DEFAULT_MAX_STAY_NIGHTS: () => DEFAULT_MAX_STAY_NIGHTS,
   DEFAULT_PAYMENT_HOLD_WINDOW_HOURS: () => DEFAULT_PAYMENT_HOLD_WINDOW_HOURS,
-  DEFAULT_ROOM_TYPES: () => DEFAULT_ROOM_TYPES2,
+  DEFAULT_ROOM_TYPES: () => DEFAULT_ROOM_TYPES,
   DEFAULT_STAY_NIGHTS: () => DEFAULT_STAY_NIGHTS,
   DEFAULT_TERMS_VERSION: () => DEFAULT_TERMS_VERSION,
   DEFAULT_UPLOAD_TIMEOUT_MS: () => DEFAULT_UPLOAD_TIMEOUT_MS,
@@ -225541,6 +225573,7 @@ __export(shared_exports, {
   redateBreakfastSelections: () => redateBreakfastSelections,
   redateOtherAddOnSelections: () => redateOtherAddOnSelections,
   requiredExtraBedsFor: () => requiredExtraBedsFor,
+  resolveBookingPreferenceValues: () => resolveBookingPreferenceValues,
   resolveCurrentLevel: () => resolveCurrentLevel,
   resolveMaxStayNights: () => resolveMaxStayNights,
   resolvePaymentMethodLabel: () => resolvePaymentMethodLabel,
@@ -225744,14 +225777,14 @@ async function handleCreateTestRun(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can create test runs." });
   }
-  const parsed2 = createTestRunSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = createTestRunSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Please provide a valid test run name, environment, and duration."
     });
   }
-  const { name: name2, environment, durationMinutes } = parsed2.data;
+  const { name: name2, environment, durationMinutes } = parsed.data;
   try {
     if (environment === "production") {
       const activeRuns = await adminDb.collection("testRuns").where("environment", "==", "production").where("status", "==", "active").get();
@@ -225807,14 +225840,14 @@ async function handleCloseTestRun(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can close test runs." });
   }
-  const parsed2 = closeTestRunSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = closeTestRunSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Please provide a valid test run ID."
     });
   }
-  const { runId } = parsed2.data;
+  const { runId } = parsed.data;
   try {
     const runRef = adminDb.collection("testRuns").doc(runId);
     const runDoc = await runRef.get();
@@ -225874,14 +225907,14 @@ async function handleDeleteTestRun(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can delete test data." });
   }
-  const parsed2 = deleteTestRunSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = deleteTestRunSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Please provide a valid test run ID."
     });
   }
-  const { runId } = parsed2.data;
+  const { runId } = parsed.data;
   const runRef = adminDb.collection("testRuns").doc(runId);
   const now = /* @__PURE__ */ new Date();
   try {
@@ -226217,14 +226250,14 @@ async function handleStagingResetExecute(req, res) {
       error: "This project is not authorized for operational reset. Staging allowlist check failed."
     });
   }
-  const parsed2 = stagingResetConfirmSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = stagingResetConfirmSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Preview ID, typed RESET STAGING, and project name are required."
     });
   }
-  const { confirmation, projectName, previewId } = parsed2.data;
+  const { confirmation, projectName, previewId } = parsed.data;
   const currentProject = process.env.FIREBASE_PROJECT_ID || "";
   if (projectName !== currentProject) {
     return res.status(400).json({
@@ -226620,12 +226653,12 @@ function syntheticFromSource(sourceValue, salt, prefix, domain) {
 }
 function sanitizeBookingExport(booking, salt, snapshotId, importedAt) {
   const guestEmail = String(booking.guestEmail || "");
-  const guestName2 = String(booking.guestName || "");
+  const guestName = String(booking.guestName || "");
   const guestPhone = String(booking.guestPhone || "");
   const sourceEmail = guestEmail.trim().toLowerCase();
   const sanitized = {
     ...booking,
-    guestName: syntheticFromSource(guestName2, salt, "Guest", "guests.invalid"),
+    guestName: syntheticFromSource(guestName, salt, "Guest", "guests.invalid"),
     guestEmail: sourceEmail ? syntheticFromSource(sourceEmail, salt, "guest", "example.invalid") : "",
     guestPhone: guestPhone ? syntheticFromSource(guestPhone, salt, "+639****0000", "phones.invalid") : "",
     address: "[REDACTED \u2014 sanitized for staging]",
@@ -226787,14 +226820,14 @@ async function handleStagingRefreshPreview(req, res) {
       error: "Staging refresh is only available on staging projects. The current project is not on the staging allowlist."
     });
   }
-  const parsed2 = stagingRefreshSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = stagingRefreshSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Please provide a valid production export (bookings, storeOrders, members) and options."
     });
   }
-  const { export: exportPayload, options } = parsed2.data;
+  const { export: exportPayload, options } = parsed.data;
   const mode = options.mode;
   const salt = import_node_crypto.default.randomBytes(16).toString("hex");
   const snapshotId = `refresh-${Date.now()}-${import_node_crypto.default.randomBytes(4).toString("hex")}`;
@@ -227826,8 +227859,8 @@ function toDate3(value) {
   if (!value) return null;
   if (value instanceof Date) return value;
   if (typeof value.toDate === "function") return value.toDate();
-  const parsed2 = new Date(value);
-  return Number.isNaN(parsed2.getTime()) ? null : parsed2;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 function formatDate(value) {
   const date = toDate3(value);
@@ -229185,11 +229218,11 @@ async function handleEmailTrigger(req, res, action) {
         notes: external_exports.string().trim().max(500).optional().default("")
       });
       const bodyData = req.body?.request || req.body || {};
-      const parsed2 = earlyCheckinRequestSchema.safeParse(bodyData);
-      if (!parsed2.success) {
+      const parsed = earlyCheckinRequestSchema.safeParse(bodyData);
+      if (!parsed.success) {
         return res.status(400).json({ success: false, error: "Please provide a valid requested check-in time (max 20 characters) and notes (max 500 characters)." });
       }
-      const request = parsed2.data;
+      const request = parsed.data;
       const earlyCheckIn = {
         source: "guest-request",
         status: "requested",
@@ -229599,8 +229632,8 @@ function toIsoOrNull(value) {
     if (d instanceof Date && !isNaN(d.getTime())) return d.toISOString();
   }
   if (typeof value === "string") {
-    const parsed2 = new Date(value);
-    if (!isNaN(parsed2.getTime())) return parsed2.toISOString();
+    const parsed = new Date(value);
+    if (!isNaN(parsed.getTime())) return parsed.toISOString();
   }
   return null;
 }
@@ -229627,15 +229660,15 @@ async function handleStartInFlowHold(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const parsed2 = StartBookingHoldSchema.safeParse(req.body);
-  if (!parsed2.success) {
+  const parsed = StartBookingHoldSchema.safeParse(req.body);
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Invalid hold request.",
-      details: parsed2.error.flatten()
+      details: parsed.error.flatten()
     });
   }
-  const input = parsed2.data;
+  const input = parsed.data;
   const holdMinutes = IN_FLOW_HOLD_MINUTES;
   if (!Number.isFinite(holdMinutes) || holdMinutes < MIN_IN_FLOW_HOLD_MINUTES || holdMinutes > MAX_IN_FLOW_HOLD_MINUTES) {
     return res.status(500).json({
@@ -229802,15 +229835,15 @@ async function handleExtendInFlowHold(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const parsed2 = ExtendBookingHoldSchema.safeParse(req.body);
-  if (!parsed2.success) {
+  const parsed = ExtendBookingHoldSchema.safeParse(req.body);
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Invalid hold extension request.",
-      details: parsed2.error.flatten()
+      details: parsed.error.flatten()
     });
   }
-  const input = parsed2.data;
+  const input = parsed.data;
   if (!HOLD_ID_REGEX.test(input.holdId)) {
     return res.status(400).json({ success: false, error: "Invalid hold id format." });
   }
@@ -230005,16 +230038,16 @@ async function hasActiveStaffInventoryHoldConflict(transaction, roomId, start, e
   });
 }
 async function handleAcquireStaffInventoryHold(req, res) {
-  const parsed2 = holdRangeSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = holdRangeSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({ success: false, error: "Choose valid rooms and dates." });
   }
-  const roomIds = Array.from(new Set(parsed2.data.roomIds));
-  if (roomIds.length !== parsed2.data.roomIds.length) {
+  const roomIds = Array.from(new Set(parsed.data.roomIds));
+  if (roomIds.length !== parsed.data.roomIds.length) {
     return res.status(400).json({ success: false, error: "Each room can only be selected once." });
   }
   try {
-    const { start, end } = parseRange(parsed2.data.startDate, parsed2.data.endDate);
+    const { start, end } = parseRange(parsed.data.startDate, parsed.data.endDate);
     const holdRef = adminDb.collection("staffInventoryHolds").doc();
     const now = /* @__PURE__ */ new Date();
     const expiresAt = new Date(now.getTime() + STAFF_HOLD_MINUTES * 6e4);
@@ -230090,10 +230123,10 @@ async function handleAcquireStaffInventoryHold(req, res) {
   }
 }
 async function handleReleaseStaffInventoryHold(req, res) {
-  const parsed2 = holdIdSchema.safeParse(req.body || {});
-  if (!parsed2.success) return res.status(400).json({ success: false, error: "A valid hold id is required." });
+  const parsed = holdIdSchema.safeParse(req.body || {});
+  if (!parsed.success) return res.status(400).json({ success: false, error: "A valid hold id is required." });
   try {
-    const ref = adminDb.collection("staffInventoryHolds").doc(parsed2.data.holdId);
+    const ref = adminDb.collection("staffInventoryHolds").doc(parsed.data.holdId);
     await adminDb.runTransaction(async (transaction) => {
       const snap = await transaction.get(ref);
       if (!snap.exists) throw new Error("Hold not found.");
@@ -230113,10 +230146,10 @@ async function handleReleaseStaffInventoryHold(req, res) {
   }
 }
 async function handleExtendStaffInventoryHold(req, res) {
-  const parsed2 = holdIdSchema.safeParse(req.body || {});
-  if (!parsed2.success) return res.status(400).json({ success: false, error: "A valid hold id is required." });
+  const parsed = holdIdSchema.safeParse(req.body || {});
+  if (!parsed.success) return res.status(400).json({ success: false, error: "A valid hold id is required." });
   try {
-    const ref = adminDb.collection("staffInventoryHolds").doc(parsed2.data.holdId);
+    const ref = adminDb.collection("staffInventoryHolds").doc(parsed.data.holdId);
     let responseData = null;
     await adminDb.runTransaction(async (transaction) => {
       const snap = await transaction.get(ref);
@@ -230310,6 +230343,8 @@ init_shared();
 init_shared();
 init_shared();
 init_shared();
+init_shared();
+init_shared();
 
 // server/lib/breakfast-selections.ts
 init_zod();
@@ -230358,13 +230393,13 @@ function buildMealLookup(meals) {
 function validateBreakfastSelections(input) {
   const { selections, breakfastConfig, now, staffCreated } = input;
   if (selections === null || selections === void 0) return null;
-  const parsed2 = breakfastSelectionsSchema.safeParse(selections);
-  if (!parsed2.success) {
+  const parsed = breakfastSelectionsSchema.safeParse(selections);
+  if (!parsed.success) {
     throw new BreakfastSelectionValidationError(
       "Invalid breakfast selection. Please refresh and try again."
     );
   }
-  const entries = parsed2.data;
+  const entries = parsed.data;
   const mealLookup = buildMealLookup(breakfastConfig.meals);
   const validatedEntries = {};
   for (const [key, entry] of Object.entries(entries)) {
@@ -230597,8 +230632,8 @@ function assertAddOnExists(addOnLookup, addOnId) {
 }
 function assertNotLocked2(input) {
   const { selectionKey, serverNow, addOn, checkInDate } = input;
-  const parsed2 = parseOtherAddOnSelectionKey(selectionKey);
-  if (!parsed2) {
+  const parsed = parseOtherAddOnSelectionKey(selectionKey);
+  if (!parsed) {
     throw new Error(`${OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX}${selectionKey}`);
   }
   const state = computeOtherAddOnCutoffState({
@@ -230607,21 +230642,21 @@ function assertNotLocked2(input) {
     now: serverNow
   });
   if (state.isLocked) {
-    throw new Error(`${OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX}${parsed2.date}`);
+    throw new Error(`${OTHER_ADDON_OP_ERROR.LOCKED_DATE_PREFIX}${parsed.date}`);
   }
 }
 function assertSelectionForAdd(next, selectionKey) {
-  const parsed2 = parseOtherAddOnSelectionKey(selectionKey);
-  if (!parsed2) return;
-  const prior = next[parsed2.date]?.find((e3) => e3 && e3.addOnId === parsed2.addOnId);
+  const parsed = parseOtherAddOnSelectionKey(selectionKey);
+  if (!parsed) return;
+  const prior = next[parsed.date]?.find((e3) => e3 && e3.addOnId === parsed.addOnId);
   if (prior && prior.removedAt === null) {
     throw new Error(OTHER_ADDON_OP_ERROR.SELECTION_ALREADY_ORDERED);
   }
 }
 function assertSelectionForChange(next, selectionKey) {
-  const parsed2 = parseOtherAddOnSelectionKey(selectionKey);
-  if (!parsed2) return;
-  const prior = next[parsed2.date]?.find((e3) => e3 && e3.addOnId === parsed2.addOnId);
+  const parsed = parseOtherAddOnSelectionKey(selectionKey);
+  if (!parsed) return;
+  const prior = next[parsed.date]?.find((e3) => e3 && e3.addOnId === parsed.addOnId);
   if (!prior || prior.removedAt !== null) {
     throw new Error(OTHER_ADDON_OP_ERROR.SELECTION_NOT_ORDERED);
   }
@@ -230722,14 +230757,14 @@ function generateOtherAddOnRefundId() {
 init_shared();
 
 // server/handlers/reservationScopeTransition.ts
-async function preReadSiblingChildren(transaction, adminDb2, bookingReservationId2, map2) {
-  if (bookingReservationId2.length === 0) return [];
+async function preReadSiblingChildren(transaction, adminDb2, bookingReservationId, map2) {
+  if (bookingReservationId.length === 0) return [];
   const childrenForFlip = await transaction.get(
-    adminDb2.collection("bookings").where("reservationId", "==", bookingReservationId2)
+    adminDb2.collection("bookings").where("reservationId", "==", bookingReservationId)
   );
   return childrenForFlip.docs.map(map2);
 }
-function applyReservationScopePaymentTransition(transaction, adminDb2, bookingReservationId2, targetBookingId, children, rule, updatedAt) {
+function applyReservationScopePaymentTransition(transaction, adminDb2, bookingReservationId, targetBookingId, children, rule, updatedAt) {
   const postUpdateChildStatuses = [];
   const siblingFlips = [];
   for (const child of children) {
@@ -230741,8 +230776,8 @@ function applyReservationScopePaymentTransition(transaction, adminDb2, bookingRe
       transaction.update(adminDb2.collection("bookings").doc(child.id), decision.write);
     }
   }
-  if (bookingReservationId2.length > 0 && children.length > 0) {
-    transaction.update(adminDb2.collection("reservations").doc(bookingReservationId2), { updatedAt });
+  if (bookingReservationId.length > 0 && children.length > 0) {
+    transaction.update(adminDb2.collection("reservations").doc(bookingReservationId), { updatedAt });
   }
   return {
     siblingFlippedCount: siblingFlips.length,
@@ -231080,12 +231115,12 @@ var ROOM_NOT_READY_PREVIOUS_GUEST_ERROR = "Room not ready \u2014 previous guest 
 var PREALLOCATED_BOOKING_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
 var PREALLOCATED_PAYMENT_ID_REGEX = /^[A-Za-z0-9]{10,32}$/;
 var RESCHEDULABLE_STATUSES = ["pending", "payment-uploaded", "payment-confirmed", "confirmed", "checked-in"];
-function isExpiredPendingHold(bookingData2, now) {
-  if (!bookingData2) return false;
-  if (bookingData2.status !== "pending") return false;
+function isExpiredPendingHold(bookingData, now) {
+  if (!bookingData) return false;
+  if (bookingData.status !== "pending") return false;
   return !isBookingOccupyingRoom({
-    status: bookingData2.status,
-    holdExpiresAt: bookingData2.holdExpiresAt
+    status: bookingData.status,
+    holdExpiresAt: bookingData.holdExpiresAt
   }, now);
 }
 function isExpectedBookingUploadPath(path, bookingId, folder) {
@@ -231118,9 +231153,9 @@ function sumBilledAddToBillOrders(snapshot) {
   }, 0);
 }
 async function readTransactionalFolioSnapshot(input) {
-  const { transaction, bookingRef: bookingRef2, bookingId, bookingData: bookingData2 } = input;
-  const bookingReservationId2 = String(bookingData2.reservationId || "").trim();
-  if (!bookingReservationId2) {
+  const { transaction, bookingRef: bookingRef2, bookingId, bookingData } = input;
+  const bookingReservationId = String(bookingData.reservationId || "").trim();
+  if (!bookingReservationId) {
     const paymentsRef = bookingRef2.collection("payments");
     const chargesRef = bookingRef2.collection("charges");
     const storeOrdersQuery = adminDb.collection("storeOrders").where("bookingId", "==", bookingId);
@@ -231134,10 +231169,10 @@ async function readTransactionalFolioSnapshot(input) {
     const addToBillTotal2 = sumBilledAddToBillOrders(storeOrdersSnapshot);
     const otherAddOnTotal2 = Math.max(
       0,
-      Number(bookingData2.otherAddOnTotal) || 0
+      Number(bookingData.otherAddOnTotal) || 0
     );
     const totals2 = computeServerFolioTotals({
-      totalPrice: Number(bookingData2.totalPrice) || 0,
+      totalPrice: Number(bookingData.totalPrice) || 0,
       incidentalTotal: incidentalTotal2,
       addToBillTotal: addToBillTotal2,
       collectedTotal: collectedTotal2,
@@ -231145,7 +231180,7 @@ async function readTransactionalFolioSnapshot(input) {
     });
     return {
       reservationId: "",
-      totalPrice: Number(bookingData2.totalPrice) || 0,
+      totalPrice: Number(bookingData.totalPrice) || 0,
       otherAddOnTotal: otherAddOnTotal2,
       collectedTotal: collectedTotal2,
       incidentalTotal: incidentalTotal2,
@@ -231154,11 +231189,11 @@ async function readTransactionalFolioSnapshot(input) {
       source: "booking-subcollection-legacy"
     };
   }
-  const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
+  const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
   const reservationPaymentsRef = reservationRef.collection("payments");
   const reservationRefundsRef = reservationRef.collection("refunds");
   const reservationChargesRef = reservationRef.collection("charges");
-  const childBookingsQuery = adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2);
+  const childBookingsQuery = adminDb.collection("bookings").where("reservationId", "==", bookingReservationId);
   const [
     reservationDoc,
     reservationPaymentsSnapshot,
@@ -231216,7 +231251,7 @@ async function readTransactionalFolioSnapshot(input) {
     otherAddOnTotal
   });
   return {
-    reservationId: bookingReservationId2,
+    reservationId: bookingReservationId,
     totalPrice,
     otherAddOnTotal,
     collectedTotal,
@@ -231918,6 +231953,10 @@ async function handleCreateBooking(req, res) {
     let finalTotalPrice = 0;
     let finalRateBreakdown = null;
     let finalLookupTokens = [];
+    let finalBookingRefs = [];
+    let finalChildPricing = [];
+    let finalRoomTypeEntries = [];
+    let finalCorporateDetails = { isCorporate: false, corporateCode: "", companyName: "" };
     let finalReservationRef = "";
     let finalRooms = [];
     let computedData = {};
@@ -232034,7 +232073,7 @@ async function handleCreateBooking(req, res) {
         throw new Error("Senior/PWD online claims are currently disabled. Please claim the discount at the front desk with a valid ID.");
       }
       const roomTypesArr = Array.isArray(hotelConfig.roomTypes) ? hotelConfig.roomTypes : [];
-      const resolvedRoomSelections2 = normalizedRoomSelections.map((selection) => {
+      const resolvedRoomSelections = normalizedRoomSelections.map((selection) => {
         const rawSelectionType = roomTypesArr.find(
           (entry) => entry && entry.value === selection.roomType
         );
@@ -232052,11 +232091,10 @@ async function handleCreateBooking(req, res) {
           typeEntry: applyRoomTypeDefaults(rawSelectionType)
         };
       });
-      const bookingPreferencesCatalog = Array.isArray(
+      finalRoomTypeEntries = resolvedRoomSelections.map((selection) => selection.typeEntry);
+      const bookingPreferencesCatalog = resolveBookingPreferenceValues(
         hotelConfig.bookingPreferences
-      ) ? hotelConfig.bookingPreferences.filter(
-        (v6) => typeof v6 === "object" && v6 !== null && typeof v6.value === "string"
-      ).map((v6) => v6.value) : [];
+      );
       const invalidPreferenceKeys = additionalPreferences.filter(
         (key) => !bookingPreferencesCatalog.includes(key)
       );
@@ -232072,7 +232110,7 @@ async function handleCreateBooking(req, res) {
           `Expected arrival time "${expectedArrivalTime}" is outside the booking window.`
         );
       })();
-      const primaryRoomType = resolvedRoomSelections2[0]?.roomType || roomType;
+      const primaryRoomType = resolvedRoomSelections[0]?.roomType || roomType;
       const rawTypeEntry = roomTypesArr.find((entry) => entry && entry.value === primaryRoomType);
       if (!rawTypeEntry) {
         throw new Error("Selected room type is not available.");
@@ -232084,7 +232122,7 @@ async function handleCreateBooking(req, res) {
       const typeCorporateRate = Number(typeEntry.corporateRate) || 0;
       const seasonalRateOverrides = normalizeSeasonalRateOverrides(hotelConfig.seasonalRateOverrides);
       const candidatesByType = /* @__PURE__ */ new Map();
-      for (const typeValue of [...new Set(resolvedRoomSelections2.map((selection) => selection.roomType))]) {
+      for (const typeValue of [...new Set(resolvedRoomSelections.map((selection) => selection.roomType))]) {
         const candidatesQuery = adminDb.collection("rooms").where("type", "==", typeValue).where("isActive", "==", true);
         const candidatesSnapshot = await transaction.get(candidatesQuery);
         const candidates = candidatesSnapshot.docs.map((d) => ({ id: d.id, data: d.data() })).filter((candidate) => candidate.data).sort((a, b3) => {
@@ -232097,7 +232135,7 @@ async function handleCreateBooking(req, res) {
       let sawLingeringCheckedInConflict = false;
       const assignedRooms = [];
       const assignedRoomIds = [];
-      for (const selection of resolvedRoomSelections2) {
+      for (const selection of resolvedRoomSelections) {
         const candidates = candidatesByType.get(selection.roomType) || [];
         let foundThisRound = null;
         for (const candidate of candidates) {
@@ -232117,24 +232155,24 @@ async function handleCreateBooking(req, res) {
           const overlapSnapshot = await transaction.get(overlapQuery);
           let sawOverlap = false;
           for (const doc of overlapSnapshot.docs) {
-            const bookingData2 = doc.data();
-            if (isExpiredPendingHold(bookingData2)) {
-              const existingCheckIn = toDateOrNull(bookingData2.checkIn);
-              const existingCheckOut = toDateOrNull(bookingData2.checkOut);
+            const bookingData = doc.data();
+            if (isExpiredPendingHold(bookingData)) {
+              const existingCheckIn = toDateOrNull(bookingData.checkIn);
+              const existingCheckOut = toDateOrNull(bookingData.checkOut);
               const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap2(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
               if (dateOverlaps) {
                 expiredHoldRetirements.push({
                   ref: doc.ref,
-                  previousData: bookingData2,
-                  bookingRef: String(bookingData2.bookingRef || doc.id),
-                  guestEmail: String(bookingData2.guestEmail || ""),
-                  holdExpiresAt: toDateOrNull(bookingData2.holdExpiresAt)
+                  previousData: bookingData,
+                  bookingRef: String(bookingData.bookingRef || doc.id),
+                  guestEmail: String(bookingData.guestEmail || ""),
+                  holdExpiresAt: toDateOrNull(bookingData.holdExpiresAt)
                 });
               }
               continue;
             }
             const reason = getOccupancyConflictReason({
-              bookingData: bookingData2,
+              bookingData,
               requestedCheckIn: checkInDate,
               requestedCheckOut: checkOutDate,
               requestedCheckInKey: checkIn,
@@ -232177,7 +232215,7 @@ async function handleCreateBooking(req, res) {
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
       const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: 0 };
-      const actualBreakfastRate2 = 0;
+      const actualBreakfastRate = 0;
       const breakfastIncludesChildrenDefault = true;
       const validatedBreakfastSelections = validateBreakfastSelections({
         selections: body.breakfastSelections,
@@ -232320,7 +232358,7 @@ async function handleCreateBooking(req, res) {
         }
       }
       let activeRoomRate = typeBaseRate;
-      let corporateDetails2 = { isCorporate: false, corporateCode: "", companyName: "" };
+      let corporateDetails = { isCorporate: false, corporateCode: "", companyName: "" };
       let corporateCodeRef = null;
       let corporateCodeUsageUpdate = null;
       let corpCodeDoc = null;
@@ -232346,9 +232384,9 @@ async function handleCreateBooking(req, res) {
             usageCount: corpData.usageCount || 0
           }, { requestedUses: assignedRooms.length });
           if (corpValidation.valid) {
-            corporateDetails2.isCorporate = true;
-            corporateDetails2.corporateCode = formattedCorpCode;
-            corporateDetails2.companyName = corpData.companyName || "";
+            corporateDetails.isCorporate = true;
+            corporateDetails.corporateCode = formattedCorpCode;
+            corporateDetails.companyName = corpData.companyName || "";
             if (corpData.ratePerRoomType && typeof corpData.ratePerRoomType === "object") {
               perStayNegotiatedRate = { ...corpData.ratePerRoomType };
               if (perStayNegotiatedRate[roomType] !== void 0) {
@@ -232377,10 +232415,10 @@ async function handleCreateBooking(req, res) {
           );
         }
       }
-      if (!corporateDetails2.isCorporate && corporateFlatRate === true) {
-        corporateDetails2.isCorporate = true;
-        corporateDetails2.corporateCode = "";
-        corporateDetails2.companyName = String(guestDetails.companyName || "").trim().slice(0, 160);
+      if (!corporateDetails.isCorporate && corporateFlatRate === true) {
+        corporateDetails.isCorporate = true;
+        corporateDetails.corporateCode = "";
+        corporateDetails.companyName = String(guestDetails.companyName || "").trim().slice(0, 160);
         activeRoomRate = typeCorporateRate > 0 ? typeCorporateRate : typeBaseRate;
       }
       const roomStayPricing = validatedRoomStays.map((stay, index) => {
@@ -232388,12 +232426,12 @@ async function handleCreateBooking(req, res) {
         const baseRate = Number(stayType.pricePerNight) || 0;
         const stayCorporateRate = Number(stayType.corporateRate) || 0;
         const negotiatedForThisStay = perStayNegotiatedRate ? perStayNegotiatedRate[stayType.value] : void 0;
-        const stayActiveRate = corporateDetails2.isCorporate ? negotiatedForThisStay !== void 0 ? negotiatedForThisStay : stayCorporateRate > 0 ? stayCorporateRate : baseRate : baseRate;
-        const stayRoomBreakdown = corporateDetails2.isCorporate ? {
+        const stayActiveRate = corporateDetails.isCorporate ? negotiatedForThisStay !== void 0 ? negotiatedForThisStay : stayCorporateRate > 0 ? stayCorporateRate : baseRate : baseRate;
+        const stayRoomBreakdown = corporateDetails.isCorporate ? {
           roomSubtotal: stayActiveRate * numNights,
           roomLines: [{
             source: "corporate",
-            label: corporateDetails2.corporateCode ? "Corporate negotiated rate" : "Corporate flat rate",
+            label: corporateDetails.corporateCode ? "Corporate negotiated rate" : "Corporate flat rate",
             startDate: checkIn,
             endDate: checkOut,
             nights: numNights,
@@ -232451,8 +232489,8 @@ async function handleCreateBooking(req, res) {
       let voucherDiscount = 0;
       let appliedVoucherCode = "";
       let voucherUsageUpdate = null;
-      if (voucherCode && !corporateDetails2.isCorporate) {
-        const childrenWithVoucherCount = resolvedRoomSelections2.length;
+      if (voucherCode && !corporateDetails.isCorporate) {
+        const childrenWithVoucherCount = resolvedRoomSelections.length;
         const formattedCode = voucherCode.trim().toUpperCase();
         let voucherRef = adminDb.collection("vouchers").doc(formattedCode);
         let voucherDoc = await transaction.get(voucherRef);
@@ -232472,7 +232510,7 @@ async function handleCreateBooking(req, res) {
             (assignedRoom) => assignedRoom.data.type === assignedRoom.selection.roomType
           );
           const applicableTypes = Array.isArray(vData.applicableRoomTypes) ? vData.applicableRoomTypes : [];
-          const allSelectedTypesApplicable = applicableTypes.length === 0 || resolvedRoomSelections2.every((selection) => applicableTypes.includes(selection.roomType));
+          const allSelectedTypesApplicable = applicableTypes.length === 0 || resolvedRoomSelections.every((selection) => applicableTypes.includes(selection.roomType));
           const isValid2 = vData.isActive !== false && (!voucherExpiresAt || voucherExpiresAt >= now2) && (vData.usageCap === null || (vData.usageCount || 0) < vData.usageCap) && // Per BF-19 (booking-flow audit 2026-06-26): the
           // empty-or-undefined case is covered by the optional
           // chaining below; drop the redundant `!vData.applicableRoomTypes`
@@ -232563,7 +232601,7 @@ async function handleCreateBooking(req, res) {
         label: deduction.label,
         amounts: allocateRoundedAmount(deduction.amount, roomStayWeights)
       }));
-      const childPricing2 = roomStayPricing.map((stay, index) => ({
+      const childPricing = roomStayPricing.map((stay, index) => ({
         ...stay,
         totalPrice: allocatedChildTotals[index],
         voucherDiscount: allocatedVoucherDiscounts[index],
@@ -232598,6 +232636,7 @@ async function handleCreateBooking(req, res) {
           finalTotal: allocatedChildTotals[index]
         }
       }));
+      finalChildPricing = childPricing;
       const { todayStr, todayCompact } = getManilaDateInfo();
       const counterRef = adminDb.collection("counters").doc(`bookings-${todayStr}`);
       const counterDoc = await transaction.get(counterRef);
@@ -232605,10 +232644,11 @@ async function handleCreateBooking(req, res) {
       if (counterDoc.exists) {
         sequence = (counterDoc.data()?.count || 0) + 1;
       }
-      const childBookingRefs2 = assignedRooms.map(
+      const childBookingRefs = assignedRooms.map(
         (_2, roomIdx) => `${hotel_config_default.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence + roomIdx).padStart(5, "0")}`
       );
-      const bookingRef2 = childBookingRefs2[0];
+      const bookingRef2 = childBookingRefs[0];
+      finalBookingRefs = childBookingRefs;
       finalBookingRef = bookingRef2;
       finalTotalPrice = totalPrice;
       finalRateBreakdown = rateBreakdown;
@@ -232702,13 +232742,13 @@ async function handleCreateBooking(req, res) {
           at: now
         });
       }
-      const guestName2 = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
+      const guestName = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
       const newBooking = {
         bookingRef: bookingRef2,
         roomId,
         roomNumber: roomData.roomNumber,
         roomType,
-        guestName: guestName2,
+        guestName,
         guestEmail: guestDetails.email.trim().toLowerCase(),
         guestPhone: guestDetails.phone.trim(),
         numGuests: guests,
@@ -232758,9 +232798,9 @@ async function handleCreateBooking(req, res) {
         discountRejectionReason: "",
         voucherCode: appliedVoucherCode,
         voucherDiscount,
-        isCorporate: corporateDetails2.isCorporate,
-        corporateCode: corporateDetails2.corporateCode,
-        companyName: corporateDetails2.companyName,
+        isCorporate: corporateDetails.isCorporate,
+        corporateCode: corporateDetails.corporateCode,
+        companyName: corporateDetails.companyName,
         // Per feat/special-requests-redirect (2026-08-21):
         // the online /book create no longer writes
         // `specialRequests` on the booking doc. The public
@@ -232818,7 +232858,7 @@ async function handleCreateBooking(req, res) {
         // `null` so the canonical "absent" value is consistent.
         paymentProofUrl: paymentProofUrl || null,
         paymentProofPath: paymentProofPath || null,
-        source: corporateDetails2.isCorporate ? "corporate" : "online",
+        source: corporateDetails.isCorporate ? "corporate" : "online",
         notes: "",
         handledBy: "",
         // Server-detected Spark Rewards member (per W2.2 / decision #90).
@@ -232960,7 +233000,7 @@ async function handleCreateBooking(req, res) {
         // `isCorporate: true` defaults to direct-billing
         // semantics and the staff LOU workflow assumes
         // chargeback.
-        ...corporateDetails2.isCorporate ? {
+        ...corporateDetails.isCorporate ? {
           corporate: {
             designation: String(guestDetails.designation || "").trim().slice(0, 120),
             companyAddress: String(guestDetails.companyAddress || "").trim().slice(0, 300),
@@ -232995,7 +233035,7 @@ async function handleCreateBooking(req, res) {
         updatedAt: /* @__PURE__ */ new Date()
       };
       const websiteContent = websiteContentDoc.exists ? websiteContentDoc.data() : {};
-      const corpCodeData = corporateDetails2.isCorporate && corpCodeDoc && corpCodeDoc.exists ? corpCodeDoc.data() : null;
+      const corpCodeData = corporateDetails.isCorporate && corpCodeDoc && corpCodeDoc.exists ? corpCodeDoc.data() : null;
       const cancellationPolicySnapshot = createCancellationPolicySnapshot({
         websiteContent,
         hotelConfig,
@@ -233005,7 +233045,7 @@ async function handleCreateBooking(req, res) {
       const newReservation = {
         id: effectiveReservationId,
         reservationRef: finalReservationRef,
-        leadGuestName: guestName2,
+        leadGuestName: guestName,
         // Per the intercom-verify-guest permanent fix
         // extension (2026-08-21, add-room-to-reservation):
         // the reservation header carries a structured
@@ -233063,15 +233103,15 @@ async function handleCreateBooking(req, res) {
         // the invariant). The totalPrice match is exact.
         aggregateRevenueAllocation: assertBookingRevenueAllocationInvariant(
           {
-            roomNet: childPricing2.reduce(
+            roomNet: childPricing.reduce(
               (sum, pricing) => sum + (Number(pricing.roomTotal) || 0),
               0
             ),
-            breakfastNet: childPricing2.reduce(
+            breakfastNet: childPricing.reduce(
               (sum, pricing) => sum + (Number(pricing.breakfastTotal) || 0),
               0
             ),
-            addOnNet: childPricing2.reduce(
+            addOnNet: childPricing.reduce(
               (sum, pricing) => sum + (Number(pricing.extraBedTotal) || 0),
               0
             ),
@@ -233086,10 +233126,10 @@ async function handleCreateBooking(req, res) {
           },
           totalPrice
         ),
-        source: corporateDetails2.isCorporate ? "corporate" : "online",
-        isCorporate: corporateDetails2.isCorporate,
-        corporateCode: corporateDetails2.corporateCode,
-        companyName: corporateDetails2.companyName,
+        source: corporateDetails.isCorporate ? "corporate" : "online",
+        isCorporate: corporateDetails.isCorporate,
+        corporateCode: corporateDetails.corporateCode,
+        companyName: corporateDetails.companyName,
         voucherCode: appliedVoucherCode,
         memberDiscountPct: appliedMemberDiscountPct,
         paymentStatus: paymentProofPath || paymentProofUrl ? "payment-uploaded" : "awaiting-payment",
@@ -233160,7 +233200,7 @@ async function handleCreateBooking(req, res) {
       const bookingWriteRefs = [];
       for (let bookingIdx = 0; bookingIdx < assignedRooms.length; bookingIdx++) {
         const assignedRoomForBooking = assignedRooms[bookingIdx];
-        const pricingForRoom = childPricing2[bookingIdx];
+        const pricingForRoom = childPricing[bookingIdx];
         const bookingIdForThisRoom = assignedRoomForBooking.selection.bookingId;
         const perRoomBookingDocRef = adminDb.collection("bookings").doc(bookingIdForThisRoom);
         bookingWriteRefs.push({
@@ -233182,7 +233222,7 @@ async function handleCreateBooking(req, res) {
             // reservation inherited the spread `newBooking.bookingRef`,
             // which made a "ref + email" lookup ambiguous across the
             // group.
-            bookingRef: childBookingRefs2[bookingIdx],
+            bookingRef: childBookingRefs[bookingIdx],
             roomId: assignedRoomForBooking.id,
             roomNumber: String(assignedRoomForBooking.data.roomNumber || ""),
             roomType: assignedRoomForBooking.selection.roomType,
@@ -233292,7 +233332,7 @@ async function handleCreateBooking(req, res) {
       }
       finalRooms = bookingWriteRefs.map((write, index) => {
         const assigned = assignedRooms[index];
-        const pricing = childPricing2[index];
+        const pricing = childPricing[index];
         return {
           bookingId: write.ref.id,
           roomId: assigned.id,
@@ -233305,6 +233345,11 @@ async function handleCreateBooking(req, res) {
           totalPrice: pricing.totalPrice
         };
       });
+      finalCorporateDetails = {
+        isCorporate: corporateDetails.isCorporate === true,
+        corporateCode: corporateDetails.corporateCode || "",
+        companyName: corporateDetails.companyName || ""
+      };
       if (newBooking && newBooking.holdExpiresAt) {
         const he3 = newBooking.holdExpiresAt;
         bookingHoldExpiresAt = he3 instanceof Date ? he3 : he3.toDate ? he3.toDate() : null;
@@ -233328,7 +233373,7 @@ async function handleCreateBooking(req, res) {
         });
       }
       computedData = {
-        guestName: guestName2,
+        guestName,
         email: guestDetails.email.trim().toLowerCase(),
         roomName: roomData.name,
         roomNumber: roomData.roomNumber,
@@ -233337,7 +233382,7 @@ async function handleCreateBooking(req, res) {
         numNights,
         totalPrice,
         rateBreakdown,
-        source: corporateDetails2.isCorporate ? "corporate" : "online"
+        source: corporateDetails.isCorporate ? "corporate" : "online"
       };
     });
     if (alreadyExistingBookingResponse) {
@@ -233363,24 +233408,24 @@ async function handleCreateBooking(req, res) {
     }
     try {
       const emailView = buildCreateEmailView({
-        reservationId: finalReservationId || "",
+        reservationId: effectiveReservationId || "",
         reservationRef: finalReservationRef || "",
-        finalBookingRefs: childBookingRefs,
-        finalLookupTokens: childLookupTokens,
+        finalBookingRefs,
+        finalLookupTokens,
         finalRooms,
-        childPricing,
-        roomTypes: resolvedRoomSelections.map((s4) => s4.typeEntry),
-        guestName,
+        childPricing: finalChildPricing,
+        roomTypes: finalRoomTypeEntries,
+        guestName: `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`,
         guestEmail: guestDetails.email.trim().toLowerCase(),
         guestPhone: guestDetails.phone.trim(),
         totalPrice: finalTotalPrice,
         numNights,
         paymentMethod,
         paymentStatus: paymentProofPath || paymentProofUrl ? "payment-uploaded" : "pending",
-        source: corporateDetails.isCorporate ? "corporate" : "online",
-        isCorporate: corporateDetails.isCorporate === true,
-        corporateCode: corporateDetails.corporateCode || "",
-        companyName: corporateDetails.companyName || "",
+        source: finalCorporateDetails.isCorporate ? "corporate" : "online",
+        isCorporate: finalCorporateDetails.isCorporate === true,
+        corporateCode: finalCorporateDetails.corporateCode || "",
+        companyName: finalCorporateDetails.companyName || "",
         // ETR-22: thread the test-run banner metadata into the
         // synthetic email view so the booking-submitted template
         // renders the test-run banner above the reservation
@@ -233901,24 +233946,24 @@ async function handleCreateWalkin(req, res) {
         let sawConflict = false;
         let sawLingering = false;
         for (const doc of bookingsSnapshot.docs) {
-          const bookingData2 = doc.data();
-          if (isExpiredPendingHold(bookingData2, now)) {
-            const existingCheckIn = toDateOrNull(bookingData2.checkIn);
-            const existingCheckOut = toDateOrNull(bookingData2.checkOut);
+          const bookingData = doc.data();
+          if (isExpiredPendingHold(bookingData, now)) {
+            const existingCheckIn = toDateOrNull(bookingData.checkIn);
+            const existingCheckOut = toDateOrNull(bookingData.checkOut);
             const dateOverlaps = existingCheckIn && existingCheckOut ? rangesOverlap2(existingCheckIn, existingCheckOut, checkInDate, checkOutDate) : false;
             if (dateOverlaps) {
               expiredHoldRetirements.push({
                 ref: doc.ref,
-                previousData: bookingData2,
-                bookingRef: String(bookingData2.bookingRef || doc.id),
-                guestEmail: String(bookingData2.guestEmail || ""),
-                holdExpiresAt: toDateOrNull(bookingData2.holdExpiresAt)
+                previousData: bookingData,
+                bookingRef: String(bookingData.bookingRef || doc.id),
+                guestEmail: String(bookingData.guestEmail || ""),
+                holdExpiresAt: toDateOrNull(bookingData.holdExpiresAt)
               });
             }
             continue;
           }
           const reason = getOccupancyConflictReason({
-            bookingData: bookingData2,
+            bookingData,
             requestedCheckIn: checkInDate,
             requestedCheckOut: checkOutDate,
             requestedCheckInKey: checkIn,
@@ -233950,7 +233995,7 @@ async function handleCreateWalkin(req, res) {
       const breakfastConfigRef = adminDb.collection("settings").doc("breakfastConfig");
       const breakfastConfigDoc = await transaction.get(breakfastConfigRef);
       const breakfastConfig = breakfastConfigDoc.exists ? breakfastConfigDoc.data() : { isEnabled: false, ratePerPersonPerNight: 0 };
-      const actualBreakfastRate2 = 0;
+      const actualBreakfastRate = 0;
       const breakfastIncludesChildrenDefault = true;
       const breakfastIncludesChildren = breakfastIncludesChildrenDefault;
       const validatedWalkinBreakfast = validateBreakfastSelections({
@@ -234226,13 +234271,13 @@ async function handleCreateWalkin(req, res) {
       const bookingRef2 = walkinBookingRefs[0];
       finalBookingRef = bookingRef2;
       finalReservationRef = `R-${todayCompact}-${String(sequence).padStart(5, "0")}`;
-      const guestName2 = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
+      const guestName = `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`;
       newBooking = {
         bookingRef: bookingRef2,
         roomId,
         roomNumber: roomData.roomNumber,
         roomType: roomData.type,
-        guestName: guestName2,
+        guestName,
         guestEmail: guestDetails.email.trim().toLowerCase(),
         guestPhone: guestDetails.phone.trim(),
         numGuests: guests,
@@ -234390,7 +234435,7 @@ async function handleCreateWalkin(req, res) {
       const newReservation = {
         id: effectiveReservationId,
         reservationRef: finalReservationRef,
-        leadGuestName: guestName2,
+        leadGuestName: guestName,
         // Per the intercom-verify-guest permanent fix
         // extension (2026-08-21, add-room-to-reservation):
         // mirrors the online reservation header — see the
@@ -234487,7 +234532,7 @@ async function handleCreateWalkin(req, res) {
         // fingerprint is built by the same hoisted builder the
         // idempotency check above used, so a replay of an N-room
         // walk-in compares like for like.
-        requestFingerprint: buildWalkinFingerprint(guestName2),
+        requestFingerprint: buildWalkinFingerprint(guestName),
         // Per MRB-14 (2026-08-03, per decision #180 —
         // proposed): the actual range snapshot. Walk-ins
         // create all N children in the same transaction
@@ -234931,20 +234976,20 @@ async function handleRemoveVoucher(req, res) {
       const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
       const bookingDoc = await transaction.get(bookingRef2);
       if (!bookingDoc.exists) throw new Error("Booking not found.");
-      const bookingData2 = bookingDoc.data();
-      const existingVoucherCode = String(bookingData2.voucherCode || "").trim();
+      const bookingData = bookingDoc.data();
+      const existingVoucherCode = String(bookingData.voucherCode || "").trim();
       if (!existingVoucherCode) {
         result = { idempotentReplay: true, bookingId };
         return;
       }
       const voucherRef = adminDb.collection("vouchers").doc(existingVoucherCode);
       const voucherDoc = await transaction.get(voucherRef);
-      const originalTotalPrice = bookingData2.originalTotalPrice;
+      const originalTotalPrice = bookingData.originalTotalPrice;
       if (originalTotalPrice === null || originalTotalPrice === void 0) {
         throw new Error("Original total price not stored on booking.");
       }
-      const memberDiscountPct = Number(bookingData2.memberDiscountPct || 0);
-      const rawPointsRedeemedValue = Number(bookingData2.pointsRedeemedValue || 0);
+      const memberDiscountPct = Number(bookingData.memberDiscountPct || 0);
+      const rawPointsRedeemedValue = Number(bookingData.pointsRedeemedValue || 0);
       const pointsRedeemedValue = Number.isFinite(rawPointsRedeemedValue) ? Math.max(rawPointsRedeemedValue, 0) : 0;
       const removeChain = calculateDiscountChain({
         roomTotal: Number(originalTotalPrice) || 0,
@@ -234959,7 +235004,7 @@ async function handleRemoveVoucher(req, res) {
         // the larger pre-voucher base).
         voucherAmount: 0,
         memberPct: memberDiscountPct,
-        scope: normalizeDiscountScope(bookingData2.discountScopeSnapshot),
+        scope: normalizeDiscountScope(bookingData.discountScopeSnapshot),
         round: true
       });
       const restoredTotalPrice = Math.max(removeChain.total - pointsRedeemedValue, 0);
@@ -234972,7 +235017,7 @@ async function handleRemoveVoucher(req, res) {
         // leaking through the spread would be
         // semantically wrong.
         ...(() => {
-          const { voucherCode: _omit, ...rest } = bookingData2;
+          const { voucherCode: _omit, ...rest } = bookingData;
           return rest;
         })(),
         voucherCode: "",
@@ -235021,17 +235066,17 @@ async function handleRejectDiscount(req, res) {
     if (!bookingDoc.exists) {
       return res.status(404).json({ success: false, error: "Booking not found." });
     }
-    const bookingData2 = bookingDoc.data();
-    if (!bookingData2.discountType) {
+    const bookingData = bookingDoc.data();
+    if (!bookingData.discountType) {
       return res.status(400).json({ success: false, error: "Booking does not have an active government discount request." });
     }
-    const originalTotalPrice = bookingData2.originalTotalPrice;
+    const originalTotalPrice = bookingData.originalTotalPrice;
     if (originalTotalPrice === null || originalTotalPrice === void 0) {
       return res.status(500).json({ success: false, error: "Original total price not stored on booking." });
     }
-    const voucherDiscount = Number(bookingData2.voucherDiscount || 0);
-    const memberDiscountPct = Number(bookingData2.memberDiscountPct || 0);
-    const rawPointsRedeemedValue = Number(bookingData2.pointsRedeemedValue || 0);
+    const voucherDiscount = Number(bookingData.voucherDiscount || 0);
+    const memberDiscountPct = Number(bookingData.memberDiscountPct || 0);
+    const rawPointsRedeemedValue = Number(bookingData.pointsRedeemedValue || 0);
     const pointsRedeemedValue = Number.isFinite(rawPointsRedeemedValue) ? Math.max(rawPointsRedeemedValue, 0) : 0;
     const rejectChain = calculateDiscountChain({
       roomTotal: Number(originalTotalPrice) || 0,
@@ -235040,12 +235085,12 @@ async function handleRejectDiscount(req, res) {
       seniorPct: 0,
       voucherAmount: voucherDiscount,
       memberPct: memberDiscountPct,
-      scope: normalizeDiscountScope(bookingData2.discountScopeSnapshot),
+      scope: normalizeDiscountScope(bookingData.discountScopeSnapshot),
       round: true
     });
     const restoredTotalPrice = Math.max(rejectChain.total - pointsRedeemedValue, 0);
     const rateBreakdown = rebuildRateBreakdown({
-      ...bookingData2,
+      ...bookingData,
       discountType: "",
       discountPct: 0,
       pointsRedeemedValue,
@@ -235067,7 +235112,7 @@ async function handleRejectDiscount(req, res) {
     await bookingRef2.update(updates);
     try {
       await sendBookingTrigger("discount-rejected", {
-        ...bookingData2,
+        ...bookingData,
         discountRejectionReason: reason || "",
         totalPrice: restoredTotalPrice
       });
@@ -235181,7 +235226,7 @@ async function handleRejectPayment(req, res) {
     return res.status(400).json({ success: false, error: "A rejection reason is required so the guest can fix the issue." });
   }
   const paymentRejectedBy = req.staff?.uid || "staff";
-  let bookingData2 = null;
+  let bookingData = null;
   let siblingRejectedCount = 0;
   try {
     const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
@@ -235197,11 +235242,11 @@ async function handleRejectPayment(req, res) {
       }
       const data = bookingDoc.data();
       const isTargetInPaymentUploaded = data.status === "payment-uploaded";
-      const bookingReservationId2 = String(data.reservationId || "").trim();
+      const bookingReservationId = String(data.reservationId || "").trim();
       const siblingChildBookings = await preReadSiblingChildren(
         transaction,
         adminDb,
-        bookingReservationId2,
+        bookingReservationId,
         (d) => ({
           id: d.id,
           status: String((d.data() || {}).status || "")
@@ -235213,7 +235258,7 @@ async function handleRejectPayment(req, res) {
       if (!isTargetInPaymentUploaded && !hasRejectableSiblings) {
         throw new Error(`Only a booking in 'payment-uploaded' status can be rejected (current: ${data.status}).`);
       }
-      bookingData2 = data;
+      bookingData = data;
       const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
       const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data() : {};
       const holdWindowHours = normalizePaymentHoldWindowHours(
@@ -235227,7 +235272,7 @@ async function handleRejectPayment(req, res) {
       const { postUpdateChildStatuses, siblingFlippedCount: helperSiblingRejectedCount } = applyReservationScopePaymentTransition(
         transaction,
         adminDb,
-        bookingReservationId2,
+        bookingReservationId,
         bookingId,
         siblingChildBookings,
         (child) => {
@@ -235404,7 +235449,8 @@ async function handleCancelBooking(req, res) {
   }
   try {
     let bookingDocumentRef;
-    let bookingData2;
+    let bookingData;
+    let guestRequestedScope = "room";
     const now = /* @__PURE__ */ new Date();
     if (req.staff) {
       if (bookingId) {
@@ -235423,27 +235469,28 @@ async function handleCancelBooking(req, res) {
       if (!doc.exists) {
         return res.status(404).json({ success: false, error: "Booking not found." });
       }
-      bookingData2 = doc.data();
+      bookingData = doc.data();
     } else {
-      const parsed2 = guestCancelSchema.safeParse(req.body || {});
-      if (!parsed2.success) {
+      const parsed = guestCancelSchema.safeParse(req.body || {});
+      if (!parsed.success) {
         return res.status(400).json({
           success: false,
           error: "Please provide a valid booking reference and email or lookup token."
         });
       }
-      validReason = parsed2.data.reason;
-      const compositeFilter = parsed2.data.token ? { field: "lookupToken", value: String(parsed2.data.token).toLowerCase() } : { field: "guestEmail", value: parsed2.data.guestEmail };
-      const query = adminDb.collection("bookings").where("bookingRef", "==", parsed2.data.bookingRef).where(compositeFilter.field, "==", compositeFilter.value).limit(1);
+      validReason = parsed.data.reason;
+      guestRequestedScope = parsed.data.scope;
+      const compositeFilter = parsed.data.token ? { field: "lookupToken", value: String(parsed.data.token).toLowerCase() } : { field: "guestEmail", value: parsed.data.guestEmail };
+      const query = adminDb.collection("bookings").where("bookingRef", "==", parsed.data.bookingRef).where(compositeFilter.field, "==", compositeFilter.value).limit(1);
       const snapshot = await query.get();
       if (snapshot.empty) {
         return res.status(404).json({
           success: false,
-          error: parsed2.data.token ? "Booking not found with matching token." : "Booking not found with matching email."
+          error: parsed.data.token ? "Booking not found with matching token." : "Booking not found with matching email."
         });
       }
       bookingDocumentRef = snapshot.docs[0].ref;
-      bookingData2 = snapshot.docs[0].data();
+      bookingData = snapshot.docs[0].data();
     }
     if (
       // Per MRB-05 PR #2 (2026-08-02, per decision #159):
@@ -235464,21 +235511,21 @@ async function handleCancelBooking(req, res) {
       // `cancelled` cases remain rejected (in-house
       // cancellation is a separate flow; idempotent
       // rejection of an already-cancelled booking).
-      bookingData2.status === "checked-in" || bookingData2.status === "cancelled"
+      bookingData.status === "checked-in" || bookingData.status === "cancelled"
     ) {
       return res.status(400).json({
         success: false,
-        error: `Booking cannot be cancelled because its status is already ${bookingData2.status}. Please contact the front desk.`
+        error: `Booking cannot be cancelled because its status is already ${bookingData.status}. Please contact the front desk.`
       });
     }
-    if (!isStaffCancellation && !GUEST_CANCELLABLE_STATUSES.includes(String(bookingData2.status || ""))) {
+    if (!isStaffCancellation && !GUEST_CANCELLABLE_STATUSES.includes(String(bookingData.status || ""))) {
       return res.status(400).json({
         success: false,
         error: "Your booking is past the self-service cancellation window. Please contact the front desk so a staff member can assist you with cancellation and any applicable refund."
       });
     }
-    const requestedScope = isStaffCancellation ? String((req.body || {}).scope || "").trim().toLowerCase() === "reservation" ? "reservation" : "room" : parsed.data.scope;
-    const lookedUpReservationId = String(bookingData2.reservationId || "").trim();
+    const requestedScope = isStaffCancellation ? String((req.body || {}).scope || "").trim().toLowerCase() === "reservation" ? "reservation" : "room" : guestRequestedScope;
+    const lookedUpReservationId = String(bookingData.reservationId || "").trim();
     const isReservationScope = requestedScope === "reservation" && lookedUpReservationId.length > 0;
     const postTransactionAction = isReservationScope ? "booking-cancelled-reservation" : "booking-cancelled";
     if (isReservationScope) {
@@ -235524,12 +235571,12 @@ async function handleCancelBooking(req, res) {
             scope: "reservation",
             lookedUpBooking: cancellableChildren[0] || {
               id: bookingDocumentRef.id,
-              bookingRef: String(bookingData2.bookingRef || ""),
-              status: String(bookingData2.status || ""),
-              roomType: String(bookingData2.roomType || ""),
-              totalPrice: Number(bookingData2.totalPrice) || 0,
-              reservationPosition: Number(bookingData2.reservationPosition) || null,
-              cancellationPolicySnapshot: bookingData2.cancellationPolicySnapshot || reservationCancellationPolicySnapshotForLiability
+              bookingRef: String(bookingData.bookingRef || ""),
+              status: String(bookingData.status || ""),
+              roomType: String(bookingData.roomType || ""),
+              totalPrice: Number(bookingData.totalPrice) || 0,
+              reservationPosition: Number(bookingData.reservationPosition) || null,
+              cancellationPolicySnapshot: bookingData.cancellationPolicySnapshot || reservationCancellationPolicySnapshotForLiability
             },
             reservation: {
               id: lookedUpReservationId,
@@ -235792,9 +235839,9 @@ async function handleCancelBooking(req, res) {
         bookingUpdate.otherAddOnTotal = perChildRedated.otherAddOnTotal;
         bookingUpdate.hasAnyOtherAddOns = perChildRedated.hasAnyOtherAddOns;
         transaction.update(bookingDocumentRef, bookingUpdate);
-        const bookingReservationId2 = String(freshBooking.reservationId || "").trim();
-        if (bookingReservationId2.length > 0) {
-          const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
+        const bookingReservationId = String(freshBooking.reservationId || "").trim();
+        if (bookingReservationId.length > 0) {
+          const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
           transaction.update(reservationRef, {
             updatedAt: now
           });
@@ -235855,7 +235902,7 @@ async function handleCancelBooking(req, res) {
           cancellationReason: validReason,
           cancellationSource: cancellationSourceForEmail,
           liabilityProjection
-        } : { ...bookingData2, cancellationReason: validReason, liabilityProjection }
+        } : { ...bookingData, cancellationReason: validReason, liabilityProjection }
       );
     } catch (emailErr) {
       console.error("Failed to send cancellation email:", emailErr);
@@ -235870,14 +235917,14 @@ async function handleCancelBooking(req, res) {
         const { computeCancellationLiabilityState: computeCancellationLiabilityState2 } = await Promise.resolve().then(() => (init_shared(), shared_exports));
         const projection = computeCancellationLiabilityState2({ liability, processedAmount: 0 });
         const stateLabel = projection.stateLabel || "Pending refund";
-        const notifTitle = policyRefund > 0 ? `Cancellation refund pending \u2014 ${bookingData2.bookingRef || bookingId} (${stateLabel}, \u20B1${policyRefund.toLocaleString("en-PH")})` : `Cancellation recorded \u2014 ${bookingData2.bookingRef || bookingId} (no refund owed)`;
+        const notifTitle = policyRefund > 0 ? `Cancellation refund pending \u2014 ${bookingData.bookingRef || bookingId} (${stateLabel}, \u20B1${policyRefund.toLocaleString("en-PH")})` : `Cancellation recorded \u2014 ${bookingData.bookingRef || bookingId} (no refund owed)`;
         await writeNotification2({
           type: "cancellation-refund",
           title: notifTitle,
           entityType: "booking",
           entityId: bookingId,
-          roomNumber: bookingData2.roomNumber || null,
-          bookingRef: bookingData2.bookingRef || null
+          roomNumber: bookingData.roomNumber || null,
+          bookingRef: bookingData.bookingRef || null
         });
       }
     } catch (notifErr) {
@@ -235900,7 +235947,7 @@ async function handleCancelPreview(req, res) {
   let requestedScope = req.staff ? String((req.body || {}).scope || "").trim().toLowerCase() === "reservation" ? "reservation" : "room" : "room";
   try {
     let bookingDocumentRef;
-    let bookingData2;
+    let bookingData;
     if (req.staff) {
       if (bookingId) {
         bookingDocumentRef = adminDb.collection("bookings").doc(bookingId);
@@ -235918,35 +235965,35 @@ async function handleCancelPreview(req, res) {
       if (!doc.exists) {
         return res.status(404).json({ success: false, error: "Booking not found." });
       }
-      bookingData2 = doc.data();
+      bookingData = doc.data();
     } else {
-      const parsed2 = guestCancelPreviewSchema.safeParse(req.body || {});
-      if (!parsed2.success) {
+      const parsed = guestCancelPreviewSchema.safeParse(req.body || {});
+      if (!parsed.success) {
         return res.status(400).json({
           success: false,
           error: "Please provide a valid booking reference and email or lookup token."
         });
       }
-      requestedScope = parsed2.data.scope;
-      const compositeFilter = parsed2.data.token ? { field: "lookupToken", value: String(parsed2.data.token).toLowerCase() } : { field: "guestEmail", value: parsed2.data.guestEmail };
-      const query = adminDb.collection("bookings").where("bookingRef", "==", parsed2.data.bookingRef).where(compositeFilter.field, "==", compositeFilter.value).limit(1);
+      requestedScope = parsed.data.scope;
+      const compositeFilter = parsed.data.token ? { field: "lookupToken", value: String(parsed.data.token).toLowerCase() } : { field: "guestEmail", value: parsed.data.guestEmail };
+      const query = adminDb.collection("bookings").where("bookingRef", "==", parsed.data.bookingRef).where(compositeFilter.field, "==", compositeFilter.value).limit(1);
       const snapshot = await query.get();
       if (snapshot.empty) {
         return res.status(404).json({
           success: false,
-          error: parsed2.data.token ? "Booking not found with matching token." : "Booking not found with matching email."
+          error: parsed.data.token ? "Booking not found with matching token." : "Booking not found with matching email."
         });
       }
       bookingDocumentRef = snapshot.docs[0].ref;
-      bookingData2 = snapshot.docs[0].data();
+      bookingData = snapshot.docs[0].data();
     }
-    const lookedUpReservationId = String(bookingData2.reservationId || "").trim();
+    const lookedUpReservationId = String(bookingData.reservationId || "").trim();
     const hasReservation = lookedUpReservationId.length > 0;
     const isReservationScope = requestedScope === "reservation" && lookedUpReservationId.length > 0;
     const now = /* @__PURE__ */ new Date();
     let reservation = null;
     let cancellableChildren = [];
-    let allocationSubtotal = Math.max(Number(bookingData2.totalPrice) || 0, 0);
+    let allocationSubtotal = Math.max(Number(bookingData.totalPrice) || 0, 0);
     let reservationCancellationPolicySnapshot = null;
     if (hasReservation) {
       const reservationRef = adminDb.collection("reservations").doc(lookedUpReservationId);
@@ -235987,22 +236034,22 @@ async function handleCancelPreview(req, res) {
       );
       cancellableChildren = isReservationScope ? eligibleChildren : eligibleChildren.filter((child) => child.id === bookingDocumentRef.id);
     } else {
-      const legacyFallbackSnapshot = bookingData2.checkIn ? {
+      const legacyFallbackSnapshot = bookingData.checkIn ? {
         cutoffHours: 48,
         refundPctBefore: 100,
         refundPctAfter: 0,
         policyText: "Cancellations made 48 hours or more before check-in are eligible for a full refund. Cancellations within 48 hours of check-in are non-refundable. No-shows will be charged the full booking amount.",
-        scheduledCheckInTime: (bookingData2.checkIn.toDate ? bookingData2.checkIn.toDate() : new Date(bookingData2.checkIn)).toISOString(),
+        scheduledCheckInTime: (bookingData.checkIn.toDate ? bookingData.checkIn.toDate() : new Date(bookingData.checkIn)).toISOString(),
         source: "legacy-fallback"
       } : null;
       cancellableChildren = [{
         id: bookingDocumentRef.id,
-        bookingRef: String(bookingData2.bookingRef || ""),
-        status: String(bookingData2.status || ""),
-        roomType: String(bookingData2.roomType || ""),
-        totalPrice: Number(bookingData2.totalPrice) || 0,
-        reservationPosition: Number(bookingData2.reservationPosition) || null,
-        cancellationPolicySnapshot: bookingData2.cancellationPolicySnapshot || legacyFallbackSnapshot
+        bookingRef: String(bookingData.bookingRef || ""),
+        status: String(bookingData.status || ""),
+        roomType: String(bookingData.roomType || ""),
+        totalPrice: Number(bookingData.totalPrice) || 0,
+        reservationPosition: Number(bookingData.reservationPosition) || null,
+        cancellationPolicySnapshot: bookingData.cancellationPolicySnapshot || legacyFallbackSnapshot
       }];
     }
     let reservationNetCollected = 0;
@@ -236025,22 +236072,22 @@ async function handleCancelPreview(req, res) {
         0
       );
     }
-    const legacyFallbackSnapshotForAnchor = !hasReservation && bookingData2.checkIn ? {
+    const legacyFallbackSnapshotForAnchor = !hasReservation && bookingData.checkIn ? {
       cutoffHours: 48,
       refundPctBefore: 100,
       refundPctAfter: 0,
       policyText: "Cancellations made 48 hours or more before check-in are eligible for a full refund. Cancellations within 48 hours of check-in are non-refundable. No-shows will be charged the full booking amount.",
-      scheduledCheckInTime: (bookingData2.checkIn.toDate ? bookingData2.checkIn.toDate() : new Date(bookingData2.checkIn)).toISOString(),
+      scheduledCheckInTime: (bookingData.checkIn.toDate ? bookingData.checkIn.toDate() : new Date(bookingData.checkIn)).toISOString(),
       source: "legacy-fallback"
     } : null;
     const lookedUpBookingForHelper = {
       id: bookingDocumentRef.id,
-      bookingRef: String(bookingData2.bookingRef || ""),
-      status: String(bookingData2.status || ""),
-      roomType: String(bookingData2.roomType || ""),
-      totalPrice: Number(bookingData2.totalPrice) || 0,
-      reservationPosition: Number(bookingData2.reservationPosition) || null,
-      cancellationPolicySnapshot: bookingData2.cancellationPolicySnapshot || (hasReservation ? reservationCancellationPolicySnapshot : legacyFallbackSnapshotForAnchor)
+      bookingRef: String(bookingData.bookingRef || ""),
+      status: String(bookingData.status || ""),
+      roomType: String(bookingData.roomType || ""),
+      totalPrice: Number(bookingData.totalPrice) || 0,
+      reservationPosition: Number(bookingData.reservationPosition) || null,
+      cancellationPolicySnapshot: bookingData.cancellationPolicySnapshot || (hasReservation ? reservationCancellationPolicySnapshot : legacyFallbackSnapshotForAnchor)
     };
     const preview = evaluateCancelPreview({
       scope: requestedScope,
@@ -236106,8 +236153,8 @@ async function handleAddPayment(req, res) {
       if (!bookingDoc.exists) {
         throw new Error("Booking not found");
       }
-      const bookingData2 = bookingDoc.data();
-      bookingDataSnapshot = bookingData2;
+      const bookingData = bookingDoc.data();
+      bookingDataSnapshot = bookingData;
       transitionedToPaymentConfirmed = false;
       if (method !== "pay-at-hotel" && method !== "add-to-bill") {
         const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
@@ -236119,8 +236166,8 @@ async function handleAddPayment(req, res) {
           throw new Error("Transaction reference is required for this payment method.");
         }
       }
-      const bookingReservationId2 = String(bookingData2.reservationId || "").trim();
-      const paymentsRef = bookingReservationId2.length > 0 ? adminDb.collection("reservations").doc(bookingReservationId2).collection("payments") : bookingRef2.collection("payments");
+      const bookingReservationId = String(bookingData.reservationId || "").trim();
+      const paymentsRef = bookingReservationId.length > 0 ? adminDb.collection("reservations").doc(bookingReservationId).collection("payments") : bookingRef2.collection("payments");
       const paymentsSnapshot = await transaction.get(paymentsRef);
       const existingPaid = paymentsSnapshot.docs.reduce((sum, docSnap) => {
         const data = docSnap.data();
@@ -236133,7 +236180,7 @@ async function handleAddPayment(req, res) {
         if (!sameRequest) throw new Error("Payment ID has already been used for a different payment.");
         idempotentReplay = true;
         totalPaid = existingPaid;
-        totalPrice = Number(bookingData2.totalPrice || 0);
+        totalPrice = Number(bookingData.totalPrice || 0);
         fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
         staffPaymentMarkerMissing = false;
         return;
@@ -236142,7 +236189,7 @@ async function handleAddPayment(req, res) {
       const siblingChildBookings = await preReadSiblingChildren(
         transaction,
         adminDb,
-        bookingReservationId2,
+        bookingReservationId,
         (d) => {
           const childData = d.data() || {};
           return {
@@ -236152,15 +236199,15 @@ async function handleAddPayment(req, res) {
           };
         }
       );
-      totalPrice = Number(bookingData2.totalPrice || 0);
+      totalPrice = Number(bookingData.totalPrice || 0);
       fullyPaid = totalPrice > 0 && totalPaid >= totalPrice;
-      isConfirmableStatus = bookingData2.status === "pending" || bookingData2.status === "payment-uploaded";
-      hadPaymentProof = !!(bookingData2.paymentProofPath || bookingData2.paymentProofUrl);
-      staffPaymentMarkerMissing = !bookingData2.emailNotificationsSent?.staffNewPayment;
+      isConfirmableStatus = bookingData.status === "pending" || bookingData.status === "payment-uploaded";
+      hadPaymentProof = !!(bookingData.paymentProofPath || bookingData.paymentProofUrl);
+      staffPaymentMarkerMissing = !bookingData.emailNotificationsSent?.staffNewPayment;
       const { siblingFlippedCount: helperSiblingFlippedCount } = applyReservationScopePaymentTransition(
         transaction,
         adminDb,
-        bookingReservationId2,
+        bookingReservationId,
         bookingId,
         siblingChildBookings,
         (child) => {
@@ -236183,9 +236230,9 @@ async function handleAddPayment(req, res) {
         now
       );
       siblingFlippedCount = helperSiblingFlippedCount;
-      const pendingLoyaltyPoints = Math.max(Number(bookingData2.pendingLoyaltyPoints || 0), 0);
-      const settlesCheckedOutFolio = bookingData2.status === "checked-out" && bookingData2.loyaltyAwardStatus === "pending-payment" && pendingLoyaltyPoints > 0 && totalPaid >= Number(bookingData2.checkedOutFolioTotal || 0);
-      const loyaltyMemberRef = settlesCheckedOutFolio && bookingData2.memberId ? adminDb.collection("members").doc(String(bookingData2.memberId)) : null;
+      const pendingLoyaltyPoints = Math.max(Number(bookingData.pendingLoyaltyPoints || 0), 0);
+      const settlesCheckedOutFolio = bookingData.status === "checked-out" && bookingData.loyaltyAwardStatus === "pending-payment" && pendingLoyaltyPoints > 0 && totalPaid >= Number(bookingData.checkedOutFolioTotal || 0);
+      const loyaltyMemberRef = settlesCheckedOutFolio && bookingData.memberId ? adminDb.collection("members").doc(String(bookingData.memberId)) : null;
       const loyaltyMemberDoc = loyaltyMemberRef ? await transaction.get(loyaltyMemberRef) : null;
       const bookingUpdates = {};
       if (hadPaymentProof && staffPaymentMarkerMissing) {
@@ -236201,7 +236248,7 @@ async function handleAddPayment(req, res) {
         });
         transitionedToPaymentConfirmed = true;
         bookingDataSnapshot = {
-          ...bookingData2,
+          ...bookingData,
           ...bookingUpdates
         };
       }
@@ -236224,8 +236271,8 @@ async function handleAddPayment(req, res) {
           type: "earn",
           points: loyaltyPointsAwarded,
           bookingId,
-          bookingRef: bookingData2.bookingRef,
-          description: `Settled Stay Earnings (${bookingData2.bookingRef})`,
+          bookingRef: bookingData.bookingRef,
+          description: `Settled Stay Earnings (${bookingData.bookingRef})`,
           by: staffUid2,
           createdAt: awardedAt
         });
@@ -236234,7 +236281,7 @@ async function handleAddPayment(req, res) {
         transaction.update(bookingRef2, bookingUpdates);
       }
       const newPaymentRef = paymentsRef.doc(paymentId);
-      const recordWithReservation = bookingReservationId2.length > 0 ? { ...paymentRecord, reservationId: bookingReservationId2, bookingId } : paymentRecord;
+      const recordWithReservation = bookingReservationId.length > 0 ? { ...paymentRecord, reservationId: bookingReservationId, bookingId } : paymentRecord;
       transaction.create(newPaymentRef, recordWithReservation);
     });
   } catch (error) {
@@ -236306,8 +236353,8 @@ async function handleAddPayment(req, res) {
 }
 async function fireRefundStateEmailAndNotification(params) {
   const bookingDoc = await adminDb.collection("bookings").doc(params.targetBookingId).get();
-  const bookingData2 = bookingDoc.exists ? bookingDoc.data() || {} : {};
-  const guestEmail = String(bookingData2.guestEmail || "").trim();
+  const bookingData = bookingDoc.exists ? bookingDoc.data() || {} : {};
+  const guestEmail = String(bookingData.guestEmail || "").trim();
   let liabilityProjection = null;
   try {
     const { loadLiabilityProjectionForEmail: loadLiabilityProjectionForEmail2 } = await Promise.resolve().then(() => (init_email(), email_exports));
@@ -236329,7 +236376,7 @@ async function fireRefundStateEmailAndNotification(params) {
     try {
       const { sendBookingTrigger: sendBookingTrigger2 } = await Promise.resolve().then(() => (init_email(), email_exports));
       const emailView = {
-        ...bookingData2,
+        ...bookingData,
         id: params.targetBookingId,
         reservationId: params.targetReservationId,
         liabilityProjection,
@@ -236341,7 +236388,7 @@ async function fireRefundStateEmailAndNotification(params) {
     }
   }
   const stateLabel = liabilityProjection?.stateLabel || params.newState;
-  const bookingRefForTitle = String(bookingData2.bookingRef || params.targetBookingId).trim();
+  const bookingRefForTitle = String(bookingData.bookingRef || params.targetBookingId).trim();
   const notifTitle = `Refund ${stateLabel.toLowerCase()} \u2014 ${bookingRefForTitle} (${params.priorState} \u2192 ${params.newState})`;
   try {
     const { writeNotification: writeNotification2 } = await Promise.resolve().then(() => (init_notifications(), notifications_exports));
@@ -236350,8 +236397,8 @@ async function fireRefundStateEmailAndNotification(params) {
       title: notifTitle,
       entityType: "booking",
       entityId: params.targetBookingId,
-      roomNumber: bookingData2.roomNumber || null,
-      bookingRef: bookingData2.bookingRef || null
+      roomNumber: bookingData.roomNumber || null,
+      bookingRef: bookingData.bookingRef || null
     });
   } catch (notifErr) {
     console.error("[add-refund] Staff notification failed; continuing:", notifErr);
@@ -236385,17 +236432,19 @@ async function handleAddRefund(req, res) {
     let priorStateRef = null;
     let newStateRef = null;
     let priorLiabilityRef = null;
+    let refundBookingReservationId = "";
     await adminDb.runTransaction(async (transaction) => {
       const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
       const bookingDoc = await transaction.get(bookingRef2);
       if (!bookingDoc.exists) throw new Error("Booking not found");
-      const bookingData2 = bookingDoc.data();
-      const bookingReservationId2 = String(bookingData2.reservationId || "").trim();
-      const refundsRef = bookingReservationId2.length > 0 ? adminDb.collection("reservations").doc(bookingReservationId2).collection("refunds") : bookingRef2.collection("payments");
+      const bookingData = bookingDoc.data();
+      const bookingReservationId = String(bookingData.reservationId || "").trim();
+      refundBookingReservationId = bookingReservationId;
+      const refundsRef = bookingReservationId.length > 0 ? adminDb.collection("reservations").doc(bookingReservationId).collection("refunds") : bookingRef2.collection("payments");
       const refundsSnapshot = await transaction.get(refundsRef);
       let netPositivePayments = 0;
-      if (bookingReservationId2.length > 0) {
-        const paymentsRef = adminDb.collection("reservations").doc(bookingReservationId2).collection("payments");
+      if (bookingReservationId.length > 0) {
+        const paymentsRef = adminDb.collection("reservations").doc(bookingReservationId).collection("payments");
         const paymentsSnapshot = await transaction.get(paymentsRef);
         netPositivePayments = paymentsSnapshot.docs.reduce(
           (sum, paymentDoc) => sum + Number(paymentDoc.data().amount || 0),
@@ -236407,7 +236456,7 @@ async function handleAddRefund(req, res) {
         0
       );
       netCollected = netPositivePayments + netRefunds;
-      const liabilityDoc = bookingReservationId2.length > 0 ? adminDb.collection("reservations").doc(bookingReservationId2) : bookingRef2;
+      const liabilityDoc = bookingReservationId.length > 0 ? adminDb.collection("reservations").doc(bookingReservationId) : bookingRef2;
       const liabilityData = (await transaction.get(liabilityDoc)).data() || {};
       const liability = liabilityData.cancellationLiability || null;
       priorLiabilityRef = liability;
@@ -236443,8 +236492,8 @@ async function handleAddRefund(req, res) {
         transaction,
         db: adminDb,
         existingDoc: refundDocSnap,
-        currentPaidAmount: Number(bookingData2.paidAmount || 0),
-        reservationId: bookingReservationId2.length > 0 ? bookingReservationId2 : null
+        currentPaidAmount: Number(bookingData.paidAmount || 0),
+        reservationId: bookingReservationId.length > 0 ? bookingReservationId : null
       });
       if (helperResult.conflict) {
         throw new Error("Refund ID has already been used for a different refund.");
@@ -236464,7 +236513,7 @@ async function handleAddRefund(req, res) {
       try {
         await fireRefundStateEmailAndNotification({
           targetBookingId: bookingId,
-          targetReservationId: bookingReservationId.length > 0 ? bookingReservationId : null,
+          targetReservationId: refundBookingReservationId.length > 0 ? refundBookingReservationId : null,
           priorState: priorStateRef,
           newState: newStateRef,
           refundRecord,
@@ -236635,13 +236684,13 @@ async function handleMarkPaymentConfirmed(req, res) {
   try {
     const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
     const handledBy = req.staff?.uid || "staff";
-    let bookingData2 = null;
+    let bookingData = null;
     let alreadyConfirmed = false;
     await adminDb.runTransaction(async (transaction) => {
       const bookingDoc = await transaction.get(bookingRef2);
       if (!bookingDoc.exists) throw new Error("BOOKING_NOT_FOUND");
       const data = bookingDoc.data();
-      bookingData2 = data;
+      bookingData = data;
       if (data.status === "payment-confirmed") {
         alreadyConfirmed = true;
         return;
@@ -236660,7 +236709,7 @@ async function handleMarkPaymentConfirmed(req, res) {
       return res.status(200).json({ success: true, data: { status: "payment-confirmed", alreadyConfirmed: true } });
     }
     try {
-      await sendBookingTrigger("payment-confirmed", { ...bookingData2, status: "payment-confirmed" });
+      await sendBookingTrigger("payment-confirmed", { ...bookingData, status: "payment-confirmed" });
     } catch (emailErr) {
       console.error("Failed to send payment-confirmed email:", emailErr);
     }
@@ -236701,9 +236750,9 @@ async function handleVerifyAndRecordPayment(req, res) {
   const safeNote = typeof note === "string" ? note.trim().slice(0, 500) : "";
   const paymentNote = safeNote || "Verified payment proof";
   const staffUid2 = req.staff?.uid || "staff";
+  let bookingData = null;
   try {
     const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
-    let bookingData2 = null;
     let totalCollected = 0;
     let totalPrice = 0;
     let fullyPaid = false;
@@ -236714,9 +236763,9 @@ async function handleVerifyAndRecordPayment(req, res) {
       const bookingDoc = await transaction.get(bookingRef2);
       if (!bookingDoc.exists) throw new Error("BOOKING_NOT_FOUND");
       const data = bookingDoc.data();
-      bookingData2 = data;
-      const bookingReservationId2 = String(data.reservationId || "").trim();
-      const paymentsRef = bookingReservationId2.length > 0 ? adminDb.collection("reservations").doc(bookingReservationId2).collection("payments") : bookingRef2.collection("payments");
+      bookingData = data;
+      const bookingReservationId = String(data.reservationId || "").trim();
+      const paymentsRef = bookingReservationId.length > 0 ? adminDb.collection("reservations").doc(bookingReservationId).collection("payments") : bookingRef2.collection("payments");
       const paymentsSnapshot = await transaction.get(paymentsRef);
       const existingPaid = paymentsSnapshot.docs.reduce((sum, docSnap) => {
         return sum + Number(docSnap.data().amount || 0);
@@ -236724,7 +236773,7 @@ async function handleVerifyAndRecordPayment(req, res) {
       const siblingChildBookings = await preReadSiblingChildren(
         transaction,
         adminDb,
-        bookingReservationId2,
+        bookingReservationId,
         (d) => {
           const childData = d.data() || {};
           return {
@@ -236770,7 +236819,7 @@ async function handleVerifyAndRecordPayment(req, res) {
       const { postUpdateChildStatuses, siblingFlippedCount: helperSiblingFlippedCount } = applyReservationScopePaymentTransition(
         transaction,
         adminDb,
-        bookingReservationId2,
+        bookingReservationId,
         bookingId,
         siblingChildBookings,
         (child) => {
@@ -236807,7 +236856,7 @@ async function handleVerifyAndRecordPayment(req, res) {
         recordedAt: /* @__PURE__ */ new Date()
       };
       if (!safeTransactionReference) delete paymentRecord.transactionReference;
-      const recordWithReservation = bookingReservationId2.length > 0 ? { ...paymentRecord, reservationId: bookingReservationId2, bookingId } : paymentRecord;
+      const recordWithReservation = bookingReservationId.length > 0 ? { ...paymentRecord, reservationId: bookingReservationId, bookingId } : paymentRecord;
       transaction.create(paymentsRef.doc(paymentId), recordWithReservation);
       const bookingUpdates = {
         updatedAt: now
@@ -236820,7 +236869,7 @@ async function handleVerifyAndRecordPayment(req, res) {
       if (Object.keys(bookingUpdates).length > 0) {
         transaction.update(bookingRef2, bookingUpdates);
       }
-      bookingData2 = { ...data, ...bookingUpdates };
+      bookingData = { ...data, ...bookingUpdates };
     });
     if (idempotentReplay) {
       return res.status(200).json({
@@ -236829,7 +236878,7 @@ async function handleVerifyAndRecordPayment(req, res) {
           idempotentReplay: true,
           paymentId,
           totalCollected,
-          status: bookingData2?.status || null,
+          status: bookingData?.status || null,
           fullyPaid,
           siblingFlippedCount
         }
@@ -236837,24 +236886,24 @@ async function handleVerifyAndRecordPayment(req, res) {
     }
     try {
       if (fullyPaid) {
-        await sendBookingTrigger("payment-confirmed", { ...bookingData2, status: "payment-confirmed" });
+        await sendBookingTrigger("payment-confirmed", { ...bookingData, status: "payment-confirmed" });
       }
       await writeNotification({
         type: "payment",
-        title: fullyPaid ? `Payment verified \u2014 ${bookingData2?.bookingRef || bookingId} (full)` : `Partial payment recorded \u2014 ${bookingData2?.bookingRef || bookingId} (${numericAmount})`,
+        title: fullyPaid ? `Payment verified \u2014 ${bookingData?.bookingRef || bookingId} (full)` : `Partial payment recorded \u2014 ${bookingData?.bookingRef || bookingId} (${numericAmount})`,
         entityType: "booking",
         entityId: bookingId,
-        roomNumber: bookingData2?.roomNumber || null,
-        bookingRef: bookingData2?.bookingRef || null
+        roomNumber: bookingData?.roomNumber || null,
+        bookingRef: bookingData?.bookingRef || null
       });
       if (siblingFlippedCount > 0) {
         await writeNotification({
           type: "payment",
-          title: `${siblingFlippedCount} more room${siblingFlippedCount === 1 ? "" : "s"} cleared \u2014 ${bookingData2?.bookingRef || bookingId}`,
+          title: `${siblingFlippedCount} more room${siblingFlippedCount === 1 ? "" : "s"} cleared \u2014 ${bookingData?.bookingRef || bookingId}`,
           entityType: "booking",
           entityId: bookingId,
-          roomNumber: bookingData2?.roomNumber || null,
-          bookingRef: bookingData2?.bookingRef || null
+          roomNumber: bookingData?.roomNumber || null,
+          bookingRef: bookingData?.bookingRef || null
         });
       }
     } catch (sideEffectErr) {
@@ -236918,7 +236967,7 @@ async function handleConfirmBooking(req, res) {
   try {
     const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
     const confirmedBy = req.staff?.uid || "staff";
-    let bookingData2 = null;
+    let bookingData = null;
     let alreadyConfirmed = false;
     const now = /* @__PURE__ */ new Date();
     await adminDb.runTransaction(async (transaction) => {
@@ -236927,7 +236976,7 @@ async function handleConfirmBooking(req, res) {
         throw new Error("BOOKING_NOT_FOUND");
       }
       const data = bookingDoc.data();
-      bookingData2 = data;
+      bookingData = data;
       if (data.status === "confirmed") {
         alreadyConfirmed = true;
         return;
@@ -236936,15 +236985,15 @@ async function handleConfirmBooking(req, res) {
       if (!allowedStatuses.includes(data.status)) {
         throw new Error(`INVALID_STATUS:${data.status}`);
       }
-      const bookingReservationId2 = String(data.reservationId || "").trim();
+      const bookingReservationId = String(data.reservationId || "").trim();
       transaction.update(bookingRef2, {
         status: "confirmed",
         confirmedAt: now,
         confirmedBy,
         updatedAt: now
       });
-      if (bookingReservationId2.length > 0) {
-        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
+      if (bookingReservationId.length > 0) {
+        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
         transaction.update(reservationRef, {
           updatedAt: now
         });
@@ -236958,7 +237007,7 @@ async function handleConfirmBooking(req, res) {
       const reservationView = await loadReservationEmailView(bookingId);
       await sendBookingTrigger(
         "booking-confirmed",
-        reservationView ?? { ...bookingData2, status: "confirmed" }
+        reservationView ?? { ...bookingData, status: "confirmed" }
       );
     } catch (emailErr) {
       emailQueued = false;
@@ -236966,11 +237015,11 @@ async function handleConfirmBooking(req, res) {
     }
     await writeNotification({
       type: "booking",
-      title: `Booking confirmed \u2014 ${bookingData2.bookingRef || bookingId} (Room ${bookingData2.roomNumber || ""})`.trim(),
+      title: `Booking confirmed \u2014 ${bookingData.bookingRef || bookingId} (Room ${bookingData.roomNumber || ""})`.trim(),
       entityType: "booking",
       entityId: bookingId,
-      roomNumber: bookingData2.roomNumber || null,
-      bookingRef: bookingData2.bookingRef || null
+      roomNumber: bookingData.roomNumber || null,
+      bookingRef: bookingData.bookingRef || null
     });
     return res.status(200).json({ success: true, data: { status: "confirmed", emailQueued } });
   } catch (error) {
@@ -237005,7 +237054,7 @@ async function handleConfirmBookingWithBalance(req, res) {
   const hotelConfigDoc = await adminDb.collection("settings").doc("hotelConfig").get();
   const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data() : {};
   const unpaidCheckoutThreshold = Number(hotelConfig.unpaidCheckoutApprovalThreshold) || 5e3;
-  let bookingData2 = null;
+  let bookingData = null;
   let balance = 0;
   let needsAdminApproval = false;
   let balanceThreshold = unpaidCheckoutThreshold;
@@ -237018,7 +237067,7 @@ async function handleConfirmBookingWithBalance(req, res) {
         throw new Error("BOOKING_NOT_FOUND");
       }
       const data = bookingDoc.data();
-      bookingData2 = data;
+      bookingData = data;
       if (data.status !== "payment-uploaded") {
         throw new Error(`INVALID_STATUS:${data.status}`);
       }
@@ -237038,9 +237087,9 @@ async function handleConfirmBookingWithBalance(req, res) {
         needsAdminApproval = true;
         throw new Error(`THRESHOLD_EXCEEDED:${txThreshold}:${computedBalance}`);
       }
-      const bookingReservationId2 = String(data.reservationId || "").trim();
-      if (bookingReservationId2.length > 0) {
-        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
+      const bookingReservationId = String(data.reservationId || "").trim();
+      if (bookingReservationId.length > 0) {
+        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
         transaction.update(reservationRef, {
           updatedAt: now
         });
@@ -237066,7 +237115,7 @@ async function handleConfirmBookingWithBalance(req, res) {
     });
     try {
       await sendBookingConfirmedWithBalanceTrigger(
-        { ...bookingData2, status: "confirmed" },
+        { ...bookingData, status: "confirmed" },
         balance,
         safeReason
       );
@@ -237076,11 +237125,11 @@ async function handleConfirmBookingWithBalance(req, res) {
     try {
       await writeNotification({
         type: "booking",
-        title: `Booking confirmed (balance due) \u2014 ${bookingData2.bookingRef || bookingId} (Room ${bookingData2.roomNumber || ""})`.trim(),
+        title: `Booking confirmed (balance due) \u2014 ${bookingData.bookingRef || bookingId} (Room ${bookingData.roomNumber || ""})`.trim(),
         entityType: "booking",
         entityId: bookingId,
-        roomNumber: bookingData2.roomNumber || null,
-        bookingRef: bookingData2.bookingRef || null
+        roomNumber: bookingData.roomNumber || null,
+        bookingRef: bookingData.bookingRef || null
       });
     } catch (notifErr) {
       console.error("Failed to write confirm-with-balance notification:", notifErr);
@@ -237135,19 +237184,19 @@ async function handleCheckinBooking(req, res) {
       if (!bookingDoc.exists) {
         throw new Error("Booking not found.");
       }
-      const bookingData2 = bookingDoc.data() || {};
+      const bookingData = bookingDoc.data() || {};
       const readiness = getCheckInReadiness({
-        status: bookingData2.status,
-        guestIdPhotoUrl: bookingData2.guestIdPhotoUrl,
-        guestRegistration: bookingData2.guestRegistration
+        status: bookingData.status,
+        guestIdPhotoUrl: bookingData.guestIdPhotoUrl,
+        guestRegistration: bookingData.guestRegistration
       });
       if (!readiness.ready) {
         throw new Error(`Booking is not ready for check-in. Missing: ${readiness.missingItems.join(", ")}.`);
       }
-      if (!bookingData2.roomId) {
+      if (!bookingData.roomId) {
         throw new Error("Booking has no assigned room.");
       }
-      const roomRef = adminDb.collection("rooms").doc(String(bookingData2.roomId));
+      const roomRef = adminDb.collection("rooms").doc(String(bookingData.roomId));
       const roomDoc = await transaction.get(roomRef);
       if (!roomDoc.exists) {
         throw new Error("Assigned room not found.");
@@ -237156,17 +237205,17 @@ async function handleCheckinBooking(req, res) {
       if (roomData.status === "blocked") {
         throw new Error("Assigned room is blocked and cannot be checked in.");
       }
-      const activeCheckinQuery = adminDb.collection("bookings").where("roomId", "==", String(bookingData2.roomId)).where("status", "==", "checked-in").limit(1);
+      const activeCheckinQuery = adminDb.collection("bookings").where("roomId", "==", String(bookingData.roomId)).where("status", "==", "checked-in").limit(1);
       const activeCheckinSnap = await transaction.get(activeCheckinQuery);
       const occupiedByOtherBooking = activeCheckinSnap.docs.some((doc) => doc.id !== bookingId);
       if (occupiedByOtherBooking) {
         throw new Error("Assigned room is already occupied by another checked-in booking.");
       }
-      const bookingReservationId2 = String(bookingData2.reservationId || "").trim();
+      const bookingReservationId = String(bookingData.reservationId || "").trim();
       let postUpdateChildStatuses = [];
-      if (bookingReservationId2.length > 0) {
+      if (bookingReservationId.length > 0) {
         const childrenForCount = await transaction.get(
-          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2)
+          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId)
         );
         postUpdateChildStatuses = childrenForCount.docs.map(
           (d) => d.id === bookingId ? "checked-in" : String(d.data()?.status || "")
@@ -237182,8 +237231,8 @@ async function handleCheckinBooking(req, res) {
         status: "occupied",
         updatedAt: now
       });
-      if (bookingReservationId2.length > 0) {
-        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
+      if (bookingReservationId.length > 0) {
+        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
         transaction.update(reservationRef, {
           updatedAt: now
         });
@@ -237225,11 +237274,11 @@ async function handleCheckoutBooking(req, res) {
     if (!bookingDoc.exists) {
       return res.status(404).json({ success: false, error: "Booking not found." });
     }
-    const bookingData2 = bookingDoc.data();
-    if (bookingData2.status !== "checked-in") {
+    const bookingData = bookingDoc.data();
+    if (bookingData.status !== "checked-in") {
       return res.status(400).json({
         success: false,
-        error: `Booking can only be checked out from 'checked-in' status (current: ${bookingData2.status}).`
+        error: `Booking can only be checked out from 'checked-in' status (current: ${bookingData.status}).`
       });
     }
     const checkedOutBy = req.staff?.uid || "staff";
@@ -237241,15 +237290,15 @@ async function handleCheckoutBooking(req, res) {
     let pointsAwarded = 0;
     let eligiblePoints = 0;
     let checkedOutWithBalance = 0;
-    let memberId = bookingData2.memberId || null;
+    let memberId = bookingData.memberId || null;
     let rewardsConfig = null;
     let unpaidCheckoutApprovedBy = null;
     let memberDoc = null;
     if (memberId) {
       memberDoc = await adminDb.collection("members").doc(memberId).get();
     }
-    if (!memberDoc?.exists && bookingData2.guestEmail) {
-      const guestEmail = String(bookingData2.guestEmail).toLowerCase();
+    if (!memberDoc?.exists && bookingData.guestEmail) {
+      const guestEmail = String(bookingData.guestEmail).toLowerCase();
       const membersSnap = await adminDb.collection("members").where("email", "==", guestEmail).limit(1).get();
       if (!membersSnap.empty) {
         memberDoc = membersSnap.docs[0];
@@ -237334,26 +237383,26 @@ async function handleCheckoutBooking(req, res) {
         loyaltyAwardStatus: canAwardPoints ? awardNow ? "awarded" : "pending-payment" : "ineligible",
         pointsAwardedAt: awardNow ? now : null
       });
-      const bookingReservationId2 = String(freshBookingData.reservationId || "").trim();
+      const bookingReservationId = String(freshBookingData.reservationId || "").trim();
       let postUpdateChildStatuses = [];
-      if (bookingReservationId2.length > 0) {
+      if (bookingReservationId.length > 0) {
         const childrenForCount = await transaction.get(
-          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2)
+          adminDb.collection("bookings").where("reservationId", "==", bookingReservationId)
         );
         postUpdateChildStatuses = childrenForCount.docs.map(
           (d) => d.id === bookingId ? "checked-out" : String(d.data()?.status || "")
         );
       }
       transaction.update(bookingRef2, bookingUpdate);
-      if (bookingData2.roomId) {
-        const roomRef = adminDb.collection("rooms").doc(String(bookingData2.roomId));
+      if (bookingData.roomId) {
+        const roomRef = adminDb.collection("rooms").doc(String(bookingData.roomId));
         transaction.update(roomRef, {
           status: "available",
           housekeepingStatus: "dirty",
           updatedAt: now
         });
       }
-      const roomNumber = String(bookingData2.roomNumber || "");
+      const roomNumber = String(bookingData.roomNumber || "");
       if (roomNumber) {
         const intercomRef = adminDb.collection("intercoms").doc(roomNumber);
         transaction.set(
@@ -237362,8 +237411,8 @@ async function handleCheckoutBooking(req, res) {
           { merge: true }
         );
       }
-      if (bookingReservationId2.length > 0) {
-        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId2);
+      if (bookingReservationId.length > 0) {
+        const reservationRef = adminDb.collection("reservations").doc(bookingReservationId);
         transaction.update(reservationRef, {
           updatedAt: now
         });
@@ -237385,8 +237434,8 @@ async function handleCheckoutBooking(req, res) {
             type: "earn",
             points: pointsAwarded,
             bookingId,
-            bookingRef: bookingData2.bookingRef,
-            description: `Stay Checkout Earnings (${bookingData2.bookingRef})`,
+            bookingRef: bookingData.bookingRef,
+            description: `Stay Checkout Earnings (${bookingData.bookingRef})`,
             by: checkedOutBy,
             createdAt: /* @__PURE__ */ new Date()
           });
@@ -237487,22 +237536,22 @@ async function handleCheckoutBooking(req, res) {
   }
 }
 async function handleLookupBooking(req, res) {
-  const parsed2 = lookupSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = lookupSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Please provide a valid booking reference, email, or lookup token."
     });
   }
-  const { bookingRef: trimmedRef, guestEmail: normalizedEmail, token: lookupToken, reservationRef: trimmedReservationRef } = parsed2.data;
+  const { bookingRef: trimmedRef, guestEmail: normalizedEmail, token: lookupToken, reservationRef: trimmedReservationRef } = parsed.data;
   try {
     if (trimmedRef && lookupToken) {
       const snapshot = await adminDb.collection("bookings").where("bookingRef", "==", trimmedRef).where("lookupToken", "==", String(lookupToken).toLowerCase()).limit(1).get();
       if (snapshot.empty) {
         return res.status(404).json({ success: false, error: "Booking not found." });
       }
-      const bookingData2 = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
-      return await enrichAndRespond(res, bookingData2);
+      const bookingData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+      return await enrichAndRespond(res, bookingData);
     }
     if (trimmedReservationRef) {
       const reservationSnap = await adminDb.collection("reservations").where("reservationRef", "==", trimmedReservationRef).limit(1).get();
@@ -237542,11 +237591,11 @@ async function handleLookupBooking(req, res) {
         if (!matched) {
           return res.status(404).json({ success: false, error: "Booking not found." });
         }
-        const bookingData3 = { id: matched.id, ...matched.data() };
-        return await enrichAndRespond(res, bookingData3);
+        const bookingData2 = { id: matched.id, ...matched.data() };
+        return await enrichAndRespond(res, bookingData2);
       }
-      const bookingData2 = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
-      return await enrichAndRespond(res, bookingData2);
+      const bookingData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+      return await enrichAndRespond(res, bookingData);
     }
     if (trimmedRef) {
       const snapshot = await adminDb.collection("bookings").where("bookingRef", "==", trimmedRef).limit(1).get();
@@ -237554,8 +237603,8 @@ async function handleLookupBooking(req, res) {
         return res.status(404).json({ success: false, error: "Booking not found." });
       }
       const bookingDoc = snapshot.docs[0];
-      const bookingData2 = { id: bookingDoc.id, ...bookingDoc.data() };
-      return await enrichAndRespond(res, bookingData2);
+      const bookingData = { id: bookingDoc.id, ...bookingDoc.data() };
+      return await enrichAndRespond(res, bookingData);
     }
     if (normalizedEmail) {
       const PICKER_LIMIT = 11;
@@ -237573,8 +237622,8 @@ async function handleLookupBooking(req, res) {
       });
       if (sorted.length === 1) {
         const top = sorted[0];
-        const bookingData2 = { id: top.id, ...top.data };
-        return await enrichAndRespond(res, bookingData2);
+        const bookingData = { id: top.id, ...top.data };
+        return await enrichAndRespond(res, bookingData);
       }
       const moreExist = sorted.length > 10;
       const entriesSource = moreExist ? sorted.slice(0, 10) : sorted;
@@ -237603,8 +237652,8 @@ async function handleLookupBooking(req, res) {
         return res.status(404).json({ success: false, error: "Booking not found." });
       }
       const bookingDoc = snapshot.docs[0];
-      const bookingData2 = { id: bookingDoc.id, ...bookingDoc.data() };
-      return await enrichAndRespond(res, bookingData2);
+      const bookingData = { id: bookingDoc.id, ...bookingDoc.data() };
+      return await enrichAndRespond(res, bookingData);
     }
     return res.status(400).json({
       success: false,
@@ -237615,11 +237664,11 @@ async function handleLookupBooking(req, res) {
     return res.status(500).json({ success: false, error: "Unable to look up booking. Please try again." });
   }
 }
-async function enrichAndRespond(res, bookingData2) {
+async function enrichAndRespond(res, bookingData) {
   let roomData = null;
-  if (bookingData2.roomId) {
+  if (bookingData.roomId) {
     try {
-      const roomDoc = await adminDb.collection("rooms").doc(String(bookingData2.roomId)).get();
+      const roomDoc = await adminDb.collection("rooms").doc(String(bookingData.roomId)).get();
       if (roomDoc.exists) {
         roomData = roomDoc.data();
       }
@@ -237627,7 +237676,7 @@ async function enrichAndRespond(res, bookingData2) {
       console.error("Failed to enrich booking with room data:", roomErr);
     }
   }
-  const reservationId = String(bookingData2.reservationId || "").trim();
+  const reservationId = String(bookingData.reservationId || "").trim();
   if (reservationId) {
     const reservationRef = adminDb.collection("reservations").doc(reservationId);
     const reservationSnap = await reservationRef.get();
@@ -237638,7 +237687,7 @@ async function enrichAndRespond(res, bookingData2) {
       if (children.length > 1) {
         return res.status(200).json({
           success: true,
-          data: buildReservationLookupView(reservation, children, roomData, bookingData2)
+          data: buildReservationLookupView(reservation, children, roomData, bookingData)
         });
       }
     }
@@ -237652,28 +237701,28 @@ async function enrichAndRespond(res, bookingData2) {
       // older clients that don't read `kind` still get the
       // same fields they always did.
       kind: "single",
-      id: bookingData2.id,
-      bookingRef: bookingData2.bookingRef,
+      id: bookingData.id,
+      bookingRef: bookingData.bookingRef,
       // `guestEmail` is dropped from the wire entirely.
       // The card uses `maskedEmail` for the echo; the
       // cancellation + resend flows use the value the user
       // typed into the form (kept in local state).
-      maskedEmail: maskEmail(String(bookingData2.guestEmail || "")),
-      guestPhone: bookingData2.guestPhone,
-      roomId: bookingData2.roomId,
-      roomNumber: bookingData2.roomNumber,
-      roomName: roomData?.name || bookingData2.roomType || "",
-      roomType: bookingData2.roomType,
-      checkIn: bookingData2.checkIn,
-      checkOut: bookingData2.checkOut,
-      numNights: bookingData2.numNights,
-      numGuests: bookingData2.numGuests,
-      ratePerNight: bookingData2.ratePerNight,
-      totalPrice: bookingData2.totalPrice,
-      rateBreakdown: bookingData2.rateBreakdown || null,
-      paymentMethod: bookingData2.paymentMethod,
-      status: bookingData2.status,
-      specialRequests: bookingData2.specialRequests || ""
+      maskedEmail: maskEmail(String(bookingData.guestEmail || "")),
+      guestPhone: bookingData.guestPhone,
+      roomId: bookingData.roomId,
+      roomNumber: bookingData.roomNumber,
+      roomName: roomData?.name || bookingData.roomType || "",
+      roomType: bookingData.roomType,
+      checkIn: bookingData.checkIn,
+      checkOut: bookingData.checkOut,
+      numNights: bookingData.numNights,
+      numGuests: bookingData.numGuests,
+      ratePerNight: bookingData.ratePerNight,
+      totalPrice: bookingData.totalPrice,
+      rateBreakdown: bookingData.rateBreakdown || null,
+      paymentMethod: bookingData.paymentMethod,
+      status: bookingData.status,
+      specialRequests: bookingData.specialRequests || ""
     }
   });
 }
@@ -237793,11 +237842,11 @@ async function handleResolveEarlyCheckin(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const parsed2 = resolveEarlyCheckinSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = resolveEarlyCheckinSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({ success: false, error: "Invalid resolution request details." });
   }
-  const { bookingId, status, grantIfMissing, staffNote, confirmedTime } = parsed2.data;
+  const { bookingId, status, grantIfMissing, staffNote, confirmedTime } = parsed.data;
   if (grantIfMissing && req.staff?.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only administrators can grant early check-in." });
   }
@@ -237810,7 +237859,7 @@ async function handleResolveEarlyCheckin(req, res) {
   try {
     const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
     const resolvedBy = req.staff?.name || req.staff?.email || "Staff Member";
-    let bookingData2 = null;
+    let bookingData = null;
     let didWrite = false;
     let idempotentReplay = false;
     await adminDb.runTransaction(async (transaction) => {
@@ -237825,7 +237874,7 @@ async function handleResolveEarlyCheckin(req, res) {
           const sameGrant = existing.source === "staff-granted" && existing.status === "approved" && existing.confirmedTime === confirmedTime && String(existing.staffNote || "") === staffNote;
           if (sameGrant) {
             idempotentReplay = true;
-            bookingData2 = { id: bookingDoc.id, ...data };
+            bookingData = { id: bookingDoc.id, ...data };
             return;
           }
           throw new Error("EARLY_CHECKIN_EXISTS");
@@ -237853,7 +237902,7 @@ async function handleResolveEarlyCheckin(req, res) {
           staffNote: staffNote || "",
           confirmedTime
         };
-        bookingData2 = { id: bookingDoc.id, ...data, earlyCheckIn: grantedEarlyCheckIn };
+        bookingData = { id: bookingDoc.id, ...data, earlyCheckIn: grantedEarlyCheckIn };
         transaction.update(bookingRef2, {
           earlyCheckIn: grantedEarlyCheckIn,
           updatedAt: /* @__PURE__ */ new Date()
@@ -237875,7 +237924,7 @@ async function handleResolveEarlyCheckin(req, res) {
         staffNote: staffNote || "",
         confirmedTime: status === "approved" ? confirmedTime || data.earlyCheckIn.requestedTime : null
       };
-      bookingData2 = { id: bookingDoc.id, ...data, earlyCheckIn: updatedEarlyCheckIn };
+      bookingData = { id: bookingDoc.id, ...data, earlyCheckIn: updatedEarlyCheckIn };
       transaction.update(bookingRef2, {
         earlyCheckIn: updatedEarlyCheckIn,
         updatedAt: /* @__PURE__ */ new Date()
@@ -237884,12 +237933,12 @@ async function handleResolveEarlyCheckin(req, res) {
     });
     if (didWrite) {
       try {
-        await sendEarlyCheckinResolveTrigger(bookingData2, status, staffNote);
+        await sendEarlyCheckinResolveTrigger(bookingData, status, staffNote);
       } catch (emailErr) {
         console.error("Failed to send early check-in resolve email:", emailErr);
       }
     }
-    return res.status(200).json({ success: true, data: { earlyCheckIn: bookingData2?.earlyCheckIn, idempotentReplay } });
+    return res.status(200).json({ success: true, data: { earlyCheckIn: bookingData?.earlyCheckIn, idempotentReplay } });
   } catch (error) {
     if (error?.message === "BOOKING_NOT_FOUND") {
       return res.status(404).json({ success: false, error: "Booking not found." });
@@ -237950,7 +237999,7 @@ async function handleRescheduleBooking(req, res) {
   try {
     let updatedBooking = null;
     let fullBookingForEmail = null;
-    let bookingReservationId2 = null;
+    let bookingReservationId = null;
     let existingReservationData = null;
     const expiredHoldRetirements = [];
     await adminDb.runTransaction(async (transaction) => {
@@ -237972,7 +238021,7 @@ async function handleRescheduleBooking(req, res) {
           throw new Error("Extended check-out must be after the current check-out date.");
         }
       }
-      bookingReservationId2 = (() => {
+      bookingReservationId = (() => {
         const stored = String(booking.reservationId || "").trim();
         if (stored.length > 0) return stored;
         if (requestedReservationId && RESERVATION_ID_REGEX.test(requestedReservationId)) {
@@ -237980,7 +238029,7 @@ async function handleRescheduleBooking(req, res) {
         }
         return null;
       })();
-      const reservationDocRef = bookingReservationId2 ? adminDb.collection("reservations").doc(bookingReservationId2) : null;
+      const reservationDocRef = bookingReservationId ? adminDb.collection("reservations").doc(bookingReservationId) : null;
       let rescheduleChildrenDates = null;
       if (reservationDocRef) {
         const existingReservationSnap = await transaction.get(reservationDocRef);
@@ -237989,7 +238038,7 @@ async function handleRescheduleBooking(req, res) {
         } else {
           throw new Error("RESERVATION_HEADER_WITHOUT_CHILD");
         }
-        const rescheduleChildrenQuery = adminDb.collection("bookings").where("reservationId", "==", bookingReservationId2);
+        const rescheduleChildrenQuery = adminDb.collection("bookings").where("reservationId", "==", bookingReservationId);
         const rescheduleChildrenSnap = await transaction.get(rescheduleChildrenQuery);
         rescheduleChildrenDates = rescheduleChildrenSnap.docs.map((docSnap) => {
           if (docSnap.id === String(bookingId)) {
@@ -238439,7 +238488,7 @@ async function handleRescheduleBooking(req, res) {
           rescheduleChildrenDates || []
         );
         const rescheduleFingerprint = computeRequestFingerprint({
-          reservationId: bookingReservationId2,
+          reservationId: bookingReservationId,
           roomLines: [{
             type: String(room.type || "").trim(),
             quantity: 1,
@@ -238590,7 +238639,7 @@ async function handleRescheduleBooking(req, res) {
         // empty strings (the booking was created before
         // MRB-02, so it has no header to echo).
         ...updatedBooking,
-        reservationId: bookingReservationId2 || "",
+        reservationId: bookingReservationId || "",
         reservationRef: String(existingReservationData?.reservationRef || "")
       }
     });
@@ -238624,25 +238673,25 @@ async function handleExtendStay(req, res) {
     });
   }
   try {
-    const parsed2 = guestCancelSchema.safeParse(req.body || {});
-    if (!parsed2.success) {
+    const parsed = guestCancelSchema.safeParse(req.body || {});
+    if (!parsed.success) {
       return res.status(400).json({
         success: false,
         error: "Please provide a valid booking reference and email or lookup token."
       });
     }
-    const compositeFilter = parsed2.data.token ? { field: "lookupToken", value: String(parsed2.data.token).toLowerCase() } : { field: "guestEmail", value: parsed2.data.guestEmail };
-    const query = adminDb.collection("bookings").where("bookingRef", "==", parsed2.data.bookingRef).where(compositeFilter.field, "==", compositeFilter.value).limit(1);
+    const compositeFilter = parsed.data.token ? { field: "lookupToken", value: String(parsed.data.token).toLowerCase() } : { field: "guestEmail", value: parsed.data.guestEmail };
+    const query = adminDb.collection("bookings").where("bookingRef", "==", parsed.data.bookingRef).where(compositeFilter.field, "==", compositeFilter.value).limit(1);
     const snapshot = await query.get();
     if (snapshot.empty) {
       return res.status(404).json({
         success: false,
-        error: parsed2.data.token ? "Booking not found with matching token." : "Booking not found with matching email."
+        error: parsed.data.token ? "Booking not found with matching token." : "Booking not found with matching email."
       });
     }
     const bookingDocumentRef = snapshot.docs[0].ref;
-    const bookingData2 = snapshot.docs[0].data();
-    if (!GUEST_EXTEND_STATUSES.includes(String(bookingData2.status || ""))) {
+    const bookingData = snapshot.docs[0].data();
+    if (!GUEST_EXTEND_STATUSES.includes(String(bookingData.status || ""))) {
       return res.status(400).json({
         success: false,
         error: "EXTEND_NOT_ELIGIBLE"
@@ -238652,9 +238701,9 @@ async function handleExtendStay(req, res) {
       ...req,
       body: {
         bookingId: snapshot.docs[0].id,
-        roomId: bookingData2.roomId,
+        roomId: bookingData.roomId,
         // locked — transaction enforces
-        checkIn: bookingData2.checkIn,
+        checkIn: bookingData.checkIn,
         // locked — transaction enforces
         checkOut,
         reason: typeof reason === "string" ? reason.slice(0, 500) : "",
@@ -239142,8 +239191,8 @@ function toIsoDate(value) {
     return value.toISOString().slice(0, 10);
   }
   if (typeof value === "string") {
-    const parsed2 = new Date(value);
-    if (!isNaN(parsed2.getTime())) return parsed2.toISOString().slice(0, 10);
+    const parsed = new Date(value);
+    if (!isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
   }
   return null;
 }
@@ -239296,16 +239345,16 @@ async function assertRoomIsFreeForBlock(transaction, roomId, start, end, exclude
   }
 }
 async function handleCreateBulkRoomBlocks(req, res) {
-  const parsed2 = bulkBlockSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = bulkBlockSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({ success: false, error: "Please choose rooms, valid dates, and a reason." });
   }
-  const roomIds = Array.from(new Set(parsed2.data.roomIds));
-  if (roomIds.length !== parsed2.data.roomIds.length) {
+  const roomIds = Array.from(new Set(parsed.data.roomIds));
+  if (roomIds.length !== parsed.data.roomIds.length) {
     return res.status(400).json({ success: false, error: "Each room can only be selected once." });
   }
   try {
-    const { start, end } = parseStayRange(parsed2.data.startDate, parsed2.data.endDate);
+    const { start, end } = parseStayRange(parsed.data.startDate, parsed.data.endDate);
     const batchId = adminDb.collection("roomBlockBatches").doc().id;
     const blockIds = [];
     await adminDb.runTransaction(async (transaction) => {
@@ -239331,8 +239380,8 @@ async function handleCreateBulkRoomBlocks(req, res) {
           roomType: String(room.data.type || ""),
           startDate: Timestamp.fromDate(start),
           endDate: Timestamp.fromDate(end),
-          reason: parsed2.data.reason,
-          notes: parsed2.data.notes || "",
+          reason: parsed.data.reason,
+          notes: parsed.data.notes || "",
           status: "active",
           createdBy: req.staff?.uid || req.staff?.email || "staff",
           createdAt: now,
@@ -239348,30 +239397,30 @@ async function handleCreateBulkRoomBlocks(req, res) {
   }
 }
 async function handleCreateRoomBlock(req, res) {
-  const parsed2 = blockSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = blockSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({ success: false, error: "Please choose a room, valid dates, and a reason." });
   }
   try {
-    const { start, end } = parseStayRange(parsed2.data.startDate, parsed2.data.endDate);
+    const { start, end } = parseStayRange(parsed.data.startDate, parsed.data.endDate);
     let blockId = "";
     await adminDb.runTransaction(async (transaction) => {
-      const roomRef = adminDb.collection("rooms").doc(parsed2.data.roomId);
+      const roomRef = adminDb.collection("rooms").doc(parsed.data.roomId);
       const roomDoc = await transaction.get(roomRef);
       if (!roomDoc.exists) throw new Error("Room not found.");
       const room = roomDoc.data() || {};
       if (room.isActive === false) throw new Error("Cannot block an inactive room.");
-      await assertRoomIsFreeForBlock(transaction, parsed2.data.roomId, start, end);
+      await assertRoomIsFreeForBlock(transaction, parsed.data.roomId, start, end);
       const blockRef = adminDb.collection("roomBlocks").doc();
       blockId = blockRef.id;
       transaction.set(blockRef, {
-        roomId: parsed2.data.roomId,
+        roomId: parsed.data.roomId,
         roomNumber: String(room.roomNumber || ""),
         roomType: String(room.type || ""),
         startDate: Timestamp.fromDate(start),
         endDate: Timestamp.fromDate(end),
-        reason: parsed2.data.reason,
-        notes: parsed2.data.notes || "",
+        reason: parsed.data.reason,
+        notes: parsed.data.notes || "",
         status: "active",
         createdBy: req.staff?.uid || req.staff?.email || "staff",
         createdAt: /* @__PURE__ */ new Date(),
@@ -239386,33 +239435,33 @@ async function handleCreateRoomBlock(req, res) {
   }
 }
 async function handleUpdateRoomBlock(req, res) {
-  const parsed2 = updateBlockSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = updateBlockSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({ success: false, error: "Please provide valid block details." });
   }
   try {
-    const { start, end } = parseStayRange(parsed2.data.startDate, parsed2.data.endDate);
+    const { start, end } = parseStayRange(parsed.data.startDate, parsed.data.endDate);
     await adminDb.runTransaction(async (transaction) => {
-      const blockRef = adminDb.collection("roomBlocks").doc(parsed2.data.blockId);
+      const blockRef = adminDb.collection("roomBlocks").doc(parsed.data.blockId);
       const blockDoc = await transaction.get(blockRef);
       if (!blockDoc.exists) throw new Error("Block not found.");
       const existing = blockDoc.data() || {};
       if (existing.status === "cancelled") throw new Error("Cancelled blocks cannot be edited.");
-      const targetRoomId = parsed2.data.roomId || existing.roomId;
+      const targetRoomId = parsed.data.roomId || existing.roomId;
       if (!targetRoomId) throw new Error("Room ID is required.");
       const roomRef = adminDb.collection("rooms").doc(targetRoomId);
       const roomDoc = await transaction.get(roomRef);
       if (!roomDoc.exists) throw new Error("Room not found.");
       const room = roomDoc.data() || {};
-      await assertRoomIsFreeForBlock(transaction, targetRoomId, start, end, parsed2.data.blockId);
+      await assertRoomIsFreeForBlock(transaction, targetRoomId, start, end, parsed.data.blockId);
       transaction.update(blockRef, {
         roomId: targetRoomId,
         roomNumber: String(room.roomNumber || ""),
         roomType: String(room.type || ""),
         startDate: Timestamp.fromDate(start),
         endDate: Timestamp.fromDate(end),
-        reason: parsed2.data.reason,
-        notes: parsed2.data.notes || "",
+        reason: parsed.data.reason,
+        notes: parsed.data.notes || "",
         updatedAt: /* @__PURE__ */ new Date()
       });
     });
@@ -239422,12 +239471,12 @@ async function handleUpdateRoomBlock(req, res) {
   }
 }
 async function handleCancelRoomBlock(req, res) {
-  const parsed2 = cancelBlockSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = cancelBlockSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({ success: false, error: "Block ID is required." });
   }
   try {
-    const blockRef = adminDb.collection("roomBlocks").doc(parsed2.data.blockId);
+    const blockRef = adminDb.collection("roomBlocks").doc(parsed.data.blockId);
     await blockRef.update({
       status: "cancelled",
       cancelledAt: /* @__PURE__ */ new Date(),
@@ -239679,16 +239728,16 @@ async function handleCreateCorporateInquiry(req, res) {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
   const { _hp, turnstileToken, ...inquiryBody } = req.body || {};
-  const parsed2 = inquirySchema.safeParse(inquiryBody);
-  if (!parsed2.success) {
+  const parsed = inquirySchema.safeParse(inquiryBody);
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Please check the inquiry form and try again."
     });
   }
-  const derivedContactPerson = parsed2.data.contactPerson || [parsed2.data.firstName, parsed2.data.lastName].filter(Boolean).join(" ") || "";
+  const derivedContactPerson = parsed.data.contactPerson || [parsed.data.firstName, parsed.data.lastName].filter(Boolean).join(" ") || "";
   const inquiry = {
-    ...parsed2.data,
+    ...parsed.data,
     contactPerson: derivedContactPerson,
     status: "new",
     handler: "",
@@ -239729,8 +239778,8 @@ async function handleConvertInquiryToBooking(req, res) {
   if (!staff.uid) {
     return res.status(401).json({ success: false, error: "Staff authentication is required." });
   }
-  const parsed2 = convertInquirySchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = convertInquirySchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Please check the conversion details and try again."
@@ -239746,7 +239795,7 @@ async function handleConvertInquiryToBooking(req, res) {
     hasBreakfast,
     paymentMethod,
     ratePerNightOverride
-  } = parsed2.data;
+  } = parsed.data;
   const checkInDate = /* @__PURE__ */ new Date(`${checkIn}T00:00:00Z`);
   const checkOutDate = /* @__PURE__ */ new Date(`${checkOut}T00:00:00Z`);
   if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) {
@@ -239891,7 +239940,7 @@ async function handleConvertInquiryToBooking(req, res) {
       finalBookingRef = bookingRef2;
       const finalHasBreakfast = false;
       const roomTotal = ratePerNight * numNights;
-      const breakfastTotal = finalHasBreakfast ? actualBreakfastRate * guests * numNights : 0;
+      const breakfastTotal = 0;
       finalTotalPrice = roomTotal + breakfastTotal;
       if (!Number.isFinite(finalTotalPrice)) {
         throw new Error("The converted booking total is invalid.");
@@ -239917,7 +239966,7 @@ async function handleConvertInquiryToBooking(req, res) {
         firstName = first || "Corporate";
         lastName = rest.length > 0 ? rest.join(" ") : "\u2014";
       }
-      const guestName2 = `${firstName} ${lastName}`.trim();
+      const guestName = `${firstName} ${lastName}`.trim();
       const guestEmail = String(inquiryData.email || "").trim().toLowerCase();
       const guestPhone = String(inquiryData.phone || "").trim();
       const companyName = String(inquiryData.companyName || "").trim();
@@ -239926,7 +239975,7 @@ async function handleConvertInquiryToBooking(req, res) {
         roomId,
         roomNumber: roomData.roomNumber,
         roomType: roomData.type,
-        guestName: guestName2,
+        guestName,
         guestEmail,
         guestPhone,
         // Per the intercom-verify-guest permanent fix
@@ -240270,8 +240319,8 @@ function toMillis(value) {
   if (!value) return 0;
   if (value instanceof Date) return value.getTime();
   if (typeof value?.toDate === "function") return value.toDate().getTime();
-  const parsed2 = new Date(value).getTime();
-  return Number.isFinite(parsed2) ? parsed2 : 0;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 function toIsoDate2(value) {
   if (!value) return "";
@@ -240364,8 +240413,8 @@ async function handleRegisterMember(req, res) {
   if (!authUser.uid || !authUser.email) {
     return res.status(401).json({ success: false, error: `Sign in before joining ${hotel_config_default.rewardsName}.` });
   }
-  const parsed2 = registerMemberSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = registerMemberSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Please check your rewards profile details and try again."
@@ -240393,8 +240442,8 @@ async function handleRegisterMember(req, res) {
       const counterDoc = await transaction.get(counterRef);
       const sequence = counterDoc.exists ? (counterDoc.data()?.count || 0) + 1 : 1;
       memberNumber = generateMemberNumber(hotel_config_default.memberNumberPrefix || "SR", sequence);
-      const fullName = parsed2.data.fullName || authUser.name || email.split("@")[0];
-      const photoUrl = parsed2.data.photoUrl || authUser.picture || "";
+      const fullName = parsed.data.fullName || authUser.name || email.split("@")[0];
+      const photoUrl = parsed.data.photoUrl || authUser.picture || "";
       const rewardsDoc = await adminDb.collection("settings").doc("rewardsConfig").get();
       const rewardsCfg = rewardsDoc.exists ? rewardsDoc.data() : null;
       const baseCurrentLevel = resolveCurrentLevel(rewardsCfg?.levels, 0);
@@ -240419,9 +240468,9 @@ async function handleRegisterMember(req, res) {
       transaction.set(memberRef, {
         fullName,
         email,
-        phone: parsed2.data.phone,
+        phone: parsed.data.phone,
         photoUrl,
-        authProvider: parsed2.data.authProvider,
+        authProvider: parsed.data.authProvider,
         memberNumber,
         isMember: true,
         memberSince: now,
@@ -240448,7 +240497,7 @@ async function handleRegisterMember(req, res) {
       }
     });
     const emailIsVerified = authUser.email_verified === true;
-    const linkedBookings = emailIsVerified ? await linkBookingsByEmail(email, uid, parsed2.data.bookingId || void 0) : 0;
+    const linkedBookings = emailIsVerified ? await linkBookingsByEmail(email, uid, parsed.data.bookingId || void 0) : 0;
     return res.status(200).json({
       success: true,
       data: {
@@ -240482,15 +240531,15 @@ async function handleRedeemMemberPoints(req, res) {
   if (!staff.uid) {
     return res.status(401).json({ success: false, error: "Staff authentication is required." });
   }
-  const parsed2 = redeemPointsSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = redeemPointsSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Please check the points redemption details and try again."
     });
   }
   try {
-    const { bookingId, memberId: requestedMemberId, pointsToRedeem } = parsed2.data;
+    const { bookingId, memberId: requestedMemberId, pointsToRedeem } = parsed.data;
     const result = await adminDb.runTransaction(async (transaction) => {
       return applyPointsRedemption(transaction, {
         bookingId,
@@ -240627,15 +240676,15 @@ async function handleRedeemPointsSelf(req, res) {
   if (!authUser?.uid) {
     return res.status(401).json({ success: false, error: "Sign-in token is invalid or expired." });
   }
-  const parsed2 = selfRedeemSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = selfRedeemSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Please check the points redemption details and try again."
     });
   }
   try {
-    const { bookingId, pointsToRedeem } = parsed2.data;
+    const { bookingId, pointsToRedeem } = parsed.data;
     const rewardsConfigSnap = await adminDb.collection("settings").doc("rewardsConfig").get();
     const rewardsCfgData = rewardsConfigSnap.exists ? rewardsConfigSnap.data() : null;
     if (rewardsCfgData?.allowMemberPointsRedemption !== true) {
@@ -240676,8 +240725,8 @@ async function handleUndoMemberPointsRedemption(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can undo points redemption." });
   }
-  const parsed2 = undoRedemptionSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = undoRedemptionSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Please check the redemption undo details and try again."
@@ -240685,7 +240734,7 @@ async function handleUndoMemberPointsRedemption(req, res) {
   }
   try {
     const now = /* @__PURE__ */ new Date();
-    const { bookingId } = parsed2.data;
+    const { bookingId } = parsed.data;
     let responseData = {};
     await adminDb.runTransaction(async (transaction) => {
       const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
@@ -240765,14 +240814,14 @@ async function handleSetMemberActive(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can suspend or activate member accounts." });
   }
-  const parsed2 = setMemberActiveSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = setMemberActiveSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Please choose a member account to update."
     });
   }
-  const { uid, isActive } = parsed2.data;
+  const { uid, isActive } = parsed.data;
   try {
     const memberRef = adminDb.collection("members").doc(uid);
     const memberDoc = await memberRef.get();
@@ -240835,14 +240884,14 @@ async function handleManualAdjustPoints(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can adjust member points." });
   }
-  const parsed2 = manualAdjustPointsSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = manualAdjustPointsSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Please provide a valid member ID, a non-zero points amount, and a reason (max 500 characters)."
     });
   }
-  const { memberId, amount, reason } = parsed2.data;
+  const { memberId, amount, reason } = parsed.data;
   const trimmedReason = reason.trim();
   try {
     let responseData = {};
@@ -240974,14 +241023,14 @@ async function handleLinkBookingToMember(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can link bookings to a member." });
   }
-  const parsed2 = linkBookingToMemberSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = linkBookingToMemberSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Please provide a member UID, a booking ID, and a reason (max 500 characters)."
     });
   }
-  const { memberUid, bookingId, reason } = parsed2.data;
+  const { memberUid, bookingId, reason } = parsed.data;
   const trimmedReason = reason.trim();
   try {
     let responseData = {};
@@ -241006,23 +241055,23 @@ async function handleLinkBookingToMember(req, res) {
       if (!bookingDoc.exists) {
         throw new Error("BOOKING_NOT_FOUND:Booking was not found.");
       }
-      const bookingData2 = bookingDoc.data() || {};
-      const bookingStatus = String(bookingData2.status || "");
-      const bookingTestRunId = bookingData2.testRunId || null;
+      const bookingData = bookingDoc.data() || {};
+      const bookingStatus = String(bookingData.status || "");
+      const bookingTestRunId = bookingData.testRunId || null;
       if (bookingStatus === "cancelled") {
         throw new Error("Cancelled bookings cannot be linked to a member.");
       }
       if (bookingTestRunId) {
         throw new Error("Test-run bookings cannot be linked to a member.");
       }
-      const existingMemberId = bookingData2.memberId || null;
+      const existingMemberId = bookingData.memberId || null;
       if (existingMemberId && existingMemberId !== memberUid) {
         throw new Error("This booking is already linked to a different member account. Unlink it from the booking drawer first, then retry.");
       }
       let siblingDocs = [];
-      const isReservationBooking = !!(bookingData2.reservationId && String(bookingData2.reservationId).trim());
+      const isReservationBooking = !!(bookingData.reservationId && String(bookingData.reservationId).trim());
       if (isReservationBooking) {
-        const siblingsQuery = await adminDb.collection("bookings").where("reservationId", "==", String(bookingData2.reservationId).trim()).get();
+        const siblingsQuery = await adminDb.collection("bookings").where("reservationId", "==", String(bookingData.reservationId).trim()).get();
         siblingDocs = siblingsQuery.docs.map((d) => ({ id: d.id, data: d.data() || {} })).filter((b3) => String(b3.id) !== String(resolvedBookingId));
         for (const sibling of siblingDocs) {
           const siblingMemberId = sibling.data.memberId || null;
@@ -241032,7 +241081,7 @@ async function handleLinkBookingToMember(req, res) {
         }
       }
       const allTargets = [
-        { id: resolvedBookingId, data: bookingData2, existingMemberId },
+        { id: resolvedBookingId, data: bookingData, existingMemberId },
         ...siblingDocs.map((s4) => ({
           id: s4.id,
           data: s4.data,
@@ -241058,13 +241107,13 @@ async function handleLinkBookingToMember(req, res) {
       const auditRef = adminDb.collection("bookings").doc("audit").collection("records").doc(`${resolvedBookingId}-link-${now.getTime()}`);
       transaction.set(auditRef, {
         bookingId: resolvedBookingId,
-        bookingRef: bookingData2.bookingRef || "",
+        bookingRef: bookingData.bookingRef || "",
         // G1: include the reservation cluster on the
         // audit row so a future reconciliation can
         // disambiguate "linked the lead" from "linked
         // the whole reservation".
-        reservationId: bookingData2.reservationId || resolvedReservationId || null,
-        reservationRef: bookingData2.reservationRef || null,
+        reservationId: bookingData.reservationId || resolvedReservationId || null,
+        reservationRef: bookingData.reservationRef || null,
         // G2: include the fan-out set so an auditor
         // can see exactly which bookings were
         // linked (and which were skipped via the
@@ -241074,7 +241123,7 @@ async function handleLinkBookingToMember(req, res) {
         fromMemberId: existingMemberId,
         toMemberId: memberUid,
         memberEmail: memberDoc.data()?.email || "",
-        bookingEmail: bookingData2.guestEmail || "",
+        bookingEmail: bookingData.guestEmail || "",
         reason: trimmedReason,
         staffUid: staff.uid,
         staffRole: staff.role,
@@ -241083,12 +241132,12 @@ async function handleLinkBookingToMember(req, res) {
       responseData = {
         memberUid,
         bookingId: resolvedBookingId,
-        bookingRef: bookingData2.bookingRef || "",
+        bookingRef: bookingData.bookingRef || "",
         // G1: surface the resolved reservation cluster
         // (null on legacy pre-MRB-01 single-room
         // links) so the admin UI can confirm what
         // was linked.
-        reservationId: bookingData2.reservationId || resolvedReservationId || null,
+        reservationId: bookingData.reservationId || resolvedReservationId || null,
         // G2: surface the fan-out set so the
         // admin UI can confirm which bookings were
         // linked. Always array-shaped (length 1
@@ -241132,8 +241181,8 @@ async function handleEraseMemberAccount(req, res) {
   if (!authUser.uid || !authUser.email) {
     return res.status(401).json({ success: false, error: "Sign in before requesting account erasure." });
   }
-  const parsed2 = eraseAccountSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = eraseAccountSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Please confirm account erasure by sending the 'erase-my-account' confirmation string."
@@ -241255,14 +241304,14 @@ async function handleSendVerificationEmail(req, res) {
       });
     }
     const email = authUser.email;
-    const guestName2 = authUser.name || authUser.displayName || "";
+    const guestName = authUser.name || authUser.displayName || "";
     const actionCodeSettings = {
       url: `${getServerBaseUrl()}/account/profile?emailVerified=true`,
       handleCodeInApp: true
     };
     const verificationLink = await adminAuth.generateEmailVerificationLink(email, actionCodeSettings);
     await sendVerificationEmailTrigger({
-      guestName: guestName2,
+      guestName,
       email,
       verificationLink
     });
@@ -241305,14 +241354,14 @@ async function handleUpdateTerms(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can update terms." });
   }
-  const parsed2 = updateTermsSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = updateTermsSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: `Terms body is required and must be 1-${TERMS_BODY_MAX_LENGTH.toLocaleString()} characters.`
     });
   }
-  const { termsBody } = parsed2.data;
+  const { termsBody } = parsed.data;
   const now = /* @__PURE__ */ new Date();
   const lastUpdated = now.toISOString().slice(0, 10);
   let responseData = {};
@@ -241404,14 +241453,14 @@ async function handleCreateStaff(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can create staff accounts." });
   }
-  const parsed2 = createStaffSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = createStaffSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Please check the staff account details and try again."
     });
   }
-  const { fullName, email, password, phone, nationality, role } = parsed2.data;
+  const { fullName, email, password, phone, nationality, role } = parsed.data;
   try {
     const now = /* @__PURE__ */ new Date();
     const user = await adminAuth.createUser({
@@ -241472,14 +241521,14 @@ async function handleDisableStaff(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can disable staff accounts." });
   }
-  const parsed2 = disableStaffSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = disableStaffSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Please choose a staff account to disable."
     });
   }
-  const { uid } = parsed2.data;
+  const { uid } = parsed.data;
   if (uid === staff.uid) {
     return res.status(400).json({
       success: false,
@@ -241554,14 +241603,14 @@ async function handleUpdateStaff(req, res) {
   if (staff.role !== "admin") {
     return res.status(403).json({ success: false, error: "Only admins can update staff accounts." });
   }
-  const parsed2 = updateStaffSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = updateStaffSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Please check the staff account details and try again."
     });
   }
-  const { uid, fullName, email, phone, nationality, role, password } = parsed2.data;
+  const { uid, fullName, email, phone, nationality, role, password } = parsed.data;
   try {
     const docRef = adminDb.collection("guests").doc(uid);
     const docSnap = await docRef.get();
@@ -241755,14 +241804,14 @@ async function handleCreateStoreOrder(req, res) {
   }
   const roomId = String(body.roomId).trim();
   const roomNumber = String(body.roomNumber).trim();
-  const guestName2 = String(body.guestName).trim();
+  const guestName = String(body.guestName).trim();
   if (roomId.length === 0 || roomId.length > 64) {
     return res.status(400).json({ success: false, error: "Invalid room id." });
   }
   if (roomNumber.length === 0 || roomNumber.length > MAX_ROOM_NUMBER_LENGTH) {
     return res.status(400).json({ success: false, error: "Invalid room number." });
   }
-  if (guestName2.length === 0 || guestName2.length > MAX_GUEST_NAME_LENGTH) {
+  if (guestName.length === 0 || guestName.length > MAX_GUEST_NAME_LENGTH) {
     return res.status(400).json({ success: false, error: "Please share the guest's name (up to 120 characters)." });
   }
   if (typeof body.paymentMethod !== "string" || body.paymentMethod.length === 0) {
@@ -241861,7 +241910,7 @@ async function handleCreateStoreOrder(req, res) {
         roomId,
         roomNumber,
         bookingId,
-        guestName: guestName2,
+        guestName,
         items: orderItems,
         totalAmount,
         paymentMethod: body.paymentMethod,
@@ -241901,7 +241950,7 @@ async function handleCreateStoreOrder(req, res) {
             orderId: responseData.orderId,
             roomNumber,
             guestEmail,
-            guestName: guestName2,
+            guestName,
             items: responseData.items,
             totalAmount: responseData.totalAmount,
             paymentMethod: body.paymentMethod,
@@ -242318,14 +242367,14 @@ async function handleSendGuestMessage(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const parsed2 = guestMessageSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = guestMessageSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Please check your message and try again."
     });
   }
-  const { roomNumber, sessionToken, text, isQuickRequest, isStoreOrder, orderRef, isEarlyCheckInRequest, isCancelledOrder } = parsed2.data;
+  const { roomNumber, sessionToken, text, isQuickRequest, isStoreOrder, orderRef, isEarlyCheckInRequest, isCancelledOrder } = parsed.data;
   const rawIp = req.headers["x-vercel-forwarded-for"] || req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.socket.remoteAddress || "unknown";
   const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp).split(",")[0].trim();
   if (isGuestMessageRateLimited(`intercom-msg:${ip}:${roomNumber}`, 30, 10 * 60 * 1e3)) {
@@ -242337,17 +242386,17 @@ async function handleSendGuestMessage(req, res) {
   try {
     const verified = await resolveVerifiedStay({
       roomNumber,
-      currentStayId: parsed2.data.currentStayId,
+      currentStayId: parsed.data.currentStayId,
       sessionToken
     });
     if (!verified.ok) {
       return res.status(403).json({ success: false, error: verified.error });
     }
-    const guestName2 = verified.guestName || parsed2.data.guestName;
+    const guestName = verified.guestName || parsed.data.guestName;
     await adminDb.collection("intercoms").doc(roomNumber).set({
       roomId: roomNumber,
       roomNumber,
-      guestName: guestName2,
+      guestName,
       currentStayId: verified.bookingId,
       currentStayToken: sessionToken,
       resolved: false,
@@ -242356,7 +242405,7 @@ async function handleSendGuestMessage(req, res) {
     await adminDb.collection("intercomSessions").doc(sessionToken).collection("messages").add({
       text,
       sender: "guest",
-      guestName: guestName2,
+      guestName,
       timestamp: /* @__PURE__ */ new Date(),
       isRead: false,
       isQuickRequest,
@@ -242810,14 +242859,14 @@ async function handleGetBreakfastManage(req, res) {
   if (req.method !== "GET") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const parsed2 = manageGetSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = manageGetSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Please provide a valid booking reference and lookup token."
     });
   }
-  const { bookingRef: bookingRef2, token: token2 } = parsed2.data;
+  const { bookingRef: bookingRef2, token: token2 } = parsed.data;
   if (!bookingRef2 || !token2) {
     return res.status(400).json({
       success: false,
@@ -242920,14 +242969,14 @@ async function handleUpdateBreakfast(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const parsed2 = updateBodySchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = updateBodySchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Invalid breakfast update payload."
     });
   }
-  const { bookingRef: bookingRef2, token: token2, clientBatchId, add, change, remove } = parsed2.data;
+  const { bookingRef: bookingRef2, token: token2, clientBatchId, add, change, remove } = parsed.data;
   const breakfastConfig = await loadBreakfastConfigForManage();
   if (!breakfastConfig.isEnabled) {
     return res.status(400).json({
@@ -243333,8 +243382,8 @@ async function handleStaffUpdateBreakfast(req, res) {
       error: "Forbidden: Access restricted to staff members."
     });
   }
-  const parsed2 = updateBodySchema2.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = updateBodySchema2.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Invalid breakfast update payload."
@@ -243348,7 +243397,7 @@ async function handleStaffUpdateBreakfast(req, res) {
     remove,
     overrideCutoff,
     overrideReason
-  } = parsed2.data;
+  } = parsed.data;
   if (overrideCutoff) {
     const reason = String(overrideReason || "").trim();
     if (reason.length < MIN_BREAKFAST_OVERRIDE_REASON_LENGTH) {
@@ -243741,14 +243790,14 @@ async function handleMarkServed(req, res) {
       error: "Forbidden: Access restricted to staff members."
     });
   }
-  const parsed2 = markServedBodySchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = markServedBodySchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Invalid mark-served payload."
     });
   }
-  const { bookingId, slotKey, action, reason } = parsed2.data;
+  const { bookingId, slotKey, action, reason } = parsed.data;
   const trimmedReason = String(reason || "").trim() || null;
   const graceMinutes = await loadServedGraceMinutes();
   const { cutoffTime, cutoffTimezone, cutoffsEnabled } = await loadCutoffConfig();
@@ -244001,14 +244050,14 @@ async function handleMarkRefundPaid(req, res) {
       error: "Forbidden: Access restricted to staff members."
     });
   }
-  const parsed2 = markRefundPaidBodySchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = markRefundPaidBodySchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Invalid mark-refund-paid payload."
     });
   }
-  const { bookingId, refundId, method, transactionReference, note } = parsed2.data;
+  const { bookingId, refundId, method, transactionReference, note } = parsed.data;
   const trimmedReference = transactionReference ? String(transactionReference).trim() : null;
   const trimmedNote = note ? String(note).trim() : null;
   let resultPayload = null;
@@ -244180,7 +244229,7 @@ async function handleGetAddOnsManage(req, res) {
     return res.status(400).json({ success: false, error: "Missing bookingRef or token." });
   }
   let bookingSnap;
-  let bookingData2;
+  let bookingData;
   try {
     const q3 = await adminDb.collection("bookings").where("bookingRef", "==", ref).limit(1).get();
     if (q3.empty) {
@@ -244188,18 +244237,18 @@ async function handleGetAddOnsManage(req, res) {
     }
     const doc = q3.docs[0];
     bookingSnap = doc;
-    bookingData2 = doc.data();
-    if (String(bookingData2.lookupToken || "") !== token2) {
+    bookingData = doc.data();
+    if (String(bookingData.lookupToken || "") !== token2) {
       return res.status(403).json({ success: false, error: "Invalid token." });
     }
   } catch {
     return res.status(500).json({ success: false, error: "Failed to load booking." });
   }
-  if (!bookingSnap || !bookingData2) {
+  if (!bookingSnap || !bookingData) {
     return res.status(404).json({ success: false, error: "Booking not found." });
   }
-  const checkIn = bookingData2.checkIn;
-  const checkOut = bookingData2.checkOut;
+  const checkIn = bookingData.checkIn;
+  const checkOut = bookingData.checkOut;
   const checkInDate = isIsoDate(checkIn) ? checkIn : typeof checkIn === "object" && checkIn && typeof checkIn.toDate === "function" ? (() => {
     const d = checkIn.toDate();
     const yyyy = d.getUTCFullYear();
@@ -244214,7 +244263,7 @@ async function handleGetAddOnsManage(req, res) {
     const dd = String(d.getUTCDate()).padStart(2, "0");
     return `${yyyy}-${mm}-${dd}`;
   })() : "";
-  const status = String(bookingData2.status || "").trim();
+  const status = String(bookingData.status || "").trim();
   const readOnly = !isOtherAddOnBookingMutable(status);
   const hotelEnabled = await loadOtherAddOnsHotelEnabled();
   let enabledAddOns = [];
@@ -244227,7 +244276,7 @@ async function handleGetAddOnsManage(req, res) {
     enabledAddOns = getEnabledAddOnsByHotel(enabledAddOns, hotelEnabled);
   } catch {
   }
-  const existingSelections = bookingData2.otherAddOnSelections && typeof bookingData2.otherAddOnSelections === "object" ? bookingData2.otherAddOnSelections : {};
+  const existingSelections = bookingData.otherAddOnSelections && typeof bookingData.otherAddOnSelections === "object" ? bookingData.otherAddOnSelections : {};
   const dates = enumerateDates(checkInDate, checkOutDate);
   const now = /* @__PURE__ */ new Date();
   const addOnById = /* @__PURE__ */ new Map();
@@ -244250,7 +244299,7 @@ async function handleGetAddOnsManage(req, res) {
       });
     }
   }
-  const served = bookingData2.otherAddOnServed && typeof bookingData2.otherAddOnServed === "object" ? bookingData2.otherAddOnServed : {};
+  const served = bookingData.otherAddOnServed && typeof bookingData.otherAddOnServed === "object" ? bookingData.otherAddOnServed : {};
   let refunds = [];
   try {
     const refundSnap = await adminDb.collection("bookings").doc(bookingSnap.id).collection("refunds").where("category", "==", "otherAddOn").get();
@@ -244260,10 +244309,10 @@ async function handleGetAddOnsManage(req, res) {
   } catch {
     refunds = [];
   }
-  const totalPrice = Number(bookingData2.totalPrice || 0);
+  const totalPrice = Number(bookingData.totalPrice || 0);
   const otherAddOnTotal = recomputeOtherAddOnTotal(existingSelections);
   const hasAny = hasAnyOtherAddOns(existingSelections);
-  const paidAmount = Number(bookingData2.paidAmount || 0);
+  const paidAmount = Number(bookingData.paidAmount || 0);
   const balance = Math.max(0, totalPrice + otherAddOnTotal - paidAmount);
   return res.status(200).json({
     success: true,
@@ -244275,9 +244324,9 @@ async function handleGetAddOnsManage(req, res) {
         checkIn: checkInDate,
         checkOut: checkOutDate,
         numNights: dates.length,
-        numGuests: Number(bookingData2.numGuests || 0),
-        numAdults: Number(bookingData2.numAdults || bookingData2.numGuests || 0),
-        numChildren: Number(bookingData2.numChildren || 0),
+        numGuests: Number(bookingData.numGuests || 0),
+        numAdults: Number(bookingData.numAdults || bookingData.numGuests || 0),
+        numChildren: Number(bookingData.numChildren || 0),
         totalPrice,
         otherAddOnTotal,
         hasAnyOtherAddOns: hasAny,
@@ -244305,7 +244354,6 @@ async function handleGetAddOnsManage(req, res) {
 // server/handlers/addons-manage-save.ts
 init_firestore();
 init_firebase_admin();
-init_shared();
 init_shared();
 var IDEMPOTENCY_WINDOW_MS = 6e4;
 function readOps(body) {
@@ -244360,11 +244408,11 @@ async function handleUpdateAddOns(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const parsed2 = OtherAddOnUpdateSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = OtherAddOnUpdateSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({ success: false, error: "Invalid other-add-ons update payload." });
   }
-  const { bookingRef: bookingRef2, lookupToken, clientBatchId } = parsed2.data;
+  const { bookingRef: bookingRef2, lookupToken, clientBatchId } = parsed.data;
   const ops = readOps(req.body || {});
   const totalOps = ops.add.length + ops.change.length + ops.remove.length;
   if (totalOps === 0) {
@@ -244400,8 +244448,8 @@ async function handleUpdateAddOns(req, res) {
     return res.status(403).json({ success: false, error: "Invalid token." });
   }
   const bookingId = bookingDoc.id;
-  const bookingData2 = bookingDoc.data();
-  const status = String(bookingData2.status || "").trim();
+  const bookingData = bookingDoc.data();
+  const status = String(bookingData.status || "").trim();
   if (!isOtherAddOnBookingMutable(status)) {
     return res.status(400).json({ success: false, error: OTHER_ADD_ON_READ_ONLY_ERROR });
   }
@@ -244789,11 +244837,11 @@ async function handleStaffUpdateAddOns(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const parsed2 = StaffOtherAddOnUpdateSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = StaffOtherAddOnUpdateSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({ success: false, error: "Invalid staff other-add-ons update payload." });
   }
-  const { bookingId, overrideReason } = parsed2.data;
+  const { bookingId, overrideReason } = parsed.data;
   const ops = readOps2(req.body || {});
   const totalOps = ops.add.length + ops.change.length + ops.remove.length;
   if (totalOps === 0) {
@@ -244807,9 +244855,9 @@ async function handleStaffUpdateAddOns(req, res) {
   if (!bookingSnap.exists) {
     return res.status(404).json({ success: false, error: "Booking not found." });
   }
-  const bookingData2 = bookingSnap.data() || {};
-  const bookingRefValue = String(bookingData2.bookingRef || "");
-  if (!isOtherAddOnBookingMutable(bookingData2.status)) {
+  const bookingData = bookingSnap.data() || {};
+  const bookingRefValue = String(bookingData.bookingRef || "");
+  if (!isOtherAddOnBookingMutable(bookingData.status)) {
     return res.status(400).json({ success: false, error: OTHER_ADD_ON_READ_ONLY_ERROR });
   }
   const addOnSnap = await adminDb.collection("addOns").get();
@@ -245083,11 +245131,11 @@ async function handleMarkServedAddOns(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const parsed2 = OtherAddOnMarkServedSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = OtherAddOnMarkServedSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({ success: false, error: "Invalid mark-served payload." });
   }
-  const { bookingId, selectionKeys } = parsed2.data;
+  const { bookingId, selectionKeys } = parsed.data;
   const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
   const actorUid = req.staff?.uid || "staff";
   const actorRole = req.staff?.role === "admin" ? "admin" : "front-desk";
@@ -245179,8 +245227,8 @@ async function handleMarkRefundPaidAddOns(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const parsed2 = OtherAddOnMarkRefundPaidSchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = OtherAddOnMarkRefundPaidSchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({ success: false, error: "Invalid mark-refund-paid payload." });
   }
   const staff = readStaff4(req);
@@ -245190,7 +245238,7 @@ async function handleMarkRefundPaidAddOns(req, res) {
       error: "Forbidden: Access restricted to staff members."
     });
   }
-  const { bookingId, refundId, method, transactionReference, note } = parsed2.data;
+  const { bookingId, refundId, method, transactionReference, note } = parsed.data;
   const trimmedReference = transactionReference ? String(transactionReference).trim() : null;
   const trimmedNote = note ? String(note).trim() : null;
   let opCode = null;
@@ -245208,9 +245256,9 @@ async function handleMarkRefundPaidAddOns(req, res) {
         return;
       }
       const refundData = refundSnap.data() || {};
-      const bookingData2 = bookingSnap.data() || {};
+      const bookingData = bookingSnap.data() || {};
       const selectionKey = String(refundData?.otherAddOnRefundContext?.selectionKey || "");
-      const liveSelections = bookingData2.otherAddOnSelections && typeof bookingData2.otherAddOnSelections === "object" ? bookingData2.otherAddOnSelections : {};
+      const liveSelections = bookingData.otherAddOnSelections && typeof bookingData.otherAddOnSelections === "object" ? bookingData.otherAddOnSelections : {};
       const entry = selectionKey ? (() => {
         const parts = selectionKey.split("-");
         const date = parts.slice(0, 3).join("-");
@@ -245230,7 +245278,7 @@ async function handleMarkRefundPaidAddOns(req, res) {
           transaction,
           db: adminDb,
           existingDoc: refundSnap,
-          currentPaidAmount: Number(bookingData2.paidAmount || 0),
+          currentPaidAmount: Number(bookingData.paidAmount || 0),
           slotKey: selectionKey
         });
         resultSummary = {
@@ -245361,8 +245409,8 @@ function extractGuestNameFromSlotKey(booking, slotKey, guestIndexFallback) {
   let guestIndex = guestIndexFallback;
   const tail = parts[parts.length - 1];
   if (tail !== void 0) {
-    const parsed2 = Number.parseInt(tail, 10);
-    if (Number.isFinite(parsed2) && parsed2 >= 0) guestIndex = parsed2;
+    const parsed = Number.parseInt(tail, 10);
+    if (Number.isFinite(parsed) && parsed >= 0) guestIndex = parsed;
   }
   const slotGuest = guests[guestIndex];
   if (slotGuest && typeof slotGuest === "object") {
@@ -245416,8 +245464,8 @@ function toIsoString(value) {
     if (Number.isFinite(seconds)) return new Date(seconds * 1e3).toISOString();
   }
   if (typeof value === "string") {
-    const parsed2 = Date.parse(value);
-    if (Number.isFinite(parsed2)) return new Date(parsed2).toISOString();
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
   }
   if (value instanceof Date) return value.toISOString();
   return "";
@@ -245451,12 +245499,12 @@ async function computeKitchenList(date) {
       if (entry.removedAt !== null && entry.removedAt !== void 0 && entry.removedAt !== "") {
         continue;
       }
-      const { guestIndex, guestName: guestName2 } = extractGuestNameFromSlotKey(booking, slotKey, 0);
+      const { guestIndex, guestName } = extractGuestNameFromSlotKey(booking, slotKey, 0);
       finalized.push({
         bookingId,
         ref,
         roomNumber,
-        guestName: guestName2,
+        guestName,
         guestIndex,
         slotKey,
         mealId: typeof entry.mealId === "string" ? entry.mealId : "",
@@ -245493,7 +245541,7 @@ async function computeKitchenList(date) {
       const matchingBooking = bookingById.get(bookingId);
       const roomNumber = matchingBooking ? bookingRoomNumber(matchingBooking) : "\u2014";
       const ref = matchingBooking ? bookingRef(matchingBooking) : "\u2014";
-      const { guestIndex, guestName: guestName2 } = extractGuestNameFromSlotKey(
+      const { guestIndex, guestName } = extractGuestNameFromSlotKey(
         matchingBooking || { guests: [] },
         typeof data.slotKey === "string" ? data.slotKey : "",
         0
@@ -245508,7 +245556,7 @@ async function computeKitchenList(date) {
         bookingId,
         ref,
         roomNumber,
-        guestName: guestName2,
+        guestName,
         guestIndex,
         action: typeof data.action === "string" ? data.action : "",
         mealSnapshot,
@@ -245636,14 +245684,14 @@ async function handleAcknowledgeKitchenListAudit(req, res) {
       error: "Forbidden: Access restricted to staff members."
     });
   }
-  const parsed2 = acknowledgeBodySchema.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = acknowledgeBodySchema.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Invalid acknowledge payload."
     });
   }
-  const { bookingId, auditId } = parsed2.data;
+  const { bookingId, auditId } = parsed.data;
   const auditRef = adminDb.collection("bookings").doc(bookingId).collection("breakfastAudit").doc(auditId);
   const auditSnap = await auditRef.get();
   if (!auditSnap.exists) {
@@ -245713,14 +245761,14 @@ async function handleMarkRefundPaidStandalone(req, res) {
       error: "Forbidden: Access restricted to staff members."
     });
   }
-  const parsed2 = markRefundPaidBodySchema2.safeParse(req.body || {});
-  if (!parsed2.success) {
+  const parsed = markRefundPaidBodySchema2.safeParse(req.body || {});
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
       error: "Invalid mark-refund-paid payload."
     });
   }
-  const { bookingId, refundId, method, transactionReference, note } = parsed2.data;
+  const { bookingId, refundId, method, transactionReference, note } = parsed.data;
   const trimmedReference = transactionReference ? String(transactionReference).trim() : null;
   const trimmedNote = note ? String(note).trim() : null;
   let resultSummary = null;
@@ -245810,21 +245858,21 @@ async function handlePublishSeo(req, res) {
       error: "SEO publishing is not configured. Add VERCEL_DEPLOY_HOOK_URL to the guest app environment."
     });
   }
-  const parsed2 = SeoPublishSchema.safeParse(req.body);
-  if (!parsed2.success) {
+  const parsed = SeoPublishSchema.safeParse(req.body);
+  if (!parsed.success) {
     return res.status(400).json({
       success: false,
-      error: parsed2.error.issues[0]?.message || "Review the SEO fields and try again."
+      error: parsed.error.issues[0]?.message || "Review the SEO fields and try again."
     });
   }
   const staff = req.staff;
   await adminDb.doc("settings/seo").set({
     draft: {
-      metaDescription: parsed2.data.metaDescription,
-      priceRange: parsed2.data.priceRange,
-      ogImage: parsed2.data.ogImage
+      metaDescription: parsed.data.metaDescription,
+      priceRange: parsed.data.priceRange,
+      ogImage: parsed.data.ogImage
     },
-    published: parsed2.data,
+    published: parsed.data,
     publishedAt: FieldValue.serverTimestamp(),
     publishedBy: staff?.uid || staff?.email || "admin"
   }, { merge: true });
@@ -246016,8 +246064,8 @@ async function handleGetPrivateStorageUrl(req, res) {
   if (!req.staff?.uid) {
     return res.status(401).json({ success: false, error: "Staff authentication is required." });
   }
-  const parsed2 = privateStoragePathSchema.safeParse(req.body || {});
-  if (!parsed2.success || !isAllowedPrivatePath(parsed2.data?.path || "")) {
+  const parsed = privateStoragePathSchema.safeParse(req.body || {});
+  if (!parsed.success || !isAllowedPrivatePath(parsed.data?.path || "")) {
     return res.status(400).json({ success: false, error: "Invalid private file path." });
   }
   const bucketName = process.env.FIREBASE_STORAGE_BUCKET;
@@ -246025,7 +246073,7 @@ async function handleGetPrivateStorageUrl(req, res) {
     return res.status(500).json({ success: false, error: "Storage is not configured." });
   }
   try {
-    const file = adminStorage.bucket(bucketName).file(parsed2.data.path);
+    const file = adminStorage.bucket(bucketName).file(parsed.data.path);
     const [exists] = await file.exists();
     if (!exists) {
       return res.status(404).json({ success: false, error: "Private file not found." });

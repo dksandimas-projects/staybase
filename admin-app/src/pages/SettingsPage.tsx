@@ -2876,11 +2876,33 @@ export function SettingsPage() {
     }
     if (Array.isArray(breakfastConfig.silogItems) && breakfastConfig.silogItems.length > 0) {
       const now = new Date().toISOString();
+      // Per CFG-1 (QA pass 2026-10-21): the derived price was
+      // hardcoded to `0`, but BR-08 (decision #238) deleted the
+      // legacy `ratePerPersonPerNight` READ from the guest + server
+      // paths. So a hotel that still had a legacy `silogItems` doc
+      // and then saved Dining settings silently converted its
+      // breakfast from a priced add-on into a FREE one: every
+      // derived meal row was written with `price: 0`, the guest's
+      // booking snapshotted a ₱0 breakfast, and the hotel collected
+      // nothing for it. The admin UI showed "₱0" on every meal row,
+      // which reads like a deliberate free-meal promotion rather than
+      // a data-loss bug.
+      //
+      // The legacy `ratePerPersonPerNight` IS the per-person-per-
+      // night equivalent of the new per-meal price (the legacy model
+      // charged one flat rate per guest per night for whichever
+      // silog they picked; the new model charges the meal's price),
+      // so it is carried straight through. A legacy doc with no rate
+      // at all still derives `0` — but `handleSaveBreakfast` now
+      // warns about an active meal priced at ₱0 so the operator
+      // sees it instead of discovering it in the revenue report.
+      const legacyRate = Number(breakfastConfig.ratePerPersonPerNight);
+      const derivedPrice = Number.isFinite(legacyRate) && legacyRate > 0 ? legacyRate : 0;
       return breakfastConfig.silogItems.map((item: { id: string; name: string; isActive: boolean }, index: number): BreakfastMeal => ({
         id: item.id,
         name: item.name,
         description: "",
-        price: 0,
+        price: derivedPrice,
         isActive: item.isActive,
         displayOrder: index,
         createdAt: now,
@@ -4178,6 +4200,27 @@ const handleAddLevel = () => {
 // collections" constraint is honored.
 const handleSaveBreakfast = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Per CFG-1 (QA pass 2026-10-21): warn on an ACTIVE meal priced
+    // at ₱0. The legacy→new derivation used to write `price: 0` for
+    // every meal (see the `breakfastMeals` initializer), which made
+    // breakfast free for every guest with no visible sign in the
+    // revenue report. The derivation now carries the legacy rate
+    // across, so this warning is the second line of defence: if the
+    // operator explicitly sets ₱0 on a live meal, they are told the
+    // guests will not be charged for it.
+    //
+    // Non-blocking on purpose — a zero-price meal can be a deliberate
+    // "complimentary" promotion. The warning makes the consequence
+    // explicit instead of silently accepting it.
+    const freeActiveMeal = breakfastMeals.find(
+      (meal) => meal.isActive !== false && !(Number(meal.price) > 0)
+    );
+    if (freeActiveMeal) {
+      toast.warning(
+        "Breakfast meal priced at ₱0",
+        `"${freeActiveMeal.name}" is active with a ₱0 price — guests will not be charged for it. Set a price, or mark the meal inactive to take it off the menu.`
+      );
+    }
     const payload = {
       isEnabled: breakfastEnabled,
       // Per BR-10 (decision #244 reserved, 2026-10-14

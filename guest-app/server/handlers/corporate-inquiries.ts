@@ -412,7 +412,13 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
       // catering separately). hasAnyBreakfast is always false.
       const finalHasBreakfast = false;
       const roomTotal = ratePerNight * numNights;
-      const breakfastTotal = finalHasBreakfast ? actualBreakfastRate * guests * numNights : 0;
+      // Per RPT-05 (QA pass 2026-10-21): `actualBreakfastRate` was
+      // never defined in this scope. The ternary short-circuited on
+      // `finalHasBreakfast` (always false), so it never threw — but
+      // the branch was a latent ReferenceError, and BR-08 removed
+      // breakfast from corporate conversions altogether, so the
+      // breakfast line is now written out rather than left as a trap.
+      const breakfastTotal = 0;
       finalTotalPrice = roomTotal + breakfastTotal;
       if (!Number.isFinite(finalTotalPrice)) {
         throw new Error("The converted booking total is invalid.");

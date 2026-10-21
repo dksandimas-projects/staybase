@@ -9,11 +9,58 @@
 // forward hour-by-hour for `ARRIVAL_WINDOW_HOURS`. Times
 // earlier than `checkInTime` are intentionally not offered
 // (the existing `earlyCheckIn` flow covers that).
-import { ARRIVAL_WINDOW_HOURS } from "../constants";
+import { ARRIVAL_WINDOW_HOURS, DEFAULT_BOOKING_PREFERENCES } from "../constants";
 
 export interface ArrivalTimeOption {
   value: string | null;
   label: string;
+}
+
+// Per RPT-03 (QA pass 2026-10-21): the SERVER's allowed-value
+// catalog for the Step 2 "additional preferences" check.
+//
+// THE DEFECT THIS FIXES
+// ---------------------
+// The guest client hydrates the preference catalog WITH a fallback:
+// `hydrateBookingPreferenceCatalog` in
+// `guest-app/src/hooks/useRoomTypes.ts` returns
+// `DEFAULT_BOOKING_PREFERENCES` when the live `hotelConfig`
+// catalog is empty or holds no usable entry. So a hotel that never
+// configured the list still RENDERS the nine shipped chips.
+//
+// The server had no such fallback. It built the allowed-value list
+// straight from `hotelConfig.bookingPreferences` — empty for every
+// hotel that never configured it (production included: the doc had
+// no `bookingPreferences` field at all on 2026-10-21) — and threw
+// "Selected preferences are not configured: <key>" for every key
+// the guest ticked. The throw happened INSIDE the create
+// transaction, so the whole booking failed.
+//
+// Net effect: a guest who ticked a single preference chip could not
+// complete a booking. The 500 was indistinguishable from a server
+// fault.
+//
+// THE FIX
+// -------
+// Resolve the catalog through ONE shared helper, so the client's
+// fallback and the server's validation can never disagree again.
+// An EMPTY catalog means "the hotel has not configured this list"
+// — which is the correct state for a hotel that wants the shipped
+// defaults, and the state the client already assumed. A NON-EMPTY
+// catalog is the admin's explicit choice and is used verbatim (so
+// removing a chip in the admin genuinely rejects it at the API).
+export function resolveBookingPreferenceValues(raw: unknown): string[] {
+  const values: string[] = [];
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      if (!entry || typeof entry !== "object") continue;
+      const value = (entry as { value?: unknown }).value;
+      if (typeof value === "string" && value) values.push(value);
+    }
+  }
+  return values.length > 0
+    ? values
+    : DEFAULT_BOOKING_PREFERENCES.map((option) => option.value);
 }
 
 // Per SR-01..05 (2026-10-12): parse the hotel's
