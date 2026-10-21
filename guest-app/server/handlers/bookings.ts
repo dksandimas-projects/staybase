@@ -33,7 +33,6 @@ import {
   // `booking.breakfastSelections` at create time).
   calculateExtraBedAddOn,
   getCheckInReadiness,
-  getCheckInReadiness,
   normalizeSeasonalRateOverrides,
   toDateOrNull,
   validateCorporateCode,
@@ -235,6 +234,20 @@ import {
   type AddOn,
   type OtherAddOnSelectionEntry
 } from "@spark-inn/shared";
+
+// Per RPT-03 (QA pass 2026-10-21): the shared resolver for the
+// Step 2 "additional preferences" allowed-value catalog. The client
+// falls back to the shipped defaults when the hotel has not
+// configured the list; the server must resolve the SAME list or it
+// rejects every chip the guest could actually tick.
+import { resolveBookingPreferenceValues } from "@spark-inn/shared";
+
+// Per RPT-05 (QA pass 2026-10-21): the fallback room-type catalog.
+// `handleAddRoomToReservation` falls back to the shipped defaults
+// when `hotelConfig.roomTypes` is empty, but the constant was never
+// imported — so a hotel without a configured room-type catalog threw
+// a ReferenceError instead of using the defaults.
+import { DEFAULT_ROOM_TYPES } from "@spark-inn/shared";
 
 // Per OCT-H8 (2026-10-20, decision #288): the re-dating helpers
 // the reschedule + cancel paths use to drop the add-on selections
@@ -1991,6 +2004,31 @@ export async function handleCreateBooking(req: any, res: any) {
     // N=1 path). N>1 populates the array with N
     // independent tokens.
     let finalLookupTokens: string[] = [];
+    // Per RPT-02 (QA pass 2026-10-21): the post-transaction
+    // reservation email view reads these four values, and all four
+    // are COMPUTED INSIDE the create transaction's callback — so
+    // without an explicit capture they were not in scope at the
+    // call site. The email view referenced `childBookingRefs`,
+    // `childLookupTokens`, `childPricing`, `resolvedRoomSelections`,
+    // `guestName` and `corporateDetails` by name; the first four
+    // live in the transaction callback's scope, `guestName` was a
+    // transaction-local const, and `corporateDetails` was a
+    // transaction-local `let`. The result was a ReferenceError
+    // thrown while BUILDING the email view on every guest booking
+    // create: the booking committed, the confirmation email never
+    // went out.
+    //
+    // These captures follow the same `finalX` pattern as
+    // `finalBookingRef` / `finalTotalPrice` / `finalRateBreakdown` /
+    // `finalLookupTokens` / `finalRooms` above.
+    let finalBookingRefs: string[] = [];
+    let finalChildPricing: any[] = [];
+    let finalRoomTypeEntries: any[] = [];
+    let finalCorporateDetails: {
+      isCorporate: boolean;
+      corporateCode: string;
+      companyName: string;
+    } = { isCorporate: false, corporateCode: "", companyName: "" };
     // Per MRB-02 (2026-08-02, per decision #164): the public
     // reservation ref (e.g. `R-20260802-00001`) is minted inside
     // the transaction (so it shares the same `now` + counter
@@ -2332,6 +2370,10 @@ export async function handleCreateBooking(req: any, res: any) {
           typeEntry: applyRoomTypeDefaults(rawSelectionType)
         };
       });
+      // Per RPT-02 (QA pass 2026-10-21): capture the resolved room
+      // type entries for the post-transaction email view (the email
+      // resolves each room's friendly label off the type entry).
+      finalRoomTypeEntries = resolvedRoomSelections.map((selection: any) => selection.typeEntry);
 
       // Per SR-01..05 (2026-10-12): validate the
       // reservation-level special-requests fields
@@ -2340,18 +2382,16 @@ export async function handleCreateBooking(req: any, res: any) {
       // strings / `null` arrival all skip validation
       // (back-compat with callers that don't carry the
       // SR schema — admin walk-in, third-party API).
-      const bookingPreferencesCatalog: string[] = Array.isArray(
+      // Per RPT-03 (QA pass 2026-10-21): the allowed-value catalog
+      // resolves through the SHARED helper, which falls back to the
+      // shipped `DEFAULT_BOOKING_PREFERENCES` when the hotel has not
+      // configured the list. The guest client already renders those
+      // defaults in that state, so without the fallback the server
+      // rejected every chip the guest could actually tick and the
+      // booking failed with a 500.
+      const bookingPreferencesCatalog: string[] = resolveBookingPreferenceValues(
         hotelConfig.bookingPreferences
-      )
-        ? (hotelConfig.bookingPreferences as unknown[])
-            .filter(
-              (v): v is { value: string } =>
-                typeof v === "object" &&
-                v !== null &&
-                typeof (v as { value?: unknown }).value === "string"
-            )
-            .map((v) => v.value)
-        : [];
+      );
       const invalidPreferenceKeys = additionalPreferences.filter(
         (key) => !bookingPreferencesCatalog.includes(key)
       );
@@ -3429,6 +3469,10 @@ export async function handleCreateBooking(req: any, res: any) {
           finalTotal: allocatedChildTotals[index]
         } as BookingRateBreakdown
       }));
+      // Per RPT-02 (QA pass 2026-10-21): capture the per-room
+      // pricing for the post-transaction email view (it renders each
+      // room's rate breakdown + nightly rate).
+      finalChildPricing = childPricing as any[];
 
       // 9. Generate Reference Number
       const { todayStr, todayCompact } = getManilaDateInfo();
@@ -3457,6 +3501,10 @@ export async function handleCreateBooking(req: any, res: any) {
         (_, roomIdx) => `${config.bookingRefPrefix || "SI"}-${todayCompact}-${String(sequence + roomIdx).padStart(5, "0")}`
       );
       const bookingRef = childBookingRefs[0];
+      // Per RPT-02 (QA pass 2026-10-21): capture ALL N refs for the
+      // post-transaction email view (the email lists every room when
+      // N>1). `finalBookingRef` above holds only the first.
+      finalBookingRefs = childBookingRefs;
 
       // Save output for outer scope
       finalBookingRef = bookingRef;
@@ -4275,6 +4323,16 @@ export async function handleCreateBooking(req: any, res: any) {
           totalPrice: pricing.totalPrice
         };
       });
+      // Per RPT-02 (QA pass 2026-10-21): capture the corporate
+      // attribution for the post-transaction email view. Captured
+      // HERE (not where `corporateDetails` is declared) so it
+      // reflects every mutation — the corporate-code branch sets it
+      // at two separate points in the transaction.
+      finalCorporateDetails = {
+        isCorporate: corporateDetails.isCorporate === true,
+        corporateCode: corporateDetails.corporateCode || "",
+        companyName: corporateDetails.companyName || ""
+      };
       // Per PEX-05 (2026-08-01, per decision #147): capture
       // the snapshotted deadline for the post-transaction
       // response payload + the booking-submitted email. The
@@ -4393,24 +4451,24 @@ export async function handleCreateBooking(req: any, res: any) {
       // for legacy callers that pre-date MRB-01
       // (no `reservationId` on the response).
       const emailView = buildCreateEmailView({
-        reservationId: finalReservationId || "",
+        reservationId: effectiveReservationId || "",
         reservationRef: finalReservationRef || "",
-        finalBookingRefs: childBookingRefs,
-        finalLookupTokens: childLookupTokens,
+        finalBookingRefs,
+        finalLookupTokens,
         finalRooms,
-        childPricing: childPricing as any,
-        roomTypes: resolvedRoomSelections.map((s: any) => s.typeEntry) as any,
-        guestName,
+        childPricing: finalChildPricing as any,
+        roomTypes: finalRoomTypeEntries as any,
+        guestName: `${guestDetails.firstName.trim()} ${guestDetails.lastName.trim()}`,
         guestEmail: guestDetails.email.trim().toLowerCase(),
         guestPhone: guestDetails.phone.trim(),
         totalPrice: finalTotalPrice,
         numNights,
         paymentMethod,
         paymentStatus: paymentProofPath || paymentProofUrl ? "payment-uploaded" : "pending",
-        source: corporateDetails.isCorporate ? "corporate" : "online",
-        isCorporate: corporateDetails.isCorporate === true,
-        corporateCode: corporateDetails.corporateCode || "",
-        companyName: corporateDetails.companyName || "",
+        source: finalCorporateDetails.isCorporate ? "corporate" : "online",
+        isCorporate: finalCorporateDetails.isCorporate === true,
+        corporateCode: finalCorporateDetails.corporateCode || "",
+        companyName: finalCorporateDetails.companyName || "",
         // ETR-22: thread the test-run banner metadata into the
         // synthetic email view so the booking-submitted template
         // renders the test-run banner above the reservation
@@ -7662,6 +7720,14 @@ export async function handleCancelBooking(req: any, res: any) {
   try {
     let bookingDocumentRef: any;
     let bookingData: any;
+    // Per RPT-05 (QA pass 2026-10-21): the guest scope selector.
+    // `parsed` is declared INSIDE the guest branch below, so reading
+    // `parsed.data.scope` further down (outside that branch) was a
+    // ReferenceError — the guest self-service cancel threw before it
+    // could dispatch, so the "cancel my whole reservation" path was
+    // dead. The schema already defaults `scope` to "room", so the
+    // hoisted default matches the schema's own default.
+    let guestRequestedScope: "room" | "reservation" = "room";
 
     // Per MRB-05 (2026-08-02, per decision #159): the
     // canonical `now` for the cancellation write + the
@@ -7713,6 +7779,9 @@ export async function handleCancelBooking(req: any, res: any) {
         });
       }
       validReason = parsed.data.reason;
+      // Per RPT-05 (QA pass 2026-10-21): hoist the parsed scope out
+      // of this branch so the dispatch below can read it.
+      guestRequestedScope = parsed.data.scope;
 
       const compositeFilter = parsed.data.token
         ? { field: "lookupToken", value: String(parsed.data.token).toLowerCase() }
@@ -7814,7 +7883,7 @@ export async function handleCancelBooking(req: any, res: any) {
       ? (String((req.body || {}).scope || "").trim().toLowerCase() === "reservation"
         ? "reservation"
         : "room")
-      : parsed.data.scope;
+      : guestRequestedScope;
     const lookedUpReservationId = String(bookingData.reservationId || "").trim();
     const isReservationScope = requestedScope === "reservation" && lookedUpReservationId.length > 0;
     // Per MRB-13: the post-transaction email action depends
@@ -9634,6 +9703,13 @@ export async function handleAddRefund(req: any, res: any) {
     let priorStateRef: string | null = null;
     let newStateRef: string | null = null;
     let priorLiabilityRef: any = null;
+    // Per RPT-05 (QA pass 2026-10-21): the target booking's
+    // reservation id. It is read INSIDE the transaction (where the
+    // booking doc is loaded), but the post-commit refund email +
+    // notification block runs OUTSIDE it — reading the transaction
+    // local there was a ReferenceError, so the refund state-change
+    // email never went out.
+    let refundBookingReservationId = "";
     await adminDb.runTransaction(async (transaction) => {
       const bookingRef = adminDb.collection("bookings").doc(bookingId);
       const bookingDoc = await transaction.get(bookingRef);
@@ -9660,6 +9736,9 @@ export async function handleAddRefund(req: any, res: any) {
       // of the booking's payments (which includes the
       // negative-amount refund entries for legacy).
       const bookingReservationId = String((bookingData as any).reservationId || "").trim();
+      // Per RPT-05 (QA pass 2026-10-21): hoist it out of the
+      // transaction for the post-commit refund email + notification.
+      refundBookingReservationId = bookingReservationId;
       const refundsRef = bookingReservationId.length > 0
         ? adminDb.collection("reservations").doc(bookingReservationId).collection("refunds")
         : bookingRef.collection("payments");
@@ -9848,7 +9927,7 @@ export async function handleAddRefund(req: any, res: any) {
       try {
         await fireRefundStateEmailAndNotification({
           targetBookingId: bookingId,
-          targetReservationId: bookingReservationId.length > 0 ? bookingReservationId : null,
+          targetReservationId: refundBookingReservationId.length > 0 ? refundBookingReservationId : null,
           priorState: priorStateRef,
           newState: newStateRef,
           refundRecord,
@@ -10246,9 +10325,16 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
 
   const staffUid = req.staff?.uid || "staff";
 
+  // Per RPT-05 (QA pass 2026-10-21): the booking doc, declared at
+  // the HANDLER scope rather than inside the try block. A `catch`
+  // block cannot see the `try` block's locals, so the
+  // `ALREADY_CONFIRMED` branch below — which reports the booking's
+  // status — threw a ReferenceError instead of returning the
+  // already-confirmed payload.
+  let bookingData: any = null;
+
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
-    let bookingData: any = null;
     let totalCollected = 0;
     let totalPrice = 0;
     let fullyPaid = false;

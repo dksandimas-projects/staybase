@@ -682,10 +682,28 @@ export const OtherAddOnUpdateSchema = z
     lookupToken: z.string().trim().min(8).max(200),
     turnstileToken: z.string().optional(),
     clientBatchId: z.string().trim().min(8).max(80),
-    selections: z.record(
-      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "serviceDate format"),
-      z.array(OtherAddOnSelectionEntrySchema)
-    ),
+    // Per RPT-04 (QA pass 2026-10-21): `selections` is OPTIONAL.
+    //
+    // It was REQUIRED, but the mutation contract this schema guards
+    // is the OP list (`add` / `change` / `remove`) — both handlers
+    // read the ops off the raw body via `readOps(body)` and never
+    // read `selections` at all. The guest client
+    // (`ManageOtherAddOnsPage.tsx`) and the staff drawer send the
+    // ops and no `selections`, so `safeParse` failed on the missing
+    // field and the endpoint answered
+    // "Invalid other-add-ons update payload." (HTTP 400) on EVERY
+    // save: the whole BR-12 other-add-ons write path was dead, for
+    // guests and staff alike.
+    //
+    // The field is kept (optional) so a caller that DOES send a
+    // `selections` map still validates it, and so the schema keeps
+    // describing the full write shape.
+    selections: z
+      .record(
+        z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "serviceDate format"),
+        z.array(OtherAddOnSelectionEntrySchema)
+      )
+      .optional(),
     removedKeys: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/)).default([])
   })
   .passthrough();
@@ -701,10 +719,17 @@ export const StaffOtherAddOnUpdateSchema = z
   .object({
     bookingId: z.string().trim().min(8).max(80),
     turnstileToken: z.string().optional(),
-    selections: z.record(
-      z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "serviceDate format"),
-      z.array(OtherAddOnSelectionEntrySchema)
-    ),
+    // Per RPT-04 (QA pass 2026-10-21): `selections` is OPTIONAL for
+    // the same reason as `OtherAddOnUpdateSchema` above — the staff
+    // handler reads the `add` / `change` / `remove` ops off the raw
+    // body and never reads `selections`, so requiring it rejected
+    // every real staff save with a 400.
+    selections: z
+      .record(
+        z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "serviceDate format"),
+        z.array(OtherAddOnSelectionEntrySchema)
+      )
+      .optional(),
     removedKeys: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/)).default([]),
     overrideReason: z.string().trim().min(8).max(280).optional()
   })

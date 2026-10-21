@@ -79,7 +79,6 @@ import {
   auditOtherAddOnOp,
   createOtherAddOnRefundLiability
 } from "../lib/otherAddOn-selections";
-import { hasAnyOtherAddOns } from "@spark-inn/shared";
 
 const IDEMPOTENCY_WINDOW_MS = 60_000;
 

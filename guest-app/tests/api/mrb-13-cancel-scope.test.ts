@@ -76,9 +76,17 @@ describe("MRB-13 — handleCancelBooking dispatches on the scope selector", () =
     // path uses the schema-validated `parsed.data.scope`.
     // The two branches converge on a single
     // `requestedScope: "room" | "reservation"` local.
+    //
+    // Per RPT-05 (QA pass 2026-10-21): the guest scope is hoisted
+    // into `guestRequestedScope` before the dispatch, because
+    // `parsed` is declared INSIDE the guest branch and was not in
+    // scope at the dispatch — reading `parsed.data.scope` there was
+    // a ReferenceError that killed the whole guest self-service
+    // cancel.
     expect(handlerSrc).toMatch(
-      /const requestedScope:\s*"room"\s*\|\s*"reservation"\s*=\s*isStaffCancellation\s*\?[\s\S]{0,400}parsed\.data\.scope/
+      /const requestedScope:\s*"room"\s*\|\s*"reservation"\s*=\s*isStaffCancellation\s*\?[\s\S]{0,400}guestRequestedScope/
     );
+    expect(handlerSrc).toMatch(/guestRequestedScope\s*=\s*parsed\.data\.scope/);
   });
 
   it("honours `scope === \"reservation\"` only when the looked-up booking has a `reservationId`", () => {
