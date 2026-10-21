@@ -473,3 +473,170 @@ Run once per release pass:
 - **Emails:** each transactional email (submitted, confirmed, payment-confirmed, cancelled, discount-rejected, rescheduled, contact notifications) arrives once — not zero times, not twice. The Resend panel in the booking drawer can re-send them manually.
 - **Version footer:** the current version number displays in the footer of both apps.
 - **Bot gates:** the Turnstile widget renders on booking Step 3, the corporate code gate, and the contact form; submitting twice in a row doesn't fail with a stale-token error.
+
+---
+
+## 12. Regression scenarios from the 2026-10-21 production QA pass
+
+Every scenario here corresponds to a defect that was **live in production** on
+2026-10-21 and is now fixed. They are written to be run by hand so a future
+release cannot silently reintroduce the same bug. Run them on a real browser
+(the Turnstile widget does not complete in an automated browser — see §5.3 of
+`QA-REPORT-2026-10-21.md`).
+
+### 12.1 Booking path (the P1s)
+
+#### BP-01 — A guest can tick a preference chip and still book
+**Setup:** `settings/hotelConfig` has **no** `bookingPreferences` field (the
+shipped state) — or the admin has an empty preference list.
+1. `/book` → select a room → Step 2 → *Continue without add-ons* → Step 3.
+2. Expand **Show additional preferences** and tick any chip (e.g. *"I'd like a
+   room on a high floor"*).
+3. Fill the guest details, tick the consent box, continue, confirm.
+
+**Expected:** the booking succeeds. The chip is accepted — the server falls
+back to the same nine defaults the client renders. Before the fix the server
+rejected every chip the guest could tick and the whole booking 500'd.
+
+#### BP-02 — The guest booking confirmation email is sent
+**Setup:** a guest email you can read.
+1. Complete a booking end to end.
+
+**Expected:** the confirmation email arrives **once**, with the booking
+reference, the room, the dates, the nightly rate and the total. Before the fix
+the email view threw a `ReferenceError` on every guest booking create — the
+booking committed and the email silently never went out.
+
+#### BP-03 — The guest can cancel their own pending booking
+1. As a guest, cancel a pending booking by reference + email.
+2. Repeat choosing "cancel the whole reservation" (the scope selector).
+
+**Expected:** both work and the confirmation email arrives. Before the fix the
+guest branch read a variable that was not in scope and threw.
+
+#### BP-04 — The refund state-change email is sent
+1. As staff, record a refund against a cancelled booking that has a refund
+   liability.
+
+**Expected:** the refund email + notification fire. Before the fix the
+post-commit block read a transaction-local that was out of scope, so the email
+never went out.
+
+#### BP-05 — The already-confirmed verify-payment response
+1. Verify a payment for a booking that is already payment-confirmed.
+
+**Expected:** a clean "already confirmed" response with the booking's status —
+not a 500.
+
+### 12.2 Add-ons (BR-12)
+
+#### AO-08 — A guest can add and remove an other-add-on
+**Setup:** a guest booking with a lookup token.
+1. Open the guest *Manage other add-ons* page.
+2. Add one add-on on one date, change the quantity of another, remove a third.
+3. Save.
+
+**Expected:** the save succeeds and the selections persist. Before the fix both
+the guest and the staff endpoints answered **HTTP 400** on every save, so the
+whole other-add-ons feature was unusable.
+
+#### AO-09 — The staff drawer can add an other-add-on
+1. As staff, open a booking drawer → other add-ons → add one → save.
+
+**Expected:** the save succeeds.
+
+#### AO-10 — A ₱0 add-on is still a valid selection
+1. Configure an add-on with a price of 0 and try to add it.
+
+**Expected:** the guest may select it and the booking total is unchanged. (The
+server must not reject a zero-price selection.)
+
+### 12.3 Breakfast
+
+#### BR-08 — The admin price for breakfast is never silently zero
+1. Settings → Dining → save the meal catalog.
+2. Re-open Settings → Dining.
+
+**Expected:** every meal row shows the price you set — never ₱0. Before the
+fix the legacy→new derivation wrote `price: 0` for every derived meal, and
+because BR-08 had removed the legacy `ratePerPersonPerNight` read, saving
+Dining settings silently made **breakfast free**.
+
+#### BR-09 — An active meal priced at ₱0 warns on save
+1. Set one active meal's price to 0 and save.
+
+**Expected:** a warning toast naming the meal ("guests will not be charged").
+The save is **not** blocked — a deliberate "complimentary" promotion stays
+legal — but it is no longer silent.
+
+### 12.4 Admin money surfaces
+
+#### FL-01 — The bookings table shows the real paid state
+**Setup:** a booking with a recorded payment, one with a partial payment, one
+with none.
+1. Open the Bookings list.
+
+**Expected:** the paid booking shows the **Paid** pill; the partial one shows
+neither paid nor unpaid; the unpaid one shows neither. Before the fix **no
+row ever showed the Paid pill**, because the mapper read a denormalized array
+the server never wrote (0 of 67 production bookings carried it).
+
+#### FL-02 — The payment-state filter actually filters
+1. Bookings → advanced filter → Payment state → *paid*, then → *partial*.
+
+**Expected:** each returns the matching rows. Before the fix both matched
+**nothing** (every booking read ₱0 paid).
+
+#### FL-03 — The dashboard pending-payments card is real
+1. Open the dashboard.
+
+**Expected:** the card's due figures match the folio. Before the fix it
+claimed **every** guest owed the full amount.
+
+#### FL-04 — A refunded booking is not shown as overpaid
+1. Record a refund on a booking that was paid in full.
+
+**Expected:** the row's paid total is the payment **minus** the refund.
+
+#### FL-05 — A store order's tender is not a room payment
+**Setup:** a booking with a delivered store order paid in cash.
+
+**Expected:** the booking's paid total does **not** include the store tender —
+the folio adds the store order itself. The two must never both be counted.
+
+### 12.5 Admin data hygiene
+
+#### DH-01 — The TEST DATA badge renders
+1. Open the Bookings list and find a booking tagged `isTestData: true`.
+
+**Expected:** the badge is visible, and the TEST DATA filter returns those
+rows. Before the fix the badge call sites existed but the mappers never read
+the field, so the badge was dead code and test rows were indistinguishable
+from live ones.
+
+### 12.6 Operations
+
+#### OP-01 — The notification-retention cron actually runs
+1. Confirm the prune endpoint is scheduled in the **guest-app** project's
+   `vercel.json` (the root `vercel.json` belongs to the static admin project).
+2. Insert a notification older than 30 days and wait for the schedule.
+
+**Expected:** the old notification is removed. Before the fix the route was
+deployed but never scheduled, so the retention rule never ran.
+
+#### OP-02 — The API bundle version matches `shared/VERSION`
+1. Compare `shared/VERSION` with the version the deployed guest bundle, admin
+   bundle and API serve.
+
+**Expected:** identical. The version bump and the API bundle rebuild are two
+separate commits by design — `chore(bundle):` follows the code commit.
+
+#### OP-03 — The server has no undefined identifiers
+```bash
+npx tsc --noEmit --skipLibCheck --target es2022 --module esnext \
+  --moduleResolution bundler --strict false guest-app/server/apiRouter.ts
+```
+**Expected:** zero `TS2304` / `TS2552` / `TS18004` / `TS2448` errors. The
+regression test `guest-app/tests/api/rpt-05-server-undefined-identifiers.test.ts`
+enforces this on every run. `guest-app/server/` is **outside** the tsconfig
+`include`, so without that test nothing else catches a missing identifier.
