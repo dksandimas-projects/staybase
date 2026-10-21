@@ -353,13 +353,16 @@ function enumerateGuestSlots(roomCart: Array<{ numAdults: number; numChildren?: 
 // The day-of-week is the hotel's locale-configured
 // weekday; the formatter is shared with the existing
 // `formatStayDate` helper above.
-function formatBreakfastDateLabel(date: string): string {
-  const parsed = new Date(`${date}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) return date;
-  const weekday = new Intl.DateTimeFormat(config.locale, { weekday: "short", timeZone: "UTC" }).format(parsed);
-  const monthDay = new Intl.DateTimeFormat(config.locale, { month: "short", day: "numeric", timeZone: "UTC" }).format(parsed);
-  return `${monthDay} (${weekday})`;
-}
+//
+// Per BR-03-FIT-02 (QA pass 2026-10-21) the formatter
+// lives in `src/utils/formatBreakfastDateLabel.ts` so
+// the test suite can exercise the real timezone behaviour
+// (the pre-fix version parsed the date in the BROWSER's
+// timezone but formatted it in UTC, which shifted every
+// date back one day in Asia/Manila — the hotel's own
+// timezone). See that module for the full write-up.
+
+import { formatBreakfastDateLabel } from "../utils/formatBreakfastDateLabel";
 
 // Per MBUX-16 (decision #269, 2026-10-16): the cut-off-time
 // formatter lives in its own utility module (so it can be
@@ -2619,7 +2622,7 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
               return (
                 <div key={date} className="rounded-lg bg-white p-4 ring-1 ring-gray-200">
                   <div className="flex items-center justify-between gap-3">
-                    <p className="font-semibold text-gray-950">{formatBreakfastDateLabel(date)}</p>
+                    <p className="font-semibold text-gray-950">{formatBreakfastDateLabel(date, config.locale)}</p>
                     {/* Per MBUX-17 (decision #272, 2026-10-16): the
                         pre-MBUX-17 two-line stack (a status title +
                         an amber sub-line that named the cut-off time
@@ -2962,7 +2965,7 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
                 });
               }}
               formatPrice={formatPrice}
-              formatDateLabel={formatBreakfastDateLabel}
+              formatDateLabel={(serviceDate) => formatBreakfastDateLabel(serviceDate, config.locale)}
               isLoading={otherAddOnsCatalog.isLoading}
               error={otherAddOnsCatalog.error}
             />
@@ -4748,13 +4751,35 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
                             [type]" callout fires when the cart is
                             short (roomsNeeded > currentCartCount),
                             the natural nudge for the user to add a
-                            room of this type. */}
+                            room of this type.
+
+                            Per CHD-11-FIT-01 (QA pass 2026-10-21):
+                            the card measures a type that is NOT yet
+                            in the cart on the `"type"` basis —
+                            against the rooms of this type the guest
+                            WOULD need, not against the cart as it
+                            stands. On the `"cart"` basis an empty
+                            cart has zero capacity, so a fresh Step 1
+                            rendered a red "Doesn't fit your group"
+                            chip on EVERY room type while also
+                            printing "You'd need 1 of Standard Twin
+                            for your group" right next to it — the
+                            same derivation contradicting itself on
+                            the public booking page. Once the type IS
+                            in the cart the card falls back to the
+                            `"cart"` basis, which is what the cart-line
+                            chip (CHD-12) uses, so the two indicators
+                            can never disagree. The Step 1 → Step 2
+                            submit gate is independent of this helper
+                            (it uses `requiredExtraBedsFor` over the
+                            distributed cart). */}
                         {(() => {
                           const fit = deriveRoomTypeCapacityFit({
                             type,
                             numAdults,
                             numChildren,
-                            currentCartCount: typeQuantity
+                            currentCartCount: typeQuantity,
+                            basis: typeQuantity === 0 ? "type" : "cart"
                           });
                           const chip =
                             fit.state === "fits"

@@ -76,7 +76,7 @@
 //         doesn't carry `category: "breakfast"`.
 
 import { Timestamp } from "firebase-admin/firestore";
-import type { Transaction, DocumentReference, DocumentSnapshot } from "firebase-admin/firestore";
+import type { Transaction, Firestore, DocumentReference, DocumentSnapshot } from "firebase-admin/firestore";
 
 /** Staff actor that signs the refund payment. */
 export interface RefundActor {
@@ -117,6 +117,28 @@ export interface MarkRefundPaidInput {
   actor: RefundActor;
   /** Caller-owned Firestore transaction. */
   transaction: Transaction;
+  /**
+   * The Firestore instance used to BUILD the refund / booking document
+   * references.
+   *
+   * Per CRL-02 (QA pass 2026-10-21): this is a REQUIRED field because
+   * the helper previously derived the instance from
+   * `transaction.firestore` — a property the firebase-admin
+   * `Transaction` class does NOT expose publicly (it only has the
+   * private `_firestore`). Every refund path therefore threw
+   * `TypeError: Cannot read properties of undefined (reading
+   * 'collection')` and the endpoint answered HTTP 500.
+   *
+   * Confirmed broken in production on 2026-10-21 across all four
+   * refund paths (cancellation, breakfast, other-add-on, standalone
+   * `POST /api/bookings/add-refund`); the over-refund guard was
+   * unreachable because it sits behind the same throw.
+   *
+   * A `DocumentReference` is a path holder, so any instance in the
+   * same project builds an equivalent reference — the transaction
+   * still performs every read and write.
+   */
+  db: Firestore;
   /** Refund category discriminator (per BR-01). */
   category: RefundCategory;
   /** The `slotKey` (breakfast only). The audit row carries it for BR-07. */
@@ -182,12 +204,12 @@ export function computeRefundPaidAmountDelta(
 
 /** Resolves the refund-doc parent (cancellation follows MRB-04 Phase 2.x). */
 function resolveRefundDocParent(
-  transaction: Transaction,
+  db: Firestore,
   bookingId: string,
   category: RefundCategory,
   reservationId: string | null | undefined
 ): { parent: DocumentReference; collection: "refunds" | "payments" } {
-  const bookingRef = transaction.firestore.collection("bookings").doc(bookingId);
+  const bookingRef = db.collection("bookings").doc(bookingId);
   // Per BR-12: other-add-on refunds share the same parent
   // path as breakfast — both are per-booking refunds. The
   // `category` discriminator separates them at read time.
@@ -196,7 +218,7 @@ function resolveRefundDocParent(
   }
   if (reservationId && String(reservationId).trim().length > 0) {
     return {
-      parent: transaction.firestore.collection("reservations").doc(String(reservationId)),
+      parent: db.collection("reservations").doc(String(reservationId)),
       collection: "refunds"
     };
   }
@@ -220,6 +242,7 @@ export function markRefundPaid(input: MarkRefundPaidInput): MarkRefundPaidResult
     reason,
     actor,
     transaction,
+    db,
     category,
     slotKey,
     mealSnapshot,
@@ -238,8 +261,8 @@ export function markRefundPaid(input: MarkRefundPaidInput): MarkRefundPaidResult
   // Path resolution: breakfast always at `bookings/{id}/refunds/{refundId}`.
   // Cancellation follows MRB-04 Phase 2.x (reservation header for new
   // reservations, booking payments subcollection for legacy).
-  const pathParent = resolveRefundDocParent(transaction, bookingId, category, reservationId);
-  const bookingRef: DocumentReference = transaction.firestore.collection("bookings").doc(bookingId);
+  const pathParent = resolveRefundDocParent(db, bookingId, category, reservationId);
+  const bookingRef: DocumentReference = db.collection("bookings").doc(bookingId);
   const refundRef: DocumentReference = pathParent.parent.collection(pathParent.collection).doc(refundId);
 
   if (category === "breakfast" || category === "otherAddOn") {

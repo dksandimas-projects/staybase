@@ -358,3 +358,139 @@ describe("deriveRoomTypeCapacityFit (CHD-11)", () => {
     expect(r.extraBedsNeeded).toBe(0);
   });
 });
+
+// Per CHD-11-FIT-01 (QA pass 2026-10-21): the `"type"` basis.
+//
+// The public `/book` Step 1 opened with a red "Doesn't fit your group"
+// chip on EVERY room type. Root cause: the fit verdict was measured
+// against `currentCartCount`, and on a fresh Step 1 the cart is empty —
+// zero capacity — so `totalOverflow > totalExtraBeds` was true for any
+// non-empty group, for every type. The same card simultaneously
+// printed "You'd need 1 of Standard Twin for your group", so the two
+// outputs of the single derivation contradicted each other.
+//
+// The fix splits the question the helper answers:
+//   - `"cart"` (default, unchanged) — "does the cart as it stands fit?"
+//   - `"type"` — "does this room type fit the group, at the rooms the
+//     guest would need?"
+describe("deriveRoomTypeCapacityFit — the 'type' basis (CHD-11-FIT-01)", () => {
+  const standardTwin = { maxCapacity: 2, maxChildren: 0, maxExtraBeds: 0 };
+  const deluxe = { maxCapacity: 4, maxChildren: 2, maxExtraBeds: 0 };
+  const family = { maxCapacity: 4, maxChildren: 2, maxExtraBeds: 1 };
+
+  it("on the 'type' basis an empty cart no longer reports 'doesnt-fit' for a type that hosts the group", () => {
+    // 2 adults, Standard Twin (maxCap 2): 1 room holds them exactly.
+    // Before the fix this returned "doesnt-fit" (the empty cart has
+    // zero capacity) next to roomsNeeded = 1 — the contradiction.
+    const r = deriveRoomTypeCapacityFit({
+      type: standardTwin,
+      numAdults: 2,
+      numChildren: 0,
+      currentCartCount: 0,
+      basis: "type"
+    });
+    expect(r.state).toBe("tight");
+    expect(r.roomsNeeded).toBe(1);
+  });
+
+  it("on the 'type' basis a type with headroom reports 'fits' on an empty cart", () => {
+    // 2 adults in a Deluxe (maxCap 4): 1 room, 2 unused adult slots.
+    const r = deriveRoomTypeCapacityFit({
+      type: deluxe,
+      numAdults: 2,
+      numChildren: 0,
+      currentCartCount: 0,
+      basis: "type"
+    });
+    expect(r.state).toBe("fits");
+    expect(r.roomsNeeded).toBe(1);
+  });
+
+  it("on the 'type' basis a type that needs 2 rooms reports the 2-room verdict, not the empty-cart verdict", () => {
+    // 2 adults, Single (maxCap 1): needs 2 Singles, which hold them
+    // exactly → "tight" with roomsNeeded = 2.
+    const r = deriveRoomTypeCapacityFit({
+      type: { maxCapacity: 1, maxChildren: 0, maxExtraBeds: 0 },
+      numAdults: 2,
+      numChildren: 0,
+      currentCartCount: 0,
+      basis: "type"
+    });
+    expect(r.state).toBe("tight");
+    expect(r.roomsNeeded).toBe(2);
+  });
+
+  it("on the 'type' basis a genuine capacity failure still reports 'doesnt-fit'", () => {
+    // 1 adult + 1 child in a Single (maxCap 1, maxChildren 0, no
+    // extra beds): the child cannot be accommodated at any room count.
+    // The fix must NOT flatten this into "fits" / "tight".
+    const r = deriveRoomTypeCapacityFit({
+      type: { maxCapacity: 1, maxChildren: 0, maxExtraBeds: 0 },
+      numAdults: 1,
+      numChildren: 1,
+      currentCartCount: 0,
+      basis: "type"
+    });
+    expect(r.state).toBe("doesnt-fit");
+  });
+
+  it("the default basis is 'cart' — the empty-cart verdict is unchanged for existing callers", () => {
+    // The cart-line chip (CHD-12) and every existing test rely on the
+    // cart basis. Omitting `basis` must keep the old behaviour.
+    const r = deriveRoomTypeCapacityFit({
+      type: standardTwin,
+      numAdults: 2,
+      numChildren: 0,
+      currentCartCount: 0
+    });
+    expect(r.state).toBe("doesnt-fit");
+    expect(r.roomsNeeded).toBe(1);
+  });
+
+  it("the 'type' basis does not change the verdict once the type is already in the cart", () => {
+    // 1 Standard Twin in the cart, 2 adults → exactly at the cap.
+    // Identical on both bases because currentCartCount (1) already
+    // equals roomsNeeded (1).
+    const cartBasis = deriveRoomTypeCapacityFit({
+      type: standardTwin,
+      numAdults: 2,
+      numChildren: 0,
+      currentCartCount: 1
+    });
+    const typeBasis = deriveRoomTypeCapacityFit({
+      type: standardTwin,
+      numAdults: 2,
+      numChildren: 0,
+      currentCartCount: 1,
+      basis: "type"
+    });
+    expect(typeBasis.state).toBe(cartBasis.state);
+    expect(typeBasis.state).toBe("tight");
+  });
+
+  it("the 'type' basis measures against the rooms needed; the card stays on the 'cart' basis once the type is in the cart", () => {
+    // 6 adults in 1 Family (maxCap 4, maxExtraBeds 1): 1 room cannot
+    // sleep 6 adults. Both answers are correct for their question.
+    //   - "cart" basis (what the card uses when typeQuantity >= 1, and
+    //     what the cart-line chip always uses): "doesnt-fit" — your
+    //     existing single Family is not enough.
+    //   - "type" basis (what the card uses for a type not yet in the
+    //     cart): the 2 rooms the guest would need hold them → "fits".
+    const cartBasis = deriveRoomTypeCapacityFit({
+      type: family,
+      numAdults: 6,
+      numChildren: 0,
+      currentCartCount: 1
+    });
+    const typeBasis = deriveRoomTypeCapacityFit({
+      type: family,
+      numAdults: 6,
+      numChildren: 0,
+      currentCartCount: 1,
+      basis: "type"
+    });
+    expect(cartBasis.state).toBe("doesnt-fit");
+    expect(typeBasis.state).toBe("fits");
+    expect(typeBasis.roomsNeeded).toBe(2);
+  });
+});

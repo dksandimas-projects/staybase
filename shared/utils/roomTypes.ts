@@ -201,6 +201,34 @@ export function applyRoomTypeDefaults(raw: unknown): RoomTypeEntry {
 // across `currentCartCount` rooms instead of a single room.
 export type RoomTypeCapacityFitState = "fits" | "tight" | "doesnt-fit";
 
+/**
+ * Which cart the fit verdict is measured against.
+ *
+ * - `"cart"` (default) — judge the group against the rooms of this type
+ *   that are ALREADY in the cart. "Your 1 Family room does not sleep 6
+ *   adults" is a true and useful statement, so the cart-line chip (CHD-12)
+ *   uses this basis.
+ * - `"type"` — judge the group against the rooms of this type the guest
+ *   WOULD need (`max(currentCartCount, roomsNeeded)`). This is the
+ *   room-type card chip (CHD-11) for a type that is NOT yet in the cart,
+ *   whose question is "does this room type work for my group?" — not
+ *   "does my empty cart work?". The card keeps the `"cart"` basis once
+ *   the type IS in the cart, so it can never disagree with the
+ *   cart-line chip.
+ *
+ * Why the distinction matters (QA pass 2026-10-21, finding CHD-11-FIT-01):
+ * on the `"cart"` basis an empty cart has ZERO capacity, so `state` was
+ * `"doesnt-fit"` for EVERY room type on a fresh Step 1 — the public
+ * booking page opened with a red "Doesn't fit your group" chip on all
+ * four cards while simultaneously telling the guest "You'd need 1 of
+ * Standard Twin for your group". Two outputs of the same derivation
+ * disagreeing on the same card. The `"type"` basis removes the
+ * contradiction without touching the cart-line semantics, which the
+ * Step 1 → Step 2 submit gate does not depend on (the gate uses
+ * `requiredExtraBedsFor` over the distributed cart, not this helper).
+ */
+export type RoomTypeCapacityFitBasis = "cart" | "type";
+
 export interface RoomTypeCapacityFitInput {
   // `Partial<>` because the underlying `RoomTypeEntry` declares
   // `maxCapacity` / `maxChildren` / `maxExtraBeds` as optional
@@ -211,6 +239,11 @@ export interface RoomTypeCapacityFitInput {
   numAdults: number;
   numChildren: number;
   currentCartCount: number;
+  /**
+   * See `RoomTypeCapacityFitBasis`. Defaults to `"cart"` so every
+   * existing caller keeps its current behaviour.
+   */
+  basis?: RoomTypeCapacityFitBasis;
 }
 
 export interface RoomTypeCapacityFitResult {
@@ -233,11 +266,35 @@ export function deriveRoomTypeCapacityFit(input: RoomTypeCapacityFitInput): Room
   const numChildren = Math.max(0, Math.floor(Number(input.numChildren) || 0));
   const currentCartCount = Math.max(0, Math.floor(Number(input.currentCartCount) || 0));
 
+  // Minimum number of rooms of this type to fit the group.
+  // The group's adults and children split across rooms in any
+  // combination; the worst case is `ceil(adults / maxCap)` or
+  // `ceil(children / maxChildren)`, whichever is higher.
+  // Extra beds are NOT counted — the per-bed overflow is in
+  // `extraBedsNeeded`, not in the room count.
+  const safeAdultCap = Math.max(1, maxCapacity);
+  const safeChildrenCap = Math.max(1, maxChildren);
+  const roomsNeeded = Math.max(
+    1,
+    Math.ceil(numAdults / safeAdultCap),
+    Math.ceil(numChildren / safeChildrenCap)
+  );
+
+  // The cart the verdict is measured against. On the `"type"` basis the
+  // measurement uses the rooms the guest WOULD need, so a type is never
+  // judged against a degenerate zero-room cart (see
+  // `RoomTypeCapacityFitBasis`). On the `"cart"` basis this is the cart
+  // as it stands.
+  const basis: RoomTypeCapacityFitBasis = input.basis === "type" ? "type" : "cart";
+  const evaluatedCartCount = basis === "type"
+    ? Math.max(currentCartCount, roomsNeeded)
+    : currentCartCount;
+
   // Per the room-type / cart math: total capacity available in
-  // the current cart is the per-type cap times the cart count.
-  const totalAdultCap = currentCartCount * maxCapacity;
-  const totalChildrenCap = currentCartCount * maxChildren;
-  const totalExtraBeds = currentCartCount * maxExtraBeds;
+  // the measured cart is the per-type cap times the room count.
+  const totalAdultCap = evaluatedCartCount * maxCapacity;
+  const totalChildrenCap = evaluatedCartCount * maxChildren;
+  const totalExtraBeds = evaluatedCartCount * maxExtraBeds;
 
   // Overflow follows the EXB-03 rule (overflowAdults +
   // overflowChildren) but aggregated across the whole cart.
@@ -273,21 +330,7 @@ export function deriveRoomTypeCapacityFit(input: RoomTypeCapacityFitInput): Room
     state = "tight";
   }
 
-  // Minimum number of rooms of this type to fit the group.
-  // The group's adults and children split across rooms in any
-  // combination; the worst case is `ceil(adults / maxCap)` or
-  // `ceil(children / maxChildren)`, whichever is higher.
-  // Extra beds are NOT counted — the per-bed overflow is in
-  // `extraBedsNeeded`, not in the room count.
-  const safeAdultCap = Math.max(1, maxCapacity);
-  const safeChildrenCap = Math.max(1, maxChildren);
-  const roomsNeeded = Math.max(
-    1,
-    Math.ceil(numAdults / safeAdultCap),
-    Math.ceil(numChildren / safeChildrenCap)
-  );
-
-  // Total extra beds needed across the cart (or 0 if the
+  // Total extra beds needed across the measured cart (or 0 if the
   // group fits the cart's natural capacity with no extra beds).
   const extraBedsNeeded = totalOverflow > 0 && totalOverflow <= totalExtraBeds ? totalOverflow : 0;
 

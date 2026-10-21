@@ -16,7 +16,32 @@ const InquiryPreferredDatesSchema = z.object({
 
 const inquirySchema = z.object({
   companyName: z.string().trim().min(1).max(120),
-  contactPerson: z.string().trim().min(1).max(120),
+  // Per CORP-INQ-01 (QA pass 2026-10-21): `contactPerson` is
+  // OPTIONAL, not required.
+  //
+  // The public corporate form (`guest-app/src/pages/CorporateStaysPage.tsx`,
+  // the "Request Corporate Rates" block) collects the contact's FIRST
+  // and LAST name as two separate fields and sends
+  // `{ firstName, lastName, ... }` — it never sends a flat
+  // `contactPerson`. The form's own comment claimed "`contactPerson`
+  // is derived server-side as `${firstName} ${lastName}`", but NO such
+  // derivation existed: the schema below required `contactPerson`, so
+  // EVERY inquiry submitted through the public form failed Zod
+  // validation and the endpoint answered HTTP 400 "Please check the
+  // inquiry form and try again.".
+  //
+  // Confirmed in production on 2026-10-21: the `corporateInquiries`
+  // collection was EMPTY (0 docs) — no corporate lead had ever
+  // reached the pipeline through the public form. The admin-side
+  // inquiry fixtures that did exist were written directly.
+  //
+  // The handler now derives `contactPerson` from the structured
+  // names before storing, so legacy readers (the email templates, the
+  // convert path's `contactPerson` split fallback) still see the flat
+  // field. The change is strictly MORE PERMISSIVE than before: a
+  // client that sent `contactPerson` still works unchanged, and a
+  // client that sends `firstName` + `lastName` now works too.
+  contactPerson: z.string().trim().min(1).max(120).optional(),
   email: z.string().trim().email().max(160),
   phone: z.string().trim().min(6).max(40),
   numRooms: z.coerce.number().int().min(1).max(500),
@@ -31,7 +56,14 @@ const inquirySchema = z.object({
   // that only send `contactPerson`.
   firstName: z.string().trim().min(1).max(80).optional(),
   lastName: z.string().trim().min(1).max(80).optional()
-}).strict();
+}).strict()
+  // At least one name must be present, in either shape. Before
+  // CORP-INQ-01 this was implicit in the required `contactPerson`;
+  // now it is explicit so a nameless inquiry is still refused.
+  .refine(
+    (value) => Boolean(value.contactPerson) || Boolean(value.firstName) || Boolean(value.lastName),
+    { message: "A contact name is required (contactPerson, or firstName + lastName)." }
+  );
 
 const convertInquirySchema = z.object({
   inquiryId: z.string().trim().min(1).max(160),
@@ -63,8 +95,19 @@ export async function handleCreateCorporateInquiry(req: any, res: any) {
     });
   }
 
+  // Per CORP-INQ-01 (QA pass 2026-10-21): derive the flat
+  // `contactPerson` from the structured first + last name when the
+  // client did not send one. The public corporate form sends ONLY
+  // `firstName` / `lastName`; deriving here is what the form's own
+  // comment always claimed the server did. Legacy clients that send a
+  // flat `contactPerson` are unaffected — their value wins.
+  const derivedContactPerson = parsed.data.contactPerson
+    || [parsed.data.firstName, parsed.data.lastName].filter(Boolean).join(" ")
+    || "";
+
   const inquiry = {
     ...parsed.data,
+    contactPerson: derivedContactPerson,
     status: "new",
     handler: "",
     notes: [],

@@ -99,6 +99,8 @@ export async function handleMarkRefundPaidAddOns(req: VercelRequest, res: Vercel
           note: trimmedNote,
           actor: { uid: staff.uid, role: staff.role },
           transaction,
+
+          db: adminDb,
           existingDoc: refundSnap,
           currentPaidAmount: Number(bookingData.paidAmount || 0),
           slotKey: selectionKey

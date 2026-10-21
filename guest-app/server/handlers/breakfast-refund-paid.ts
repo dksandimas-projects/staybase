@@ -155,6 +155,8 @@ export async function handleMarkRefundPaid(
           note: trimmedNote,
           actor: { uid: staff.uid, role: staff.role },
           transaction,
+
+          db: adminDb,
           existingDoc: refundSnap,
           currentPaidAmount: Number(bookingSnap.data()?.paidAmount || 0),
           slotKey: String(refundSnap.data()?.slotKey || "")

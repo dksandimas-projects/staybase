@@ -301,11 +301,14 @@ export async function handleRegisterMember(req: any, res: any) {
       const sequence = counterDoc.exists ? (counterDoc.data()?.count || 0) + 1 : 1;
       memberNumber = generateMemberNumber(config.memberNumberPrefix || "SR", sequence);
 
-      if (counterDoc.exists) {
-        transaction.update(counterRef, { count: sequence, updatedAt: now });
-      } else {
-        transaction.set(counterRef, { count: sequence, createdAt: now, updatedAt: now });
-      }
+      // NOTE: the member-number counter write is deliberately
+      // deferred until AFTER every read in this transaction.
+      // Firestore requires all reads to run before all writes —
+      // writing the counter here (as it was until 2026-10-21) made
+      // the later `transaction.get()` of the welcome-bonus history
+      // row throw "Firestore transactions require all reads to be
+      // executed before all writes." and made EVERY Spark Rewards
+      // registration fail with HTTP 500.
 
       const fullName = parsed.data.fullName || authUser.name || email.split("@")[0];
       const photoUrl = parsed.data.photoUrl || authUser.picture || "";
@@ -374,6 +377,13 @@ export async function handleRegisterMember(req: any, res: any) {
       }
 
       const initialRewardsPoints = (Number(existingMember?.rewardsPoints) || 0) + welcomeAmount;
+
+      // All reads are complete — every write below this line.
+      if (counterDoc.exists) {
+        transaction.update(counterRef, { count: sequence, updatedAt: now });
+      } else {
+        transaction.set(counterRef, { count: sequence, createdAt: now, updatedAt: now });
+      }
 
       transaction.set(memberRef, {
         fullName,
