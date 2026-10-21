@@ -246,3 +246,11 @@ generalisable lesson, now in the audit report: *a rule is a contract with a
 WRITER, not a shape — every writer path needs a test that exercises the
 actual client call.* The 74-assertion suite asserted collection shapes and
 never created a message the way the desk does.
+
+**Verified live, not just in the emulator.** `scripts/verify-prod-desk-reply.mjs`
+mints a staff custom token (`role: front-desk`), signs in against the real
+Auth instance, and performs the exact client-side `addDoc` the desk
+performs — then deletes the scratch document. Run against production after
+the hotfix: **HTTP 200** (the reply lands), cleanup 200, read-back 404
+(gone). Before the fix the same call returned 403. Run it after any future
+change to a capability-path rule.
