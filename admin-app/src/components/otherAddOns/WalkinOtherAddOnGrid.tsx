@@ -38,6 +38,9 @@ import {
   type AddOn
 } from "@spark-inn/shared";
 import { cn } from "../../utils/cn";
+// Per P0-ADMIN-API-BASE (2026-10-22): the admin app must call the
+// guest app's API through `getApiBaseUrl()`, never a relative `/api`.
+import { getApiBaseUrl } from "../../utils/apiBaseUrl";
 
 export interface WalkinOtherAddOnSelections {
   /** `yyyy-mm-dd` → array of selected add-on entries. */
@@ -92,10 +95,15 @@ export function WalkinOtherAddOnGrid({
     setLoading(true);
     (async () => {
       try {
-        const base = typeof window !== "undefined" ? window.location.origin : "";
-        const res = await fetch(`${base}/api/bookings/addons/config`, {
-          method: "GET"
-        });
+        // Per P0-ADMIN-API-BASE (2026-10-22): the guest API lives on a
+        // different origin than the admin app, whose catch-all rewrite
+        // serves the SPA shell for any unmatched path. The pre-fix
+        // `window.location.origin` fetch returned HTML, `res.json()`
+        // threw, and the grid rendered no add-on rows at all.
+        const res = await fetch(
+          `${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/addons/config`,
+          { method: "GET" }
+        );
         const data: any = await res.json();
         if (!cancelled && data?.success && Array.isArray(data?.data)) {
           setAddOns(getEnabledAddOnsByHotel(data.data as AddOn[]));
