@@ -46,6 +46,11 @@ import {
   Wallet
 } from "lucide-react";
 import { computeBreakfastCutoffState } from "@spark-inn/shared";
+// Per BR-07-P1 (2026-10-22): the CANONICAL breakfast slot-key
+// contract (0-based guest index). The guest page builds every
+// slot key through these helpers, so a meal the desk adds for a
+// guest is visible on this page.
+import { buildBreakfastSlotId, buildBreakfastSlotKey } from "@spark-inn/shared";
 import { formatPrice } from "../utils/format";
 import { Navbar } from "../components/Navbar";
 import { Footer } from "../components/Footer";
@@ -445,18 +450,25 @@ export default function ManageBreakfastPage() {
   // key is `${date}-guest-N`. We label each slot with a
   // human-readable name (`Guest 1 (Adult)`,
   // `Child 1`, etc.).
+  //
+  // Per BR-07-P1 (2026-10-22): the slot id is the CANONICAL
+  // 0-based guest index token, built by the shared
+  // `buildBreakfastSlotId` helper, and the slot key itself
+  // is built by the shared `buildBreakfastSlotKey`. The admin
+  // app builds the same key from the same 0-based index, so
+  // a meal the desk adds for a guest is visible here.
   const guestSlots = useMemo(() => {
-    const slots: Array<{ id: string; label: string }> = [];
+    const slots: Array<{ id: string; label: string; index: number }> = [];
     if (!payload) return slots;
     const numAdults = Math.max(0, Number(payload.booking.numAdults) || 0);
     const numChildren = Math.max(0, Number(payload.booking.numChildren) || 0);
     let counter = 0;
     for (let i = 0; i < numAdults; i += 1) {
-      slots.push({ id: `guest-${counter}`, label: `Guest ${counter + 1} (Adult)` });
+      slots.push({ id: buildBreakfastSlotId(counter), index: counter, label: `Guest ${counter + 1} (Adult)` });
       counter += 1;
     }
     for (let i = 0; i < numChildren; i += 1) {
-      slots.push({ id: `guest-${counter}`, label: `Child ${i + 1}` });
+      slots.push({ id: buildBreakfastSlotId(counter), index: counter, label: `Child ${i + 1}` });
       counter += 1;
     }
     // Defensive fallback: if the booking is so legacy that
@@ -464,7 +476,7 @@ export default function ManageBreakfastPage() {
     // `numGuests` as an adult-only count.
     if (slots.length === 0 && Number(payload.booking.numGuests) > 0) {
       for (let i = 0; i < payload.booking.numGuests; i += 1) {
-        slots.push({ id: `guest-${i}`, label: `Guest ${i + 1} (Adult)` });
+        slots.push({ id: buildBreakfastSlotId(i), index: i, label: `Guest ${i + 1} (Adult)` });
       }
     }
     return slots;
@@ -484,7 +496,7 @@ export default function ManageBreakfastPage() {
     const keys: string[] = [];
     for (const date of breakfastDates) {
       for (const slot of guestSlots) {
-        keys.push(`${date}-${slot.id}`);
+        keys.push(buildBreakfastSlotKey(date, slot.index));
       }
     }
     return keys;
@@ -929,7 +941,7 @@ export default function ManageBreakfastPage() {
 
                 <ul className="mt-4 space-y-3">
                   {guestSlots.map((slot) => {
-                    const slotKey = `${date}-${slot.id}`;
+                    const slotKey = buildBreakfastSlotKey(date, slot.index);
                     const served = payload.breakfastServed && payload.breakfastServed[slotKey];
                     const prior = (payload.breakfastSelections && payload.breakfastSelections[slotKey]) || null;
                     const current = Object.prototype.hasOwnProperty.call(edits, slotKey)

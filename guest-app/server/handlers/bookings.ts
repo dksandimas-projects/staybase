@@ -6008,6 +6008,26 @@ export async function handleCreateWalkin(req: any, res: any) {
         // an empty map, matching the public path's "explicit
         // opt-out" shape.
         breakfastSelections: validatedWalkinBreakfast?.entries ?? {},
+        // Per BR-07-P0 (2026-10-22): the denormalized
+        // `hasAnyBreakfast` flag. The walk-in path NEVER wrote
+        // it, so every walk-in booking shipped without the flag
+        // — and the kitchen-list query filtered on
+        // `where("hasAnyBreakfast", "==", true)`, so the chef's
+        // sheet was empty on every service date (the only
+        // bookings in production were walk-ins).
+        //
+        // The kitchen list no longer reads the flag (the
+        // authoritative signal is a non-empty
+        // `breakfastSelections` map), but the flag is still
+        // written here so the denormalization stops drifting
+        // for NEW bookings — the public create path and the
+        // reschedule path already write it.
+        //
+        // `true` when the desk recorded at least one meal;
+        // `false` for the explicit "no breakfast" opt-out
+        // (same semantics as the public create path's
+        // `validatedBreakfastSelections.hasAny`).
+        hasAnyBreakfast: Object.keys(validatedWalkinBreakfast?.entries ?? {}).length > 0,
         // Per BR-03 (2026-10-12, decision #232): the denormalized
         // `breakfastTotal` field — the future-proof snapshot for
         // the BR-04 Manage Breakfast page + the kitchen list +

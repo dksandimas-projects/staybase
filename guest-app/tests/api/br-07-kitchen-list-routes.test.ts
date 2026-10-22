@@ -108,9 +108,37 @@ describe("BR-07 — Kitchen list routes (source-text tripwires)", () => {
       "guest-app/server/handlers/breakfast-kitchen-list.ts"
     );
     expect(source).toContain("breakfastSelections");
-    expect(source).toMatch(/Object\.keys\(\s*selections\s*\)/);
+    // Per BR-07-P1 (2026-10-22): the slots are resolved through
+    // the shared normaliser (which folds the legacy bare + legacy
+    // 1-based key forms into the canonical 0-based space).
+    expect(source).toContain("normalizeBreakfastSelections");
     // Filters out cancelled entries (removedAt != null).
     expect(source).toContain("removedAt");
+  });
+
+  // 5b. Per BR-07-P0 (2026-10-22): the handler must NOT gate the
+  // finalized column on the denormalized `hasAnyBreakfast` flag.
+  // The walk-in write path never wrote it, so the flag-true query
+  // returned zero rows for every booking in production.
+  it("the handler does NOT filter on the denormalized `hasAnyBreakfast` flag", () => {
+    const source = readSource(
+      "guest-app/server/handlers/breakfast-kitchen-list.ts"
+    );
+    expect(source).not.toContain('.where("hasAnyBreakfast"');
+    expect(source).not.toContain("loadKitchenListCutoffsEnabled");
+  });
+
+  // 5c. Per BR-07-P2 (2026-10-22): the cut-off time + timezone come
+  // from the CONFIGURED settings doc, not the built-in defaults.
+  it("the handler reads the CONFIGURED cut-off time + timezone", () => {
+    const source = readSource(
+      "guest-app/server/handlers/breakfast-kitchen-list.ts"
+    );
+    expect(source).toContain("cutoffConfig.cutoffTime");
+    expect(source).toContain("cutoffConfig.cutoffTimezone");
+    // The defaults survive only as the FALLBACK when the settings
+    // doc is missing / malformed.
+    expect(source).toContain("DEFAULT_BREAKFAST_CUTOFF_TIME");
   });
 
   // 6. Per-entry room number + guest name projected on every row.
@@ -257,13 +285,22 @@ describe("BR-07 — Kitchen list routes (30s cache smoke)", () => {
     const fakes = buildHandlerFakes({
       bookings: {
         bk1: {
-          hasAnyBreakfast: true,
+          // Per BR-07-P0 (2026-10-22): the fixture is built the way
+          // the WALK-IN write path ACTUALLY writes it — `breakfastSelections`
+          // + `breakfastTotal` and NO `hasAnyBreakfast` flag. The
+          // pre-fix fixture carried `hasAnyBreakfast: true`, a shape
+          // the server's own walk-in path never produced, so all 56
+          // guest-api tests passed against a completely broken
+          // feature (the kitchen list returned zero meals for every
+          // booking in production).
           ref: "BK-001",
           roomNumber: "101",
           guestName: "Ana Cruz",
+          numGuests: 1,
           guests: [{ firstName: "Ana", lastName: "Cruz" }],
+          breakfastTotal: 220,
           breakfastSelections: {
-            "2026-10-15-guest-0": {
+            "2026-10-15-0": {
               mealId: "m-longsilog",
               mealName: "Longsilog",
               price: 220,
@@ -306,17 +343,30 @@ describe("BR-07 — Kitchen list routes (30s cache smoke)", () => {
         if (collName !== "bookings") {
           throw new Error(`unexpected collection('${collName}')`);
         }
-        const bookingSnapshot = {
-          forEach: (cb: (doc: { id: string; data: () => unknown }) => void) => {
-            fakes.callCount.bookings += 1;
-            for (const [id, data] of Object.entries(fakes.bookingsById)) {
-              cb({ id, data: () => data });
-            }
-          }
-        };
+        // Per BR-07-P0 (2026-10-22): the fake EMULATES the real
+        // Firestore query semantics — `where(field, "==", value)`
+        // really filters. The pre-fix handler filtered on
+        // `hasAnyBreakfast == true`; with a walk-in-shaped fixture
+        // (no flag) that filter matches nothing, which is exactly
+        // how the feature shipped broken. A fake that ignored the
+        // filter would hide the defect.
+        let whereFilter: { field: string; value: unknown } | null = null;
         const bookingsColl = {
-          where: () => bookingsColl,
-          get: async () => bookingSnapshot
+          where: (field: string, _op: string, value: unknown) => {
+            whereFilter = { field, value };
+            return bookingsColl;
+          },
+          get: async () => ({
+            forEach: (cb: (doc: { id: string; data: () => unknown }) => void) => {
+              fakes.callCount.bookings += 1;
+              for (const [id, data] of Object.entries(fakes.bookingsById)) {
+                if (whereFilter && (data as any)[whereFilter.field] !== whereFilter.value) {
+                  continue;
+                }
+                cb({ id, data: () => data });
+              }
+            }
+          })
         };
         return bookingsColl;
       }),

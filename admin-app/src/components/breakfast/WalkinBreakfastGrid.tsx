@@ -132,7 +132,15 @@ export function WalkinBreakfastGrid({
   const slots = useMemo(() => {
     const n = Math.max(1, Number(numGuests || 1));
     const out: Array<{ id: string; label: string }> = [];
-    for (let i = 1; i <= n; i += 1) out.push({ id: `guest-${i}`, label: `Guest ${i}` });
+    // Per BR-07-P1 (2026-10-22): the slot id is the
+    // 0-based guest index, matching the CANONICAL breakfast
+    // slot key (`${date}-guest-${guestIndex}`, 0-based) that
+    // the guest app writes and the server resolves. The
+    // pre-fix code used a 1-based index (`guest-1` …
+    // `guest-n`), so a walk-in meal the desk recorded for the
+    // FIRST guest landed on the guest app's `guest-1` slot
+    // (the SECOND guest) and was invisible to the guest.
+    for (let i = 0; i < n; i += 1) out.push({ id: `guest-${i}`, label: `Guest ${i + 1}` });
     return out;
   }, [numGuests]);
 

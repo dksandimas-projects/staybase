@@ -224748,6 +224748,95 @@ var init_breakfastCutoff = __esm({
   }
 });
 
+// ../shared/utils/breakfastSlotKey.ts
+function buildBreakfastSlotId(guestIndex) {
+  return `guest-${guestIndex}`;
+}
+function buildBreakfastSlotKey(serviceDate, guestIndex) {
+  return `${serviceDate}-${buildBreakfastSlotId(guestIndex)}`;
+}
+function buildBreakfastSlotKeyForBase(serviceDate, guestIndex, base) {
+  return base === "one-based" ? `${serviceDate}-guest-${guestIndex + 1}` : buildBreakfastSlotKey(serviceDate, guestIndex);
+}
+function parseBreakfastSlotKey(slotKey) {
+  if (typeof slotKey !== "string") return null;
+  const match = /^(\d{4}-\d{2}-\d{2})-(?:(guest-)?(\d+))$/.exec(slotKey);
+  if (!match) return null;
+  const rawIndex = Number(match[3]);
+  if (!Number.isFinite(rawIndex)) return null;
+  return {
+    serviceDate: match[1],
+    rawIndex,
+    form: match[2] ? "canonical" : "bare"
+  };
+}
+function detectBreakfastSlotIndexBase(selections, numGuests) {
+  if (!selections || typeof selections !== "object") return "zero-based";
+  let highestCanonicalIndex = -1;
+  let sawIndexZero = false;
+  for (const key of Object.keys(selections)) {
+    const parsed = parseBreakfastSlotKey(key);
+    if (!parsed || parsed.form !== "canonical") continue;
+    if (parsed.rawIndex === 0) sawIndexZero = true;
+    if (parsed.rawIndex > highestCanonicalIndex) highestCanonicalIndex = parsed.rawIndex;
+  }
+  if (sawIndexZero) return "zero-based";
+  const total = Number(numGuests);
+  if (Number.isFinite(total) && total > 0 && highestCanonicalIndex >= total) {
+    return "one-based";
+  }
+  return "zero-based";
+}
+function resolveBreakfastSlotGuestIndex(slotKey, base = "zero-based") {
+  const parsed = parseBreakfastSlotKey(slotKey);
+  if (!parsed) return null;
+  const index = parsed.form === "bare" ? parsed.rawIndex : base === "one-based" ? parsed.rawIndex - 1 : parsed.rawIndex;
+  if (index < 0) return null;
+  return index;
+}
+function normalizeBreakfastSelections(selections, numGuests) {
+  const base = detectBreakfastSlotIndexBase(
+    selections,
+    numGuests
+  );
+  const slots = /* @__PURE__ */ new Map();
+  if (!selections || typeof selections !== "object") return { base, slots };
+  for (const storedKey of Object.keys(selections)) {
+    const parsed = parseBreakfastSlotKey(storedKey);
+    if (!parsed) continue;
+    const guestIndex = resolveBreakfastSlotGuestIndex(storedKey, base);
+    if (guestIndex === null) continue;
+    const canonicalKey = buildBreakfastSlotKey(parsed.serviceDate, guestIndex);
+    const existing = slots.get(canonicalKey);
+    if (existing) {
+      const existingIsBare = parseBreakfastSlotKey(existing.storedKey)?.form === "bare";
+      if (existingIsBare && parsed.form === "canonical") {
+        slots.set(canonicalKey, {
+          canonicalKey,
+          storedKey,
+          guestIndex,
+          serviceDate: parsed.serviceDate,
+          entry: selections[storedKey]
+        });
+      }
+      continue;
+    }
+    slots.set(canonicalKey, {
+      canonicalKey,
+      storedKey,
+      guestIndex,
+      serviceDate: parsed.serviceDate,
+      entry: selections[storedKey]
+    });
+  }
+  return { base, slots };
+}
+var init_breakfastSlotKey = __esm({
+  "../shared/utils/breakfastSlotKey.ts"() {
+    "use strict";
+  }
+});
+
 // ../shared/utils/money.ts
 function roundToTwoDecimals(value) {
   const numeric = Number(value);
@@ -225449,6 +225538,9 @@ __export(shared_exports, {
   assertRevenueFinanceInvariant: () => assertRevenueFinanceInvariant,
   buildArrivalTimeOptions: () => buildArrivalTimeOptions,
   buildBreakfastRateBreakdownLines: () => buildBreakfastRateBreakdownLines,
+  buildBreakfastSlotId: () => buildBreakfastSlotId,
+  buildBreakfastSlotKey: () => buildBreakfastSlotKey,
+  buildBreakfastSlotKeyForBase: () => buildBreakfastSlotKeyForBase,
   buildCancellationLiabilitySnapshot: () => buildCancellationLiabilitySnapshot,
   buildGoogleCalendarUrl: () => buildGoogleCalendarUrl,
   buildIcsContent: () => buildIcsContent,
@@ -225494,6 +225586,7 @@ __export(shared_exports, {
   deriveReservationCounters: () => deriveReservationCounters,
   deriveRoomTypeCapacityFit: () => deriveRoomTypeCapacityFit,
   describeMaxStayNights: () => describeMaxStayNights,
+  detectBreakfastSlotIndexBase: () => detectBreakfastSlotIndexBase,
   diffNightsBetweenIso: () => diffNightsBetweenIso,
   downloadIcsFile: () => downloadIcsFile,
   eachStayNight: () => eachStayNight,
@@ -225550,6 +225643,7 @@ __export(shared_exports, {
   nextSequence: () => nextSequence,
   normalizeAddOn: () => normalizeAddOn,
   normalizeBreakfastConfig: () => normalizeBreakfastConfig,
+  normalizeBreakfastSelections: () => normalizeBreakfastSelections,
   normalizeDiscountScope: () => normalizeDiscountScope,
   normalizeInFlowHoldMinutes: () => normalizeInFlowHoldMinutes,
   normalizeMaxChildren: () => normalizeMaxChildren,
@@ -225561,6 +225655,7 @@ __export(shared_exports, {
   normalizeVatConfig: () => normalizeVatConfig,
   otherAddOnBreakdownByDate: () => otherAddOnBreakdownByDate,
   otherAddOnDraftKey: () => otherAddOnDraftKey,
+  parseBreakfastSlotKey: () => parseBreakfastSlotKey,
   parseCheckInTime: () => parseCheckInTime,
   parseCheckInTimeToPair: () => parseCheckInTimeToPair,
   parseOtherAddOnSelectionKey: () => parseOtherAddOnSelectionKey,
@@ -225574,6 +225669,7 @@ __export(shared_exports, {
   redateOtherAddOnSelections: () => redateOtherAddOnSelections,
   requiredExtraBedsFor: () => requiredExtraBedsFor,
   resolveBookingPreferenceValues: () => resolveBookingPreferenceValues,
+  resolveBreakfastSlotGuestIndex: () => resolveBreakfastSlotGuestIndex,
   resolveCurrentLevel: () => resolveCurrentLevel,
   resolveMaxStayNights: () => resolveMaxStayNights,
   resolvePaymentMethodLabel: () => resolvePaymentMethodLabel,
@@ -225649,6 +225745,7 @@ var init_shared = __esm({
     init_bookingPreferences();
     init_breakfastCutoff();
     init_breakfastTotal();
+    init_breakfastSlotKey();
     init_bookingAddOnReschedule();
     init_firestorePayload();
     init_breakfastConfig();
@@ -234391,6 +234488,26 @@ async function handleCreateWalkin(req, res) {
         // an empty map, matching the public path's "explicit
         // opt-out" shape.
         breakfastSelections: validatedWalkinBreakfast?.entries ?? {},
+        // Per BR-07-P0 (2026-10-22): the denormalized
+        // `hasAnyBreakfast` flag. The walk-in path NEVER wrote
+        // it, so every walk-in booking shipped without the flag
+        // — and the kitchen-list query filtered on
+        // `where("hasAnyBreakfast", "==", true)`, so the chef's
+        // sheet was empty on every service date (the only
+        // bookings in production were walk-ins).
+        //
+        // The kitchen list no longer reads the flag (the
+        // authoritative signal is a non-empty
+        // `breakfastSelections` map), but the flag is still
+        // written here so the denormalization stops drifting
+        // for NEW bookings — the public create path and the
+        // reschedule path already write it.
+        //
+        // `true` when the desk recorded at least one meal;
+        // `false` for the explicit "no breakfast" opt-out
+        // (same semantics as the public create path's
+        // `validatedBreakfastSelections.hasAny`).
+        hasAnyBreakfast: Object.keys(validatedWalkinBreakfast?.entries ?? {}).length > 0,
         // Per BR-03 (2026-10-12, decision #232): the denormalized
         // `breakfastTotal` field — the future-proof snapshot for
         // the BR-04 Manage Breakfast page + the kitchen list +
@@ -245403,15 +245520,8 @@ function readStaff5(req) {
   if (role !== "admin" && role !== "front-desk") return null;
   return { uid: String(staff.uid), role };
 }
-function extractGuestNameFromSlotKey(booking, slotKey, guestIndexFallback) {
+function extractGuestNameFromSlotKey(booking, guestIndex) {
   const guests = Array.isArray(booking?.guests) ? booking.guests : [];
-  const parts = slotKey.split("-");
-  let guestIndex = guestIndexFallback;
-  const tail = parts[parts.length - 1];
-  if (tail !== void 0) {
-    const parsed = Number.parseInt(tail, 10);
-    if (Number.isFinite(parsed) && parsed >= 0) guestIndex = parsed;
-  }
   const slotGuest = guests[guestIndex];
   if (slotGuest && typeof slotGuest === "object") {
     const first = typeof slotGuest.firstName === "string" ? slotGuest.firstName : "";
@@ -245472,13 +245582,19 @@ function toIsoString(value) {
 }
 async function computeKitchenList(date) {
   const datePrefix = date;
-  const cutoffsEnabled = await loadKitchenListCutoffsEnabled();
-  const cutoffState = computeBreakfastCutoffStateSafe(date, cutoffsEnabled);
+  const cutoffConfig = await loadKitchenListCutoffConfig();
+  const cutoffsEnabled = cutoffConfig.cutoffsEnabled;
+  const cutoffState = computeBreakfastCutoffStateSafe(
+    date,
+    cutoffsEnabled,
+    cutoffConfig.cutoffTime,
+    cutoffConfig.cutoffTimezone
+  );
   const cutoffAtIso = cutoffState.cutoffAt.toISOString();
   const cutoffPassed = cutoffState.isLocked;
   const bookings = [];
   try {
-    const snap = await adminDb.collection("bookings").where("hasAnyBreakfast", "==", true).get();
+    const snap = await adminDb.collection("bookings").get();
     snap.forEach((doc) => {
       bookings.push({ id: doc.id, ...doc.data() });
     });
@@ -245492,21 +245608,25 @@ async function computeKitchenList(date) {
     const bookingId = booking.id;
     const roomNumber = bookingRoomNumber(booking);
     const ref = bookingRef(booking);
-    for (const slotKey of Object.keys(selections)) {
-      if (!slotKeyDatePrefixMatches(slotKey, datePrefix)) continue;
-      const entry = selections[slotKey];
+    const { slots } = normalizeBreakfastSelections(
+      selections,
+      booking.numGuests
+    );
+    for (const slot of slots.values()) {
+      if (slot.serviceDate !== datePrefix) continue;
+      const entry = slot.entry;
       if (!entry || typeof entry !== "object") continue;
       if (entry.removedAt !== null && entry.removedAt !== void 0 && entry.removedAt !== "") {
         continue;
       }
-      const { guestIndex, guestName } = extractGuestNameFromSlotKey(booking, slotKey, 0);
+      const { guestIndex, guestName } = extractGuestNameFromSlotKey(booking, slot.guestIndex);
       finalized.push({
         bookingId,
         ref,
         roomNumber,
         guestName,
         guestIndex,
-        slotKey,
+        slotKey: slot.storedKey,
         mealId: typeof entry.mealId === "string" ? entry.mealId : "",
         mealName: typeof entry.mealName === "string" ? entry.mealName : "Unnamed meal",
         price: Number.isFinite(Number(entry.price)) ? Number(entry.price) : 0,
@@ -245528,8 +245648,16 @@ async function computeKitchenList(date) {
     const auditGroup = adminDb.collectionGroup("breakfastAudit");
     const auditSnap = await auditGroup.where("occurredAfterCutoff", "==", true).get();
     const bookingById = /* @__PURE__ */ new Map();
+    const bookingBaseById = /* @__PURE__ */ new Map();
     for (const booking of bookings) {
       bookingById.set(booking.id, booking);
+      bookingBaseById.set(
+        booking.id,
+        normalizeBreakfastSelections(
+          booking.breakfastSelections || {},
+          booking.numGuests
+        ).base
+      );
     }
     auditSnap.forEach((doc) => {
       const data = doc.data();
@@ -245541,10 +245669,13 @@ async function computeKitchenList(date) {
       const matchingBooking = bookingById.get(bookingId);
       const roomNumber = matchingBooking ? bookingRoomNumber(matchingBooking) : "\u2014";
       const ref = matchingBooking ? bookingRef(matchingBooking) : "\u2014";
+      const resolvedIndex = resolveBreakfastSlotGuestIndex(
+        typeof data.slotKey === "string" ? data.slotKey : "",
+        bookingBaseById.get(bookingId) || "zero-based"
+      );
       const { guestIndex, guestName } = extractGuestNameFromSlotKey(
         matchingBooking || { guests: [] },
-        typeof data.slotKey === "string" ? data.slotKey : "",
-        0
+        resolvedIndex === null ? 0 : resolvedIndex
       );
       const mealSnapshot = data.mealSnapshot && typeof data.mealSnapshot === "object" ? {
         mealId: String(data.mealSnapshot.mealId || ""),
@@ -245587,24 +245718,23 @@ async function computeKitchenList(date) {
     summary
   };
 }
-function computeBreakfastCutoffStateSafe(date, cutoffsEnabled = true) {
+function computeBreakfastCutoffStateSafe(date, cutoffsEnabled = true, cutoffTime = DEFAULT_BREAKFAST_CUTOFF_TIME, timezone = DEFAULT_BREAKFAST_CUTOFF_TIMEZONE) {
   try {
     const state = computeBreakfastCutoffState({
       serviceDate: date,
       now: /* @__PURE__ */ new Date(),
-      // The handler reads the same defaults the
-      // settings doc would supply. Reading from
-      // Firestore on every kitchen list hit is a
-      // worthwhile follow-up but not required for
-      // BR-07 (the defaults match the BR-02
-      // settings surface 99% of the time). Per
-      // BR-10 the `cutoffsEnabled` toggle IS
-      // re-read on every uncached request via
-      // `loadKitchenListCutoffsEnabled` so the
-      // late-change split honors the admin-side
-      // flip immediately.
-      cutoffTime: DEFAULT_BREAKFAST_CUTOFF_TIME,
-      timezone: DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
+      // Per BR-07-P2 (2026-10-22): the CONFIGURED cut-off
+      // time + timezone, read from `settings/breakfastConfig`
+      // — the same source the guest view + the staff view
+      // use. The pre-fix code passed the built-in defaults
+      // here, so the kitchen list ignored a Settings change.
+      //
+      // Per BR-10 the `cutoffsEnabled` toggle IS re-read on
+      // every uncached request via `loadKitchenListCutoffConfig`
+      // so the late-change split honors the admin-side flip
+      // immediately.
+      cutoffTime,
+      timezone,
       cutoffsEnabled
     });
     return {
@@ -245618,21 +245748,35 @@ function computeBreakfastCutoffStateSafe(date, cutoffsEnabled = true) {
     };
   }
 }
-var cutoffsEnabledCache = null;
+var cutoffConfigCache = null;
 var KITCHEN_LIST_CUTOFFS_CACHE_MS = 3e4;
-async function loadKitchenListCutoffsEnabled() {
+async function loadKitchenListCutoffConfig() {
   const now = Date.now();
-  if (cutoffsEnabledCache && now - cutoffsEnabledCache.at < KITCHEN_LIST_CUTOFFS_CACHE_MS) {
-    return cutoffsEnabledCache.value;
+  if (cutoffConfigCache && now - cutoffConfigCache.at < KITCHEN_LIST_CUTOFFS_CACHE_MS) {
+    return cutoffConfigCache.value;
   }
   try {
     const snap = await adminDb.collection("settings").doc("breakfastConfig").get();
     const source = snap.exists ? snap.data() : null;
-    const value = source?.cutoffsEnabled !== false;
-    cutoffsEnabledCache = { value, at: now };
+    const rawCutoff = String(source && source.cutoffTime || "").trim();
+    const rawZone = String(source && source.cutoffTimezone || "").trim();
+    const value = {
+      // The configured time / timezone are used only when they
+      // are well-formed; a malformed settings doc falls back to
+      // the built-in defaults (the same posture
+      // `breakfast-mark-served.ts` takes).
+      cutoffTime: /^([01]\d|2[0-3]):[0-5]\d$/.test(rawCutoff) ? rawCutoff : DEFAULT_BREAKFAST_CUTOFF_TIME,
+      cutoffTimezone: rawZone.length > 0 ? rawZone : DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
+      cutoffsEnabled: source?.cutoffsEnabled !== false
+    };
+    cutoffConfigCache = { value, at: now };
     return value;
   } catch {
-    return true;
+    return {
+      cutoffTime: DEFAULT_BREAKFAST_CUTOFF_TIME,
+      cutoffTimezone: DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
+      cutoffsEnabled: true
+    };
   }
 }
 async function handleGetKitchenList(req, res) {

@@ -165,12 +165,52 @@ Booking {
   // True if at least one breakfast selection exists. Replaces the
   // deleted `hasBreakfast` boolean for read sites that just need "is
   // there any breakfast on this booking".
+  //
+  // DENORMALIZATION — NOT authoritative. Per BR-07-P0 (2026-10-22,
+  // decision #310) the kitchen list must NOT gate on this flag: the
+  // walk-in write path never wrote it, so a flag-true query matched
+  // zero bookings and the chef's sheet was empty on every service
+  // date. The AUTHORITATIVE signal is a non-empty
+  // `breakfastSelections` map (plus the per-slot `removedAt`). The
+  // flag is still written by every write path (create / walk-in /
+  // reschedule / cancel) so it stops drifting for NEW bookings.
   hasAnyBreakfast: boolean
 
   // ... existing fields ...
 }
 
-BreakfastSlotKey = `${string}-${number}`   // "2026-10-14-0" — service date (yyyy-mm-dd) + guestIndex
+// The CANONICAL breakfast slot key (per BR-07-P1, 2026-10-22,
+// decision #310):
+//
+//   BreakfastSlotKey = `${yyyy-mm-dd}-guest-${guestIndex}`
+//                     // "2026-10-14-guest-0" — service date + 0-BASED guest index
+//
+// `guestIndex` is the index into the booking's `guests[]` array — the
+// FIRST guest is `guest-0`. "Guest 1" is a DISPLAY label
+// (`guestIndex + 1`), never part of the key.
+//
+// The shared contract lives in `shared/utils/breakfastSlotKey.ts`
+// (`buildBreakfastSlotKey` / `buildBreakfastSlotId` +
+// `normalizeBreakfastSelections`) and is used by the guest app, the
+// admin app, and the server, so the two apps cannot drift onto
+// different index bases again.
+//
+// LEGACY key forms still readable (folded in by the normaliser):
+//
+//   1. `<date>-guest-<n>`  — CANONICAL, 0-based.
+//   2. `<date>-<n>`        — the legacy bare form, 0-based (the
+//                             original spec's shape). Present on
+//                             production QA walk-in bookings.
+//   3. `<date>-guest-<n>`  — the legacy 1-based form the pre-fix
+//                             admin app wrote. Detected PER BOOKING
+//                             (a `guest-n` index reaching
+//                             `numGuests` cannot be a 0-based space)
+//                             and shifted down.
+//
+// The bare form is ALWAYS 0-based, so it maps onto the canonical key
+// with a prefix change and NO index shift. A booking that mixes the
+// bare form with the canonical form resolves to ONE slot per guest —
+// the kitchen never cooks the same guest twice.
 
 BreakfastSelectionEntry {
   mealId: string                           // snapshot reference
@@ -237,6 +277,16 @@ OnsitePayment {
 ### Kitchen list: no new collection
 
 The kitchen list is a **derived view** over `bookings/*` + `bookings/*/breakfastAudit/*`. No new Firestore collection. The cut-off "finalized" list is just "every booking with a `breakfastSelections[key]` whose `serviceDate` matches and whose `lastModifiedAt <= cutoffForDate(serviceDate)`". The "late changes" list is "every `breakfastAudit` entry with `occurredAfterCutoff: true` and `slotKey.date = X`". See `§Kitchen List` for the read query.
+
+**The read query (per BR-07-P0, 2026-10-22, decision #310).** The handler scans the `bookings` collection and filters IN MEMORY on the authoritative signal — a slot whose `serviceDate` matches the requested date and whose `removedAt` is null. It must **not** filter on the `hasAnyBreakfast` flag:
+
+- Firestore cannot OR two fields in one query, and a `!=` query does **not** match documents where the field is ABSENT (verified against production: `where("hasAnyBreakfast","!=",false)` returns 0 rows for the 49 flag-absent bookings), so there is no cheap server-side query that finds "every booking with a non-empty `breakfastSelections` map".
+- The pre-fix handler did exactly that anyway (`where("hasAnyBreakfast","==",true)`) while describing the filter as "best-effort" — it was the ONLY gate. Because the walk-in write path never wrote the flag, the query matched **zero** bookings and the chef's sheet was empty on every service date.
+- The collection is small (69 documents as of 2026-10-22) and the admin app already streams the whole collection (`onSnapshot(collection(db, "bookings"))` in `AdminContext.tsx`), so the scan is not a new access pattern. The response is cached for 30s.
+
+**Cancellation.** The per-slot `removedAt` is the ONLY cancellation gate. A cancelled booking (`hasAnyBreakfast: false`, `breakfastTotal: 0`, every slot `removedAt`-stamped) contributes **zero** meals — its meals must NOT reappear. A booking whose flag says `false` but whose slot was never removed still contributes a meal: the flag is a denormalization, the per-slot `removedAt` is the fact.
+
+**The cut-off (per BR-07-P2, 2026-10-22, decision #310).** The handler reads the CONFIGURED `breakfastConfig.cutoffTime` + `breakfastConfig.cutoffTimezone` from `settings/breakfastConfig` — the same settings doc the guest view (`breakfast-manage.ts`) and the staff view (`breakfast-mark-served.ts`) read. The pre-fix handler hard-coded `DEFAULT_BREAKFAST_CUTOFF_TIME` / `DEFAULT_BREAKFAST_CUTOFF_TIMEZONE`, so a Settings change moved the cut-off for the guest + the staff but not for the kitchen list. The built-in defaults survive only as the fallback when the settings doc is missing or malformed.
 
 ---
 
@@ -572,7 +622,7 @@ The 8 W4.4 audit-extension email templates (per `plan/features/EMAIL-AUDIT-EXTEN
 
 **Firebase:**
 - `firebase/firestore.rules` — extend `settings/breakfastConfig` write allow + add `bookings/*/breakfastAudit/*` rules + extend `bookings/*/refunds/*` rules to allow `category: "breakfast"` writes (already allow all, but pin the new fields)
-- `firebase/firestore.indexes.json` — add a composite index for the kitchen list query (`bookings where status in (...) and hasAnyBreakfast == true` + a `breakfastAudit where occurredAfterCutoff == true and slotKey.date == X` index)
+- `firebase/firestore.indexes.json` — a `breakfastAudit where occurredAfterCutoff == true and slotKey.date == X` index. The `bookings` side needs **no** composite index: per BR-07-P0 (decision #310) the kitchen list no longer queries `bookings` by a flag — it scans the collection and filters in memory.
 
 **MDs (this PR):**
 - `plan/features/BREAKFAST.md` — THIS SPEC
