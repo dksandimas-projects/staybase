@@ -30,6 +30,11 @@ import { cn } from "../../utils/cn";
 // Per P0-ADMIN-API-BASE (2026-10-22): the admin app must call the
 // guest app's API through `getApiBaseUrl()`, never a relative `/api`.
 import { getApiBaseUrl } from "../../utils/apiBaseUrl";
+import {
+  BREAKFAST_CATALOG_LOAD_ERROR,
+  resolveBreakfastCatalogView,
+  type PublicBreakfastConfigResponse
+} from "../../utils/breakfastCatalogView";
 
 export interface WalkinBreakfastSelections {
   breakfastSelections: Record<string, {
@@ -87,6 +92,13 @@ export function WalkinBreakfastGrid({
   // the same payload the public Step 2 page reads.
   const [config, setConfig] = useState<PublicBreakfastConfig | null>(null);
   const [configLoading, setConfigLoading] = useState(true);
+  // Per P0-9 (2026-10-22): a FAILED read is not the same thing as
+  // "breakfast is switched off". The old code swallowed the failure and
+  // fell through to "Breakfast not enabled" — wrong twice over (the
+  // request failed, and the grid never re-read the catalog, so the
+  // wrong message stuck until the page reloaded).
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [configRetryToken, setConfigRetryToken] = useState(0);
 
   // Local selected-meal map (slotKey -> mealId | null).
   // `null` means "no meal for this slot" — the rich
@@ -97,6 +109,7 @@ export function WalkinBreakfastGrid({
   useEffect(() => {
     let cancelled = false;
     setConfigLoading(true);
+    setConfigError(null);
     (async () => {
       try {
         // Per P0-ADMIN-API-BASE (2026-10-22): the guest API lives on a
@@ -108,12 +121,23 @@ export function WalkinBreakfastGrid({
           `${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/breakfast/config`,
           { method: "GET" }
         );
-        const data: any = await res.json();
-        if (!cancelled && data?.success && data?.data) {
-          setConfig(data.data as PublicBreakfastConfig);
+        // The breakfast config endpoint answers
+        // `{ success, data: { isEnabled, meals, ... } }` — the config
+        // lives under `data` (this is the endpoint whose shape the
+        // ADD-ONS consumers used to read by mistake; decision #313).
+        const data: PublicBreakfastConfigResponse<PublicBreakfastConfig> =
+          await res.json();
+        if (cancelled) return;
+        if (!res.ok || !data?.success || !data?.data) {
+          setConfig(null);
+          setConfigError(BREAKFAST_CATALOG_LOAD_ERROR);
+          return;
         }
+        setConfig(data.data);
       } catch {
-        // Silent — keep null
+        if (cancelled) return;
+        setConfig(null);
+        setConfigError(BREAKFAST_CATALOG_LOAD_ERROR);
       } finally {
         if (!cancelled) setConfigLoading(false);
       }
@@ -121,7 +145,7 @@ export function WalkinBreakfastGrid({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [configRetryToken]);
 
   const dates = useMemo(() => {
     const startMs = Date.parse(`${checkIn.slice(0, 10)}T00:00:00Z`);
@@ -248,7 +272,16 @@ export function WalkinBreakfastGrid({
     });
   }, [config, sortedMeals, selected, anyLocked, overrideReason, staffUid, onChange]);
 
-  if (configLoading) {
+  // Per P0-9: ONE resolver decides what this surface shows, so the
+  // "a failed read is never rendered as an empty catalog" rule is unit
+  // tested instead of only observable in a running browser.
+  const breakfastView = resolveBreakfastCatalogView({
+    loading: configLoading,
+    error: configError,
+    config
+  });
+
+  if (breakfastView.kind === "loading") {
     return (
       <div className="flex items-center gap-2 text-xs text-gray-500">
         <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Loading breakfast catalog…
@@ -256,7 +289,30 @@ export function WalkinBreakfastGrid({
     );
   }
 
-  if (!config || !config.isEnabled) {
+  if (breakfastView.kind === "error") {
+    // Per P0-9: the failed read gets its own state — the "not enabled"
+    // copy is only true when the server actually said so.
+    return (
+      <div
+        className="rounded-lg border border-red-200 bg-red-50 p-3 text-[11px] text-red-800"
+        data-testid="walkin-breakfast-error"
+      >
+        <p className="font-bold">{breakfastView.message}</p>
+        <p className="mt-1 text-red-700">
+          The meals on this booking are untouched — only the catalog list failed to load.
+        </p>
+        <button
+          type="button"
+          onClick={() => setConfigRetryToken((n) => n + 1)}
+          className="mt-2 inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[11px] font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  if (breakfastView.kind === "disabled") {
     return (
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800">
         <p className="font-bold">Breakfast not enabled</p>

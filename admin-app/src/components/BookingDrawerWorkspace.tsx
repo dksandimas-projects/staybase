@@ -72,6 +72,11 @@ import {
   ADDONS_CATALOG_LOAD_ERROR,
   resolveAddOnsCatalogView
 } from "../utils/addOnsCatalogView";
+import {
+  BREAKFAST_CATALOG_LOAD_ERROR,
+  resolveBreakfastCatalogView,
+  type PublicBreakfastConfigResponse
+} from "../utils/breakfastCatalogView";
 import { auth } from "../firebase/auth";
 import { useToast } from "./Toast";
 import { StatusBadge } from "./StatusBadge";
@@ -821,6 +826,15 @@ export function BookingDrawerBreakfastTab({
   // dropdown option visible).
   const [config, setConfig] = useState<PublicBreakfastConfig | null>(null);
   const [configLoading, setConfigLoading] = useState(true);
+  // Per P0-9 (2026-10-22): a FAILED read is NOT the same thing as
+  // "breakfast is switched off". The old code swallowed the failure and
+  // fell through to the "Breakfast is not enabled" gate, which told the
+  // staff to go change a setting that was already correct — and the tab
+  // never re-fetched, so the wrong message stuck until the whole page
+  // was reloaded. `configError` gives the failure its own state and
+  // `configRetryToken` re-runs the read without a page reload.
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [configRetryToken, setConfigRetryToken] = useState(0);
 
   // Local batch edits (slotKey -> { mealId: string, mealName: string,
   // price: number } | null). Null means "remove this slot".
@@ -864,10 +878,11 @@ export function BookingDrawerBreakfastTab({
 
   const firstDropdownRef = useRef<HTMLSelectElement | null>(null);
 
-  // Config fetch on mount.
+  // Config fetch on mount (and again on retry).
   useEffect(() => {
     let cancelled = false;
     setConfigLoading(true);
+    setConfigError(null);
     (async () => {
       try {
         // Per P0-ADMIN-API-BASE (2026-10-22): the guest API lives on a
@@ -880,13 +895,27 @@ export function BookingDrawerBreakfastTab({
           `${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/breakfast/config`,
           { method: "GET" }
         );
-        const data: any = await res.json();
-        if (!cancelled) {
-          if (data?.success && data?.data) setConfig(data.data as PublicBreakfastConfig);
-          else setConfig((prev) => prev);
+        // The breakfast config endpoint answers
+        // `{ success, data: { isEnabled, meals, ... } }` — the config
+        // lives under `data` (this is the endpoint whose shape the
+        // ADD-ONS consumers used to read by mistake).
+        const data: PublicBreakfastConfigResponse<PublicBreakfastConfig> =
+          await res.json();
+        if (cancelled) return;
+        if (!res.ok || !data?.success || !data?.data) {
+          // Per P0-9: a failed read is its own state, NOT "breakfast is
+          // switched off". Falling through to the disabled copy here is
+          // what sent the staff to Settings to re-enable a service that
+          // was already on.
+          setConfig(null);
+          setConfigError(BREAKFAST_CATALOG_LOAD_ERROR);
+          return;
         }
+        setConfig(data.data);
       } catch {
-        // silent — keep null
+        if (cancelled) return;
+        setConfig(null);
+        setConfigError(BREAKFAST_CATALOG_LOAD_ERROR);
       } finally {
         if (!cancelled) setConfigLoading(false);
       }
@@ -894,7 +923,7 @@ export function BookingDrawerBreakfastTab({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [configRetryToken]);
 
   // ---------- Derived: dates × slots × per-date lock state ----------
 
@@ -1343,7 +1372,16 @@ export function BookingDrawerBreakfastTab({
 
   // ---------- Render ----------
 
-  if (configLoading) {
+  // Per P0-9: ONE resolver decides what this surface shows, so the
+  // "a failed read is never rendered as an empty catalog" rule is unit
+  // tested instead of only observable in a running browser.
+  const breakfastView = resolveBreakfastCatalogView({
+    loading: configLoading,
+    error: configError,
+    config
+  });
+
+  if (breakfastView.kind === "loading") {
     return (
       <div className="space-y-4" data-testid="booking-drawer-breakfast-loading">
         <div className="flex items-center gap-2 text-xs font-semibold text-gray-500">
@@ -1353,7 +1391,34 @@ export function BookingDrawerBreakfastTab({
     );
   }
 
-  if (!config || !config.isEnabled) {
+  if (breakfastView.kind === "error") {
+    // Per P0-9: the failed read gets its own state — the "Breakfast is
+    // not enabled" copy is only true when the server actually said so.
+    return (
+      <div
+        className="rounded-card border border-red-200 bg-red-50 p-4 text-xs text-red-800"
+        data-testid="booking-drawer-breakfast-error"
+      >
+        <p className="font-bold">{breakfastView.message}</p>
+        <p className="mt-1 text-red-700">
+          The meals on this booking are untouched — only the catalog list failed to load.
+        </p>
+        <button
+          type="button"
+          onClick={() => setConfigRetryToken((n) => n + 1)}
+          className="mt-3 inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  // The resolver carries the config on the ready branch, so the rest of
+  // the tab does not have to re-narrow the nullable state.
+  const breakfastConfig = breakfastView.kind === "ready" ? breakfastView.config : null;
+
+  if (breakfastView.kind === "disabled") {
     return (
       <div className="rounded-card border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800" data-testid="booking-drawer-breakfast-disabled">
         <p className="font-bold">Breakfast is not enabled</p>
@@ -1445,7 +1510,7 @@ export function BookingDrawerBreakfastTab({
                         <AlertTriangle size={12} aria-hidden="true" /> Cutoff passed — late changes logged
                       </>
                     ) : (
-                      <>Order by {date}, {String(config.cutoffTime || "20:00")}</>
+                      <>Order by {date}, {String(breakfastConfig?.cutoffTime || "20:00")}</>
                     )}
                   </span>
                 </header>
