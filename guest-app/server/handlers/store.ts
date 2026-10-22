@@ -13,6 +13,14 @@ interface CreateStoreOrderBody {
   roomNumber: string;
   guestName: string;
   items: StoreOrderItemInput[];
+  // Per RPT-17 / F08 (2026-10-22): the intercom session capability
+  // token the server issued to the guest in this room. It is the
+  // guest's ONLY credential for `create-order` — the body fields
+  // above are all attacker-controlled, so without this token any
+  // caller who knew a room number could place a store order in that
+  // guest's name. Staff requests carry a Firebase ID token instead
+  // (the router sets `req.staff`) and do not need this field.
+  sessionToken?: string;
   // `paymentMethod` is the open string key the admin configured
   // for the store — see `plan/features/SETTINGS.md §11 Store`.
   // Open string key from `settings/hotelConfig.paymentMethods[]`.
@@ -52,6 +60,10 @@ const MAX_NOTES_LENGTH = 500;
 const MAX_ROOM_NUMBER_LENGTH = 12;
 const MAX_ORDER_REF_LENGTH = 40;
 const MAX_REASON_LENGTH = 500;
+// Per RPT-17 / F08 (2026-10-22): the intercom capability token is
+// 32 hex characters (128 bits). The cap mirrors the guest-message
+// schema's `sessionToken` bound in `handlers/intercom.ts`.
+const MAX_SESSION_TOKEN_LENGTH = 64;
 
 export async function handleDeliverStoreOrder(req: any, res: any) {
   if (req.method !== "POST") {
@@ -154,12 +166,91 @@ export async function handleDeliverStoreOrder(req: any, res: any) {
 // `shared/utils/bookingDates.ts` and is imported as
 // `getManilaDateInfo` above. Local definition removed BF-42.
 
+// Per RPT-17 / F08 (2026-10-22): the credential gate for
+// `create-order`.
+//
+// ROOT CAUSE. A store order is a guest action with two costs: the
+// hotel has to fulfil it, and it lands in that guest's folio. The
+// create endpoint used to validate the request BODY only —
+// `roomId`, `roomNumber`, `guestName` and `items` were all
+// attacker-controlled — so any caller who knew a room number could
+// place a minibar order in that guest's name.
+//
+// THE CREDENTIAL. The guest already holds one: the intercom session
+// capability token the server issues at `POST /api/intercom/verify-guest`
+// and stores on `intercoms/{roomNumber}.currentStayToken`. It is 32
+// hex characters of `crypto.randomBytes(16)` (128 bits), it is stable
+// for the duration of the stay, and it is regenerated whenever the
+// stay changes — the same "unguessable share link" model the
+// booking-lookup token uses, and the same credential
+// `handleSendGuestMessage` already re-verifies.
+//
+// WHY THIS DOC. `intercoms/{roomNumber}` is the SERVER's own record
+// of "which token belongs to which room + which stay". It is the
+// authoritative token → room binding (the `intercomSessions/{token}`
+// path holds the guest's THREAD, not the binding — the parent
+// document is never written, so it cannot be the authority here).
+// Reading it through the Admin SDK needs no Firestore-rules change.
+//
+// The staff path is unaffected: the front desk authenticates with a
+// Firebase ID token (the router sets `req.staff`) and skips this
+// check entirely.
+type StoreOrderSessionCheck =
+  | { ok: true; stayId: string }
+  | { ok: false; status: number; error: string };
+
+async function verifyStoreOrderSession(params: {
+  roomNumber: string;
+  sessionToken: string;
+}): Promise<StoreOrderSessionCheck> {
+  const { roomNumber, sessionToken } = params;
+
+  const intercomSnap = await adminDb.collection("intercoms").doc(roomNumber).get();
+  const intercom = intercomSnap.exists ? (intercomSnap.data() || {}) : {};
+  const issuedToken = String(intercom.currentStayToken || "");
+  const stayId = String(intercom.currentStayId || "");
+
+  // A missing / unknown token and a token issued for ANOTHER room
+  // are indistinguishable on purpose: the caller must not be able to
+  // probe which tokens exist. Both are a rejected credential.
+  if (!issuedToken || !stayId || issuedToken !== sessionToken) {
+    return {
+      ok: false,
+      status: 403,
+      error: "Your in-room session is not valid for this room. Please verify your stay again."
+    };
+  }
+
+  return { ok: true, stayId };
+}
+
 export async function handleCreateStoreOrder(req: any, res: any) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
 
   const body = (req.body || {}) as CreateStoreOrderBody;
+
+  // Per RPT-17 / F08 (2026-10-22): the credential gate. Staff (the
+  // front desk) create with a Firebase ID token — the router sets
+  // `req.staff`. Everyone else must present the intercom session
+  // capability token for THIS room.
+  const isStaffRequest = !!(req.staff && req.staff.uid);
+  let sessionStayId: string | null = null;
+
+  if (!isStaffRequest) {
+    const sessionToken = typeof body.sessionToken === "string" ? body.sessionToken.trim() : "";
+    // A missing credential is an AUTH failure, not a validation
+    // error — the caller must be able to tell "you are not
+    // authenticated" apart from "your order is malformed".
+    if (!sessionToken || sessionToken.length > MAX_SESSION_TOKEN_LENGTH) {
+      return res.status(401).json({
+        success: false,
+        error: "Your in-room session has expired. Please verify your stay again."
+      });
+    }
+  }
+
   if (!body || !body.roomId || !body.roomNumber || !body.guestName || !Array.isArray(body.items) || body.items.length === 0) {
     return res.status(400).json({ success: false, error: "Missing required store order fields." });
   }
@@ -180,6 +271,20 @@ export async function handleCreateStoreOrder(req: any, res: any) {
   }
   if (guestName.length === 0 || guestName.length > MAX_GUEST_NAME_LENGTH) {
     return res.status(400).json({ success: false, error: "Please share the guest's name (up to 120 characters)." });
+  }
+
+  // Per RPT-17 / F08 (2026-10-22): the guest's session capability
+  // token must be the one the server issued for THIS room's current
+  // stay. A token issued for another room, a token from a previous
+  // stay, and an unknown token are all rejected here — the request
+  // never reaches the transaction.
+  if (!isStaffRequest) {
+    const sessionToken = String(body.sessionToken).trim();
+    const verified = await verifyStoreOrderSession({ roomNumber, sessionToken });
+    if (!verified.ok) {
+      return res.status(verified.status).json({ success: false, error: verified.error });
+    }
+    sessionStayId = verified.stayId;
   }
 
   if (typeof body.paymentMethod !== "string" || body.paymentMethod.length === 0) {
@@ -293,14 +398,37 @@ export async function handleCreateStoreOrder(req: any, res: any) {
         };
       });
 
+      // Per RPT-17 / F08 (2026-10-22): the guest's order is bound to
+      // the stay their session token was issued for — NOT to "any
+      // active booking that happens to carry this room number"
+      // (a room can hold a future booking for the next guest, and
+      // the room-scoped query returns an arbitrary one of them).
+      // Staff requests keep the room-scoped lookup: the desk is
+      // placing the order on the guest's behalf.
+      //
+      // Per FOL-03: this is a READ, so it stays above the writes.
       let bookingId: string | null = null;
-      const activeBookingQuery = adminDb.collection("bookings")
-        .where("roomNumber", "==", roomNumber)
-        .where("status", "in", ["confirmed", "checked-in"])
-        .limit(1);
-      const activeBookingSnapshot = await transaction.get(activeBookingQuery);
-      if (!activeBookingSnapshot.empty) {
-        bookingId = activeBookingSnapshot.docs[0].id;
+      if (sessionStayId) {
+        const staySnap = await transaction.get(adminDb.collection("bookings").doc(sessionStayId));
+        if (!staySnap.exists) {
+          throw new Error("NO_ACTIVE_BOOKING");
+        }
+        const stay = staySnap.data() || {};
+        const stayRoom = String(stay.roomNumber || "").trim();
+        const stayStatus = String(stay.status || "");
+        if (stayRoom !== roomNumber || (stayStatus !== "confirmed" && stayStatus !== "checked-in")) {
+          throw new Error("NO_ACTIVE_BOOKING");
+        }
+        bookingId = staySnap.id;
+      } else {
+        const activeBookingQuery = adminDb.collection("bookings")
+          .where("roomNumber", "==", roomNumber)
+          .where("status", "in", ["confirmed", "checked-in"])
+          .limit(1);
+        const activeBookingSnapshot = await transaction.get(activeBookingQuery);
+        if (!activeBookingSnapshot.empty) {
+          bookingId = activeBookingSnapshot.docs[0].id;
+        }
       }
 
       // Per H4 (hardening batch 2026-06-26): the in-room
@@ -315,8 +443,8 @@ export async function handleCreateStoreOrder(req: any, res: any) {
       //
       // Staff walk-ins (handled by the staff app, which
       // authenticates with a Firebase ID token + sets
-      // `req.staff`) bypass this check via the route
-      // allowlist.
+      // `req.staff`) bypass the guest-session check via the
+      // route allowlist.
       if (!bookingId) {
         throw new Error("NO_ACTIVE_BOOKING");
       }

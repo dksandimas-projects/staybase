@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { mockBookings, mockStoreOrders, mockStoreItems, mockSettings, sendTrigger } = vi.hoisted(() => {
+const { mockBookings, mockIntercoms, mockStoreOrders, mockStoreItems, mockSettings, sendTrigger } = vi.hoisted(() => {
   const mockBookings: Record<string, any> = {};
+  const mockIntercoms: Record<string, any> = {};
   const mockStoreOrders: Record<string, any> = {};
   const mockStoreItems: Record<string, any> = {};
   const mockSettings: Record<string, any> = {};
   const sendTrigger = vi.fn().mockResolvedValue(undefined);
-  return { mockBookings, mockStoreOrders, mockStoreItems, mockSettings, sendTrigger };
+  return { mockBookings, mockIntercoms, mockStoreOrders, mockStoreItems, mockSettings, sendTrigger };
 });
 
 vi.mock("../../server/handlers/email", () => ({
@@ -20,6 +21,7 @@ vi.mock("../../server/lib/firebase-admin", () => {
     path: `${collection}/${id}`,
     get: async () => {
       const store = collection === "bookings" ? mockBookings
+        : collection === "intercoms" ? mockIntercoms
         : collection === "storeOrders" ? mockStoreOrders
         : collection === "storeItems" ? mockStoreItems
         : collection === "settings" ? mockSettings
@@ -31,6 +33,7 @@ vi.mock("../../server/lib/firebase-admin", () => {
     },
     set: (data: any) => {
       const store = collection === "bookings" ? mockBookings
+        : collection === "intercoms" ? mockIntercoms
         : collection === "storeOrders" ? mockStoreOrders
         : collection === "storeItems" ? mockStoreItems
         : collection === "settings" ? mockSettings
@@ -61,6 +64,7 @@ vi.mock("../../server/lib/firebase-admin", () => {
       get: async function () {
         chain._filters = chain._filters || [];
         const store = collName === "bookings" ? mockBookings
+          : collName === "intercoms" ? mockIntercoms
           : collName === "storeOrders" ? mockStoreOrders
           : collName === "storeItems" ? mockStoreItems
           : collName === "settings" ? mockSettings
@@ -113,10 +117,16 @@ const mockResponse = () => {
 
 const ITEM_ID = "item_water";
 const ACTIVE_BOOKING_ID = "booking_active";
+// Per RPT-17 / F08 (2026-10-22): the guest's create-order now
+// carries the intercom session capability token the server issued
+// for this room's current stay. The server records it on the
+// staff-only `intercoms/{roomNumber}` doc as `currentStayToken`.
+const SESSION_TOKEN = "0123456789abcdef0123456789abcdef";
 
 describe("handleCreateStoreOrder (H4)", () => {
   beforeEach(() => {
     Object.keys(mockBookings).forEach((k) => delete mockBookings[k]);
+    Object.keys(mockIntercoms).forEach((k) => delete mockIntercoms[k]);
     Object.keys(mockStoreOrders).forEach((k) => delete mockStoreOrders[k]);
     Object.keys(mockStoreItems).forEach((k) => delete mockStoreItems[k]);
     Object.keys(mockSettings).forEach((k) => delete mockSettings[k]);
@@ -126,6 +136,12 @@ describe("handleCreateStoreOrder (H4)", () => {
       roomNumber: "101",
       status: "checked-in",
       guestEmail: "guest@example.test"
+    };
+    mockIntercoms["101"] = {
+      roomId: "101",
+      roomNumber: "101",
+      currentStayId: ACTIVE_BOOKING_ID,
+      currentStayToken: SESSION_TOKEN
     };
     // Store checkout payment methods are sourced from
     // `settings/hotelConfig.paymentMethods[]` and filtered by
@@ -153,7 +169,8 @@ describe("handleCreateStoreOrder (H4)", () => {
           roomNumber: "101",
           guestName: "Maria Santos",
           items: [{ itemId: ITEM_ID, quantity: 2 }],
-          paymentMethod: "cod"
+          paymentMethod: "cod",
+          sessionToken: SESSION_TOKEN
         }
       } as any,
       res
@@ -175,7 +192,8 @@ describe("handleCreateStoreOrder (H4)", () => {
           roomNumber: "101",
           guestName: "Maria Santos",
           items: [{ itemId: ITEM_ID, quantity: 1 }],
-          paymentMethod: "cod"
+          paymentMethod: "cod",
+          sessionToken: SESSION_TOKEN
         }
       } as any,
       res
@@ -194,7 +212,8 @@ describe("handleCreateStoreOrder (H4)", () => {
           roomNumber: "101",
           guestName: "x".repeat(200),
           items: [{ itemId: ITEM_ID, quantity: 1 }],
-          paymentMethod: "cod"
+          paymentMethod: "cod",
+          sessionToken: SESSION_TOKEN
         }
       } as any,
       res
@@ -212,7 +231,8 @@ describe("handleCreateStoreOrder (H4)", () => {
           roomNumber: "  101  ",
           guestName: "  Maria Santos  ",
           items: [{ itemId: ITEM_ID, quantity: 1 }],
-          paymentMethod: "cod"
+          paymentMethod: "cod",
+          sessionToken: SESSION_TOKEN
         }
       } as any,
       res
