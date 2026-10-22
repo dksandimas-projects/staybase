@@ -268,6 +268,19 @@ import {
   redateOtherAddOnSelections
 } from "@spark-inn/shared";
 
+// Per BR-08 (P1 MONEY, 2026-10-22): the booking-scoped
+// `paidAmount` arithmetic. The two production payment-record
+// paths (`handleAddPayment` + `handleVerifyAndRecordPayment`)
+// maintain the booking's `paidAmount` with it — the money
+// collected against that booking. Before this fix the field was
+// only ever DECREMENTED (by the refund path), so every read fell
+// back to 0 and the refund-liability gate never opened.
+import {
+  computeNextBookingPaidAmount,
+  sumAttributedLedgerEntryAmounts,
+  sumLedgerEntryAmounts
+} from "@spark-inn/shared";
+
 // Per OCT-H8 (2026-10-20, decision #288): the audit + refund
 // liability writers the reschedule + cancel paths use for the
 // auto-cancelled selections.
@@ -9448,6 +9461,58 @@ export async function handleAddPayment(req: any, res: any) {
 
       const bookingUpdates: Record<string, any> = {};
 
+      // Per BR-08 (P1 MONEY, 2026-10-22): the payment write ALSO
+      // maintains the booking's `paidAmount` — the money collected
+      // AGAINST that booking.
+      //
+      // THE DEFECT: `paidAmount` had no production writer at all.
+      // The only writer was the refund path (`server/lib/refunds.ts`),
+      // which DECREMENTS it. A booking with money collected against it
+      // therefore carried no `paidAmount`, and every read fell back to
+      // 0 — including the refund-liability gate
+      // (`redateBreakfastSelections`), whose "was this meal paid
+      // for?" test (`remainingPaid >= amount`) could never be true.
+      // Cancelling a booking with a paid breakfast opened ZERO refund
+      // rows: the hotel collected the money and never refunded it.
+      //
+      // THE BASE:
+      //   • the booking doc's current `paidAmount` when it has one
+      //     (the normal case — the refund paths decrement this same
+      //     value, so it must stay INCREMENTAL and must not be
+      //     recomputed from the ledger); or
+      //   • the ledger seed when the booking predates this fix and
+      //     carries no `paidAmount` at all, so the first post-fix
+      //     payment lands on the right running total instead of
+      //     restarting from zero.
+      //
+      // The seed is scope-aware: the legacy `bookings/{id}/payments`
+      // subcollection holds THIS booking's payments only; the
+      // reservation-scope `reservations/{rid}/payments` subcollection
+      // holds EVERY room's, so only the entries the record attributes
+      // to this booking (`bookingId`) count — the same attribution the
+      // admin app's canonical payment ledger uses (RPT-01).
+      //
+      // A store-order tender (`storeOrders/{id}/payments/delivery-tender`)
+      // is NEVER counted: it is not a room-folio payment, and the
+      // folio already adds a billed add-to-bill order to the grand
+      // total via `storeTotal`.
+      const legacyCollectedAmount = bookingReservationId.length > 0
+        ? sumAttributedLedgerEntryAmounts(
+          paymentsSnapshot.docs.map((docSnap: any) => ({
+            amount: docSnap.data()?.amount,
+            bookingId: docSnap.data()?.bookingId
+          })),
+          bookingId
+        )
+        : sumLedgerEntryAmounts(
+          paymentsSnapshot.docs.map((docSnap: any) => ({ amount: docSnap.data()?.amount }))
+        );
+      bookingUpdates.paidAmount = computeNextBookingPaidAmount({
+        currentPaidAmount: (bookingData as any).paidAmount,
+        recordedAmount: numericAmount,
+        legacyCollectedAmount
+      });
+
       // Mark the staff-new-payment dedup inside the transaction so a
       // concurrent addPayment call doesn't re-fire the staff alert.
       if (hadPaymentProof && staffPaymentMarkerMissing) {
@@ -10688,6 +10753,42 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
       const bookingUpdates: Record<string, any> = {
         updatedAt: now
       };
+      // Per BR-08 (P1 MONEY, 2026-10-22): the verified payment write
+      // ALSO maintains the booking's `paidAmount` — the money
+      // collected AGAINST that booking. Same contract as
+      // `handleAddPayment` (see the long note there): the field had
+      // NO production writer before this fix (only the refund path
+      // decremented it), so every read fell back to 0 and the
+      // refund-liability gate never opened.
+      //
+      // The base is the booking doc's current `paidAmount`, or the
+      // ledger seed for a booking that predates the fix. The seed is
+      // scope-aware: the legacy `bookings/{id}/payments` subcollection
+      // holds THIS booking's payments only; the reservation-scope
+      // `reservations/{rid}/payments` subcollection holds EVERY room's,
+      // so only the entries attributed to this booking (`bookingId`)
+      // count — the same attribution the admin app's canonical
+      // payment ledger uses (RPT-01).
+      //
+      // A store-order tender is NEVER counted: it is not a room-folio
+      // payment (the folio adds a billed add-to-bill order to the
+      // grand total via `storeTotal`).
+      const legacyCollectedAmount = bookingReservationId.length > 0
+        ? sumAttributedLedgerEntryAmounts(
+          paymentsSnapshot.docs.map((docSnap: any) => ({
+            amount: docSnap.data()?.amount,
+            bookingId: docSnap.data()?.bookingId
+          })),
+          bookingId
+        )
+        : sumLedgerEntryAmounts(
+          paymentsSnapshot.docs.map((docSnap: any) => ({ amount: docSnap.data()?.amount }))
+        );
+      bookingUpdates.paidAmount = computeNextBookingPaidAmount({
+        currentPaidAmount: (data as any).paidAmount,
+        recordedAmount: numericAmount,
+        legacyCollectedAmount
+      });
       if (targetPostStatus !== data.status) {
         bookingUpdates.status = targetPostStatus;
         bookingUpdates.handledBy = staffUid;
