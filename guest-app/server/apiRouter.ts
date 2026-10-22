@@ -1930,6 +1930,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(429).json({ success: false, error: "Too many store order requests. Please try again in a minute." });
     }
 
+    // Per RPT-17 / F08 (2026-10-22): `create-order` has TWO
+    // credentials, and the route has to offer both.
+    //   - the GUEST in the room presents the intercom session
+    //     capability token (`sessionToken`), which the handler
+    //     verifies against `intercoms/{roomNumber}.currentStayToken`
+    //     — the same binding `handleSendGuestMessage` uses. A
+    //     missing / unknown / mismatched token is rejected 401/403.
+    //   - STAFF present a Firebase ID token. `authenticateStaff`
+    //     is attempted FIRST: on success the handler runs its
+    //     staff path and skips the guest-session check, exactly
+    //     like the other staff routes in this router.
+    // Staff auth that does not apply (no bearer header) falls
+    // through to the guest path rather than failing the request —
+    // the guest has no Firebase session.
+    const authResult = await authenticateStaff(req);
+    if (authResult.success) {
+      (req as any).staff = authResult;
+    }
 
     return await handleCreateStoreOrder(req, res);
   }

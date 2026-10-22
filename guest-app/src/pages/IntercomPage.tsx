@@ -1116,6 +1116,16 @@ export function IntercomPage() {
       return;
     }
 
+    // Per RPT-17 / F08 (2026-10-22): a store order lands in the
+    // guest's folio, so the server needs to know the caller really
+    // is the guest in this room. The intercom session capability
+    // token is that credential — the server verifies it against the
+    // room's current stay. Without it the request is rejected.
+    if (!sessionToken) {
+      setStoreError("Please verify your stay before placing an order.");
+      return;
+    }
+
     setIsUploadingProof(true);
     setStoreError("");
 
@@ -1137,6 +1147,10 @@ export function IntercomPage() {
           guestName,
           items: cart.map(({ item, quantity }) => ({ itemId: item.id, quantity })),
           paymentMethod,
+          // Per RPT-17 / F08 (2026-10-22): the intercom session
+          // capability token. The server re-verifies it against
+          // this room's current stay before it accepts the order.
+          sessionToken,
           paymentProofPath
         })
       });

@@ -168,6 +168,11 @@ describe("/api/store/order-status", () => {
 
     const req = {
       method: "POST",
+      // Per RPT-17 / F08 (2026-10-22): a guest create-order carries the
+      // intercom session capability token; this suite drives the
+      // STAFF path (the desk places the order on the guest's behalf),
+      // so it authenticates with a staff token instead.
+      staff: { uid: "staff_test", role: "front-desk" },
       body: {
         roomId: "room_202",
         roomNumber: "202",
@@ -223,6 +228,7 @@ describe("/api/store/order-status", () => {
     mockState.storeItems.coffee.stock = 1;
     const req = {
       method: "POST",
+      staff: { uid: "staff_test", role: "front-desk" },
       body: {
         roomId: "room_202",
         roomNumber: "202",
