@@ -39,12 +39,16 @@ import {
   // Per BR-12.1 (2026-10-15, decision #247): the
   // booking-drawer "Other Add-Ons" tab full edit UI
   // uses the same shared helpers as the public
-  // booking flow (`getEnabledAddOnsByHotel`,
-  // `computeOtherAddOnCutoffState`, `recomputeOtherAddOnTotal`)
-  // — the source of truth is shared across the
-  // guest-app + admin-app surfaces.
+  // booking flow (`computeOtherAddOnCutoffState`,
+  // `recomputeOtherAddOnTotal`) — the source of truth is
+  // shared across the guest-app + admin-app surfaces.
+  //
+  // NOTE: `getEnabledAddOnsByHotel` is NOT applied to the public
+  // catalog payload. The endpoint already applied the `isEnabled`
+  // filter and the hotel-wide master switch, and the public payload
+  // carries no `isEnabled` field — re-filtering client-side would
+  // drop every row.
   computeOtherAddOnCutoffState,
-  getEnabledAddOnsByHotel,
   recomputeOtherAddOnTotal,
   type AddOn,
   type BreakfastSelectionEntry,
@@ -292,12 +296,17 @@ export function BookingDrawerWorkspaceHeader({
                 }
                 return <span>{booking.numGuests} guest{booking.numGuests === 1 ? "" : "s"}</span>;
               })()}
-              // Per BR-08 (decision #238, 2026-10-14 — close-out): the
-                // legacy `booking.hasBreakfast: boolean` flag is
-                // gone. The drawer's overview summary reads the
-                // new rich `booking.breakfastSelections` map
-                // directly (the meal count + the snapshotted
-                // total).
+              {/* Per BR-08 (decision #238, 2026-10-14 — close-out): the
+                  legacy `booking.hasBreakfast: boolean` flag is
+                  gone. The drawer's overview summary reads the
+                  new rich `booking.breakfastSelections` map
+                  directly (the meal count + the snapshotted
+                  total).
+                  NOTE: this MUST stay a JSX comment. A bare `//` line
+                  inside JSX children is not a comment — JSX parses it
+                  as literal text and the browser paints it, which is
+                  how this note ended up rendered in the drawer header
+                  in production. */}
                 <span>
                   {(booking.breakfastSelections && Object.keys(booking.breakfastSelections).length > 0)
                     ? `${Object.keys(booking.breakfastSelections).length} meal${Object.keys(booking.breakfastSelections).length === 1 ? "" : "s"}`
@@ -2098,6 +2107,12 @@ export function BookingDrawerOtherAddOnsTab({
   // a stale dropdown option visible).
   const [catalog, setCatalog] = useState<AddOn[] | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(true);
+  // Per OCT-M1 (decision #295): the hotel-wide "Add-ons enabled"
+  // master switch, echoed by the public catalog endpoint. It lets the
+  // empty state tell "the hotel took other add-ons off sale" apart
+  // from "the hotel has no other add-ons" — the two need different
+  // copy, and only the first is a state the staff can change.
+  const [catalogEnabled, setCatalogEnabled] = useState(true);
 
   // Local `pending` map: { date-addOnId: { kind, quantity, ... } }.
   // Edits accumulate here; the "Save changes" button flushes
@@ -2150,8 +2165,22 @@ export function BookingDrawerOtherAddOnsTab({
           { method: "GET" }
         );
         const data: any = await res.json();
-        if (!cancelled && data?.success && Array.isArray(data?.data)) {
-          setCatalog(getEnabledAddOnsByHotel(data.data as AddOn[]));
+        // The public add-ons catalog endpoint answers
+        // `{ success, addOns: [...], otherAddOnsEnabled, preSeeded }` —
+        // the rows live under `addOns`, NOT under `data` (that is the
+        // BREAKFAST config endpoint's shape). The pre-fix check read
+        // `data.data`, which is always undefined here, so the catalog
+        // stayed null and the tab rendered "The add-on catalog is
+        // empty" even while the endpoint was serving rows.
+        //
+        // The rows are used AS-IS: the endpoint already applied the
+        // `isEnabled` filter and the hotel-wide master switch, and the
+        // public payload does not carry `isEnabled` at all — so
+        // re-running `getEnabledAddOnsByHotel` client-side would drop
+        // EVERY row.
+        if (!cancelled && data?.success && Array.isArray(data?.addOns)) {
+          setCatalog(data.addOns as AddOn[]);
+          setCatalogEnabled(data?.otherAddOnsEnabled !== false);
         }
       } catch {
         // silent — keep null
@@ -2450,7 +2479,9 @@ export function BookingDrawerOtherAddOnsTab({
       >
         <p className="font-heading text-base text-gray-950">Other Add-Ons</p>
         <p className="mt-2 text-xs text-amber-800">
-          The add-on catalog is empty. Add a row in Settings → Other Add-Ons to start selling add-ons.
+          {catalogEnabled
+            ? "The add-on catalog is empty. Add a row in Settings → Other Add-Ons to start selling add-ons."
+            : "Other add-ons are switched off for the hotel. Turn them back on in Settings → Other Add-Ons."}
         </p>
       </div>
     );
