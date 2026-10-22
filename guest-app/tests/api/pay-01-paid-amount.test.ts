@@ -1,4 +1,4 @@
-// Per BR-08 (P1 MONEY, 2026-10-22): `booking.paidAmount` — the money
+// Per PAY-01 (P1 MONEY, 2026-10-22): `booking.paidAmount` — the money
 // collected AGAINST a booking — must be WRITTEN by every production path
 // that records a payment.
 //
@@ -34,7 +34,7 @@
 // ---------------------
 //   1. A payment write SETS `paidAmount` to the collected amount.
 //   2. A later payment INCREMENTS it.
-//   3. The refund-liability gate OPENS when `paidAmount > 0` (the BR-08
+//   3. The refund-liability gate OPENS when `paidAmount > 0` (the PAY-01
 //      repro: a ₱2,800-paid booking with a ₱100 breakfast now yields the
 //      refund row).
 //   4. A store-order tender does NOT count toward a booking's `paidAmount`.
@@ -225,7 +225,7 @@ beforeEach(() => {
 // 1. + 2. — the payment write SETS `paidAmount`, a later one INCREMENTS it
 // ---------------------------------------------------------------------------
 
-describe("BR-08 — the payment paths write the booking's `paidAmount`", () => {
+describe("PAY-01 — the payment paths write the booking's `paidAmount`", () => {
   it("a booking created with a payment has `paidAmount` set to the collected amount", async () => {
     const res = mockResponse();
 
@@ -340,10 +340,10 @@ describe("BR-08 — the payment paths write the booking's `paidAmount`", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. — the refund-liability gate OPENS (the BR-08 repro)
+// 3. — the refund-liability gate OPENS (the PAY-01 repro)
 // ---------------------------------------------------------------------------
 
-describe("BR-08 — the refund-liability gate opens once money is on the booking", () => {
+describe("PAY-01 — the refund-liability gate opens once money is on the booking", () => {
   const gate = (paidAmount: number) =>
     redateBreakfastSelections({
       mode: "cancel",
@@ -366,7 +366,7 @@ describe("BR-08 — the refund-liability gate opens once money is on the booking
   });
 
   it("cancelling a breakfast-bearing booking now produces the refund row", async () => {
-    // The BR-08 repro: a ₱2,800 payment against a booking with a ₱100
+    // The PAY-01 repro: a ₱2,800 payment against a booking with a ₱100
     // breakfast. Before the fix the booking carried no `paidAmount`, the
     // gate was shut, and ZERO refund rows were produced.
     await handleAddPayment(staffReq({ amount: 2800 }), mockResponse());
@@ -387,7 +387,7 @@ describe("BR-08 — the refund-liability gate opens once money is on the booking
 // 4. — a store-order tender does NOT count toward a booking's `paidAmount`
 // ---------------------------------------------------------------------------
 
-describe("BR-08 — store-order tenders are not room-folio payments", () => {
+describe("PAY-01 — store-order tenders are not room-folio payments", () => {
   it("a store-order tender does NOT count toward a booking's `paidAmount`", async () => {
     // The store tender lives under the ORDER, not the booking: it is a
     // direct store payment, and the folio already adds a billed
@@ -422,7 +422,7 @@ describe("BR-08 — store-order tenders are not room-folio payments", () => {
 // 5. — the refund decrement still lands on the right value + stays idempotent
 // ---------------------------------------------------------------------------
 
-describe("BR-08 — the refund decrement stays correct + idempotent", () => {
+describe("PAY-01 — the refund decrement stays correct + idempotent", () => {
   it("a paid refund decrements the collected `paidAmount` by the refund amount", async () => {
     await handleAddPayment(staffReq({ amount: 2800 }), mockResponse());
     const collected = Number(bookingDoc().paidAmount || 0);
@@ -539,7 +539,7 @@ function handlerSlice(name: string): string {
   return bookingsSrc.slice(start, next === -1 ? bookingsSrc.length : next);
 }
 
-describe("BR-08 — the `paidAmount` write sites are pinned", () => {
+describe("PAY-01 — the `paidAmount` write sites are pinned", () => {
   it("`handleAddPayment` maintains `paidAmount`", () => {
     const slice = handlerSlice("handleAddPayment");
     expect(slice).toMatch(/paidAmount\s*=\s*computeNextBookingPaidAmount\(/);

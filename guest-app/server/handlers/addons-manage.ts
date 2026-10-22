@@ -207,7 +207,7 @@ export async function handleGetAddOnsManage(req: VercelRequest, res: VercelRespo
   const totalPrice = Number(bookingData.totalPrice || 0);
   const otherAddOnTotal = recomputeOtherAddOnTotal(existingSelections);
   const hasAny = hasAnyOtherAddOns(existingSelections);
-  // Per BR-08 (P1 MONEY, 2026-10-22): the `|| 0` fallback STAYS — a
+  // Per PAY-01 (P1 MONEY, 2026-10-22): the `|| 0` fallback STAYS — a
   // booking created before the fix carries no `paidAmount` at all,
   // and "no money collected" is the correct reading for it. The
   // field is now written by the two production payment-record paths

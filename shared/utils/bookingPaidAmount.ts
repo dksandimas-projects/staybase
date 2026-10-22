@@ -1,4 +1,4 @@
-// Per BR-08 (P1 MONEY, 2026-10-22): the booking-scoped
+// Per PAY-01 (P1 MONEY, 2026-10-22): the booking-scoped
 // `paidAmount` — the money collected AGAINST a booking.
 //
 // THE DEFECT THIS MODULE FIXES

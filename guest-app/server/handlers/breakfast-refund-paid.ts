@@ -158,7 +158,7 @@ export async function handleMarkRefundPaid(
 
           db: adminDb,
           existingDoc: refundSnap,
-          // Per BR-08 (P1 MONEY, 2026-10-22): the `|| 0` fallback
+          // Per PAY-01 (P1 MONEY, 2026-10-22): the `|| 0` fallback
           // STAYS — a booking created before the fix carries no
           // `paidAmount` at all, and "no money collected" is the
           // correct reading for it. The field is now written by the

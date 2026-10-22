@@ -72,7 +72,7 @@ export * from "./utils/breakfastSlotKey";
 // refund liabilities the spec requires.
 export * from "./utils/bookingAddOnReschedule";
 
-// Per BR-08 (P1 MONEY, 2026-10-22): the booking-scoped
+// Per PAY-01 (P1 MONEY, 2026-10-22): the booking-scoped
 // `paidAmount` arithmetic. The two production payment-record
 // paths (`handleAddPayment` + `handleVerifyAndRecordPayment`)
 // use it to maintain the booking's `paidAmount` — the money

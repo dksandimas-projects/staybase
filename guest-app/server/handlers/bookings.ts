@@ -268,7 +268,7 @@ import {
   redateOtherAddOnSelections
 } from "@spark-inn/shared";
 
-// Per BR-08 (P1 MONEY, 2026-10-22): the booking-scoped
+// Per PAY-01 (P1 MONEY, 2026-10-22): the booking-scoped
 // `paidAmount` arithmetic. The two production payment-record
 // paths (`handleAddPayment` + `handleVerifyAndRecordPayment`)
 // maintain the booking's `paidAmount` with it — the money
@@ -9461,7 +9461,7 @@ export async function handleAddPayment(req: any, res: any) {
 
       const bookingUpdates: Record<string, any> = {};
 
-      // Per BR-08 (P1 MONEY, 2026-10-22): the payment write ALSO
+      // Per PAY-01 (P1 MONEY, 2026-10-22): the payment write ALSO
       // maintains the booking's `paidAmount` — the money collected
       // AGAINST that booking.
       //
@@ -10753,7 +10753,7 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
       const bookingUpdates: Record<string, any> = {
         updatedAt: now
       };
-      // Per BR-08 (P1 MONEY, 2026-10-22): the verified payment write
+      // Per PAY-01 (P1 MONEY, 2026-10-22): the verified payment write
       // ALSO maintains the booking's `paidAmount` — the money
       // collected AGAINST that booking. Same contract as
       // `handleAddPayment` (see the long note there): the field had

@@ -27,7 +27,7 @@
 //   4. Returns the new `paidAmount` + the refund entry
 //      + an `alreadyPaid` idempotency flag.
 //
-// PER BR-08 (P1 MONEY, 2026-10-22): step 2 is a DECREMENT, and
+// PER PAY-01 (P1 MONEY, 2026-10-22): step 2 is a DECREMENT, and
 // until this fix it was the ONLY writer of `booking.paidAmount` —
 // no production path ever INCREMENTED it, so a booking with money
 // collected against it carried no `paidAmount` at all and every
@@ -178,7 +178,7 @@ export interface MarkRefundPaidInput {
   /**
    * The booking's current `paidAmount` (pre-write).
    *
-   * Per BR-08 (P1 MONEY, 2026-10-22): the field is maintained by
+   * Per PAY-01 (P1 MONEY, 2026-10-22): the field is maintained by
    * the two production payment-record paths
    * (`handleAddPayment` + `handleVerifyAndRecordPayment`), so this
    * value is the money actually collected against the booking. A

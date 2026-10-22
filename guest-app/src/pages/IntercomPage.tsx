@@ -28,6 +28,7 @@ import { formatPrice } from "../utils/format";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
 import { getEffectiveStorePaymentMethods, type EffectiveStorePaymentMethod } from "@spark-inn/shared";
+import { fetchPublicHotelConfig } from "../hooks/usePublicHotelConfig";
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const ACCEPTED_UPLOAD_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -415,25 +416,34 @@ export function IntercomPage() {
           return;
         }
 
-        const [hotelConfigDoc, storeConfigDoc] = await Promise.all([
-          getDoc(doc(db, "settings", "hotelConfig")),
-          getDoc(doc(db, "settings", "storeConfig"))
-        ]);
+        // Per F09 / SEC-6 (2026-10-22): the guest app no longer reads
+        // `settings/hotelConfig` / `settings/storeConfig` straight from
+        // Firestore. The rules now keep those documents staff-only, so
+        // the in-room panel reads the PUBLIC PROJECTION instead:
+        // `GET /api/public/hotel-config`.
+        //
+        // The projection carries `intercomQuickRequests`, `paymentMethods`
+        // and the `storeEnabled` master switch, and it carries NO
+        // corporate rate and NO staff-only bank detail.
+        const publicConfig = await fetchPublicHotelConfig();
+        const configuredQuickRequests = publicConfig?.intercomQuickRequests;
+        const configuredPaymentMethods = publicConfig?.paymentMethods;
 
         if (!isMounted) return;
         setRoomNumber(resolvedRoomNumber);
         setIsValidRoom(true);
         setRoomAccessError("");
+        const quickRequests = Array.isArray(configuredQuickRequests)
+          ? configuredQuickRequests.filter(Boolean)
+          : [];
         setQuickRequests(
-          hotelConfigDoc.exists() && Array.isArray(hotelConfigDoc.data().intercomQuickRequests)
-            ? hotelConfigDoc.data().intercomQuickRequests.filter(Boolean)
+          quickRequests.length > 0
+            ? quickRequests
             : ["Extra Towels", "Bottled Water", "Room Cleaning", "Extra Pillow", "Do Not Disturb"]
         );
-        const hotelConfigData = hotelConfigDoc.exists() ? hotelConfigDoc.data() : null;
-        const storeConfig = storeConfigDoc.exists() ? storeConfigDoc.data() : null;
-        setIsStoreEnabled(storeConfig ? storeConfig.isEnabled !== false : true);
-        const paymentMethods = Array.isArray(hotelConfigData?.paymentMethods)
-          ? hotelConfigData.paymentMethods
+        setIsStoreEnabled(publicConfig?.storeEnabled !== false);
+        const paymentMethods = Array.isArray(configuredPaymentMethods)
+          ? configuredPaymentMethods
           : [];
         const effective = getEffectiveStorePaymentMethods(paymentMethods);
         setStorePaymentMethods(effective);

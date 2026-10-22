@@ -301,22 +301,27 @@ describe("F09 / SEC-6 — the guest app does not read the raw hotel config from 
   it("no guest source file reads settings/hotelConfig from Firestore", () => {
     const offenders = walk(GUEST_SRC)
       .filter((file) => /["']settings["']\s*,\s*["']hotelConfig["']/.test(readFileSync(file, "utf8")))
-      .map((file) => relative(GUEST_SRC, file).split(/[\\/]/).join("/"))
-      .filter((path) => path !== "pages/IntercomPage.tsx");
+      .map((file) => relative(GUEST_SRC, file).split(/[\\/]/).join("/"));
 
-    // KNOWN RESIDUAL: `pages/IntercomPage.tsx` still reads the raw
-    // document (another agent owns that file — see the F09 handoff for
-    // the exact patch). Delete the filter above once the intercom page
-    // is migrated to the public projection.
+    // The in-room intercom panel was migrated to the public projection
+    // (`GET /api/public/hotel-config`) in the same release, so there is
+    // no whitelist left: ANY guest source file that reads the raw
+    // document is an offender.
     expect(offenders).toEqual([]);
   });
 
   it("no guest source file reads settings/storeConfig from Firestore", () => {
     const offenders = walk(GUEST_SRC)
       .filter((file) => /["']settings["']\s*,\s*["']storeConfig["']/.test(readFileSync(file, "utf8")))
-      .map((file) => relative(GUEST_SRC, file).split(/[\\/]/).join("/"))
-      .filter((path) => path !== "pages/IntercomPage.tsx");
+      .map((file) => relative(GUEST_SRC, file).split(/[\\/]/).join("/"));
 
     expect(offenders).toEqual([]);
+  });
+
+  it("the intercom panel reads the public projection instead of the raw documents", () => {
+    const intercom = readFileSync(join(GUEST_SRC, "pages", "IntercomPage.tsx"), "utf8");
+    expect(intercom).toContain('from "../hooks/usePublicHotelConfig"');
+    expect(intercom).toContain("fetchPublicHotelConfig");
+    expect(intercom).not.toMatch(/["']settings["']\s*,\s*["'](hotelConfig|storeConfig)["']/);
   });
 });
