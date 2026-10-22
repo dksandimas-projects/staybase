@@ -937,3 +937,32 @@ run against production without reading code.
 4. **Rule:** a comment inside JSX must be a `{/* … */}` JSX comment. The
    admin-app test suite parses every `.tsx` file in both apps with the
    TypeScript AST and fails on any `JsxText` node that starts with `//`.
+
+#### BASE-07 — A failed catalog read must never say "the catalog is empty"
+1. `curl -s https://www.sparkinnbohol.com/api/bookings/addons/config`
+2. **Expected:** `{"success":true,"addOns":[…],"otherAddOnsEnabled":true,
+   "preSeeded":false}` — `preSeeded` is `false` when the hotel has a real
+   saved catalog row (production: `airport-transfer`, ₱500). It is `true`
+   ONLY when the rows came from the hard-coded fallback because the
+   `addOns` collection was empty.
+3. Sign in to the admin app → **Bookings** → open a booking → the
+   **Add-Ons** tab.
+4. **Expected (fixed):** the catalog rows render — *Airport transfer — ₱500*
+   — for every date in the stay.
+5. **Break the read** (devtools → Network → block
+   `*/api/bookings/addons/config`, then reload the drawer).
+6. **Expected (fixed):** a red panel reading *"We couldn't load the
+   other add-ons catalog."* with a **Try again** button — **not** *"The
+   add-on catalog is empty. Add a row in Settings → Other Add-Ons."* The
+   add-ons already on the booking are untouched; only the catalog list
+   failed to load.
+7. Click **Try again** (after unblocking the request).
+8. **Expected:** the rows appear without a page reload.
+9. **Before the fix (P0-9):** the failed read was swallowed by a
+   `catch { /* silent — keep null */ }` and rendered the *empty* copy, so
+   the staff were told to go create an add-on when the real problem was
+   that the request failed — and the tab never re-fetched, so the wrong
+   message stuck until the whole page was reloaded.
+10. **Same rule, other feature (still open, §11.13):** the drawer's
+    **Breakfast** tab still has this failure shape — it renders *"Breakfast
+    is not enabled"* when the read fails.
