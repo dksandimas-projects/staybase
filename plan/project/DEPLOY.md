@@ -30,7 +30,7 @@ diff admin-app/.env.example admin-app/.env
 cat vercel.json
 ```
 
-Expected: `npm test` → 90+ tests passing; both builds succeed; typecheck clean; Phase 0–10B shows 0 remaining; `vercel.json` has the checkin-reminder cron entry and the security headers.
+Expected: `npm test` → 90+ tests passing; both builds succeed; typecheck clean; Phase 0–10B shows 0 remaining; `guest-app/vercel.json` has the checkin-reminder cron entry and the security headers.
 
 ---
 
@@ -363,4 +363,4 @@ Vercel keeps all deployments in the dashboard; one-click rollback to any previou
 - `plan/docs/SECURITY.md` — security policy summary
 - `firebase/firestore.rules` + `firebase/storage.rules` — production rules
 - `CONTRIBUTING.md` — branch retention and Conventional Commits rules
-- `vercel.json` — security headers and cron config
+- `guest-app/vercel.json` + `admin-app/vercel.json` — security headers, SPA fallback, and (guest only) the cron config

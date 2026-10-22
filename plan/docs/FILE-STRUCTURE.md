@@ -124,18 +124,30 @@ admin-app/
 
 ## Vercel Project Setup
 
-One Vercel project for the entire monorepo. Two deployments configured:
+**Two** Vercel projects, one per deployable app. Each project reads the `vercel.json` **in its own configured Root Directory** — a `vercel.json` outside that directory is never read.
 
-| Deployment | Root Directory | Domain |
-|---|---|---|
-| Guest + API | repo root (confirmed via runtime paths like `/var/task/guest-app/server/lib/...` and build logs cloning to `/vercel/path0/guest-app/...`) — **not** `guest-app/` | `www.sparkinnbohol.com` |
-| Admin | `admin-app/` | `admin.sparkinnbohol.com` |
+| Project | Root Directory | Config file | Domain |
+|---|---|---|---|
+| Guest + API (`staybase-guest-app`) | `guest-app/` | `guest-app/vercel.json` | `www.sparkinnbohol.com` |
+| Admin (`staybase-admin-app`) | `admin-app/` | `admin-app/vercel.json` | `admin.sparkinnbohol.com` |
 
-The Guest + API deployment's Root Directory is the **repo root**, with a custom Build Command that runs `guest-app`'s own `npm run build`. Vercel's zero-config function detection scans `api/` at the repo root, which is why a thin shim exists there (`api/[...route].ts` → `export { default } from "../guest-app/api/[...route]"`) — it's what Vercel actually treats as the deployed function, and it resolves to the committed `guest-app/api/[...route].js` bundle. Both deployments share the same env vars set in the single Vercel project dashboard.
+The Guest + API project's Root Directory is `guest-app/`, so **Vercel reads `guest-app/vercel.json`** — that file owns the security headers, the SPA fallback rewrites, and the **scheduled crons**. (Verified against production: the live `Content-Security-Policy` on `www.sparkinnbohol.com` matches `guest-app/vercel.json` — the only one of the three that carries `https://fonts.gstatic.com` in `connect-src`.) The deployed function is the committed bundle `guest-app/api/[...route].js`; `guest-app/server/` is not scanned by Vercel.
 
 > **Hobby plan = 12 serverless functions max.** The repo-root `api/` and `guest-app/api/` together resolve to exactly **1 function**. All handler and lib modules live under `guest-app/server/` (not scanned by Vercel). See `plan/docs/VERCEL-FUNCTION-LIMIT.md` for the full rules, the reasons behind this exact layout (learned from a production outage), and verification steps.
 
-Root `vercel.json` owns deployment-wide security headers, the build command (`npm run build:guest`), the output directory (`guest-app/dist`), and the scheduled check-in reminder cron entry. Headers include CSP, clickjacking protection, MIME sniffing protection, referrer policy, and permissions policy. The cron entry calls `/api/email/checkin-reminder` daily using the `CRON_SECRET` bearer-token flow documented in `plan/features/EMAIL-PDF-STORAGE.md`.
+### The repo-root `vercel.json` is a legacy mirror — do NOT put crons in it
+
+The repo-root `vercel.json` is a leftover from the pre-split single-project layout (before `ebad0f0` — *"fix(vercel): move config to per-app vercel.json files for Vercel monorepo"*, 2026-06-25). **No Vercel project reads it**: the guest project's Root Directory is `guest-app/` and the admin project's is `admin-app/`, so Vercel never looks at the repo root. It survives only as a copy of the deployment-wide security headers (CSP, clickjacking protection, MIME sniffing protection, referrer policy, permissions policy) — `microphone=(self)` must stay in all three files, see `plan/docs/GOTCHAS.md`.
+
+**A cron declared in a file no project reads is dead config that looks live.** On 2026-10-22 two crons (`/api/janitor/storage-sweep`, `/api/notifications/prune`) were found declared *only* here: the storage sweep had never run once (`/api/janitor/stats` → `{"runs":0}`) and three `notifications` docs had outlived the 30-day retention window, because the prune cron was never scheduled. **Cron entries live in `guest-app/vercel.json` only** — the single authoritative schedule:
+
+| Cron path | Schedule (UTC) | What it does |
+|---|---|---|
+| `/api/email/checkin-reminder` | `0 0 * * *` | Daily check-in reminder emails |
+| `/api/holds/expire` | `0 1 * * *` | PEX-06 expired pending-payment hold cleanup |
+| `/api/holds/sweep` | `0 2 * * *` | Janitor sweep for stale `bookingHolds` + `staffInventoryHolds` |
+| `/api/notifications/prune` | `0 3 * * *` | 30-day `notifications` retention prune |
+| `/api/janitor/storage-sweep` | `0 19 * * *` | Orphaned Storage folder cleanup |
 
 ---
 

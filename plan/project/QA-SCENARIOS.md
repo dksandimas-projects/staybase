@@ -618,7 +618,8 @@ from live ones.
 
 #### OP-01 — The notification-retention cron actually runs
 1. Confirm the prune endpoint is scheduled in the **guest-app** project's
-   `vercel.json` (the root `vercel.json` belongs to the static admin project).
+   `guest-app/vercel.json` (the repo-root `vercel.json` is read by no Vercel
+   project — the admin project reads `admin-app/vercel.json`).
 2. Insert a notification older than 30 days and wait for the schedule.
 
 **Expected:** the old notification is removed. Before the fix the route was

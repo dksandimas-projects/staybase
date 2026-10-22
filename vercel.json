@@ -30,19 +30,5 @@
         }
       ]
     }
-  ],
-  "crons": [
-    {
-      "path": "/api/email/checkin-reminder",
-      "schedule": "0 0 * * *"
-    },
-    {
-      "path": "/api/janitor/storage-sweep",
-      "schedule": "0 19 * * *"
-    },
-    {
-      "path": "/api/notifications/prune",
-      "schedule": "0 3 * * *"
-    }
   ]
 }

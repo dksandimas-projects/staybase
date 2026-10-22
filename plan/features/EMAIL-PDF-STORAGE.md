@@ -168,7 +168,7 @@ Triggered by `sendStaffRefundReviewTrigger(order)` from `handleCancelStoreOrder`
 
 Use Vercel Cron for check-in reminders. The cron job runs once daily against `/api/email/checkin-reminder`; when the route receives a cron-authenticated request with no booking body, it queries confirmed bookings whose `checkIn` is tomorrow in `config.timezone` and sends one reminder email per matching booking.
 
-`vercel.json` cron entry spec:
+`guest-app/vercel.json §crons` entry spec (the repo-root `vercel.json` is read by no Vercel project — see `plan/docs/FILE-STRUCTURE.md §Vercel Project Setup`):
 - Path: `/api/email/checkin-reminder`
 - Schedule: daily at `0 0 * * *` UTC, which runs at 08:00 in Asia/Manila
 - Auth: Vercel sends `Authorization: Bearer {CRON_SECRET}`; `CRON_SECRET` must be configured in Vercel and must not use a `VITE_` prefix

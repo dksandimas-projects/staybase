@@ -69,7 +69,9 @@ guest-app/
 
 api/[...route].ts               ← REPO ROOT (sibling of guest-app/), not guest-app/api/
                                    thin shim: export { default } from "../guest-app/api/[...route]"
-                                   this is what Vercel actually deploys — Root Directory is the repo root
+                                   legacy convenience shim from the pre-split layout — the guest
+                                   project's Root Directory is `guest-app/`, so the DEPLOYED
+                                   function is guest-app/api/[...route].js (the committed bundle)
 ```
 
 `server/` lives next to `api/` but is **not** scanned by Vercel. The catch-all's real logic imports handler modules via `./handlers/...` and `./lib/...` (relative to `server/apiRouter.ts`).
@@ -86,7 +88,7 @@ That forces three non-obvious rules, each discovered by a failed production depl
 2. **The esbuild bundle output (`api/[...route].js`) and its source (`server/apiRouter.ts`) cannot share the same path.** An earlier attempt bundled to `api/[...route].js` and then deleted `api/[...route].ts` — this broke Vercel's build entirely (`Error: File not found: api/[...route].ts`, because Vercel's build step needs the source present *after* the build script runs, to detect the function). The fix: the router source lives at `server/apiRouter.ts` — `api/` never has a `.ts` file for this route at all, only the generated `.js`.
 3. **The generated `.js` bundle must be committed to git, not gitignored.** Even with #1 and #2 fixed, a gitignored `api/[...route].js` regenerated fresh on every build still shipped **zero functions** — `vercel inspect <url>` showed `Builds: . [0ms]`, no `λ api/[...route]` entry, despite the file demonstrably existing on disk by the time the build script finished (visible in the build logs). Vercel's function-candidate detection for `api/` runs independently of the custom Build Command and doesn't see files that aren't in the git checkout. **Rebuild and recommit `guest-app/api/[...route].js` (`npm run build:api -w guest-app`) whenever `server/apiRouter.ts`, any `server/handlers/*`/`server/lib/*` file, or `@spark-inn/shared` changes.** There is no pre-commit hook enforcing this yet — it's a manual step.
 
-Additionally, the **repo-root** `api/[...route].ts` shim (`export { default } from "../guest-app/api/[...route]"` — this is the file Vercel actually treats as the deployed function, since the project's Root Directory is the repo root, confirmed via runtime paths like `/var/task/guest-app/server/lib/...`) needs `"allowJs": true` in the repo-root `api/tsconfig.json`. Without it, `tsc` throws `TS7016` trying to resolve the shim's extensionless import to a `.js` file, and Vercel silently drops the function (a `404`, with no build error surfaced anywhere in the logs — this was the hardest of the four bugs to diagnose).
+Additionally, the **repo-root** `api/[...route].ts` shim (`export { default } from "../guest-app/api/[...route]"`) is a legacy convenience shim from the pre-split layout. It needs `"allowJs": true` in the repo-root `api/tsconfig.json` — without it, `tsc` throws `TS7016` trying to resolve the shim's extensionless import to a `.js` file. (The guest project's Root Directory is `guest-app/`, so the deployed function is the committed `guest-app/api/[...route].js`; the shim is not what Vercel registers today — but keep it compilable so `npm run typecheck` stays green.)
 
 **If `/api/*` starts failing in production again:** check `vercel inspect --logs <deployment-url>` for the actual runtime error first, and `vercel inspect <deployment-url>` (no `--logs`) to confirm the `Builds` section actually lists `λ api/[...route]` — an empty `Builds: . [0ms]` means the function isn't even registered, which is a build-detection problem (see rules above), not a runtime crash. Local `vercel dev` is not reliable for this diagnosis — it has its own separate, flaky routing behavior in this environment.
 
@@ -114,7 +116,7 @@ After every Vercel deployment, confirm in the dashboard, or via `vercel inspect 
 2. The function list should show **exactly 1 entry**: `api/[...route]`. **An empty list (`Builds: . [0ms]`, no `λ` entry at all) is a real failure mode, not just "0 is fine"** — it means Vercel never registered a function and every `/api/*` call will 404. See "Build artifact requirements" above.
 3. If the count is 2+, the build is picking up an extra file. Check `git status` and look for any new `.ts`/`.js` file under `api/` or its subdirectories (repo root or `guest-app/`).
 
-Also: the `vercel.json` `buildCommand` is set to `npm run build:guest` and `outputDirectory` to `guest-app/dist`. Don't change these without also re-verifying the function count.
+Also: the build command and output directory are set in the **Vercel project settings**, not in a `vercel.json` — the guest project's Root Directory is `guest-app/`, so it builds `guest-app/` (build command `npm run build`, output directory `dist`) and reads `guest-app/vercel.json`. The repo-root `build:guest` script (`npm run build -w guest-app`) is a local convenience. Don't change the build/output settings without also re-verifying the function count.
 
 ---
 
