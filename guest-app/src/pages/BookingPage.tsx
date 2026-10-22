@@ -71,6 +71,11 @@ import {
 // (which requires `calculateExtraBedAddOn` + `requiredExtraBedsFor`
 // to be adjacent in the same import) intact.
 import { deriveRoomTypeCapacityFit, computeBreakfastCutoffState, recomputeBreakfastTotal, buildBreakfastRateBreakdownLines, type BreakfastSelectionEntry } from "@spark-inn/shared";
+// Per BR-07-P1 (2026-10-22): the CANONICAL breakfast slot-key
+// contract. The guest app builds every breakfast slot key
+// through these helpers, so the guest write path and the admin
+// read paths address the SAME slot (0-based guest index).
+import { buildBreakfastSlotId, buildBreakfastSlotKey } from "@spark-inn/shared";
 // Per OCT-M4 (2026-10-20, decision #297): the guest Step 2
 // "Other Add-Ons" grid + its draft helpers. BR-12 shipped the
 // catalog, the staff walk-in grid and the post-booking Manage page
@@ -330,18 +335,27 @@ function enumerateBreakfastDates(checkIn: string, checkOut: string): string[] {
 // `${date}-${slotId}` selection entry; the server
 // uses the same id when it renders the email view
 // + receipt PDF.
-function enumerateGuestSlots(roomCart: Array<{ numAdults: number; numChildren?: number }>): Array<{ id: string; label: string }> {
-  const slots: Array<{ id: string; label: string }> = [];
+//
+// Per BR-07-P1 (2026-10-22): the slot id is the
+// CANONICAL 0-based guest index token, built by the
+// shared `buildBreakfastSlotId` helper, and the slot
+// key itself is built by the shared
+// `buildBreakfastSlotKey`. The admin app builds the
+// same key from the same 0-based index, so the guest
+// write path and every admin read path address the
+// SAME slot.
+function enumerateGuestSlots(roomCart: Array<{ numAdults: number; numChildren?: number }>): Array<{ id: string; label: string; index: number }> {
+  const slots: Array<{ id: string; label: string; index: number }> = [];
   let counter = 0;
   for (const room of roomCart) {
     const adults = Math.max(0, Number(room.numAdults) || 0);
     for (let i = 0; i < adults; i += 1) {
-      slots.push({ id: `guest-${counter}`, label: `Guest ${counter + 1} (Adult)` });
+      slots.push({ id: buildBreakfastSlotId(counter), index: counter, label: `Guest ${counter + 1} (Adult)` });
       counter += 1;
     }
     const children = Math.max(0, Number(room.numChildren) || 0);
     for (let i = 0; i < children; i += 1) {
-      slots.push({ id: `guest-${counter}`, label: `Child ${i + 1}` });
+      slots.push({ id: buildBreakfastSlotId(counter), index: counter, label: `Child ${i + 1}` });
       counter += 1;
     }
   }
@@ -2701,7 +2715,7 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
                       this writes the same map the selectors write. */}
                   {(() => {
                     const sourceHasChoice = slots.some((slot) =>
-                      Boolean(breakfastSelections[`${date}-${slot.id}`])
+                      Boolean(breakfastSelections[buildBreakfastSlotKey(date, slot.index)])
                     );
                     if (!sourceHasChoice || cutoff.isLocked) return null;
                     const laterEditableDates = dates.filter((later) => {
@@ -2756,7 +2770,7 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
                   ) : null}
                   <div className="mt-3 space-y-2">
                     {slots.map((slot) => {
-                      const key = `${date}-${slot.id}`;
+                      const key = buildBreakfastSlotKey(date, slot.index);
                       const selected = breakfastSelections[key]?.mealId || "";
                       // Per MBUX-05: the pre-MBUX-05 row was a fixed
                       // `min-w-[160px]` label beside a `flex-1` select. At

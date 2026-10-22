@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { collection, collectionGroup, doc, getDocs } from "firebase/firestore";
-import { getManilaDateInfo, type DiscountType } from "@spark-inn/shared";
+import { getManilaDateInfo, normalizeBreakfastSelections, type DiscountType } from "@spark-inn/shared";
 import { useAdmin, type Booking } from "../context/AdminContext";
 import {
   hasUnverifiedDiscount,
@@ -638,19 +638,35 @@ export function DashboardPage() {
         && typeof b.breakfastSelections === "object"
         && Object.values(b.breakfastSelections).some((entry: any) => entry && entry.removedAt == null);
       if (!hasAnyActive || !["confirmed", "checked-in", "checked-out"].includes(b.status)) return;
-      for (let g = 1; g <= (b.numGuests || 0); g++) {
-        const key = `${todayKey}-guest-${g}`;
-        const selection = b.breakfastSelections?.[key];
+      // Per BR-07-P1 (2026-10-22): the slots are resolved
+      // into the CANONICAL 0-based space through the shared
+      // normaliser, so the widget also reads the legacy bare
+      // (`<date>-N`) and legacy 1-based (`<date>-guest-N`) key
+      // forms. The pre-fix code looked up a 1-based key
+      // (`${todayKey}-guest-${g}`), so it never saw the guest
+      // app's 0-based keys and showed the wrong guest's meal.
+      const normalized = normalizeBreakfastSelections(
+        (b.breakfastSelections as any) || {},
+        b.numGuests
+      );
+      const normalizedServed = normalizeBreakfastSelections(
+        (b.breakfastServed as any) || {},
+        b.numGuests
+      );
+      for (const slot of normalized.slots.values()) {
+        if (slot.serviceDate !== todayKey) continue;
+        const selection = slot.entry;
         if (selection) {
+          const servedSlot = normalizedServed.slots.get(slot.canonicalKey);
           list.push({
             bookingId: b.id,
             bookingRef: b.bookingRef,
             guestName: b.guestName,
             roomNumber: b.roomNumber || "TBD",
-            guestIndex: g,
-            key,
+            guestIndex: slot.guestIndex + 1,
+            key: slot.storedKey,
             selection,
-            served: !!b.breakfastServed?.[key],
+            served: !!servedSlot,
             status: b.status
           });
         }

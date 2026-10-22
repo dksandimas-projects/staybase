@@ -45,12 +45,40 @@
 // cache key is the `date` only — `viewMode`
 // (`today` / `tomorrow`) is purely a client-side tab
 // toggle, the data shape is identical.
+//
+// ---------------------------------------------------------------------------
+// BR-07 P0/P1/P2 fixes (2026-10-22)
+// ---------------------------------------------------------------------------
+//
+// P0 — the sheet was permanently empty. The handler filtered
+// on `where("hasAnyBreakfast", "==", true)`; the walk-in write
+// path never wrote that flag, so the query matched nothing and
+// every service date showed zero meals. The flag is now NOT
+// read at all — the authoritative signal is a non-empty
+// `breakfastSelections` map, filtered in memory.
+//
+// P1 — the slot keys. Three key forms exist in the wild (the
+// canonical 0-based `<date>-guest-<n>`, the legacy bare
+// `<date>-N`, and the legacy 1-based `<date>-guest-<n>` the
+// pre-fix admin app wrote). Every slot is now resolved through
+// the shared normaliser in `@spark-inn/shared`
+// (`normalizeBreakfastSelections`), so a meal is attributed to
+// the right guest row and the same guest is never counted
+// twice.
+//
+// P2 — the cut-off. The handler hard-coded the DEFAULT cut-off
+// time / timezone while the guest view and the staff view read
+// the CONFIGURED ones. It now reads the same
+// `settings/breakfastConfig` doc they do.
 
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { z } from "zod";
 import { Timestamp } from "firebase-admin/firestore";
 import {
   computeBreakfastCutoffState,
+  normalizeBreakfastSelections,
+  resolveBreakfastSlotGuestIndex,
+  type BreakfastSlotIndexBase,
   DEFAULT_BREAKFAST_CUTOFF_TIME,
   DEFAULT_BREAKFAST_CUTOFF_TIMEZONE
 } from "@spark-inn/shared";
@@ -210,29 +238,27 @@ function readStaff(req: VercelRequest): { uid: string; role: StaffRole } | null 
   return { uid: String(staff.uid), role };
 }
 
-// `extractGuestNameFromSlotKey` parses the `slotKey`
-// (`YYYY-MM-DD-guest-N`) down to the integer N and
-// returns the matching guest name from the booking's
-// `guests[]` array. Slots indexed past the array length
-// OR with a non-numeric tail fall back to the first
-// guest (`guests[0]?.name` or the booking's top-level
-// `guestName`) so the kitchen list always shows a
-// caller label.
+// `extractGuestNameFromSlotKey` resolves the slot's guest
+// index to a display name from the booking's `guests[]`
+// array.
+//
+// The index is NOT re-derived from the key string here — the
+// caller passes the ALREADY-RESOLVED 0-based index that
+// `normalizeBreakfastSelections` produced. That matters
+// because three key forms exist in the wild (canonical
+// `guest-0`, the legacy bare `-0`, and the legacy 1-based
+// `guest-1`) and only the shared normaliser knows which
+// index each one denotes.
+//
+// Slots indexed past the array length OR with a non-numeric
+// tail fall back to the first guest (`guests[0]?.name` or
+// the booking's top-level `guestName`) so the kitchen list
+// always shows a caller label.
 function extractGuestNameFromSlotKey(
   booking: any,
-  slotKey: string,
-  guestIndexFallback: number
+  guestIndex: number
 ): { guestIndex: number; guestName: string } {
   const guests = Array.isArray(booking?.guests) ? booking.guests : [];
-  // The slot key tail is "guest-N" (per BR-01).
-  const parts = slotKey.split("-");
-  let guestIndex = guestIndexFallback;
-  // Last segment holds the numeric index.
-  const tail = parts[parts.length - 1];
-  if (tail !== undefined) {
-    const parsed = Number.parseInt(tail, 10);
-    if (Number.isFinite(parsed) && parsed >= 0) guestIndex = parsed;
-  }
   const slotGuest = guests[guestIndex];
   if (slotGuest && typeof slotGuest === "object") {
     const first = typeof slotGuest.firstName === "string" ? slotGuest.firstName : "";
@@ -314,6 +340,8 @@ interface ProjectionBooking {
   roomNumber: string;
   guestName: string;
   guests: any[];
+  /** The booking's guest count — used to detect the legacy 1-based slot space. */
+  numGuests?: number;
   breakfastSelections?: Record<string, any> | null;
 }
 
@@ -330,31 +358,60 @@ async function computeKitchenList(date: string): Promise<KitchenListResponse> {
   // `cutoffsEnabled === false`, every date appears
   // "still open" in the response — the finalised /
   // late-change split collapses because there is no
-  // cut-off moment to be late against. We still re-use
-  // the BR-07 default cutoff time / timezone (per the
-  // existing comment below) so the read is a single
-  // targeted fetch for the toggle, not a settings-doc
-  // hydration.
-  const cutoffsEnabled = await loadKitchenListCutoffsEnabled();
-  // The cutoff AT for this date is `(date - 1) at 20:00
-  // hotel-tz`. We piggy-back on `computeBreakfastCutoffState`
-  // (in @spark-inn/shared) for the canonical rule.
-  const cutoffState = computeBreakfastCutoffStateSafe(date, cutoffsEnabled);
+  // cut-off moment to be late against.
+  //
+  // Per BR-07-P2 (2026-10-22): the CONFIGURED cut-off time
+  // + timezone are read from the same settings doc. The
+  // pre-fix code hard-coded `DEFAULT_BREAKFAST_CUTOFF_TIME`
+  // / `DEFAULT_BREAKFAST_CUTOFF_TIMEZONE`, so when the hotel
+  // changed the cut-off in Settings the guest view
+  // (`breakfast-manage.ts`) and the staff view
+  // (`breakfast-mark-served.ts`) followed the new value while
+  // the kitchen list kept the built-in default. It is now the
+  // same single settings read the other two views do.
+  const cutoffConfig = await loadKitchenListCutoffConfig();
+  const cutoffsEnabled = cutoffConfig.cutoffsEnabled;
+  // The cutoff AT for this date is `(date - 1)` at the
+  // configured cut-off time in the configured timezone. We
+  // piggy-back on `computeBreakfastCutoffState` (in
+  // @spark-inn/shared) for the canonical rule.
+  const cutoffState = computeBreakfastCutoffStateSafe(
+    date,
+    cutoffsEnabled,
+    cutoffConfig.cutoffTime,
+    cutoffConfig.cutoffTimezone
+  );
   const cutoffAtIso = cutoffState.cutoffAt.toISOString();
   const cutoffPassed = cutoffState.isLocked;
 
-  // 1. Read the `bookings` collection. The query for
-  // `hasAnyBreakfast === true` is a best-effort filter
-  // — the post-filter on `breakfastSelections[date-*]`
-  // is the source of truth (a booking may flip the flag
-  // off while keeping legacy selections during the
-  // BR-04 migration window).
+  // 1. Read the `bookings` collection.
+  //
+  // Per BR-07-P0 (2026-10-22): the pre-fix code filtered on the
+  // `hasAnyBreakfast` field being `true` and treated the result
+  // as a "best-effort filter" over the real `breakfastSelections`
+  // map. It was NOT best-effort — it was the ONLY gate, and the
+  // walk-in write path never wrote the flag, so the query returned
+  // zero rows for every booking in production and the chef's sheet
+  // was permanently empty.
+  //
+  // The flag is a DENORMALIZATION and it drifts: Firestore
+  // cannot OR two fields in one query, and a `!=` query does
+  // NOT match documents where the field is absent (verified
+  // against production: `where("hasAnyBreakfast","!=",false)`
+  // returns 0 rows for the 49 flag-absent bookings), so
+  // there is no cheap server-side query that finds "every
+  // booking with a non-empty `breakfastSelections`".
+  //
+  // The AUTHORITATIVE signal is the map itself, so the
+  // handler reads the collection and filters in memory. The
+  // collection is small (69 documents as of 2026-10-22) and
+  // the admin app already streams the whole collection
+  // (`onSnapshot(collection(db, "bookings"))` in
+  // `AdminContext.tsx`), so this is not a new access pattern.
+  // The response is cached for 30s.
   const bookings: ProjectionBooking[] = [];
   try {
-    const snap = await adminDb
-      .collection("bookings")
-      .where("hasAnyBreakfast", "==", true)
-      .get();
+    const snap = await adminDb.collection("bookings").get();
     snap.forEach((doc) => {
       bookings.push({ id: doc.id, ...(doc.data() as any) });
     });
@@ -366,6 +423,14 @@ async function computeKitchenList(date: string): Promise<KitchenListResponse> {
   // 2. Project the finalized entries for this date.
   // Each entry is one per-guest slot — the same shape
   // the Manage Breakfast + Step 2 UI works with.
+  //
+  // The slot keys are resolved through the shared
+  // normaliser (`normalizeBreakfastSelections`), which
+  // folds the legacy bare `<date>-N` form and the legacy
+  // 1-based `<date>-guest-N` form into the canonical
+  // 0-based `<date>-guest-N` space. Without it the kitchen
+  // list would attribute a guest's meal to the wrong row
+  // and could count the same guest twice.
   const finalized: KitchenListFinalizedEntry[] = [];
   for (const booking of bookings) {
     const selections = booking.breakfastSelections;
@@ -373,25 +438,35 @@ async function computeKitchenList(date: string): Promise<KitchenListResponse> {
     const bookingId = booking.id;
     const roomNumber = bookingRoomNumber(booking);
     const ref = bookingRef(booking);
-    for (const slotKey of Object.keys(selections)) {
-      if (!slotKeyDatePrefixMatches(slotKey, datePrefix)) continue;
-      const entry = (selections as Record<string, any>)[slotKey];
+    const { slots } = normalizeBreakfastSelections(
+      selections as Record<string, any>,
+      (booking as any).numGuests
+    );
+    for (const slot of slots.values()) {
+      if (slot.serviceDate !== datePrefix) continue;
+      const entry = slot.entry;
       if (!entry || typeof entry !== "object") continue;
       // `removedAt` non-null means cancelled before
       // the cut-off (the kitchen list skips cancelled
       // entries — a removal after the cut-off still
       // appears in the "Late changes" column instead).
+      //
+      // This is the ONLY cancellation gate. A booking whose
+      // `hasAnyBreakfast` flag is `false` (the cancel path
+      // writes it) but whose slot was never removed still
+      // shows up — the flag is not authoritative, the
+      // per-slot `removedAt` is.
       if (entry.removedAt !== null && entry.removedAt !== undefined && entry.removedAt !== "") {
         continue;
       }
-      const { guestIndex, guestName } = extractGuestNameFromSlotKey(booking, slotKey, 0);
+      const { guestIndex, guestName } = extractGuestNameFromSlotKey(booking, slot.guestIndex);
       finalized.push({
         bookingId,
         ref,
         roomNumber,
         guestName,
         guestIndex,
-        slotKey,
+        slotKey: slot.storedKey,
         mealId: typeof entry.mealId === "string" ? entry.mealId : "",
         mealName: typeof entry.mealName === "string" ? entry.mealName : "Unnamed meal",
         price: Number.isFinite(Number(entry.price)) ? Number(entry.price) : 0,
@@ -430,8 +505,21 @@ async function computeKitchenList(date: string): Promise<KitchenListResponse> {
     // surface room number + guest name without a
     // second round-trip per audit entry.
     const bookingById = new Map<string, ProjectionBooking>();
+    // Per-booking slot-index base — the audit entry's
+    // `slotKey` is resolved through the SAME normaliser the
+    // finalized column uses, so a late change on a legacy
+    // booking is attributed to the same guest row as the
+    // meal it changed.
+    const bookingBaseById = new Map<string, BreakfastSlotIndexBase>();
     for (const booking of bookings) {
       bookingById.set(booking.id, booking);
+      bookingBaseById.set(
+        booking.id,
+        normalizeBreakfastSelections(
+          (booking.breakfastSelections || {}) as Record<string, any>,
+          (booking as any).numGuests
+        ).base
+      );
     }
     auditSnap.forEach((doc) => {
       const data = doc.data() as any;
@@ -451,10 +539,13 @@ async function computeKitchenList(date: string): Promise<KitchenListResponse> {
         ? bookingRoomNumber(matchingBooking)
         : "—";
       const ref = matchingBooking ? bookingRef(matchingBooking) : "—";
+      const resolvedIndex = resolveBreakfastSlotGuestIndex(
+        typeof data.slotKey === "string" ? data.slotKey : "",
+        bookingBaseById.get(bookingId) || "zero-based"
+      );
       const { guestIndex, guestName } = extractGuestNameFromSlotKey(
         matchingBooking || { guests: [] },
-        typeof data.slotKey === "string" ? data.slotKey : "",
-        0
+        resolvedIndex === null ? 0 : resolvedIndex
       );
       const mealSnapshot =
         data.mealSnapshot && typeof data.mealSnapshot === "object"
@@ -522,7 +613,9 @@ async function computeKitchenList(date: string): Promise<KitchenListResponse> {
  */
 function computeBreakfastCutoffStateSafe(
   date: string,
-  cutoffsEnabled = true
+  cutoffsEnabled = true,
+  cutoffTime: string = DEFAULT_BREAKFAST_CUTOFF_TIME,
+  timezone: string = DEFAULT_BREAKFAST_CUTOFF_TIMEZONE
 ): {
   cutoffAt: Date;
   isLocked: boolean;
@@ -531,19 +624,18 @@ function computeBreakfastCutoffStateSafe(
     const state = computeBreakfastCutoffState({
       serviceDate: date,
       now: new Date(),
-      // The handler reads the same defaults the
-      // settings doc would supply. Reading from
-      // Firestore on every kitchen list hit is a
-      // worthwhile follow-up but not required for
-      // BR-07 (the defaults match the BR-02
-      // settings surface 99% of the time). Per
-      // BR-10 the `cutoffsEnabled` toggle IS
-      // re-read on every uncached request via
-      // `loadKitchenListCutoffsEnabled` so the
-      // late-change split honors the admin-side
-      // flip immediately.
-      cutoffTime: DEFAULT_BREAKFAST_CUTOFF_TIME,
-      timezone: DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
+      // Per BR-07-P2 (2026-10-22): the CONFIGURED cut-off
+      // time + timezone, read from `settings/breakfastConfig`
+      // — the same source the guest view + the staff view
+      // use. The pre-fix code passed the built-in defaults
+      // here, so the kitchen list ignored a Settings change.
+      //
+      // Per BR-10 the `cutoffsEnabled` toggle IS re-read on
+      // every uncached request via `loadKitchenListCutoffConfig`
+      // so the late-change split honors the admin-side flip
+      // immediately.
+      cutoffTime,
+      timezone,
       cutoffsEnabled
     });
     return {
@@ -559,21 +651,37 @@ function computeBreakfastCutoffStateSafe(
 }
 
 // Per BR-10 (2026-10-14, decision #244 reserved —
-// Phase 14): fetch just the `cutoffsEnabled` toggle
-// from the live settings doc. The read is wrapped in
-// a try / catch so a transient Firestore outage
-// degrades to the conservative `true` (cut-offs
-// enforced) posture rather than silently locking
-// every date open.
-let cutoffsEnabledCache: { value: boolean; at: number } | null = null;
+// Phase 14): fetch the BR-02 cut-off triple
+// (`cutoffTime` + `cutoffTimezone`) + the `cutoffsEnabled`
+// toggle from the live settings doc. The read is wrapped in
+// a try / catch so a transient Firestore outage degrades to
+// the conservative posture (cut-offs enforced at the default
+// time) rather than silently locking every date open.
+//
+// Per BR-07-P2 (2026-10-22): the pre-fix loader read ONLY
+// `cutoffsEnabled` and the handler hard-coded the default
+// cut-off time / timezone. The guest view
+// (`breakfast-manage.ts`) and the staff view
+// (`breakfast-mark-served.ts`) both read the CONFIGURED
+// values, so a Settings change moved the cut-off for the
+// guest + the staff but not for the kitchen list. This loader
+// is now the same shape as `loadCutoffConfig` in
+// `breakfast-mark-served.ts`.
+interface KitchenListCutoffConfig {
+  cutoffTime: string;
+  cutoffTimezone: string;
+  cutoffsEnabled: boolean;
+}
+
+let cutoffConfigCache: { value: KitchenListCutoffConfig; at: number } | null = null;
 const KITCHEN_LIST_CUTOFFS_CACHE_MS = 30_000;
-async function loadKitchenListCutoffsEnabled(): Promise<boolean> {
+async function loadKitchenListCutoffConfig(): Promise<KitchenListCutoffConfig> {
   const now = Date.now();
   if (
-    cutoffsEnabledCache &&
-    now - cutoffsEnabledCache.at < KITCHEN_LIST_CUTOFFS_CACHE_MS
+    cutoffConfigCache &&
+    now - cutoffConfigCache.at < KITCHEN_LIST_CUTOFFS_CACHE_MS
   ) {
-    return cutoffsEnabledCache.value;
+    return cutoffConfigCache.value;
   }
   try {
     const snap = await adminDb
@@ -581,8 +689,20 @@ async function loadKitchenListCutoffsEnabled(): Promise<boolean> {
       .doc("breakfastConfig")
       .get();
     const source: any = snap.exists ? snap.data() : null;
-    const value = source?.cutoffsEnabled !== false;
-    cutoffsEnabledCache = { value, at: now };
+    const rawCutoff = String((source && source.cutoffTime) || "").trim();
+    const rawZone = String((source && source.cutoffTimezone) || "").trim();
+    const value: KitchenListCutoffConfig = {
+      // The configured time / timezone are used only when they
+      // are well-formed; a malformed settings doc falls back to
+      // the built-in defaults (the same posture
+      // `breakfast-mark-served.ts` takes).
+      cutoffTime: /^([01]\d|2[0-3]):[0-5]\d$/.test(rawCutoff)
+        ? rawCutoff
+        : DEFAULT_BREAKFAST_CUTOFF_TIME,
+      cutoffTimezone: rawZone.length > 0 ? rawZone : DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
+      cutoffsEnabled: source?.cutoffsEnabled !== false
+    };
+    cutoffConfigCache = { value, at: now };
     return value;
   } catch {
     // Conservative posture on a Firestore blip:
@@ -590,15 +710,13 @@ async function loadKitchenListCutoffsEnabled(): Promise<boolean> {
     // default). The 30s cache window means the
     // fallback only applies briefly during an
     // outage.
-    return true;
+    return {
+      cutoffTime: DEFAULT_BREAKFAST_CUTOFF_TIME,
+      cutoffTimezone: DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
+      cutoffsEnabled: true
+    };
   }
 }
-
-// Late-bound cut-off helper uses the BR-01 default
-// cutoff time + timezone. The shared helper is the
-// single source of truth — pulling the config doc
-// here would add a per-request Firestore hop without
-// changing the answer (defaults are the common case).
 
 // ---------- Handlers ----------
 

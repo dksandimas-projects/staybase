@@ -221220,7 +221220,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.18.15";
+    VERSION2 = "2.18.12";
   }
 });
 
@@ -222620,18 +222620,16 @@ function computeServerFolioTotals(input) {
 }
 function getReservationFolioSummary(input) {
   const reservationTotal = Number(input.reservationTotal) || 0;
-  const otherAddOnTotal = Math.max(0, Number(input.otherAddOnTotal) || 0);
   const refunds = input.refunds ?? [];
   const paymentsTotal = input.payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) + refunds.reduce((sum, r3) => sum + (Number(r3.amount) || 0), 0);
   const chargesTotal = input.charges.reduce(
     (sum, c2) => sum + (Number(c2.amount) || 0),
     0
   );
-  const balance = reservationTotal + otherAddOnTotal + chargesTotal - paymentsTotal;
+  const balance = reservationTotal + chargesTotal - paymentsTotal;
   return {
     reservationId: input.reservationId,
     reservationTotal,
-    otherAddOnTotal,
     chargesTotal,
     paymentsTotal,
     balance,
@@ -222719,12 +222717,6 @@ function assertBookingRevenueAllocationInvariant(allocation, totalPrice) {
     round2(allocation.roomNet) + round2(allocation.breakfastNet) + round2(allocation.addOnNet) - round2(allocation.deductionNet)
   );
   const expected = round2(totalPrice);
-  const allocationTotal = round2(allocation.totalNet);
-  if (Math.abs(allocationTotal - expected) > 0.05) {
-    throw new Error(
-      `[MRB-11] revenue allocation total mismatch: allocation.totalNet(${allocation.totalNet}) != booking.totalPrice(${expected}). This is a server-side bug \u2014 the allocation snapshot and the billed total were computed from different figures.`
-    );
-  }
   if (Math.abs(computed - expected) > 0.05) {
     throw new Error(
       `[MRB-11] revenue allocation invariant violation: roomNet(${allocation.roomNet}) + breakfastNet(${allocation.breakfastNet}) + addOnNet(${allocation.addOnNet}) - deductionNet(${allocation.deductionNet}) = ${computed}, expected totalNet(${expected}). This is a server-side bug \u2014 the pricing chain returned an inconsistent allocation.`
@@ -222818,26 +222810,6 @@ function computeBookingRevenueAllocation(input) {
     totalNet
   );
 }
-function rebuildBookingRevenueAllocation(input) {
-  const existing = input.existingAllocation;
-  const grossSubtotal = round2(Math.max(0, Number(input.grossSubtotal) || 0));
-  const totalPrice = round2(Number(input.totalPrice) || 0);
-  let roomNet = existing ? round2(existing.roomNet) : grossSubtotal;
-  const breakfastNet = existing ? round2(existing.breakfastNet) : 0;
-  const addOnNet = existing ? round2(existing.addOnNet) : 0;
-  const shortfall = Math.max(
-    0,
-    totalPrice - round2(roomNet + breakfastNet + addOnNet)
-  );
-  roomNet = round2(roomNet + shortfall);
-  const deductionNet = round2(
-    Math.max(0, round2(roomNet + breakfastNet + addOnNet) - totalPrice)
-  );
-  return assertBookingRevenueAllocationInvariant(
-    { roomNet, breakfastNet, addOnNet, deductionNet, totalNet: totalPrice },
-    totalPrice
-  );
-}
 function computeReservationActualDateRange(headerCheckIn, headerCheckOut, children) {
   if (children.length === 0) return null;
   const headerIn = new Date(headerCheckIn).getTime();
@@ -222880,15 +222852,6 @@ function sumBreakfastRateLines(breakdown) {
     total += amount;
   }
   return Math.round(total * 100) / 100;
-}
-function computeBreakfastAdjustedTotalPrice(input) {
-  const totalPrice = Number(input.totalPrice) || 0;
-  const breakfastTotal = Number(input.breakfastTotal) || 0;
-  const anchor = input.breakfastInTotalPrice;
-  if (anchor === null || anchor === void 0 || !Number.isFinite(anchor)) {
-    return totalPrice;
-  }
-  return totalPrice - anchor + breakfastTotal;
 }
 function recomputeBreakfastTotal(selections) {
   if (!selections) return 0;
@@ -224785,6 +224748,95 @@ var init_breakfastCutoff = __esm({
   }
 });
 
+// ../shared/utils/breakfastSlotKey.ts
+function buildBreakfastSlotId(guestIndex) {
+  return `guest-${guestIndex}`;
+}
+function buildBreakfastSlotKey(serviceDate, guestIndex) {
+  return `${serviceDate}-${buildBreakfastSlotId(guestIndex)}`;
+}
+function buildBreakfastSlotKeyForBase(serviceDate, guestIndex, base) {
+  return base === "one-based" ? `${serviceDate}-guest-${guestIndex + 1}` : buildBreakfastSlotKey(serviceDate, guestIndex);
+}
+function parseBreakfastSlotKey(slotKey) {
+  if (typeof slotKey !== "string") return null;
+  const match = /^(\d{4}-\d{2}-\d{2})-(?:(guest-)?(\d+))$/.exec(slotKey);
+  if (!match) return null;
+  const rawIndex = Number(match[3]);
+  if (!Number.isFinite(rawIndex)) return null;
+  return {
+    serviceDate: match[1],
+    rawIndex,
+    form: match[2] ? "canonical" : "bare"
+  };
+}
+function detectBreakfastSlotIndexBase(selections, numGuests) {
+  if (!selections || typeof selections !== "object") return "zero-based";
+  let highestCanonicalIndex = -1;
+  let sawIndexZero = false;
+  for (const key of Object.keys(selections)) {
+    const parsed = parseBreakfastSlotKey(key);
+    if (!parsed || parsed.form !== "canonical") continue;
+    if (parsed.rawIndex === 0) sawIndexZero = true;
+    if (parsed.rawIndex > highestCanonicalIndex) highestCanonicalIndex = parsed.rawIndex;
+  }
+  if (sawIndexZero) return "zero-based";
+  const total = Number(numGuests);
+  if (Number.isFinite(total) && total > 0 && highestCanonicalIndex >= total) {
+    return "one-based";
+  }
+  return "zero-based";
+}
+function resolveBreakfastSlotGuestIndex(slotKey, base = "zero-based") {
+  const parsed = parseBreakfastSlotKey(slotKey);
+  if (!parsed) return null;
+  const index = parsed.form === "bare" ? parsed.rawIndex : base === "one-based" ? parsed.rawIndex - 1 : parsed.rawIndex;
+  if (index < 0) return null;
+  return index;
+}
+function normalizeBreakfastSelections(selections, numGuests) {
+  const base = detectBreakfastSlotIndexBase(
+    selections,
+    numGuests
+  );
+  const slots = /* @__PURE__ */ new Map();
+  if (!selections || typeof selections !== "object") return { base, slots };
+  for (const storedKey of Object.keys(selections)) {
+    const parsed = parseBreakfastSlotKey(storedKey);
+    if (!parsed) continue;
+    const guestIndex = resolveBreakfastSlotGuestIndex(storedKey, base);
+    if (guestIndex === null) continue;
+    const canonicalKey = buildBreakfastSlotKey(parsed.serviceDate, guestIndex);
+    const existing = slots.get(canonicalKey);
+    if (existing) {
+      const existingIsBare = parseBreakfastSlotKey(existing.storedKey)?.form === "bare";
+      if (existingIsBare && parsed.form === "canonical") {
+        slots.set(canonicalKey, {
+          canonicalKey,
+          storedKey,
+          guestIndex,
+          serviceDate: parsed.serviceDate,
+          entry: selections[storedKey]
+        });
+      }
+      continue;
+    }
+    slots.set(canonicalKey, {
+      canonicalKey,
+      storedKey,
+      guestIndex,
+      serviceDate: parsed.serviceDate,
+      entry: selections[storedKey]
+    });
+  }
+  return { base, slots };
+}
+var init_breakfastSlotKey = __esm({
+  "../shared/utils/breakfastSlotKey.ts"() {
+    "use strict";
+  }
+});
+
 // ../shared/utils/money.ts
 function roundToTwoDecimals(value) {
   const numeric = Number(value);
@@ -225486,6 +225538,9 @@ __export(shared_exports, {
   assertRevenueFinanceInvariant: () => assertRevenueFinanceInvariant,
   buildArrivalTimeOptions: () => buildArrivalTimeOptions,
   buildBreakfastRateBreakdownLines: () => buildBreakfastRateBreakdownLines,
+  buildBreakfastSlotId: () => buildBreakfastSlotId,
+  buildBreakfastSlotKey: () => buildBreakfastSlotKey,
+  buildBreakfastSlotKeyForBase: () => buildBreakfastSlotKeyForBase,
   buildCancellationLiabilitySnapshot: () => buildCancellationLiabilitySnapshot,
   buildGoogleCalendarUrl: () => buildGoogleCalendarUrl,
   buildIcsContent: () => buildIcsContent,
@@ -225513,7 +225568,6 @@ __export(shared_exports, {
   compressImageFile: () => compressImageFile,
   computeBookingFolio: () => computeBookingFolio,
   computeBookingRevenueAllocation: () => computeBookingRevenueAllocation,
-  computeBreakfastAdjustedTotalPrice: () => computeBreakfastAdjustedTotalPrice,
   computeBreakfastCutoffState: () => computeBreakfastCutoffState,
   computeCancellationLiabilityState: () => computeCancellationLiabilityState,
   computeExtendedInFlowHoldExpiresAt: () => computeExtendedInFlowHoldExpiresAt,
@@ -225532,6 +225586,7 @@ __export(shared_exports, {
   deriveReservationCounters: () => deriveReservationCounters,
   deriveRoomTypeCapacityFit: () => deriveRoomTypeCapacityFit,
   describeMaxStayNights: () => describeMaxStayNights,
+  detectBreakfastSlotIndexBase: () => detectBreakfastSlotIndexBase,
   diffNightsBetweenIso: () => diffNightsBetweenIso,
   downloadIcsFile: () => downloadIcsFile,
   eachStayNight: () => eachStayNight,
@@ -225588,6 +225643,7 @@ __export(shared_exports, {
   nextSequence: () => nextSequence,
   normalizeAddOn: () => normalizeAddOn,
   normalizeBreakfastConfig: () => normalizeBreakfastConfig,
+  normalizeBreakfastSelections: () => normalizeBreakfastSelections,
   normalizeDiscountScope: () => normalizeDiscountScope,
   normalizeInFlowHoldMinutes: () => normalizeInFlowHoldMinutes,
   normalizeMaxChildren: () => normalizeMaxChildren,
@@ -225599,13 +225655,13 @@ __export(shared_exports, {
   normalizeVatConfig: () => normalizeVatConfig,
   otherAddOnBreakdownByDate: () => otherAddOnBreakdownByDate,
   otherAddOnDraftKey: () => otherAddOnDraftKey,
+  parseBreakfastSlotKey: () => parseBreakfastSlotKey,
   parseCheckInTime: () => parseCheckInTime,
   parseCheckInTimeToPair: () => parseCheckInTimeToPair,
   parseOtherAddOnSelectionKey: () => parseOtherAddOnSelectionKey,
   raceUploadWithTimeout: () => raceUploadWithTimeout,
   readCacheWithTtl: () => readCacheWithTtl,
   readPublicSiteContentBustTimestamp: () => readPublicSiteContentBustTimestamp,
-  rebuildBookingRevenueAllocation: () => rebuildBookingRevenueAllocation,
   recomputeBreakfastTotal: () => recomputeBreakfastTotal,
   recomputeOtherAddOnTotal: () => recomputeOtherAddOnTotal,
   recordSweepResult: () => recordSweepResult,
@@ -225613,6 +225669,7 @@ __export(shared_exports, {
   redateOtherAddOnSelections: () => redateOtherAddOnSelections,
   requiredExtraBedsFor: () => requiredExtraBedsFor,
   resolveBookingPreferenceValues: () => resolveBookingPreferenceValues,
+  resolveBreakfastSlotGuestIndex: () => resolveBreakfastSlotGuestIndex,
   resolveCurrentLevel: () => resolveCurrentLevel,
   resolveMaxStayNights: () => resolveMaxStayNights,
   resolvePaymentMethodLabel: () => resolvePaymentMethodLabel,
@@ -225688,6 +225745,7 @@ var init_shared = __esm({
     init_bookingPreferences();
     init_breakfastCutoff();
     init_breakfastTotal();
+    init_breakfastSlotKey();
     init_bookingAddOnReschedule();
     init_firestorePayload();
     init_breakfastConfig();
@@ -233140,18 +233198,6 @@ async function handleCreateBooking(req, res) {
         // holds by construction (the aggregate is the
         // sum of children, each of which already passes
         // the invariant). The totalPrice match is exact.
-        //
-        // Per the P1 revenue-reporting audit (2026-10-22):
-        // the aggregate's total is the RESERVATION's billed
-        // total — `finalTotalPrice`, i.e. the chain total
-        // minus the points the member redeemed at creation.
-        // The points redemption is a deduction LAYER the
-        // chain does not see (it is applied to the
-        // reservation total after the chain runs), so it is
-        // added to the aggregate's deduction line here;
-        // without it the stored aggregate carried the
-        // pre-redemption total while the reservation doc
-        // carried the post-redemption one.
         aggregateRevenueAllocation: assertBookingRevenueAllocationInvariant(
           {
             roomNet: childPricing.reduce(
@@ -233172,10 +233218,10 @@ async function handleCreateBooking(req, res) {
                 0
               ),
               0
-            ) + (Number(selfRedeemedValue) || 0),
-            totalNet: finalTotalPrice
+            ),
+            totalNet: totalPrice
           },
-          finalTotalPrice
+          totalPrice
         ),
         source: corporateDetails.isCorporate ? "corporate" : "online",
         isCorporate: corporateDetails.isCorporate,
@@ -234442,6 +234488,26 @@ async function handleCreateWalkin(req, res) {
         // an empty map, matching the public path's "explicit
         // opt-out" shape.
         breakfastSelections: validatedWalkinBreakfast?.entries ?? {},
+        // Per BR-07-P0 (2026-10-22): the denormalized
+        // `hasAnyBreakfast` flag. The walk-in path NEVER wrote
+        // it, so every walk-in booking shipped without the flag
+        // — and the kitchen-list query filtered on
+        // `where("hasAnyBreakfast", "==", true)`, so the chef's
+        // sheet was empty on every service date (the only
+        // bookings in production were walk-ins).
+        //
+        // The kitchen list no longer reads the flag (the
+        // authoritative signal is a non-empty
+        // `breakfastSelections` map), but the flag is still
+        // written here so the denormalization stops drifting
+        // for NEW bookings — the public create path and the
+        // reschedule path already write it.
+        //
+        // `true` when the desk recorded at least one meal;
+        // `false` for the explicit "no breakfast" opt-out
+        // (same semantics as the public create path's
+        // `validatedBreakfastSelections.hasAny`).
+        hasAnyBreakfast: Object.keys(validatedWalkinBreakfast?.entries ?? {}).length > 0,
         // Per BR-03 (2026-10-12, decision #232): the denormalized
         // `breakfastTotal` field — the future-proof snapshot for
         // the BR-04 Manage Breakfast page + the kitchen list +
@@ -234843,20 +234909,6 @@ async function handleApplyBookingDiscount(req, res) {
         voucherDiscount,
         totalPrice,
         rateBreakdown,
-        // Per the P1 revenue-reporting audit (2026-10-22): the
-        // MRB-11 revenue allocation is RE-SNAPSHOTTED. This path
-        // moves the bill (`totalPrice`) but used to leave the
-        // create-time allocation untouched — so the Reports
-        // revenue streams kept reading the pre-discount total
-        // while the guest was billed the discounted one. The
-        // shared helper re-derives the deduction from the same
-        // figures the new bill was computed from, so the
-        // allocation's total IS the new bill.
-        revenueAllocation: rebuildBookingRevenueAllocation({
-          existingAllocation: booking.revenueAllocation,
-          grossSubtotal: subtotal,
-          totalPrice
-        }),
         updatedAt: /* @__PURE__ */ new Date()
       };
       if (voucherRef) transaction.update(voucherRef, { usageCount: voucherUsageCount, updatedAt: /* @__PURE__ */ new Date() });
@@ -234998,18 +235050,6 @@ async function handleApplyReservationDiscount(req, res) {
           voucherDiscount,
           totalPrice,
           rateBreakdown,
-          // Per the P1 revenue-reporting audit (2026-10-22): the
-          // MRB-11 revenue allocation is RE-SNAPSHOTTED per child.
-          // This path moves each child's bill (`totalPrice`) but
-          // used to leave the create-time allocation untouched — so
-          // the Reports revenue streams kept reading the
-          // pre-discount total while the guest was billed the
-          // discounted one.
-          revenueAllocation: rebuildBookingRevenueAllocation({
-            existingAllocation: booking.revenueAllocation,
-            grossSubtotal: subtotal,
-            totalPrice
-          }),
           updatedAt: /* @__PURE__ */ new Date()
         };
         transaction.update(child.ref, updates);
@@ -235113,17 +235153,6 @@ async function handleRemoveVoucher(req, res) {
         staffRemovedVoucherAt: /* @__PURE__ */ new Date(),
         totalPrice: restoredTotalPrice,
         ...rateBreakdown ? { rateBreakdown } : {},
-        // Per the P1 revenue-reporting audit (2026-10-22): the
-        // MRB-11 revenue allocation is RE-SNAPSHOTTED. Removing a
-        // voucher moves the bill back up; the create-time
-        // allocation (which still carried the voucher deduction)
-        // used to stay behind, so the Reports revenue streams read
-        // a total the guest was no longer billed.
-        revenueAllocation: rebuildBookingRevenueAllocation({
-          existingAllocation: bookingData.revenueAllocation,
-          grossSubtotal: Number(originalTotalPrice) || 0,
-          totalPrice: restoredTotalPrice
-        }),
         updatedAt: /* @__PURE__ */ new Date()
       };
       if (voucherDoc.exists) {
@@ -235195,17 +235224,6 @@ async function handleRejectDiscount(req, res) {
       discountPct: 0,
       totalPrice: restoredTotalPrice,
       ...rateBreakdown ? { rateBreakdown } : {},
-      // Per the P1 revenue-reporting audit (2026-10-22): the
-      // MRB-11 revenue allocation is RE-SNAPSHOTTED. Rejecting a
-      // government discount moves the bill back up; the
-      // create-time allocation (which still carried the senior
-      // deduction) used to stay behind, so the Reports revenue
-      // streams read a total the guest was no longer billed.
-      revenueAllocation: rebuildBookingRevenueAllocation({
-        existingAllocation: bookingData.revenueAllocation,
-        grossSubtotal: Number(originalTotalPrice) || 0,
-        totalPrice: restoredTotalPrice
-      }),
       updatedAt: /* @__PURE__ */ new Date()
     };
     await bookingRef2.update(updates);
@@ -239196,27 +239214,18 @@ async function handleAddRoomToReservation(req, res) {
       const newTotalPrice = Number(reservation.totalPrice || 0) + finalTotalPrice;
       const newAggregateRevenueAllocation = (() => {
         const existingAlloc = reservation.aggregateRevenueAllocation;
-        const baseRoomNet = existingAlloc ? Number(existingAlloc.roomNet || 0) : Number(reservation.totalPrice || 0);
-        const baseBreakfastNet = existingAlloc ? Number(existingAlloc.breakfastNet || 0) : 0;
-        const baseAddOnNet = existingAlloc ? Number(existingAlloc.addOnNet || 0) : 0;
-        const roomNet = baseRoomNet + newChildRevenueAllocation.roomNet;
-        const breakfastNet = baseBreakfastNet + newChildRevenueAllocation.breakfastNet;
-        const addOnNet = baseAddOnNet + newChildRevenueAllocation.addOnNet;
-        const grossTotal = roomNet + breakfastNet + addOnNet;
+        if (!existingAlloc) {
+          return newChildRevenueAllocation;
+        }
         return assertBookingRevenueAllocationInvariant(
           {
-            roomNet,
-            breakfastNet,
-            addOnNet,
-            // The deduction is the difference between the gross
-            // streams and the billed total, so the per-stream
-            // sum always ties to the total the header persists
-            // (in the normal case this is byte-identical to
-            // `existing.deductionNet + newChild.deductionNet`).
-            deductionNet: grossTotal - newTotalPrice,
-            totalNet: newTotalPrice
+            roomNet: Number(existingAlloc.roomNet || 0) + newChildRevenueAllocation.roomNet,
+            breakfastNet: Number(existingAlloc.breakfastNet || 0) + newChildRevenueAllocation.breakfastNet,
+            addOnNet: Number(existingAlloc.addOnNet || 0) + newChildRevenueAllocation.addOnNet,
+            deductionNet: Number(existingAlloc.deductionNet || 0) + newChildRevenueAllocation.deductionNet,
+            totalNet: Number(existingAlloc.totalNet || 0) + newChildRevenueAllocation.totalNet
           },
-          newTotalPrice
+          Number(existingAlloc.totalNet || 0) + newChildRevenueAllocation.totalNet
         );
       })();
       const newChildrenDates = [
@@ -240102,29 +240111,6 @@ async function handleConvertInquiryToBooking(req, res) {
         ratePerNight,
         totalPrice: finalTotalPrice,
         originalTotalPrice: finalTotalPrice,
-        // Per MRB-11 (2026-08-03, per decision #177): the
-        // per-stream revenue allocation snapshot. The
-        // corporate conversion path used to write `totalPrice`
-        // WITHOUT one, so the Reports revenue streams fell
-        // back to the legacy proportional split and tagged the
-        // row `allocation: "legacy-heuristic"` — a corporate
-        // booking was mis-attributed to the room stream and
-        // carried no MRB-11 identity at all.
-        //
-        // The snapshot is computed by the SHARED helper the
-        // other write paths use (`computeBookingRevenueAllocation`),
-        // so the streams and the total come from the same
-        // figures — never a second, hand-rolled computation.
-        // A corporate conversion has no breakfast (per BR-08),
-        // no extra bed, no voucher, no senior discount and no
-        // points, so the allocation is the gross room amount.
-        revenueAllocation: computeBookingRevenueAllocation({
-          ratePerNight,
-          numNights,
-          breakfastTotal: 0,
-          extraBedTotal: 0,
-          totalPrice: finalTotalPrice
-        }),
         // Per H2 (hardening batch 2026-06-26): the
         // corporate convert flow writes a token too so
         // the inquiry-to-booking email can carry the
@@ -243055,11 +243041,7 @@ async function handleGetBreakfastManage(req, res) {
   );
   const balance = Math.max(
     0,
-    computeBreakfastAdjustedTotalPrice({
-      totalPrice,
-      breakfastInTotalPrice,
-      breakfastTotal: recomputedTotal
-    }) - paidAmount
+    (breakfastInTotalPrice === null ? totalPrice : totalPrice - breakfastInTotalPrice + recomputedTotal) - paidAmount
   );
   const served = booking.breakfastServed && typeof booking.breakfastServed === "object" ? booking.breakfastServed : {};
   const refunds = await loadPendingBreakfastRefunds(booking.id);
@@ -243340,11 +243322,7 @@ async function handleUpdateBreakfast(req, res) {
       );
       const newBalance = Math.max(
         0,
-        computeBreakfastAdjustedTotalPrice({
-          totalPrice: totalPriceNum,
-          breakfastInTotalPrice,
-          breakfastTotal: newBreakfastTotal
-        }) - paidAmountNum
+        (breakfastInTotalPrice === null ? totalPriceNum : totalPriceNum - breakfastInTotalPrice + newBreakfastTotal) - paidAmountNum
       );
       resultSummary.newBalance = Number(newBalance.toFixed(2));
       resultSummary.refundLiabilityCreated = refundLiabilityCreated;
@@ -243791,15 +243769,10 @@ async function handleStaffUpdateBreakfast(req, res) {
       const newBreakfastTotal = recomputeBreakfastTotal(nextSelections);
       const totalPriceNum = Number(booking.totalPrice || 0);
       const paidAmountNum = Number(booking.paidAmount || 0);
-      const breakfastInTotalPrice = sumBreakfastRateLines(
-        booking.rateBreakdown
+      const newBalance = Math.max(
+        0,
+        totalPriceNum + newBreakfastTotal - paidAmountNum
       );
-      const currentTotalPrice = computeBreakfastAdjustedTotalPrice({
-        totalPrice: totalPriceNum,
-        breakfastInTotalPrice,
-        breakfastTotal: newBreakfastTotal
-      });
-      const newBalance = Math.max(0, currentTotalPrice - paidAmountNum);
       transaction.update(bookingRef2, {
         breakfastSelections: nextSelections,
         breakfastTotal: newBreakfastTotal,
@@ -245547,15 +245520,8 @@ function readStaff5(req) {
   if (role !== "admin" && role !== "front-desk") return null;
   return { uid: String(staff.uid), role };
 }
-function extractGuestNameFromSlotKey(booking, slotKey, guestIndexFallback) {
+function extractGuestNameFromSlotKey(booking, guestIndex) {
   const guests = Array.isArray(booking?.guests) ? booking.guests : [];
-  const parts = slotKey.split("-");
-  let guestIndex = guestIndexFallback;
-  const tail = parts[parts.length - 1];
-  if (tail !== void 0) {
-    const parsed = Number.parseInt(tail, 10);
-    if (Number.isFinite(parsed) && parsed >= 0) guestIndex = parsed;
-  }
   const slotGuest = guests[guestIndex];
   if (slotGuest && typeof slotGuest === "object") {
     const first = typeof slotGuest.firstName === "string" ? slotGuest.firstName : "";
@@ -245616,13 +245582,19 @@ function toIsoString(value) {
 }
 async function computeKitchenList(date) {
   const datePrefix = date;
-  const cutoffsEnabled = await loadKitchenListCutoffsEnabled();
-  const cutoffState = computeBreakfastCutoffStateSafe(date, cutoffsEnabled);
+  const cutoffConfig = await loadKitchenListCutoffConfig();
+  const cutoffsEnabled = cutoffConfig.cutoffsEnabled;
+  const cutoffState = computeBreakfastCutoffStateSafe(
+    date,
+    cutoffsEnabled,
+    cutoffConfig.cutoffTime,
+    cutoffConfig.cutoffTimezone
+  );
   const cutoffAtIso = cutoffState.cutoffAt.toISOString();
   const cutoffPassed = cutoffState.isLocked;
   const bookings = [];
   try {
-    const snap = await adminDb.collection("bookings").where("hasAnyBreakfast", "==", true).get();
+    const snap = await adminDb.collection("bookings").get();
     snap.forEach((doc) => {
       bookings.push({ id: doc.id, ...doc.data() });
     });
@@ -245636,21 +245608,25 @@ async function computeKitchenList(date) {
     const bookingId = booking.id;
     const roomNumber = bookingRoomNumber(booking);
     const ref = bookingRef(booking);
-    for (const slotKey of Object.keys(selections)) {
-      if (!slotKeyDatePrefixMatches(slotKey, datePrefix)) continue;
-      const entry = selections[slotKey];
+    const { slots } = normalizeBreakfastSelections(
+      selections,
+      booking.numGuests
+    );
+    for (const slot of slots.values()) {
+      if (slot.serviceDate !== datePrefix) continue;
+      const entry = slot.entry;
       if (!entry || typeof entry !== "object") continue;
       if (entry.removedAt !== null && entry.removedAt !== void 0 && entry.removedAt !== "") {
         continue;
       }
-      const { guestIndex, guestName } = extractGuestNameFromSlotKey(booking, slotKey, 0);
+      const { guestIndex, guestName } = extractGuestNameFromSlotKey(booking, slot.guestIndex);
       finalized.push({
         bookingId,
         ref,
         roomNumber,
         guestName,
         guestIndex,
-        slotKey,
+        slotKey: slot.storedKey,
         mealId: typeof entry.mealId === "string" ? entry.mealId : "",
         mealName: typeof entry.mealName === "string" ? entry.mealName : "Unnamed meal",
         price: Number.isFinite(Number(entry.price)) ? Number(entry.price) : 0,
@@ -245672,8 +245648,16 @@ async function computeKitchenList(date) {
     const auditGroup = adminDb.collectionGroup("breakfastAudit");
     const auditSnap = await auditGroup.where("occurredAfterCutoff", "==", true).get();
     const bookingById = /* @__PURE__ */ new Map();
+    const bookingBaseById = /* @__PURE__ */ new Map();
     for (const booking of bookings) {
       bookingById.set(booking.id, booking);
+      bookingBaseById.set(
+        booking.id,
+        normalizeBreakfastSelections(
+          booking.breakfastSelections || {},
+          booking.numGuests
+        ).base
+      );
     }
     auditSnap.forEach((doc) => {
       const data = doc.data();
@@ -245685,10 +245669,13 @@ async function computeKitchenList(date) {
       const matchingBooking = bookingById.get(bookingId);
       const roomNumber = matchingBooking ? bookingRoomNumber(matchingBooking) : "\u2014";
       const ref = matchingBooking ? bookingRef(matchingBooking) : "\u2014";
+      const resolvedIndex = resolveBreakfastSlotGuestIndex(
+        typeof data.slotKey === "string" ? data.slotKey : "",
+        bookingBaseById.get(bookingId) || "zero-based"
+      );
       const { guestIndex, guestName } = extractGuestNameFromSlotKey(
         matchingBooking || { guests: [] },
-        typeof data.slotKey === "string" ? data.slotKey : "",
-        0
+        resolvedIndex === null ? 0 : resolvedIndex
       );
       const mealSnapshot = data.mealSnapshot && typeof data.mealSnapshot === "object" ? {
         mealId: String(data.mealSnapshot.mealId || ""),
@@ -245731,24 +245718,23 @@ async function computeKitchenList(date) {
     summary
   };
 }
-function computeBreakfastCutoffStateSafe(date, cutoffsEnabled = true) {
+function computeBreakfastCutoffStateSafe(date, cutoffsEnabled = true, cutoffTime = DEFAULT_BREAKFAST_CUTOFF_TIME, timezone = DEFAULT_BREAKFAST_CUTOFF_TIMEZONE) {
   try {
     const state = computeBreakfastCutoffState({
       serviceDate: date,
       now: /* @__PURE__ */ new Date(),
-      // The handler reads the same defaults the
-      // settings doc would supply. Reading from
-      // Firestore on every kitchen list hit is a
-      // worthwhile follow-up but not required for
-      // BR-07 (the defaults match the BR-02
-      // settings surface 99% of the time). Per
-      // BR-10 the `cutoffsEnabled` toggle IS
-      // re-read on every uncached request via
-      // `loadKitchenListCutoffsEnabled` so the
-      // late-change split honors the admin-side
-      // flip immediately.
-      cutoffTime: DEFAULT_BREAKFAST_CUTOFF_TIME,
-      timezone: DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
+      // Per BR-07-P2 (2026-10-22): the CONFIGURED cut-off
+      // time + timezone, read from `settings/breakfastConfig`
+      // — the same source the guest view + the staff view
+      // use. The pre-fix code passed the built-in defaults
+      // here, so the kitchen list ignored a Settings change.
+      //
+      // Per BR-10 the `cutoffsEnabled` toggle IS re-read on
+      // every uncached request via `loadKitchenListCutoffConfig`
+      // so the late-change split honors the admin-side flip
+      // immediately.
+      cutoffTime,
+      timezone,
       cutoffsEnabled
     });
     return {
@@ -245762,21 +245748,35 @@ function computeBreakfastCutoffStateSafe(date, cutoffsEnabled = true) {
     };
   }
 }
-var cutoffsEnabledCache = null;
+var cutoffConfigCache = null;
 var KITCHEN_LIST_CUTOFFS_CACHE_MS = 3e4;
-async function loadKitchenListCutoffsEnabled() {
+async function loadKitchenListCutoffConfig() {
   const now = Date.now();
-  if (cutoffsEnabledCache && now - cutoffsEnabledCache.at < KITCHEN_LIST_CUTOFFS_CACHE_MS) {
-    return cutoffsEnabledCache.value;
+  if (cutoffConfigCache && now - cutoffConfigCache.at < KITCHEN_LIST_CUTOFFS_CACHE_MS) {
+    return cutoffConfigCache.value;
   }
   try {
     const snap = await adminDb.collection("settings").doc("breakfastConfig").get();
     const source = snap.exists ? snap.data() : null;
-    const value = source?.cutoffsEnabled !== false;
-    cutoffsEnabledCache = { value, at: now };
+    const rawCutoff = String(source && source.cutoffTime || "").trim();
+    const rawZone = String(source && source.cutoffTimezone || "").trim();
+    const value = {
+      // The configured time / timezone are used only when they
+      // are well-formed; a malformed settings doc falls back to
+      // the built-in defaults (the same posture
+      // `breakfast-mark-served.ts` takes).
+      cutoffTime: /^([01]\d|2[0-3]):[0-5]\d$/.test(rawCutoff) ? rawCutoff : DEFAULT_BREAKFAST_CUTOFF_TIME,
+      cutoffTimezone: rawZone.length > 0 ? rawZone : DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
+      cutoffsEnabled: source?.cutoffsEnabled !== false
+    };
+    cutoffConfigCache = { value, at: now };
     return value;
   } catch {
-    return true;
+    return {
+      cutoffTime: DEFAULT_BREAKFAST_CUTOFF_TIME,
+      cutoffTimezone: DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
+      cutoffsEnabled: true
+    };
   }
 }
 async function handleGetKitchenList(req, res) {

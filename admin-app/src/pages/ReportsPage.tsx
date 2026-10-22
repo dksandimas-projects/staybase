@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useAdmin } from "../context/AdminContext";
-import { getLatestPaymentReference, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, getBookingRevenueStreams, isVatEnabled, getEffectiveVatRate } from "@spark-inn/shared";
+import { getLatestPaymentReference, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, getBookingRevenueStreams, isVatEnabled, getEffectiveVatRate, normalizeBreakfastSelections } from "@spark-inn/shared";
 import {
   AreaChart, Area,
   BarChart, Bar,
@@ -1460,8 +1460,19 @@ export function ReportsPage() {
         dateCursor.setDate(dateCursor.getDate() + i);
         const dateStr = dateCursor.toISOString().split("T")[0];
         if (!dateMap[dateStr]) dateMap[dateStr] = {};
-        for (let g = 1; g <= b.numGuests; g++) {
-          const key = `${dateStr}-guest-${g}`;
+        // Per BR-07-P1 (2026-10-22): the booking's selections
+        // are resolved into the CANONICAL 0-based slot space
+        // through the shared normaliser, so the report counts
+        // the legacy bare (`<date>-N`) and legacy 1-based
+        // (`<date>-guest-N`) key forms too. The pre-fix code
+        // looked up a 1-based key (`${dateStr}-guest-${g}`),
+        // so it never saw the guest app's 0-based keys.
+        const normalized = normalizeBreakfastSelections(
+          (b.breakfastSelections as any) || {},
+          b.numGuests
+        );
+        for (const slot of normalized.slots.values()) {
+          if (slot.serviceDate !== dateStr) continue;
           // Per BR-05 (2026-10-13): the booking doc's
           // `breakfastSelections` may now be either the
           // legacy `Record<string, string>` shape (meal
@@ -1469,9 +1480,8 @@ export function ReportsPage() {
           // (`{ mealId, mealName, price, ... }`). The
           // legacy report counts the meal name (matches
           // the pre-BR-05 inventory report); the rich
-          // shape needs the `mealName` extraction. The
-          // `key in selection` branch handles both.
-          const rawSelection: any = (b.breakfastSelections as any)?.[key];
+          // shape needs the `mealName` extraction.
+          const rawSelection: any = slot.entry;
           if (rawSelection) {
             const mealName =
               typeof rawSelection === "string"

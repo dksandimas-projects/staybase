@@ -90,15 +90,24 @@ describe("PDF generation repair", () => {
     expect(registrationBody).toMatch(/Pre-selected choices are marked; circle or check to change\./);
     expect(registrationBody).not.toMatch(/Circle or check your choice for each guest per day\./);
 
-    // The pre-fill reads from `booking.breakfastSelections` keyed
-    // by `${date}-guest-${g + 1}` (the same key shape the booking
-    // drawer's <select> writes to). Matching is by meal name
-    // (`mealName` field on the new rich shape — BR-01 moved
-    // from a string to a `{ mealId, mealName, price, ... }` entry).
+    // The pre-fill reads from `booking.breakfastSelections`
+    // resolved through the SHARED slot-key normaliser, so the
+    // key is the CANONICAL 0-based one (the same key shape the
+    // guest app writes and the booking drawer's <select> writes
+    // to). Matching is by meal name (`mealName` field on the new
+    // rich shape — BR-01 moved from a string to a
+    // `{ mealId, mealName, price, ... }` entry).
     // Per BR-08 (decision #238, 2026-10-14 — close-out): the
     // legacy string fallback (the value of the entry was the
     // meal name itself) is preserved for pre-BR-01 bookings.
-    expect(registrationBody).toMatch(/b\.breakfastSelections\[`\$\{date\}-guest-\$\{g \+ 1\}`\]/);
+    //
+    // Per BR-07-P1 (2026-10-22): the pre-fix code looked up a
+    // 1-BASED key (`${date}-guest-${g + 1}`), so every row was
+    // pre-filled with the NEXT guest's meal and the last guest's
+    // meal never appeared. The normaliser also makes the legacy
+    // bare + legacy 1-based key forms readable here.
+    expect(registrationBody).toMatch(/normalizeBreakfastSelections\(/);
+    expect(registrationBody).toMatch(/buildBreakfastSlotKey\(date,\s*g\)/);
     expect(registrationBody).toMatch(/isSelected = !!selectedName /);
 
     // The selected branch must fill the checkbox in the brand

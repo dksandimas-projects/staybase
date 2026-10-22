@@ -57,10 +57,18 @@ describe("BSP-02 — dashboard renders + toggles the served state", () => {
   const dashboardPage = read("admin-app/src/pages/DashboardPage.tsx");
 
   it("reads the served flag from each booking snapshot (the hydration point)", () => {
-    // Per DashboardPage.tsx ~line 258: `served: !!b.breakfastServed?.[key]`
-    // This is the read site that returns `false` for every key when the
-    // mapper fails to hydrate the field.
-    expect(dashboardPage).toMatch(/served:\s*!!b\.breakfastServed\?\.\[key\]/);
+    // Per DashboardPage.tsx: the served flag is read from the
+    // booking's `breakfastServed` map.
+    //
+    // Per BR-07-P1 (2026-10-22): the read now goes through the
+    // shared slot-key normaliser, so the served map is keyed by
+    // the CANONICAL slot key and the legacy bare / legacy
+    // 1-based key forms still resolve to the right slot. The
+    // pre-fix code read `!!b.breakfastServed?.[key]` with a
+    // 1-based key, so it never matched the guest app's
+    // 0-based keys.
+    expect(dashboardPage).toMatch(/normalizedServed\s*=\s*normalizeBreakfastSelections\(/);
+    expect(dashboardPage).toMatch(/served:\s*!!servedSlot/);
   });
 
   it("toggles via spread of booking.breakfastServed so other keys survive", () => {

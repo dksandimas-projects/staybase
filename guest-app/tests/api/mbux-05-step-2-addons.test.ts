@@ -331,8 +331,15 @@ describe("MBUX-05 — responsive per-guest selectors", () => {
 
 describe("MBUX-05 — the copy action's placement rules", () => {
   it("appears only on a date with at least one explicit selection", () => {
+    // Per BR-07-P1 (2026-10-22): the slot key is built by the
+    // shared canonical builder (`buildBreakfastSlotKey(date,
+    // slot.index)`) instead of the inline
+    // `` `${date}-${slot.id}` `` template. The KEY is byte-identical
+    // — the shared builder emits `${date}-guest-${index}` and
+    // `slot.id` IS `guest-${index}` — but the contract now lives in
+    // one place shared with the admin app.
     expect(bookingPageSrc).toMatch(
-      /const sourceHasChoice = slots\.some\(\(slot\) =>\s*Boolean\(breakfastSelections\[`\$\{date\}-\$\{slot\.id\}`\]\)\s*\);/
+      /const sourceHasChoice = slots\.some\(\(slot\) =>\s*Boolean\(breakfastSelections\[buildBreakfastSlotKey\(date, slot\.index\)\]\)\s*\);/
     );
     expect(bookingPageSrc).toMatch(/if \(!sourceHasChoice \|\| cutoff\.isLocked\) return null;/);
   });

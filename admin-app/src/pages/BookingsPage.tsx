@@ -37,7 +37,13 @@ import {
   // is enforced consistently with the Reports page + the
   // guest live preview.
   isVatEnabled,
-  getEffectiveVatRate
+  getEffectiveVatRate,
+  // Per BR-07-P1 (2026-10-22): the CANONICAL breakfast
+  // slot-key contract (0-based guest index) + the normaliser
+  // that folds the legacy bare and legacy 1-based key forms
+  // into it.
+  buildBreakfastSlotKey,
+  normalizeBreakfastSelections
 } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
@@ -871,6 +877,21 @@ export function BookingsPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [activeBookingSection, setActiveBookingSection] = useState<BookingDrawerSection>("overview");
   const [showEditRegistration, setShowEditRegistration] = useState(false);
+
+  // Per BR-07-P1 (2026-10-22): the selected booking's breakfast
+  // selections resolved into the CANONICAL 0-based slot space
+  // (`${date}-guest-${index}`). The shared normaliser also folds
+  // the two legacy key forms (the bare `<date>-N` form and the
+  // legacy 1-based `<date>-guest-N` form) into it, so the
+  // registration-form pre-fill reads the right guest's meal.
+  const selectedBookingBreakfastSlots = useMemo(
+    () =>
+      normalizeBreakfastSelections(
+        (selectedBooking?.breakfastSelections || {}) as Record<string, any>,
+        selectedBooking?.numGuests
+      ),
+    [selectedBooking?.breakfastSelections, selectedBooking?.numGuests]
+  );
 
   useEffect(() => {
     setActiveBookingSection("overview");
@@ -3341,6 +3362,15 @@ export function BookingsPage() {
         (item: { id: string; name: string; isActive: boolean }) => item.isActive
       );
       const stayDates = getStayDates(b);
+      // Per BR-07-P1 (2026-10-22): resolve the booking's
+      // selections into the canonical 0-based slot space once,
+      // so the pre-fill below reads the right guest's meal
+      // (and understands the legacy bare / legacy 1-based key
+      // forms).
+      const normalizedBreakfast = normalizeBreakfastSelections(
+        (b.breakfastSelections || {}) as Record<string, any>,
+        b.numGuests
+      );
       const breakfastRows = b.numGuests * Math.max(stayDates.length, 1);
       const breakfastH = 11 + Math.max(1, breakfastRows) * 5;
       const breakfastTop = Math.min(Math.max(y + 3, 232), 276 - breakfastH);
@@ -3376,12 +3406,23 @@ export function BookingsPage() {
             const rowLabel = stayDates.length > 1 ? `Guest ${g + 1} (${shortDate}):` : `Guest ${g + 1}:`;
             // The new `breakfastSelections` shape stores
             // a `{mealId, mealName, price, …}` object under
-            // `${date}-guest-${g + 1}` (BR-01). The pre-fill
-            // match uses `mealName` to stay backward-compatible
-            // with the legacy silog-names match used in earlier
-            // captures — a guest whose booking predates the
-            // BR-01 migration still gets the right checkbox.
-            const selectionEntry = b.breakfastSelections[`${date}-guest-${g + 1}`];
+            // `${date}-guest-${g}` (BR-01, 0-based guest
+            // index). The pre-fill match uses `mealName` to
+            // stay backward-compatible with the legacy
+            // silog-names match used in earlier captures — a
+            // guest whose booking predates the BR-01
+            // migration still gets the right checkbox.
+            //
+            // Per BR-07-P1 (2026-10-22): the slot is resolved
+            // through the shared normaliser, so the legacy bare
+            // (`<date>-N`) and legacy 1-based (`<date>-guest-N`)
+            // key forms still resolve to the right guest. The
+            // pre-fix code used a 1-based key
+            // (`${date}-guest-${g + 1}`), so every row was
+            // pre-filled with the NEXT guest's meal.
+            const selectionEntry = normalizedBreakfast.slots.get(
+              buildBreakfastSlotKey(date, g)
+            )?.entry;
             const selectedName = selectionEntry
               ? (typeof selectionEntry === "string"
                 ? selectionEntry
@@ -6232,7 +6273,18 @@ export function BookingsPage() {
                             <tr key={guestIndex}>
                               <td className="py-2 pr-3 font-semibold text-gray-800">Guest {guestIndex + 1}</td>
                               {getStayDates(selectedBooking).map((date) => {
-                                const key = `${date}-guest-${guestIndex + 1}`;
+                                // Per BR-07-P1 (2026-10-22): the
+                                // canonical slot key is 0-based
+                                // (`${date}-guest-${index}`) — the
+                                // same space the guest app writes
+                                // and the server resolves. The
+                                // pre-fix code used a 1-based key
+                                // (`${date}-guest-${index + 1}`),
+                                // so this table read the NEXT
+                                // guest's meal and never showed
+                                // the last guest's.
+                                const key = buildBreakfastSlotKey(date, guestIndex);
+                                const slotEntry = selectedBookingBreakfastSlots.slots.get(key)?.entry;
                                 return (
                                   <td key={key} className="px-2 py-2">
                                     <select
@@ -6249,10 +6301,10 @@ export function BookingsPage() {
                                       // is the new `meals[]` instead of the
                                       // legacy `silogItems[]`.
                                       value={(
-                                        selectedBooking.breakfastSelections?.[key]
-                                          && typeof selectedBooking.breakfastSelections[key] === "object"
-                                          ? (selectedBooking.breakfastSelections[key] as any).mealName || ""
-                                          : (selectedBooking.breakfastSelections?.[key] as unknown as string) || ""
+                                        slotEntry
+                                          && typeof slotEntry === "object"
+                                          ? (slotEntry as any).mealName || ""
+                                          : (slotEntry as unknown as string) || ""
                                       )}
                                       onChange={(event) => handleBreakfastSelection(key, event.target.value)}
                                       className="min-h-[34px] w-full rounded border border-gray-200 bg-white px-2 text-[10px] font-semibold text-gray-700"

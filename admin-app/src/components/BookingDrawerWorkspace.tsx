@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   BedDouble,
@@ -26,6 +26,16 @@ import {
   getLatestPaymentReference,
   MIN_BREAKFAST_OVERRIDE_REASON_LENGTH,
   recomputeBreakfastTotal,
+  // Per BR-07-P1 (2026-10-22): the CANONICAL breakfast
+  // slot-key contract + the normaliser that folds the
+  // legacy bare (`<date>-N`) and legacy 1-based
+  // (`<date>-guest-N`) forms into it. The drawer, the guest
+  // app, and the server all resolve slots through these
+  // helpers, so the admin app cannot drift onto a
+  // different index base than the guest app again.
+  buildBreakfastSlotKey,
+  buildBreakfastSlotKeyForBase,
+  normalizeBreakfastSelections,
   // Per BR-12.1 (2026-10-15, decision #247): the
   // booking-drawer "Other Add-Ons" tab full edit UI
   // uses the same shared helpers as the public
@@ -865,8 +875,18 @@ export function BookingDrawerBreakfastTab({
   const guestSlots = useMemo(() => {
     const n = Math.max(1, Number(booking.numGuests || 1));
     const slots: Array<{ id: string; label: string }> = [];
-    for (let i = 1; i <= n; i += 1) {
-      slots.push({ id: `guest-${i}`, label: `Guest ${i}` });
+    // Per BR-07-P1 (2026-10-22): the slot id is the 0-based
+    // guest index, matching the CANONICAL breakfast slot key
+    // (`${date}-guest-${guestIndex}`, 0-based) the guest app
+    // writes and the server resolves. The pre-fix code used a
+    // 1-based index (`guest-1` … `guest-n`), so the drawer's
+    // "Guest 1" row read the SECOND guest's meal and the last
+    // guest's meal was never shown to staff — and staff wrote
+    // to a key the guest page's universe does not contain, so a
+    // staff-added meal for the last guest was invisible to the
+    // guest.
+    for (let i = 0; i < n; i += 1) {
+      slots.push({ id: `guest-${i}`, label: `Guest ${i + 1}` });
     }
     return slots;
   }, [booking.numGuests]);
@@ -929,6 +949,33 @@ export function BookingDrawerBreakfastTab({
   );
 
   // ---------- Existing data ----------
+  //
+  // Per BR-07-P1 (2026-10-22): the slot keys are resolved
+  // through the shared normaliser
+  // (`normalizeBreakfastSelections`) so the drawer reads the
+  // CANONICAL 0-based space and still understands the two
+  // legacy forms that live in production:
+  //
+  //   - the bare `<date>-N` form (0-based), and
+  //   - the legacy 1-based `<date>-guest-N` form the
+  //     pre-fix admin app wrote.
+  //
+  // `existingSelections` is keyed by the CANONICAL slot key
+  // (`${date}-guest-${index}`), so the drawer row for guest
+  // index `i` reads `existingSelections[buildBreakfastSlotKey(date, i)]`.
+  // `slotKeyForIndex` maps a row back to the key the ops must
+  // carry: the booking's STORED key when the slot already
+  // exists (so a legacy booking keeps its own index space and
+  // never ends up with two), otherwise a fresh key in that
+  // same space.
+  const normalizedBreakfast = useMemo(
+    () =>
+      normalizeBreakfastSelections(
+        (booking.breakfastSelections || {}) as Record<string, any>,
+        booking.numGuests
+      ),
+    [booking.breakfastSelections, booking.numGuests]
+  );
 
   // Existing selection per slot, mirrored from booking.
   // The admin-context booking type is a union of the
@@ -937,29 +984,63 @@ export function BookingDrawerBreakfastTab({
   // a single value's `mealId` (string-key-only legacy
   // values stay in their own shape — the drawer
   // gracefully shows empty slots for those bookings).
+  //
+  // The map is keyed by the booking's STORED slot key, so the
+  // diff + the ops below keep working against the key that is
+  // actually on the doc. The normaliser guarantees one entry
+  // per guest slot, so a booking that mixes the legacy bare
+  // form with the canonical form cannot show the same guest
+  // twice.
   const existingSelections: Record<string, BreakfastSelectionEntry> = useMemo(() => {
-    const src: any = booking.breakfastSelections;
-    if (!src || typeof src !== "object") return {};
     const out: Record<string, BreakfastSelectionEntry> = {};
-    for (const [key, value] of Object.entries(src)) {
-      if (value && typeof value === "object" && "mealId" in (value as any)) {
-        out[key] = value as BreakfastSelectionEntry;
+    for (const slot of normalizedBreakfast.slots.values()) {
+      const value: any = slot.entry;
+      if (value && typeof value === "object" && "mealId" in value) {
+        out[slot.storedKey] = value as BreakfastSelectionEntry;
       }
     }
     return out;
-  }, [booking.breakfastSelections]);
+  }, [normalizedBreakfast]);
+
+  // The key an op for `guestIndex` on `date` must carry.
+  // The booking's stored key wins (so an edit lands on the
+  // entry that already exists); a new slot gets a key in the
+  // booking's own index base (canonical 0-based for every
+  // booking written today, 1-based for a legacy booking so
+  // the two spaces never mix inside one booking).
+  const slotKeyForIndex = useCallback(
+    (date: string, guestIndex: number): string => {
+      const canonicalKey = buildBreakfastSlotKey(date, guestIndex);
+      const existing = normalizedBreakfast.slots.get(canonicalKey);
+      if (existing) return existing.storedKey;
+      return buildBreakfastSlotKeyForBase(
+        date,
+        guestIndex,
+        normalizedBreakfast.base
+      );
+    },
+    [normalizedBreakfast]
+  );
 
   const existingServed: Record<string, BreakfastServedEntry> = useMemo(() => {
     const src: any = booking.breakfastServed;
     if (!src || typeof src !== "object") return {};
     const out: Record<string, BreakfastServedEntry> = {};
-    for (const [key, value] of Object.entries(src)) {
-      if (value && typeof value === "object" && "servedAt" in (value as any)) {
-        out[key] = value as BreakfastServedEntry;
+    // The served map is keyed by slot key too — normalise it
+    // with the SAME base so the served badge lines up with the
+    // selection it belongs to.
+    const normalizedServed = normalizeBreakfastSelections(
+      src as Record<string, any>,
+      booking.numGuests
+    );
+    for (const slot of normalizedServed.slots.values()) {
+      const value: any = slot.entry;
+      if (value && typeof value === "object" && "servedAt" in value) {
+        out[slot.canonicalKey] = value as BreakfastServedEntry;
       }
     }
     return out;
-  }, [booking.breakfastServed]);
+  }, [booking.breakfastServed, booking.numGuests]);
 
   // Pending refund liabilities (BR-01 `category: "breakfast"`).
   // Walk the booking's `refunds[]` (the existing OnsitePayment shape
@@ -1333,9 +1414,16 @@ export function BookingDrawerBreakfastTab({
 
                 <ul className="mt-3 space-y-2">
                   {guestSlots.map((slot, slotIdx) => {
-                    const slotKey = `${date}-${slot.id}`;
+                    // Per BR-07-P1 (2026-10-22): the row's
+                    // canonical key is the 0-based guest index
+                    // (the guest app's slot space), and the op
+                    // key is the booking's stored key for that
+                    // slot (or a fresh key in the booking's own
+                    // index base).
+                    const canonicalKey = buildBreakfastSlotKey(date, slotIdx);
+                    const slotKey = slotKeyForIndex(date, slotIdx);
                     const existing = existingSelections[slotKey];
-                    const served = existingServed[slotKey];
+                    const served = existingServed[canonicalKey];
                     const hasMeal = existing && !existing.removedAt;
                     const isRemoved = existing && existing.removedAt;
                     const selectedMealId = pendingOp.change.find((op) => op.slotKey === slotKey)?.mealId

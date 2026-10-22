@@ -257,8 +257,18 @@ describe("BR-10 — every caller of computeBreakfastCutoffState threads cutoffsE
       // canonical server-side call site — its
       // underlying `computeBreakfastCutoffState({...`
       // must forward the flag too.
+      //
+      // Per BR-07-P2 (2026-10-22): the handler now forwards the
+      // CONFIGURED cut-off time + timezone (read from
+      // `settings/breakfastConfig`) instead of the hard-coded
+      // `DEFAULT_BREAKFAST_CUTOFF_TIME` /
+      // `DEFAULT_BREAKFAST_CUTOFF_TIMEZONE`. The pre-fix
+      // signature pinned the defaults, which is exactly the
+      // defect: the guest view + the staff view followed the
+      // Settings value while the kitchen list kept the
+      // built-in one.
       path: "guest-app/server/handlers/breakfast-kitchen-list.ts",
-      signature: "cutoffTime: DEFAULT_BREAKFAST_CUTOFF_TIME,\n      timezone: DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,\n      cutoffsEnabled"
+      signature: "cutoffTime,\n      timezone,\n      cutoffsEnabled"
     },
     {
       path: "guest-app/server/handlers/breakfast-mark-served.ts",

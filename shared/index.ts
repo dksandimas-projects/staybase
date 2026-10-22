@@ -55,6 +55,16 @@ export * from "./utils/bookingPreferences";
 export * from "./utils/breakfastCutoff";
 export * from "./utils/breakfastTotal";
 
+// Per BR-01 (Phase 13 — Breakfast Redesign, decision
+// #231, 2026-10-12): the CANONICAL breakfast slot-key
+// contract (`${serviceDate}-guest-${guestIndex}`, 0-based)
+// + the normaliser that folds the legacy bare
+// (`<date>-N`) and legacy 1-based (`<date>-guest-N`)
+// forms into it. The guest app, the admin app, and the
+// server all resolve slots through it so the two apps
+// cannot drift onto different index bases again.
+export * from "./utils/breakfastSlotKey";
+
 // Per OCT-H8 (2026-10-20, decision #288): the pure re-dating /
 // auto-cancel logic for a booking whose stay window moved (or was
 // cancelled). The reschedule + cancel handlers use it to drop the
