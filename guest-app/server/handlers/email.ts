@@ -1117,6 +1117,34 @@ async function findBooking(req: VercelRequest, options: { requireGuestMatch: boo
   } else if (bookingRef) {
     const trimmed = String(bookingRef).trim();
     let query: any;
+    // Per RPT-16 (P1 security fix, 2026-10-22): the
+    // reservation-ref branch below must enforce the SAME guest
+    // credential as the `SI-…` branch further down.
+    //
+    // THE DEFECT (pre-fix): the `RESERVATION_REF_REGEX` branch
+    // queried the `reservations` collection by `reservationRef`
+    // with NO guest-email filter at all, and the post-resolution
+    // guard only ran the guest-email check for `bookingId`
+    // payloads. So an UNAUTHENTICATED caller holding an
+    // enumerable `R-YYYYMMDD-NNNNN` ref could (a) resolve the
+    // booking, (b) fire the guest-facing `booking-submitted` /
+    // `booking-cancelled` emails, and (c) use the 400-vs-404
+    // response difference as an enumeration oracle (the `SI-…`
+    // branch answered 400 "Booking reference and guest email
+    // are required." when the email was missing).
+    //
+    // THE FIX: hoist the credential gate so it covers BOTH ref
+    // shapes, using the byte-identical error string the `SI-…`
+    // branch uses so the two branches stay indistinguishable to
+    // the caller (same status code, same message). The email
+    // comparison is case-insensitive + trimmed, matching the
+    // existing convention in the post-resolution guard at the
+    // bottom of this function.
+    const isReservationRef = RESERVATION_REF_REGEX.test(trimmed);
+    const requiresGuestEmail = options.requireGuestMatch && !user.uid;
+    if (requiresGuestEmail && !guestEmail) {
+      throw new Error("Booking reference and guest email are required.");
+    }
     // Per EC-02b (operator-reported 2026-08-21): post-MRB-01
     // bookings (decision #159) carry a `reservationRef`
     // (`R-YYYYMMDD-NNNNN`) rather than a per-child
@@ -1135,7 +1163,7 @@ async function findBooking(req: VercelRequest, options: { requireGuestMatch: boo
     // checkin-reminder cron, and the
     // `resolveBookingForLink` helper at members.ts:816
     // that the MED-3 G1 fix added for the same wire shape).
-    if (RESERVATION_REF_REGEX.test(trimmed)) {
+    if (isReservationRef) {
       const reservationSnap = await adminDb
         .collection("reservations")
         .where("reservationRef", "==", trimmed)
@@ -1171,6 +1199,23 @@ async function findBooking(req: VercelRequest, options: { requireGuestMatch: boo
         snapshot = fallbackSnap.docs[0];
       } else {
         snapshot = childrenSnap.docs[0];
+      }
+      // Per RPT-16 (2026-10-22): the reservation-ref branch's
+      // credential check — the equivalent of the `SI-…` branch's
+      // `where("guestEmail", "==", …)` filter. Firestore has no
+      // case-insensitive equality query, so the comparison runs
+      // after the lead child is resolved (the lead child always
+      // carries the booking's `guestEmail`, lowercased + trimmed
+      // on write per SEV-1 #4). A mismatch returns `null` — the
+      // same 404 "Booking not found." the `SI-…` branch returns
+      // for a wrong email, so the two branches are
+      // indistinguishable to the caller.
+      if (requiresGuestEmail) {
+        const bookingEmail = String((snapshot.data() as any)?.guestEmail || "")
+          .trim()
+          .toLowerCase();
+        const providedEmail = String(guestEmail).trim().toLowerCase();
+        if (bookingEmail !== providedEmail) return null;
       }
     } else {
       query = adminDb.collection("bookings").where("bookingRef", "==", trimmed).limit(1);
