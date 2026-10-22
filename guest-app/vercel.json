@@ -42,6 +42,14 @@
     {
       "path": "/api/holds/sweep",
       "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/janitor/storage-sweep",
+      "schedule": "0 19 * * *"
+    },
+    {
+      "path": "/api/notifications/prune",
+      "schedule": "0 3 * * *"
     }
   ],
   "rewrites": [

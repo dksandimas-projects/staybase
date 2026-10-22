@@ -60,7 +60,7 @@ Guests must never read or write this collection.
 
 ### Retention (build alongside, do not defer)
 
-The panel loads a bounded query — `orderBy("createdAt","desc").limit(50)` — never the whole collection. Prune old docs so history stays bounded: a Vercel Cron entry in `vercel.json` (same pattern as the existing check-in-reminder cron) hitting a new admin route that hard-deletes `notifications` older than N days (e.g. 30). Without this, the collection grows linearly forever (the FLR-03 pattern already flagged in the roadmap).
+The panel loads a bounded query — `orderBy("createdAt","desc").limit(50)` — never the whole collection. Prune old docs so history stays bounded: a Vercel Cron entry in `guest-app/vercel.json §crons` (same pattern as the existing check-in-reminder cron; the repo-root `vercel.json` is read by no Vercel project) hitting a new admin route that hard-deletes `notifications` older than N days (e.g. 30). Without this, the collection grows linearly forever (the FLR-03 pattern already flagged in the roadmap).
 
 ---
 
@@ -98,7 +98,7 @@ The panel loads a bounded query — `orderBy("createdAt","desc").limit(50)` — 
 - **Never log PII** (Hard Rule) — entries carry room number / booking ref / order ref, never guest email or payment data.
 - Reuse `Toast`, `Drawer` (admin), `useBreakpoint`, and `BottomTabBar`/focus-trap building blocks from `ADMIN-MOBILE.md` for the mobile panel.
 - Role-aware: Front Desk and Admin both see the center (rules: `isStaff()`); all event types are operational, not admin-only.
-- **MD sync at build:** add the `notifications` collection to `BACKEND.md` (schema table + Security Rules Summary row), the `Notification` type to `TYPES.md`, the notification-write side-effect to the relevant routes in `API-ROUTES.md`, and the retention cron to `vercel.json` + the cron list.
+- **MD sync at build:** add the `notifications` collection to `BACKEND.md` (schema table + Security Rules Summary row), the `Notification` type to `TYPES.md`, the notification-write side-effect to the relevant routes in `API-ROUTES.md`, and the retention cron to `guest-app/vercel.json §crons` + the cron list.
 
 ---
 

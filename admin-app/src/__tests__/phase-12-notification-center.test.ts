@@ -35,8 +35,12 @@ const sharedTypesSrc = readFileSync(
   resolve(__dirname, "../../../shared/types/index.ts"),
   "utf8"
 );
-const vercelJson = JSON.parse(
-  readFileSync(resolve(__dirname, "../../../vercel.json"), "utf8")
+// The guest Vercel project's Root Directory is `guest-app/`, so Vercel
+// reads `guest-app/vercel.json` — that is the file that actually
+// schedules a cron. The repo-root `vercel.json` is read by no Vercel
+// project (see `plan/docs/FILE-STRUCTURE.md §Vercel Project Setup`).
+const guestAppVercelJson = JSON.parse(
+  readFileSync(resolve(__dirname, "../../../guest-app/vercel.json"), "utf8")
 );
 const apiRouterSrc = readFileSync(
   resolve(__dirname, "../../../guest-app/server/apiRouter.ts"),
@@ -367,10 +371,16 @@ describe("Phase 12 — Notification Center (decision #120)", () => {
   });
 
   describe("retention cron", () => {
-    it("adds a new notifications/prune cron to vercel.json", () => {
-      const cronEntries = (vercelJson.crons || []) as Array<{ path: string; schedule: string }>;
+    it("adds a new notifications/prune cron to guest-app/vercel.json", () => {
+      const cronEntries = (guestAppVercelJson.crons || []) as Array<{
+        path: string;
+        schedule: string;
+      }>;
       const entry = cronEntries.find((c) => c.path === "/api/notifications/prune");
-      expect(entry, "expected /api/notifications/prune in vercel.json crons").toBeTruthy();
+      expect(
+        entry,
+        "expected /api/notifications/prune in guest-app/vercel.json crons"
+      ).toBeTruthy();
       // Daily — schedule is a string (5-field cron expression)
       expect(typeof entry!.schedule).toBe("string");
     });
