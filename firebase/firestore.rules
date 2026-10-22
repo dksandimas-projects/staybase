@@ -376,8 +376,22 @@ service cloud.firestore {
     }
 
     match /corporateInquiries/{inquiryId} {
-      allow read, update, delete: if isStaff();
+      allow read, update: if isStaff();
       allow create: if isStaff();
+      // Per F01-CORP (2026-10-22, P5 production QA): `delete` was
+      // staff-wide. Nothing in the codebase deletes an inquiry
+      // through a rules-governed write — the admin app only UPDATES
+      // (`AdminContext.tsx` — `updateInquiryStatus`, `addInquiryNote`;
+      // `CorporateInquiriesPage.tsx` — `accessCodeId`), the guest
+      // submits through the server (`/api/corporate/inquiry`, Admin
+      // SDK), and the staging reset deletes via the Admin SDK too.
+      // So the grant was never used and was pure destructive
+      // surface for a front-desk account: one delete destroys the
+      // pipeline record for a live corporate negotiation. Deleting
+      // an inquiry is admin-only now; the desk keeps the whole
+      // documented pipeline workflow (move through stages, log
+      // notes, issue the access code).
+      allow delete: if isAdmin();
     }
 
     match /corporateInvoices/{invoiceId} {
@@ -437,9 +451,46 @@ service cloud.firestore {
     // code never reads these collections client-side (the
     // API is the only sanctioned path). Admin staff reads
     // them via authenticated sessions.
+    // Per F01-CORP (2026-10-22, P5 production QA): the
+    // `corporateCodes` write rule was `allow write: if isStaff()`.
+    // A FRONT-DESK account could therefore reprice or deactivate a
+    // negotiated corporate rate straight from the Firestore SDK.
+    // The admin UI gate on the Rates page
+    // (`AdminLayout.tsx` — `restrictedPaths = ["/rates", "/members",
+    // "/settings"]`) is COSMETIC for this collection, because every
+    // write here happens CLIENT-side (`AdminContext.tsx` —
+    // `updateCorporateCode`, `toggleCorporateCodeActive`,
+    // `deleteCorporateCode`) and the desk role is allowed to reach
+    // Firestore directly. `ratePerRoomType` IS the negotiated
+    // nightly rate the guest is charged on `/corporate/book`, so this
+    // is direct revenue loss.
+    //
+    // CREATE stays staff-wide ON PURPOSE — the desk's documented
+    // job is to negotiate a rate and issue the code. Per
+    // `plan/features/CORPORATE-INQUIRIES.md` §Generate Access Code
+    // (reachable from the front-desk Corporate Inquiries page per
+    // `plan/features/AUTH-ROLES.md` §Roles), the desk writes
+    // `corporateCodes/{code}` with `companyName`, `ratePerRoomType`,
+    // `expiresAt`, `usageCap`, `usageCount: 0`, `linkedInquiryId`,
+    // `createdBy`, `isActive: true`, then links it back with
+    // `corporateInquiries/{id}.accessCodeId`. Minting the code at
+    // the desk IS the workflow; repricing a code that ALREADY
+    // EXISTS is not.
+    //
+    // So the split is by OPERATION, not by role:
+    //   create → staff        (the desk's Generate Access Code flow)
+    //   update → admin only   (reprice / deactivate an existing code)
+    //   delete → admin only
+    // The admin-only Rates page is the only client writer of
+    // update/delete, so admin keeps the full surface. The server
+    // (Admin SDK — `bookings.ts`, `corporate-codes.ts`) bypasses
+    // these rules entirely, so the server-side `usageCount` counter
+    // and the corporate-booking redemption path are unaffected.
     match /corporateCodes/{code} {
       allow read: if isStaff();
-      allow write: if isStaff();
+      allow create: if isStaff();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
     }
 
     // Per PR-AUDIT-B2 (2026-10-20): the Spark Rewards portal reads
@@ -459,7 +510,33 @@ service cloud.firestore {
     match /vouchers/{voucherId} {
       allow read: if isStaff()
         || (signedIn() && resource.data.memberId == request.auth.uid);
-      allow write: if isStaff();
+      // Per F01-VOU (2026-10-22, P5 production QA): the voucher
+      // WRITE was `allow write: if isStaff()`, so a front-desk
+      // account could mint or reprice a promo voucher (an arbitrary
+      // discount) straight from the Firestore SDK. The Rates page is
+      // admin-only in the UI, but that gate is cosmetic here: the
+      // writes are CLIENT-side (`AdminContext.tsx` — `addVoucher`,
+      // `updateVoucher`, `toggleVoucherActive`).
+      //
+      // Admin-only is safe because the Rates page is the ONLY client
+      // writer of this collection:
+      //   - `addVoucher` / `updateVoucher` / `toggleVoucherActive`
+      //     are consumed ONLY by `admin-app/src/pages/RatesPage.tsx`
+      //     (admin-only page — `AdminLayout.tsx` `restrictedPaths`).
+      //   - The Spark Rewards portal (`guest-app/src/pages/
+      //     RewardsPage.tsx`) only READS its own reward vouchers —
+      //     it has no `setDoc` / `updateDoc` / `deleteDoc` at all.
+      //   - The free-night REWARD voucher is minted SERVER-side at
+      //     checkout (`guest-app/server/handlers/bookings.ts` —
+      //     `adminDb.collection("vouchers").doc(freeNightCode)`),
+      //     and the Admin SDK bypasses these rules.
+      //   - The `usageCount` counter is incremented / decremented
+      //     SERVER-side (`bookings.ts` — `transaction.update(
+      //     voucherRef, { usageCount })`, Admin SDK).
+      // No member-issued or desk-issued voucher is written from a
+      // client, so `isAdmin()` closes the hole without breaking a
+      // documented workflow.
+      allow write: if isAdmin();
     }
 
     // Per PR-AUDIT-B5 (2026-10-20): the intercom thread document was

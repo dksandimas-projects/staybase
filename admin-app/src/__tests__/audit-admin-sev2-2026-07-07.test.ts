@@ -40,7 +40,21 @@ describe("Admin audit 2026-07-07 SEV-2 fixes", () => {
     expect(corporateSrc).not.toMatch(/corporateDoubleRate|corporateExecRate/);
     expect(contextSrc).toMatch(/runTransaction\(db,\s*async\s*\(transaction\)/);
     expect(contextSrc).toMatch(/Corporate code already exists/);
-    expect(rulesSrc).toMatch(/match \/corporateCodes\/\{code\}[\s\S]*allow write: if isStaff\(\);/);
+    // F01 (2026-10-22): the corporate-code rule is split BY OPERATION —
+    // staff may CREATE (the desk's documented Generate Access Code flow),
+    // but repricing / deactivating / deleting an existing code is
+    // admin-only. The previous pin was a greedy
+    // `match /corporateCodes/{code}[\s\S]*allow write: if isStaff();`
+    // regex: `[\s\S]*` ran past the end of the block, so it matched a
+    // LATER rule in the file and never actually guarded this one.
+    const corpCodeBlock = rulesSrc.match(
+      /match \/corporateCodes\/\{code\}\s*\{[\s\S]*?\n\s{4}\}/
+    );
+    expect(corpCodeBlock, "expected a corporateCodes match block").toBeTruthy();
+    expect(corpCodeBlock![0]).toMatch(/allow create: if isStaff\(\);/);
+    expect(corpCodeBlock![0]).toMatch(/allow update: if isAdmin\(\);/);
+    expect(corpCodeBlock![0]).toMatch(/allow delete: if isAdmin\(\);/);
+    expect(corpCodeBlock![0]).not.toMatch(/allow write: if isStaff\(\);/);
   });
 
   it("AA-09 adds dashboard operational sections and removes fabricated trend copy", () => {
