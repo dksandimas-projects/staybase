@@ -4045,6 +4045,18 @@ export async function handleCreateBooking(req: any, res: any) {
         // holds by construction (the aggregate is the
         // sum of children, each of which already passes
         // the invariant). The totalPrice match is exact.
+        //
+        // Per the P1 revenue-reporting audit (2026-10-22):
+        // the aggregate's total is the RESERVATION's billed
+        // total — `finalTotalPrice`, i.e. the chain total
+        // minus the points the member redeemed at creation.
+        // The points redemption is a deduction LAYER the
+        // chain does not see (it is applied to the
+        // reservation total after the chain runs), so it is
+        // added to the aggregate's deduction line here;
+        // without it the stored aggregate carried the
+        // pre-redemption total while the reservation doc
+        // carried the post-redemption one.
         aggregateRevenueAllocation: assertBookingRevenueAllocationInvariant(
           {
             roomNet: childPricing.reduce(
@@ -4067,10 +4079,10 @@ export async function handleCreateBooking(req: any, res: any) {
                   0
                 ),
               0
-            ),
-            totalNet: totalPrice
+            ) + (Number(selfRedeemedValue) || 0),
+            totalNet: finalTotalPrice
           },
-          totalPrice
+          finalTotalPrice
         ),
         source: corporateDetails.isCorporate ? "corporate" : "online",
         isCorporate: corporateDetails.isCorporate,
@@ -14373,18 +14385,42 @@ export async function handleAddRoomToReservation(req: any, res: any) {
       const newTotalPrice = Number(reservation.totalPrice || 0) + finalTotalPrice;
       const newAggregateRevenueAllocation = (() => {
         const existingAlloc = (reservation as any).aggregateRevenueAllocation;
-        if (!existingAlloc) {
-          return newChildRevenueAllocation;
-        }
+        // Per the P1 revenue-reporting audit (2026-10-22): the
+        // aggregate's total is the RESERVATION's billed total
+        // (`newTotalPrice`) — the same number the header
+        // persists as its `totalPrice`. The legacy branch (a
+        // pre-MRB-11 reservation with no stored aggregate)
+        // attributes the reservation's existing total to the
+        // room stream — the same assumption the legacy revenue
+        // heuristic makes — so the per-stream sum still ties to
+        // the billed total.
+        const baseRoomNet = existingAlloc
+          ? Number(existingAlloc.roomNet || 0)
+          : Number(reservation.totalPrice || 0);
+        const baseBreakfastNet = existingAlloc
+          ? Number(existingAlloc.breakfastNet || 0)
+          : 0;
+        const baseAddOnNet = existingAlloc
+          ? Number(existingAlloc.addOnNet || 0)
+          : 0;
+        const roomNet = baseRoomNet + newChildRevenueAllocation.roomNet;
+        const breakfastNet = baseBreakfastNet + newChildRevenueAllocation.breakfastNet;
+        const addOnNet = baseAddOnNet + newChildRevenueAllocation.addOnNet;
+        const grossTotal = roomNet + breakfastNet + addOnNet;
         return assertBookingRevenueAllocationInvariant(
           {
-            roomNet: Number(existingAlloc.roomNet || 0) + newChildRevenueAllocation.roomNet,
-            breakfastNet: Number(existingAlloc.breakfastNet || 0) + newChildRevenueAllocation.breakfastNet,
-            addOnNet: Number(existingAlloc.addOnNet || 0) + newChildRevenueAllocation.addOnNet,
-            deductionNet: Number(existingAlloc.deductionNet || 0) + newChildRevenueAllocation.deductionNet,
-            totalNet: Number(existingAlloc.totalNet || 0) + newChildRevenueAllocation.totalNet
+            roomNet,
+            breakfastNet,
+            addOnNet,
+            // The deduction is the difference between the gross
+            // streams and the billed total, so the per-stream
+            // sum always ties to the total the header persists
+            // (in the normal case this is byte-identical to
+            // `existing.deductionNet + newChild.deductionNet`).
+            deductionNet: grossTotal - newTotalPrice,
+            totalNet: newTotalPrice
           },
-          Number(existingAlloc.totalNet || 0) + newChildRevenueAllocation.totalNet
+          newTotalPrice
         );
       })();
       const newChildrenDates = [

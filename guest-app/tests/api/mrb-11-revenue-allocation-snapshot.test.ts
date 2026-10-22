@@ -107,8 +107,19 @@ describe("MRB-11 — server-side revenue allocation snapshot (PR2 wiring)", () =
     // is the sum of the N per-child allocations, written
     // transactionally with the child writes. The invariant
     // assertion runs before the write.
+    //
+    // Per the P1 revenue-reporting audit (2026-10-22): the
+    // aggregate's total is the RESERVATION's billed total —
+    // `finalTotalPrice`, i.e. the chain total minus the points
+    // the member redeemed at creation (the header persists
+    // `totalPrice: finalTotalPrice`). The points ride on the
+    // aggregate's deduction line because they are a
+    // deduction layer the pricing chain does not see.
     expect(handlerSrc).toMatch(
-      /aggregateRevenueAllocation: assertBookingRevenueAllocationInvariant[\s\S]{0,800}?totalNet: totalPrice/s
+      /aggregateRevenueAllocation: assertBookingRevenueAllocationInvariant[\s\S]{0,900}?totalNet: finalTotalPrice/s
+    );
+    expect(handlerSrc).toMatch(
+      /aggregateRevenueAllocation: assertBookingRevenueAllocationInvariant[\s\S]{0,900}?deductionNet:[\s\S]{0,400}?selfRedeemedValue/s
     );
   });
 

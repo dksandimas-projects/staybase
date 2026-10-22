@@ -222717,6 +222717,12 @@ function assertBookingRevenueAllocationInvariant(allocation, totalPrice) {
     round2(allocation.roomNet) + round2(allocation.breakfastNet) + round2(allocation.addOnNet) - round2(allocation.deductionNet)
   );
   const expected = round2(totalPrice);
+  const allocationTotal = round2(allocation.totalNet);
+  if (Math.abs(allocationTotal - expected) > 0.05) {
+    throw new Error(
+      `[MRB-11] revenue allocation total mismatch: allocation.totalNet(${allocation.totalNet}) != booking.totalPrice(${expected}). This is a server-side bug \u2014 the allocation snapshot and the billed total were computed from different figures.`
+    );
+  }
   if (Math.abs(computed - expected) > 0.05) {
     throw new Error(
       `[MRB-11] revenue allocation invariant violation: roomNet(${allocation.roomNet}) + breakfastNet(${allocation.breakfastNet}) + addOnNet(${allocation.addOnNet}) - deductionNet(${allocation.deductionNet}) = ${computed}, expected totalNet(${expected}). This is a server-side bug \u2014 the pricing chain returned an inconsistent allocation.`
@@ -233101,6 +233107,18 @@ async function handleCreateBooking(req, res) {
         // holds by construction (the aggregate is the
         // sum of children, each of which already passes
         // the invariant). The totalPrice match is exact.
+        //
+        // Per the P1 revenue-reporting audit (2026-10-22):
+        // the aggregate's total is the RESERVATION's billed
+        // total — `finalTotalPrice`, i.e. the chain total
+        // minus the points the member redeemed at creation.
+        // The points redemption is a deduction LAYER the
+        // chain does not see (it is applied to the
+        // reservation total after the chain runs), so it is
+        // added to the aggregate's deduction line here;
+        // without it the stored aggregate carried the
+        // pre-redemption total while the reservation doc
+        // carried the post-redemption one.
         aggregateRevenueAllocation: assertBookingRevenueAllocationInvariant(
           {
             roomNet: childPricing.reduce(
@@ -233121,10 +233139,10 @@ async function handleCreateBooking(req, res) {
                 0
               ),
               0
-            ),
-            totalNet: totalPrice
+            ) + (Number(selfRedeemedValue) || 0),
+            totalNet: finalTotalPrice
           },
-          totalPrice
+          finalTotalPrice
         ),
         source: corporateDetails.isCorporate ? "corporate" : "online",
         isCorporate: corporateDetails.isCorporate,
@@ -239097,18 +239115,27 @@ async function handleAddRoomToReservation(req, res) {
       const newTotalPrice = Number(reservation.totalPrice || 0) + finalTotalPrice;
       const newAggregateRevenueAllocation = (() => {
         const existingAlloc = reservation.aggregateRevenueAllocation;
-        if (!existingAlloc) {
-          return newChildRevenueAllocation;
-        }
+        const baseRoomNet = existingAlloc ? Number(existingAlloc.roomNet || 0) : Number(reservation.totalPrice || 0);
+        const baseBreakfastNet = existingAlloc ? Number(existingAlloc.breakfastNet || 0) : 0;
+        const baseAddOnNet = existingAlloc ? Number(existingAlloc.addOnNet || 0) : 0;
+        const roomNet = baseRoomNet + newChildRevenueAllocation.roomNet;
+        const breakfastNet = baseBreakfastNet + newChildRevenueAllocation.breakfastNet;
+        const addOnNet = baseAddOnNet + newChildRevenueAllocation.addOnNet;
+        const grossTotal = roomNet + breakfastNet + addOnNet;
         return assertBookingRevenueAllocationInvariant(
           {
-            roomNet: Number(existingAlloc.roomNet || 0) + newChildRevenueAllocation.roomNet,
-            breakfastNet: Number(existingAlloc.breakfastNet || 0) + newChildRevenueAllocation.breakfastNet,
-            addOnNet: Number(existingAlloc.addOnNet || 0) + newChildRevenueAllocation.addOnNet,
-            deductionNet: Number(existingAlloc.deductionNet || 0) + newChildRevenueAllocation.deductionNet,
-            totalNet: Number(existingAlloc.totalNet || 0) + newChildRevenueAllocation.totalNet
+            roomNet,
+            breakfastNet,
+            addOnNet,
+            // The deduction is the difference between the gross
+            // streams and the billed total, so the per-stream
+            // sum always ties to the total the header persists
+            // (in the normal case this is byte-identical to
+            // `existing.deductionNet + newChild.deductionNet`).
+            deductionNet: grossTotal - newTotalPrice,
+            totalNet: newTotalPrice
           },
-          Number(existingAlloc.totalNet || 0) + newChildRevenueAllocation.totalNet
+          newTotalPrice
         );
       })();
       const newChildrenDates = [

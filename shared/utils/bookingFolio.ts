@@ -795,6 +795,24 @@ function round2(value: number): number {
  * returns the same allocation so the server can chain
  * `assertBookingRevenueAllocationInvariant(allocation)`
  * inline.
+ *
+ * TWO checks, both required:
+ *   1. `roomNet + breakfastNet + addOnNet − deductionNet === totalPrice`
+ *      (the per-stream sum).
+ *   2. `allocation.totalNet === totalPrice` (the allocation's
+ *      own total is the billed total). Added by the P1
+ *      revenue-reporting audit (2026-10-22) — without it a
+ *      stale allocation (written at create time, never
+ *      refreshed when a discount was applied / removed /
+ *      rejected afterwards) passed the guard while Reports
+ *      read a `totalNet` that no longer matched the billed
+ *      total.
+ *
+ * The `totalPrice` argument MUST be the number the caller
+ * persists as the booking's `totalPrice`. A booking with NO
+ * allocation (pre-MRB-11) never reaches this helper — the
+ * read path falls back to the legacy heuristic in
+ * `getBookingRevenueStreams` — so legacy docs stay readable.
  */
 export function assertBookingRevenueAllocationInvariant(
   allocation: BookingRevenueAllocation,
@@ -817,6 +835,37 @@ export function assertBookingRevenueAllocationInvariant(
       round2(allocation.deductionNet)
   );
   const expected = round2(totalPrice);
+  // Per the P1 revenue-reporting audit (2026-10-22): the guard
+  // above only proved that the four streams add up to the
+  // allocation's OWN `totalNet`. It never proved that
+  // `totalNet` is the same number as the booking's persisted
+  // `totalPrice` — so a STALE allocation (one written at create
+  // time and never refreshed when a discount was applied,
+  // removed or rejected afterwards) passed the check while
+  // Reports read a `totalNet` that no longer matched the
+  // billed total. This check closes that hole: the allocation's
+  // total IS the booking's total.
+  //
+  // It runs FIRST so the more actionable message wins: a
+  // mismatch here means the snapshot and the bill were computed
+  // from different figures, which is the actual defect (the
+  // per-stream sum below would also disagree, but with a
+  // less specific message).
+  //
+  // The caller MUST pass the same number it persists as the
+  // booking's `totalPrice` — that is the contract this check
+  // enforces. A booking that has no allocation at all never
+  // reaches this helper (the pre-MRB-11 read path falls back
+  // to the legacy heuristic in `getBookingRevenueStreams`),
+  // so legacy docs stay readable.
+  const allocationTotal = round2(allocation.totalNet);
+  if (Math.abs(allocationTotal - expected) > 0.05) {
+    throw new Error(
+      `[MRB-11] revenue allocation total mismatch: ` +
+        `allocation.totalNet(${allocation.totalNet}) != booking.totalPrice(${expected}). ` +
+        `This is a server-side bug — the allocation snapshot and the billed total were computed from different figures.`
+    );
+  }
   if (Math.abs(computed - expected) > 0.05) {
     throw new Error(
       `[MRB-11] revenue allocation invariant violation: ` +

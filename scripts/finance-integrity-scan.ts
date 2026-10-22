@@ -111,6 +111,78 @@ export function scanBookingRecord(bookingId: string, data: Record<string, any>):
     }];
   }
 
+  // Per MRB-11 (decision #177): the stored per-stream revenue
+  // allocation is the snapshot the Reports revenue streams read.
+  // The allocation's own `totalNet` MUST be the booking's billed
+  // `totalPrice` — when a discount is applied, removed or rejected
+  // AFTER the create write, a stale allocation keeps the old
+  // figure and the Reports revenue no longer matches the bill.
+  // The guard at the write boundary (`assertBookingRevenueAllocation
+  // Invariant`) now enforces this, so a booking that trips it is a
+  // doc written before the guard was tightened (or by a path that
+  // never re-snapshots the allocation).
+  const allocation = data.revenueAllocation;
+  if (allocation && typeof allocation === "object") {
+    const allocationTotal = finiteNumber(allocation.totalNet);
+    if (allocationTotal === null || Math.abs(allocationTotal - totalPrice) >= 0.01) {
+      return [{
+        findingId: `${entityPath}:allocation-total-mismatch`,
+        cohort: "pricing-drift",
+        entityPath,
+        issue: "revenueAllocation.totalNet does not match totalPrice (MRB-11 revenue identity).",
+        observedValue: money(totalPrice),
+        expectedValue: allocationTotal === null ? "finite allocation total required" : money(allocationTotal),
+        proposedAction: "manual-review",
+        proposedValue: "",
+        approved: "NO",
+        reviewNotes: ""
+      }];
+    }
+  } else if (data.source === "corporate") {
+    // A corporate-source booking with NO allocation at all is a
+    // write-path defect (the corporate inquiry conversion wrote
+    // `totalPrice` but never snapshotted the allocation), so the
+    // Reports revenue streams fall back to the legacy heuristic
+    // and the row is mis-attributed. Legacy pre-MRB-11 bookings
+    // are NOT flagged — their missing allocation is legitimate.
+    return [{
+      findingId: `${entityPath}:corporate-missing-allocation`,
+      cohort: "pricing-drift",
+      entityPath,
+      issue: "Corporate-source booking has no revenueAllocation snapshot (MRB-11 revenue identity).",
+      observedValue: "absent",
+      expectedValue: "revenueAllocation present",
+      proposedAction: "manual-review",
+      proposedValue: "",
+      approved: "NO",
+      reviewNotes: ""
+    }];
+  }
+
+  // Per BR-12 / OCT-FOL-01 (decision #298): the other add-ons are
+  // NOT inside `totalPrice` — they sit ON TOP of the room bill for
+  // the balance. A booking that carries them therefore has a
+  // `totalPrice` that (correctly) excludes the add-on money. The
+  // finding is a REVIEW REMINDER, not a claim that the room bill
+  // is wrong: the folio surfaces must add the term, otherwise the
+  // hotel is owed money that every balance surface reports as
+  // settled.
+  const otherAddOnTotal = finiteNumber(data.otherAddOnTotal);
+  if (otherAddOnTotal !== null && otherAddOnTotal > 0) {
+    return [{
+      findingId: `${entityPath}:other-addon-outside-room-bill`,
+      cohort: "pricing-drift",
+      entityPath,
+      issue: "Booking carries BR-12 other add-ons that sit on top of totalPrice (decision #298) — confirm the folio surfaces add them.",
+      observedValue: money(otherAddOnTotal),
+      expectedValue: "added on top of totalPrice",
+      proposedAction: "manual-review",
+      proposedValue: "",
+      approved: "NO",
+      reviewNotes: ""
+    }];
+  }
+
   return [];
 }
 
