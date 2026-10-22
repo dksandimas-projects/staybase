@@ -222620,16 +222620,18 @@ function computeServerFolioTotals(input) {
 }
 function getReservationFolioSummary(input) {
   const reservationTotal = Number(input.reservationTotal) || 0;
+  const otherAddOnTotal = Math.max(0, Number(input.otherAddOnTotal) || 0);
   const refunds = input.refunds ?? [];
   const paymentsTotal = input.payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) + refunds.reduce((sum, r3) => sum + (Number(r3.amount) || 0), 0);
   const chargesTotal = input.charges.reduce(
     (sum, c2) => sum + (Number(c2.amount) || 0),
     0
   );
-  const balance = reservationTotal + chargesTotal - paymentsTotal;
+  const balance = reservationTotal + otherAddOnTotal + chargesTotal - paymentsTotal;
   return {
     reservationId: input.reservationId,
     reservationTotal,
+    otherAddOnTotal,
     chargesTotal,
     paymentsTotal,
     balance,
@@ -222814,6 +222816,26 @@ function computeBookingRevenueAllocation(input) {
   return assertBookingRevenueAllocationInvariant(
     { roomNet, breakfastNet, addOnNet, deductionNet, totalNet },
     totalNet
+  );
+}
+function rebuildBookingRevenueAllocation(input) {
+  const existing = input.existingAllocation;
+  const grossSubtotal = round2(Math.max(0, Number(input.grossSubtotal) || 0));
+  const totalPrice = round2(Number(input.totalPrice) || 0);
+  let roomNet = existing ? round2(existing.roomNet) : grossSubtotal;
+  const breakfastNet = existing ? round2(existing.breakfastNet) : 0;
+  const addOnNet = existing ? round2(existing.addOnNet) : 0;
+  const shortfall = Math.max(
+    0,
+    totalPrice - round2(roomNet + breakfastNet + addOnNet)
+  );
+  roomNet = round2(roomNet + shortfall);
+  const deductionNet = round2(
+    Math.max(0, round2(roomNet + breakfastNet + addOnNet) - totalPrice)
+  );
+  return assertBookingRevenueAllocationInvariant(
+    { roomNet, breakfastNet, addOnNet, deductionNet, totalNet: totalPrice },
+    totalPrice
   );
 }
 function computeReservationActualDateRange(headerCheckIn, headerCheckOut, children) {
@@ -225573,6 +225595,7 @@ __export(shared_exports, {
   raceUploadWithTimeout: () => raceUploadWithTimeout,
   readCacheWithTtl: () => readCacheWithTtl,
   readPublicSiteContentBustTimestamp: () => readPublicSiteContentBustTimestamp,
+  rebuildBookingRevenueAllocation: () => rebuildBookingRevenueAllocation,
   recomputeBreakfastTotal: () => recomputeBreakfastTotal,
   recomputeOtherAddOnTotal: () => recomputeOtherAddOnTotal,
   recordSweepResult: () => recordSweepResult,
@@ -234810,6 +234833,20 @@ async function handleApplyBookingDiscount(req, res) {
         voucherDiscount,
         totalPrice,
         rateBreakdown,
+        // Per the P1 revenue-reporting audit (2026-10-22): the
+        // MRB-11 revenue allocation is RE-SNAPSHOTTED. This path
+        // moves the bill (`totalPrice`) but used to leave the
+        // create-time allocation untouched — so the Reports
+        // revenue streams kept reading the pre-discount total
+        // while the guest was billed the discounted one. The
+        // shared helper re-derives the deduction from the same
+        // figures the new bill was computed from, so the
+        // allocation's total IS the new bill.
+        revenueAllocation: rebuildBookingRevenueAllocation({
+          existingAllocation: booking.revenueAllocation,
+          grossSubtotal: subtotal,
+          totalPrice
+        }),
         updatedAt: /* @__PURE__ */ new Date()
       };
       if (voucherRef) transaction.update(voucherRef, { usageCount: voucherUsageCount, updatedAt: /* @__PURE__ */ new Date() });
@@ -234951,6 +234988,18 @@ async function handleApplyReservationDiscount(req, res) {
           voucherDiscount,
           totalPrice,
           rateBreakdown,
+          // Per the P1 revenue-reporting audit (2026-10-22): the
+          // MRB-11 revenue allocation is RE-SNAPSHOTTED per child.
+          // This path moves each child's bill (`totalPrice`) but
+          // used to leave the create-time allocation untouched — so
+          // the Reports revenue streams kept reading the
+          // pre-discount total while the guest was billed the
+          // discounted one.
+          revenueAllocation: rebuildBookingRevenueAllocation({
+            existingAllocation: booking.revenueAllocation,
+            grossSubtotal: subtotal,
+            totalPrice
+          }),
           updatedAt: /* @__PURE__ */ new Date()
         };
         transaction.update(child.ref, updates);
@@ -235054,6 +235103,17 @@ async function handleRemoveVoucher(req, res) {
         staffRemovedVoucherAt: /* @__PURE__ */ new Date(),
         totalPrice: restoredTotalPrice,
         ...rateBreakdown ? { rateBreakdown } : {},
+        // Per the P1 revenue-reporting audit (2026-10-22): the
+        // MRB-11 revenue allocation is RE-SNAPSHOTTED. Removing a
+        // voucher moves the bill back up; the create-time
+        // allocation (which still carried the voucher deduction)
+        // used to stay behind, so the Reports revenue streams read
+        // a total the guest was no longer billed.
+        revenueAllocation: rebuildBookingRevenueAllocation({
+          existingAllocation: bookingData.revenueAllocation,
+          grossSubtotal: Number(originalTotalPrice) || 0,
+          totalPrice: restoredTotalPrice
+        }),
         updatedAt: /* @__PURE__ */ new Date()
       };
       if (voucherDoc.exists) {
@@ -235125,6 +235185,17 @@ async function handleRejectDiscount(req, res) {
       discountPct: 0,
       totalPrice: restoredTotalPrice,
       ...rateBreakdown ? { rateBreakdown } : {},
+      // Per the P1 revenue-reporting audit (2026-10-22): the
+      // MRB-11 revenue allocation is RE-SNAPSHOTTED. Rejecting a
+      // government discount moves the bill back up; the
+      // create-time allocation (which still carried the senior
+      // deduction) used to stay behind, so the Reports revenue
+      // streams read a total the guest was no longer billed.
+      revenueAllocation: rebuildBookingRevenueAllocation({
+        existingAllocation: bookingData.revenueAllocation,
+        grossSubtotal: Number(originalTotalPrice) || 0,
+        totalPrice: restoredTotalPrice
+      }),
       updatedAt: /* @__PURE__ */ new Date()
     };
     await bookingRef2.update(updates);

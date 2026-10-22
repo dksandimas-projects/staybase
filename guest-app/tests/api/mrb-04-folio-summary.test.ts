@@ -151,7 +151,7 @@ describe("MRB-04 folio migration — Phase 1 (types + subcollection rules + beha
       );
     });
 
-    it("enforces the canonical balance invariant: balance == reservationTotal + chargesTotal − paymentsTotal", () => {
+    it("enforces the canonical balance invariant: balance == reservationTotal + otherAddOnTotal + chargesTotal − paymentsTotal", () => {
       // The MRB-04 balance invariant: `reservation
       // balance == reservationTotal + chargesTotal
       // − paymentsTotal`. A positive balance means
@@ -160,8 +160,15 @@ describe("MRB-04 folio migration — Phase 1 (types + subcollection rules + beha
       // pending). The single-pass sign-aware sum
       // preserves the invariant at the math level
       // — no separate derivation that could drift.
+      //
+      // Per OCT-FOL-01 (2026-10-20, decision #298) the
+      // invariant gained the BR-12 other add-ons term: the
+      // add-ons are NOT inside `totalPrice` — they sit on top
+      // of the room bill for the balance. Without it a
+      // reservation with an unpaid airport transfer reported a
+      // ₱0 balance.
       expect(folio).toMatch(
-        /const balance = reservationTotal \+ chargesTotal - paymentsTotal;/
+        /const balance =\s*\n\s*reservationTotal \+ otherAddOnTotal \+ chargesTotal - paymentsTotal;/
       );
     });
 

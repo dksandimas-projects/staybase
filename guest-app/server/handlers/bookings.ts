@@ -194,6 +194,14 @@ import {
   evaluateCancelPreview,
   buildCancellationLiabilitySnapshot,
   assertBookingRevenueAllocationInvariant,
+  // Per the P1 revenue-reporting audit (2026-10-22): the shared
+  // helper that REBUILDS a booking's revenue allocation after a
+  // post-create money change (a discount / voucher applied, a
+  // voucher removed, a government discount rejected). Those paths
+  // move `totalPrice` and used to leave the create-time
+  // allocation untouched, so the Reports revenue streams read a
+  // stale total.
+  rebuildBookingRevenueAllocation,
   // Per SR-01..05 (2026-10-12): the server-side
   // arrival-time validator (parses the hotel's
   // `checkInTime` and returns the set of valid
@@ -6537,6 +6545,20 @@ export async function handleApplyBookingDiscount(req: any, res: any) {
         voucherDiscount,
         totalPrice,
         rateBreakdown,
+        // Per the P1 revenue-reporting audit (2026-10-22): the
+        // MRB-11 revenue allocation is RE-SNAPSHOTTED. This path
+        // moves the bill (`totalPrice`) but used to leave the
+        // create-time allocation untouched — so the Reports
+        // revenue streams kept reading the pre-discount total
+        // while the guest was billed the discounted one. The
+        // shared helper re-derives the deduction from the same
+        // figures the new bill was computed from, so the
+        // allocation's total IS the new bill.
+        revenueAllocation: rebuildBookingRevenueAllocation({
+          existingAllocation: booking.revenueAllocation,
+          grossSubtotal: subtotal,
+          totalPrice
+        }),
         updatedAt: new Date()
       };
       if (voucherRef) transaction.update(voucherRef, { usageCount: voucherUsageCount, updatedAt: new Date() });
@@ -6778,6 +6800,18 @@ export async function handleApplyReservationDiscount(req: any, res: any) {
           voucherDiscount,
           totalPrice,
           rateBreakdown,
+          // Per the P1 revenue-reporting audit (2026-10-22): the
+          // MRB-11 revenue allocation is RE-SNAPSHOTTED per child.
+          // This path moves each child's bill (`totalPrice`) but
+          // used to leave the create-time allocation untouched — so
+          // the Reports revenue streams kept reading the
+          // pre-discount total while the guest was billed the
+          // discounted one.
+          revenueAllocation: rebuildBookingRevenueAllocation({
+            existingAllocation: booking.revenueAllocation,
+            grossSubtotal: subtotal,
+            totalPrice
+          }),
           updatedAt: new Date()
         };
         transaction.update(child.ref, updates);
@@ -6960,6 +6994,17 @@ export async function handleRemoveVoucher(req: any, res: any) {
         staffRemovedVoucherAt: new Date(),
         totalPrice: restoredTotalPrice,
         ...(rateBreakdown ? { rateBreakdown } : {}),
+        // Per the P1 revenue-reporting audit (2026-10-22): the
+        // MRB-11 revenue allocation is RE-SNAPSHOTTED. Removing a
+        // voucher moves the bill back up; the create-time
+        // allocation (which still carried the voucher deduction)
+        // used to stay behind, so the Reports revenue streams read
+        // a total the guest was no longer billed.
+        revenueAllocation: rebuildBookingRevenueAllocation({
+          existingAllocation: bookingData.revenueAllocation,
+          grossSubtotal: Number(originalTotalPrice) || 0,
+          totalPrice: restoredTotalPrice
+        }),
         updatedAt: new Date()
       };
 
@@ -7071,6 +7116,17 @@ export async function handleRejectDiscount(req: any, res: any) {
       discountPct: 0,
       totalPrice: restoredTotalPrice,
       ...(rateBreakdown ? { rateBreakdown } : {}),
+      // Per the P1 revenue-reporting audit (2026-10-22): the
+      // MRB-11 revenue allocation is RE-SNAPSHOTTED. Rejecting a
+      // government discount moves the bill back up; the
+      // create-time allocation (which still carried the senior
+      // deduction) used to stay behind, so the Reports revenue
+      // streams read a total the guest was no longer billed.
+      revenueAllocation: rebuildBookingRevenueAllocation({
+        existingAllocation: bookingData.revenueAllocation,
+        grossSubtotal: Number(originalTotalPrice) || 0,
+        totalPrice: restoredTotalPrice
+      }),
       updatedAt: new Date()
     };
 

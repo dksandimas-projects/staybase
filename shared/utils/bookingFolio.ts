@@ -376,6 +376,29 @@ export interface ReservationFolioSummaryInput {
   /** The reservation's charge entries (from `reservations/{id}/charges` for new reservations, or `bookings/{id}/charges` for legacy null-`reservationId` bookings). */
   charges: FolioReservationCharge[];
   /**
+   * The BR-12 other add-ons total for the reservation (the SUM
+   * of the children's `otherAddOnTotal`).
+   *
+   * Per OCT-FOL-01 (2026-10-20, decision #298) the other
+   * add-ons are NOT inside `totalPrice` — they sit ON TOP of
+   * the room bill for the balance:
+   *
+   *   folio grand total = reservationTotal   // the room bill
+   *                     + otherAddOnTotal    // ← BR-12 other add-ons
+   *                     + chargesTotal
+   *   balance           = grand total − paymentsTotal
+   *
+   * Without the term a reservation with an unpaid airport
+   * transfer reported a ₱0 balance — the hotel was owed the
+   * money and every balance surface said the guest was
+   * settled. `computeBookingFolio` (admin) +
+   * `computeServerFolioTotals` (server) both take the term;
+   * this helper was the one surface that did not.
+   *
+   * Default `0` keeps the pre-BR-12 callers byte-equivalent.
+   */
+  otherAddOnTotal?: number;
+  /**
    * Whether the data came from the new reservation subcollections
    * or the legacy `bookings/{id}/payments` +
    * `bookings/{id}/charges`. The caller decides (the booking has
@@ -413,12 +436,19 @@ export function getReservationFolioSummary(
 ): {
   reservationId: string;
   reservationTotal: number;
+  otherAddOnTotal: number;
   chargesTotal: number;
   paymentsTotal: number;
   balance: number;
   source: "reservation-subcollection" | "booking-subcollection-legacy";
 } {
   const reservationTotal = Number(input.reservationTotal) || 0;
+  // Per OCT-FOL-01 (decision #298): the BR-12 other add-ons are
+  // NOT inside `totalPrice` — they are added on top of the room
+  // bill for the balance. The helper was the one folio surface
+  // that never took the term, so a reservation with an unpaid
+  // add-on reported a ₱0 balance.
+  const otherAddOnTotal = Math.max(0, Number(input.otherAddOnTotal) || 0);
   // Sign-aware sums — `payments` + `refunds` are summed into
   // `paymentsTotal`. Refunds are negative entries on either
   // subcollection (per CRL-01's negative-amount convention);
@@ -442,13 +472,16 @@ export function getReservationFolioSummary(
     0
   );
   // The canonical balance invariant: outstanding =
-  // reservationTotal + chargesTotal − paymentsTotal. A
-  // positive balance means the guest owes money; a negative
-  // balance means the guest is overpaid (refund pending).
-  const balance = reservationTotal + chargesTotal - paymentsTotal;
+  // reservationTotal + otherAddOnTotal + chargesTotal −
+  // paymentsTotal. A positive balance means the guest owes
+  // money; a negative balance means the guest is overpaid
+  // (refund pending).
+  const balance =
+    reservationTotal + otherAddOnTotal + chargesTotal - paymentsTotal;
   return {
     reservationId: input.reservationId,
     reservationTotal,
+    otherAddOnTotal,
     chargesTotal,
     paymentsTotal,
     balance,
@@ -1077,6 +1110,74 @@ export function computeBookingRevenueAllocation(
   return assertBookingRevenueAllocationInvariant(
     { roomNet, breakfastNet, addOnNet, deductionNet, totalNet },
     totalNet
+  );
+}
+
+/**
+ * REBUILD a booking's MRB-11 revenue allocation for a booking
+ * whose bill has just CHANGED after create time.
+ *
+ * The create-time write paths (public create, walk-in, corporate
+ * conversion, reschedule, add-room) use
+ * `computeBookingRevenueAllocation`. The POST-CREATION money
+ * paths — a discount or voucher being applied, a voucher being
+ * removed, a government discount being rejected — move
+ * `booking.totalPrice` but used to leave the create-time
+ * allocation untouched. The Reports revenue streams read that
+ * stale snapshot, so the reported revenue no longer matched the
+ * bill the guest was charged.
+ *
+ * The GROSS per-stream values do not change when a discount is
+ * applied, removed or rejected (the dates and the selections do
+ * not move) — only the DEDUCTION does. So the stored
+ * allocation's streams are reused verbatim and the deduction is
+ * re-derived as the difference between the gross streams and the
+ * new bill. The result satisfies BOTH MRB-11 identities:
+ *   `roomNet + breakfastNet + addOnNet − deductionNet === totalNet`
+ *   `totalNet === totalPrice`
+ *
+ * A pre-MRB-11 booking has no stored allocation; its gross falls
+ * back to `grossSubtotal` (attributed to the room stream — the
+ * same assumption the legacy revenue heuristic makes).
+ */
+export interface RebuildBookingRevenueAllocationInput {
+  /** The booking's stored allocation (post-MRB-11). `null` / absent for a pre-MRB-11 booking. */
+  existingAllocation?: BookingRevenueAllocation | null;
+  /**
+   * The booking's GROSS subtotal (room + breakfast + extra bed)
+   * — the pre-discount figure. Used as the fallback gross when
+   * the booking carries no stored allocation.
+   */
+  grossSubtotal: number;
+  /** The booking's NEW billed total. The rebuilt allocation's `totalNet` IS this number. */
+  totalPrice: number;
+}
+
+export function rebuildBookingRevenueAllocation(
+  input: RebuildBookingRevenueAllocationInput
+): BookingRevenueAllocation {
+  const existing = input.existingAllocation;
+  const grossSubtotal = round2(Math.max(0, Number(input.grossSubtotal) || 0));
+  const totalPrice = round2(Number(input.totalPrice) || 0);
+  let roomNet = existing ? round2(existing.roomNet) : grossSubtotal;
+  const breakfastNet = existing ? round2(existing.breakfastNet) : 0;
+  const addOnNet = existing ? round2(existing.addOnNet) : 0;
+  // Defensive: the bill can never exceed the gross streams, but a
+  // legacy booking whose stored gross disagrees with its
+  // `originalTotalPrice` must not make the write-boundary guard
+  // throw in the middle of a desk workflow — the shortfall rides
+  // on the room stream instead.
+  const shortfall = Math.max(
+    0,
+    totalPrice - round2(roomNet + breakfastNet + addOnNet)
+  );
+  roomNet = round2(roomNet + shortfall);
+  const deductionNet = round2(
+    Math.max(0, round2(roomNet + breakfastNet + addOnNet) - totalPrice)
+  );
+  return assertBookingRevenueAllocationInvariant(
+    { roomNet, breakfastNet, addOnNet, deductionNet, totalNet: totalPrice },
+    totalPrice
   );
 }
 
