@@ -221220,7 +221220,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.18.11";
+    VERSION2 = "2.18.12";
   }
 });
 
@@ -228087,7 +228087,12 @@ async function findBooking(req, options) {
   } else if (bookingRef2) {
     const trimmed = String(bookingRef2).trim();
     let query;
-    if (RESERVATION_REF_REGEX.test(trimmed)) {
+    const isReservationRef = RESERVATION_REF_REGEX.test(trimmed);
+    const requiresGuestEmail = options.requireGuestMatch && !user.uid;
+    if (requiresGuestEmail && !guestEmail) {
+      throw new Error("Booking reference and guest email are required.");
+    }
+    if (isReservationRef) {
       const reservationSnap = await adminDb.collection("reservations").where("reservationRef", "==", trimmed).limit(1).get();
       if (reservationSnap.empty) return null;
       const reservationDoc = reservationSnap.docs[0];
@@ -228098,6 +228103,11 @@ async function findBooking(req, options) {
         snapshot = fallbackSnap.docs[0];
       } else {
         snapshot = childrenSnap.docs[0];
+      }
+      if (requiresGuestEmail) {
+        const bookingEmail = String(snapshot.data()?.guestEmail || "").trim().toLowerCase();
+        const providedEmail = String(guestEmail).trim().toLowerCase();
+        if (bookingEmail !== providedEmail) return null;
       }
     } else {
       query = adminDb.collection("bookings").where("bookingRef", "==", trimmed).limit(1);
