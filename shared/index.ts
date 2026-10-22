@@ -72,6 +72,15 @@ export * from "./utils/breakfastSlotKey";
 // refund liabilities the spec requires.
 export * from "./utils/bookingAddOnReschedule";
 
+// Per BR-08 (P1 MONEY, 2026-10-22): the booking-scoped
+// `paidAmount` arithmetic. The two production payment-record
+// paths (`handleAddPayment` + `handleVerifyAndRecordPayment`)
+// use it to maintain the booking's `paidAmount` — the money
+// collected against it — which the refund-liability gate
+// (`redateBreakfastSelections`) reads to decide whether a removed
+// meal was paid for.
+export * from "./utils/bookingPaidAmount";
+
 // Per OCT-H5 (2026-10-20, decision #283): the deep strip of
 // `undefined`-valued keys applied to every admin settings write.
 // The Firestore SDK rejects `undefined` outright
