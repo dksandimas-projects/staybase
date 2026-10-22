@@ -221220,7 +221220,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.18.12";
+    VERSION2 = "2.18.15";
   }
 });
 
@@ -222620,16 +222620,18 @@ function computeServerFolioTotals(input) {
 }
 function getReservationFolioSummary(input) {
   const reservationTotal = Number(input.reservationTotal) || 0;
+  const otherAddOnTotal = Math.max(0, Number(input.otherAddOnTotal) || 0);
   const refunds = input.refunds ?? [];
   const paymentsTotal = input.payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) + refunds.reduce((sum, r3) => sum + (Number(r3.amount) || 0), 0);
   const chargesTotal = input.charges.reduce(
     (sum, c2) => sum + (Number(c2.amount) || 0),
     0
   );
-  const balance = reservationTotal + chargesTotal - paymentsTotal;
+  const balance = reservationTotal + otherAddOnTotal + chargesTotal - paymentsTotal;
   return {
     reservationId: input.reservationId,
     reservationTotal,
+    otherAddOnTotal,
     chargesTotal,
     paymentsTotal,
     balance,
@@ -222717,6 +222719,12 @@ function assertBookingRevenueAllocationInvariant(allocation, totalPrice) {
     round2(allocation.roomNet) + round2(allocation.breakfastNet) + round2(allocation.addOnNet) - round2(allocation.deductionNet)
   );
   const expected = round2(totalPrice);
+  const allocationTotal = round2(allocation.totalNet);
+  if (Math.abs(allocationTotal - expected) > 0.05) {
+    throw new Error(
+      `[MRB-11] revenue allocation total mismatch: allocation.totalNet(${allocation.totalNet}) != booking.totalPrice(${expected}). This is a server-side bug \u2014 the allocation snapshot and the billed total were computed from different figures.`
+    );
+  }
   if (Math.abs(computed - expected) > 0.05) {
     throw new Error(
       `[MRB-11] revenue allocation invariant violation: roomNet(${allocation.roomNet}) + breakfastNet(${allocation.breakfastNet}) + addOnNet(${allocation.addOnNet}) - deductionNet(${allocation.deductionNet}) = ${computed}, expected totalNet(${expected}). This is a server-side bug \u2014 the pricing chain returned an inconsistent allocation.`
@@ -222810,6 +222818,26 @@ function computeBookingRevenueAllocation(input) {
     totalNet
   );
 }
+function rebuildBookingRevenueAllocation(input) {
+  const existing = input.existingAllocation;
+  const grossSubtotal = round2(Math.max(0, Number(input.grossSubtotal) || 0));
+  const totalPrice = round2(Number(input.totalPrice) || 0);
+  let roomNet = existing ? round2(existing.roomNet) : grossSubtotal;
+  const breakfastNet = existing ? round2(existing.breakfastNet) : 0;
+  const addOnNet = existing ? round2(existing.addOnNet) : 0;
+  const shortfall = Math.max(
+    0,
+    totalPrice - round2(roomNet + breakfastNet + addOnNet)
+  );
+  roomNet = round2(roomNet + shortfall);
+  const deductionNet = round2(
+    Math.max(0, round2(roomNet + breakfastNet + addOnNet) - totalPrice)
+  );
+  return assertBookingRevenueAllocationInvariant(
+    { roomNet, breakfastNet, addOnNet, deductionNet, totalNet: totalPrice },
+    totalPrice
+  );
+}
 function computeReservationActualDateRange(headerCheckIn, headerCheckOut, children) {
   if (children.length === 0) return null;
   const headerIn = new Date(headerCheckIn).getTime();
@@ -222852,6 +222880,15 @@ function sumBreakfastRateLines(breakdown) {
     total += amount;
   }
   return Math.round(total * 100) / 100;
+}
+function computeBreakfastAdjustedTotalPrice(input) {
+  const totalPrice = Number(input.totalPrice) || 0;
+  const breakfastTotal = Number(input.breakfastTotal) || 0;
+  const anchor = input.breakfastInTotalPrice;
+  if (anchor === null || anchor === void 0 || !Number.isFinite(anchor)) {
+    return totalPrice;
+  }
+  return totalPrice - anchor + breakfastTotal;
 }
 function recomputeBreakfastTotal(selections) {
   if (!selections) return 0;
@@ -225476,6 +225513,7 @@ __export(shared_exports, {
   compressImageFile: () => compressImageFile,
   computeBookingFolio: () => computeBookingFolio,
   computeBookingRevenueAllocation: () => computeBookingRevenueAllocation,
+  computeBreakfastAdjustedTotalPrice: () => computeBreakfastAdjustedTotalPrice,
   computeBreakfastCutoffState: () => computeBreakfastCutoffState,
   computeCancellationLiabilityState: () => computeCancellationLiabilityState,
   computeExtendedInFlowHoldExpiresAt: () => computeExtendedInFlowHoldExpiresAt,
@@ -225567,6 +225605,7 @@ __export(shared_exports, {
   raceUploadWithTimeout: () => raceUploadWithTimeout,
   readCacheWithTtl: () => readCacheWithTtl,
   readPublicSiteContentBustTimestamp: () => readPublicSiteContentBustTimestamp,
+  rebuildBookingRevenueAllocation: () => rebuildBookingRevenueAllocation,
   recomputeBreakfastTotal: () => recomputeBreakfastTotal,
   recomputeOtherAddOnTotal: () => recomputeOtherAddOnTotal,
   recordSweepResult: () => recordSweepResult,
@@ -228087,12 +228126,7 @@ async function findBooking(req, options) {
   } else if (bookingRef2) {
     const trimmed = String(bookingRef2).trim();
     let query;
-    const isReservationRef = RESERVATION_REF_REGEX.test(trimmed);
-    const requiresGuestEmail = options.requireGuestMatch && !user.uid;
-    if (requiresGuestEmail && !guestEmail) {
-      throw new Error("Booking reference and guest email are required.");
-    }
-    if (isReservationRef) {
+    if (RESERVATION_REF_REGEX.test(trimmed)) {
       const reservationSnap = await adminDb.collection("reservations").where("reservationRef", "==", trimmed).limit(1).get();
       if (reservationSnap.empty) return null;
       const reservationDoc = reservationSnap.docs[0];
@@ -228103,11 +228137,6 @@ async function findBooking(req, options) {
         snapshot = fallbackSnap.docs[0];
       } else {
         snapshot = childrenSnap.docs[0];
-      }
-      if (requiresGuestEmail) {
-        const bookingEmail = String(snapshot.data()?.guestEmail || "").trim().toLowerCase();
-        const providedEmail = String(guestEmail).trim().toLowerCase();
-        if (bookingEmail !== providedEmail) return null;
       }
     } else {
       query = adminDb.collection("bookings").where("bookingRef", "==", trimmed).limit(1);
@@ -233111,6 +233140,18 @@ async function handleCreateBooking(req, res) {
         // holds by construction (the aggregate is the
         // sum of children, each of which already passes
         // the invariant). The totalPrice match is exact.
+        //
+        // Per the P1 revenue-reporting audit (2026-10-22):
+        // the aggregate's total is the RESERVATION's billed
+        // total — `finalTotalPrice`, i.e. the chain total
+        // minus the points the member redeemed at creation.
+        // The points redemption is a deduction LAYER the
+        // chain does not see (it is applied to the
+        // reservation total after the chain runs), so it is
+        // added to the aggregate's deduction line here;
+        // without it the stored aggregate carried the
+        // pre-redemption total while the reservation doc
+        // carried the post-redemption one.
         aggregateRevenueAllocation: assertBookingRevenueAllocationInvariant(
           {
             roomNet: childPricing.reduce(
@@ -233131,10 +233172,10 @@ async function handleCreateBooking(req, res) {
                 0
               ),
               0
-            ),
-            totalNet: totalPrice
+            ) + (Number(selfRedeemedValue) || 0),
+            totalNet: finalTotalPrice
           },
-          totalPrice
+          finalTotalPrice
         ),
         source: corporateDetails.isCorporate ? "corporate" : "online",
         isCorporate: corporateDetails.isCorporate,
@@ -234802,6 +234843,20 @@ async function handleApplyBookingDiscount(req, res) {
         voucherDiscount,
         totalPrice,
         rateBreakdown,
+        // Per the P1 revenue-reporting audit (2026-10-22): the
+        // MRB-11 revenue allocation is RE-SNAPSHOTTED. This path
+        // moves the bill (`totalPrice`) but used to leave the
+        // create-time allocation untouched — so the Reports
+        // revenue streams kept reading the pre-discount total
+        // while the guest was billed the discounted one. The
+        // shared helper re-derives the deduction from the same
+        // figures the new bill was computed from, so the
+        // allocation's total IS the new bill.
+        revenueAllocation: rebuildBookingRevenueAllocation({
+          existingAllocation: booking.revenueAllocation,
+          grossSubtotal: subtotal,
+          totalPrice
+        }),
         updatedAt: /* @__PURE__ */ new Date()
       };
       if (voucherRef) transaction.update(voucherRef, { usageCount: voucherUsageCount, updatedAt: /* @__PURE__ */ new Date() });
@@ -234943,6 +234998,18 @@ async function handleApplyReservationDiscount(req, res) {
           voucherDiscount,
           totalPrice,
           rateBreakdown,
+          // Per the P1 revenue-reporting audit (2026-10-22): the
+          // MRB-11 revenue allocation is RE-SNAPSHOTTED per child.
+          // This path moves each child's bill (`totalPrice`) but
+          // used to leave the create-time allocation untouched — so
+          // the Reports revenue streams kept reading the
+          // pre-discount total while the guest was billed the
+          // discounted one.
+          revenueAllocation: rebuildBookingRevenueAllocation({
+            existingAllocation: booking.revenueAllocation,
+            grossSubtotal: subtotal,
+            totalPrice
+          }),
           updatedAt: /* @__PURE__ */ new Date()
         };
         transaction.update(child.ref, updates);
@@ -235046,6 +235113,17 @@ async function handleRemoveVoucher(req, res) {
         staffRemovedVoucherAt: /* @__PURE__ */ new Date(),
         totalPrice: restoredTotalPrice,
         ...rateBreakdown ? { rateBreakdown } : {},
+        // Per the P1 revenue-reporting audit (2026-10-22): the
+        // MRB-11 revenue allocation is RE-SNAPSHOTTED. Removing a
+        // voucher moves the bill back up; the create-time
+        // allocation (which still carried the voucher deduction)
+        // used to stay behind, so the Reports revenue streams read
+        // a total the guest was no longer billed.
+        revenueAllocation: rebuildBookingRevenueAllocation({
+          existingAllocation: bookingData.revenueAllocation,
+          grossSubtotal: Number(originalTotalPrice) || 0,
+          totalPrice: restoredTotalPrice
+        }),
         updatedAt: /* @__PURE__ */ new Date()
       };
       if (voucherDoc.exists) {
@@ -235117,6 +235195,17 @@ async function handleRejectDiscount(req, res) {
       discountPct: 0,
       totalPrice: restoredTotalPrice,
       ...rateBreakdown ? { rateBreakdown } : {},
+      // Per the P1 revenue-reporting audit (2026-10-22): the
+      // MRB-11 revenue allocation is RE-SNAPSHOTTED. Rejecting a
+      // government discount moves the bill back up; the
+      // create-time allocation (which still carried the senior
+      // deduction) used to stay behind, so the Reports revenue
+      // streams read a total the guest was no longer billed.
+      revenueAllocation: rebuildBookingRevenueAllocation({
+        existingAllocation: bookingData.revenueAllocation,
+        grossSubtotal: Number(originalTotalPrice) || 0,
+        totalPrice: restoredTotalPrice
+      }),
       updatedAt: /* @__PURE__ */ new Date()
     };
     await bookingRef2.update(updates);
@@ -239107,18 +239196,27 @@ async function handleAddRoomToReservation(req, res) {
       const newTotalPrice = Number(reservation.totalPrice || 0) + finalTotalPrice;
       const newAggregateRevenueAllocation = (() => {
         const existingAlloc = reservation.aggregateRevenueAllocation;
-        if (!existingAlloc) {
-          return newChildRevenueAllocation;
-        }
+        const baseRoomNet = existingAlloc ? Number(existingAlloc.roomNet || 0) : Number(reservation.totalPrice || 0);
+        const baseBreakfastNet = existingAlloc ? Number(existingAlloc.breakfastNet || 0) : 0;
+        const baseAddOnNet = existingAlloc ? Number(existingAlloc.addOnNet || 0) : 0;
+        const roomNet = baseRoomNet + newChildRevenueAllocation.roomNet;
+        const breakfastNet = baseBreakfastNet + newChildRevenueAllocation.breakfastNet;
+        const addOnNet = baseAddOnNet + newChildRevenueAllocation.addOnNet;
+        const grossTotal = roomNet + breakfastNet + addOnNet;
         return assertBookingRevenueAllocationInvariant(
           {
-            roomNet: Number(existingAlloc.roomNet || 0) + newChildRevenueAllocation.roomNet,
-            breakfastNet: Number(existingAlloc.breakfastNet || 0) + newChildRevenueAllocation.breakfastNet,
-            addOnNet: Number(existingAlloc.addOnNet || 0) + newChildRevenueAllocation.addOnNet,
-            deductionNet: Number(existingAlloc.deductionNet || 0) + newChildRevenueAllocation.deductionNet,
-            totalNet: Number(existingAlloc.totalNet || 0) + newChildRevenueAllocation.totalNet
+            roomNet,
+            breakfastNet,
+            addOnNet,
+            // The deduction is the difference between the gross
+            // streams and the billed total, so the per-stream
+            // sum always ties to the total the header persists
+            // (in the normal case this is byte-identical to
+            // `existing.deductionNet + newChild.deductionNet`).
+            deductionNet: grossTotal - newTotalPrice,
+            totalNet: newTotalPrice
           },
-          Number(existingAlloc.totalNet || 0) + newChildRevenueAllocation.totalNet
+          newTotalPrice
         );
       })();
       const newChildrenDates = [
@@ -240004,6 +240102,29 @@ async function handleConvertInquiryToBooking(req, res) {
         ratePerNight,
         totalPrice: finalTotalPrice,
         originalTotalPrice: finalTotalPrice,
+        // Per MRB-11 (2026-08-03, per decision #177): the
+        // per-stream revenue allocation snapshot. The
+        // corporate conversion path used to write `totalPrice`
+        // WITHOUT one, so the Reports revenue streams fell
+        // back to the legacy proportional split and tagged the
+        // row `allocation: "legacy-heuristic"` — a corporate
+        // booking was mis-attributed to the room stream and
+        // carried no MRB-11 identity at all.
+        //
+        // The snapshot is computed by the SHARED helper the
+        // other write paths use (`computeBookingRevenueAllocation`),
+        // so the streams and the total come from the same
+        // figures — never a second, hand-rolled computation.
+        // A corporate conversion has no breakfast (per BR-08),
+        // no extra bed, no voucher, no senior discount and no
+        // points, so the allocation is the gross room amount.
+        revenueAllocation: computeBookingRevenueAllocation({
+          ratePerNight,
+          numNights,
+          breakfastTotal: 0,
+          extraBedTotal: 0,
+          totalPrice: finalTotalPrice
+        }),
         // Per H2 (hardening batch 2026-06-26): the
         // corporate convert flow writes a token too so
         // the inquiry-to-booking email can carry the
@@ -242934,7 +243055,11 @@ async function handleGetBreakfastManage(req, res) {
   );
   const balance = Math.max(
     0,
-    (breakfastInTotalPrice === null ? totalPrice : totalPrice - breakfastInTotalPrice + recomputedTotal) - paidAmount
+    computeBreakfastAdjustedTotalPrice({
+      totalPrice,
+      breakfastInTotalPrice,
+      breakfastTotal: recomputedTotal
+    }) - paidAmount
   );
   const served = booking.breakfastServed && typeof booking.breakfastServed === "object" ? booking.breakfastServed : {};
   const refunds = await loadPendingBreakfastRefunds(booking.id);
@@ -243215,7 +243340,11 @@ async function handleUpdateBreakfast(req, res) {
       );
       const newBalance = Math.max(
         0,
-        (breakfastInTotalPrice === null ? totalPriceNum : totalPriceNum - breakfastInTotalPrice + newBreakfastTotal) - paidAmountNum
+        computeBreakfastAdjustedTotalPrice({
+          totalPrice: totalPriceNum,
+          breakfastInTotalPrice,
+          breakfastTotal: newBreakfastTotal
+        }) - paidAmountNum
       );
       resultSummary.newBalance = Number(newBalance.toFixed(2));
       resultSummary.refundLiabilityCreated = refundLiabilityCreated;
@@ -243662,10 +243791,15 @@ async function handleStaffUpdateBreakfast(req, res) {
       const newBreakfastTotal = recomputeBreakfastTotal(nextSelections);
       const totalPriceNum = Number(booking.totalPrice || 0);
       const paidAmountNum = Number(booking.paidAmount || 0);
-      const newBalance = Math.max(
-        0,
-        totalPriceNum + newBreakfastTotal - paidAmountNum
+      const breakfastInTotalPrice = sumBreakfastRateLines(
+        booking.rateBreakdown
       );
+      const currentTotalPrice = computeBreakfastAdjustedTotalPrice({
+        totalPrice: totalPriceNum,
+        breakfastInTotalPrice,
+        breakfastTotal: newBreakfastTotal
+      });
+      const newBalance = Math.max(0, currentTotalPrice - paidAmountNum);
       transaction.update(bookingRef2, {
         breakfastSelections: nextSelections,
         breakfastTotal: newBreakfastTotal,

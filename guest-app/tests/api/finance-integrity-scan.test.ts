@@ -74,4 +74,99 @@ describe("FLR-01 finance integrity scanner", () => {
     const parsed = findingsFromCsv(findingsToCsv([finding]));
     expect(parsed).toEqual([finding]);
   });
+
+  // Per MRB-11 (decision #177): the Reports revenue streams read
+  // the stored per-stream allocation. The allocation's own
+  // `totalNet` MUST be the booking's billed `totalPrice`. The
+  // scanner did not implement that identity, so a booking whose
+  // allocation went stale (a discount applied / removed /
+  // rejected after the create write) reported ZERO findings.
+  describe("MRB-11 allocation identity", () => {
+    test("flags an allocation whose totalNet does not match totalPrice", () => {
+      const findings = scanBookingRecord("booking_alloc", {
+        totalPrice: 3840,
+        source: "walk-in",
+        revenueAllocation: {
+          roomNet: 4800,
+          breakfastNet: 0,
+          addOnNet: 0,
+          deductionNet: 0,
+          totalNet: 4800
+        }
+      });
+
+      expect(findings[0]).toMatchObject({
+        findingId: "bookings/booking_alloc:allocation-total-mismatch",
+        cohort: "pricing-drift",
+        observedValue: "3840.00",
+        expectedValue: "4800.00",
+        proposedAction: "manual-review",
+        approved: "NO"
+      });
+    });
+
+    test("does not flag a booking whose allocation matches its totalPrice", () => {
+      expect(scanBookingRecord("booking_alloc_ok", {
+        totalPrice: 5000,
+        source: "online",
+        revenueAllocation: {
+          roomNet: 4000,
+          breakfastNet: 1000,
+          addOnNet: 0,
+          deductionNet: 0,
+          totalNet: 5000
+        }
+      })).toEqual([]);
+    });
+
+    test("flags a corporate-source booking with no allocation at all", () => {
+      const findings = scanBookingRecord("booking_corp", {
+        totalPrice: 4600,
+        source: "corporate"
+      });
+
+      expect(findings[0]).toMatchObject({
+        findingId: "bookings/booking_corp:corporate-missing-allocation",
+        cohort: "pricing-drift",
+        observedValue: "absent",
+        proposedAction: "manual-review",
+        approved: "NO"
+      });
+    });
+
+    test("does not flag a legacy non-corporate booking with no allocation", () => {
+      // A pre-MRB-11 booking legitimately has no allocation —
+      // the read path falls back to the legacy heuristic. Only
+      // the corporate write path (which must snapshot one) is
+      // a defect.
+      expect(scanBookingRecord("booking_legacy", {
+        totalPrice: 4600,
+        source: "online"
+      })).toEqual([]);
+    });
+
+    test("flags BR-12 other add-ons that sit on top of totalPrice", () => {
+      const findings = scanBookingRecord("booking_addon", {
+        totalPrice: 8100,
+        source: "online",
+        otherAddOnTotal: 1500,
+        hasAnyOtherAddOns: true,
+        revenueAllocation: {
+          roomNet: 8100,
+          breakfastNet: 0,
+          addOnNet: 0,
+          deductionNet: 0,
+          totalNet: 8100
+        }
+      });
+
+      expect(findings[0]).toMatchObject({
+        findingId: "bookings/booking_addon:other-addon-outside-room-bill",
+        cohort: "pricing-drift",
+        observedValue: "1500.00",
+        proposedAction: "manual-review",
+        approved: "NO"
+      });
+    });
+  });
 });

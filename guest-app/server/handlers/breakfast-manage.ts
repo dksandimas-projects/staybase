@@ -50,6 +50,12 @@ import {
   // the balance can subtract the breakfast that is already
   // inside `totalPrice` before adding the current one.
   sumBreakfastRateLines,
+  // Per OCT-H1 (2026-10-20, decision #282): the SINGLE source of
+  // truth for "subtract the breakfast already inside `totalPrice`,
+  // then add the current one". The staff update path routes
+  // through the same helper, so the guest and the desk can never
+  // disagree about the same booking.
+  computeBreakfastAdjustedTotalPrice,
   type BreakfastSelectionEntry,
   type CutoffState,
   type PublicBreakfastConfig
@@ -431,11 +437,17 @@ export async function handleGetBreakfastManage(req: VercelRequest, res: VercelRe
   const breakfastInTotalPrice = sumBreakfastRateLines(
     (booking as any).rateBreakdown as any
   );
+  // Per OCT-H1 (decision #282) the shared helper is the SINGLE
+  // source of truth for the "subtract the breakfast that is
+  // already inside the total, then add the new one" arithmetic —
+  // the staff update path routes through the same one.
   const balance = Math.max(
     0,
-    (breakfastInTotalPrice === null
-      ? totalPrice
-      : totalPrice - breakfastInTotalPrice + recomputedTotal) - paidAmount
+    computeBreakfastAdjustedTotalPrice({
+      totalPrice,
+      breakfastInTotalPrice,
+      breakfastTotal: recomputedTotal
+    }) - paidAmount
   );
 
   const served: Record<string, any> =
@@ -888,11 +900,15 @@ export async function handleUpdateBreakfast(req: VercelRequest, res: VercelRespo
       const breakfastInTotalPrice = sumBreakfastRateLines(
         (booking as any).rateBreakdown as any
       );
+      // The shared helper is the SINGLE source of truth for the
+      // arithmetic (the staff update path routes through it too).
       const newBalance = Math.max(
         0,
-        (breakfastInTotalPrice === null
-          ? totalPriceNum
-          : totalPriceNum - breakfastInTotalPrice + newBreakfastTotal) - paidAmountNum
+        computeBreakfastAdjustedTotalPrice({
+          totalPrice: totalPriceNum,
+          breakfastInTotalPrice,
+          breakfastTotal: newBreakfastTotal
+        }) - paidAmountNum
       );
 
       resultSummary.newBalance = Number(newBalance.toFixed(2));

@@ -98,6 +98,47 @@ export function sumBreakfastRateLines(breakdown: {
 }
 
 /**
+ * The booking's CURRENT room bill after a breakfast change.
+ *
+ * Per BR-01 / BR-03 the booking's `totalPrice` is the AS-BOOKED
+ * room bill (`roomTotal + breakfastTotal + extraBedTotal` minus
+ * discounts) — the breakfast is a COMPONENT of it, not an
+ * addition to it. So a surface that recomputes a bill after the
+ * selections change must SUBTRACT the breakfast that is already
+ * inside the total before adding the new one, or the breakfast is
+ * charged twice.
+ *
+ * This helper is the SINGLE source of truth for that arithmetic
+ * (per OCT-H1, 2026-10-20, decision #282). The guest Manage path
+ * and the staff update path both route through it, so the guest
+ * and the desk can never disagree about the same booking.
+ *
+ * `breakfastInTotalPrice` is the anchor from `sumBreakfastRateLines`
+ * (the create-time breakfast amount still carried by the booking's
+ * `rateBreakdown.addOns[]`). `null` means "unknown" — a booking
+ * with no rate breakdown at all. The conservative fallback is to
+ * keep the total as-is (never add the breakfast on top of a total
+ * that may already contain it), which is the direction that never
+ * over-charges the guest.
+ */
+export function computeBreakfastAdjustedTotalPrice(input: {
+  /** The booking's stored (as-booked) `totalPrice`. */
+  totalPrice: number;
+  /** The breakfast amount already inside `totalPrice` (see `sumBreakfastRateLines`). `null` = unknown. */
+  breakfastInTotalPrice: number | null;
+  /** The breakfast total of the CURRENT selections. */
+  breakfastTotal: number;
+}): number {
+  const totalPrice = Number(input.totalPrice) || 0;
+  const breakfastTotal = Number(input.breakfastTotal) || 0;
+  const anchor = input.breakfastInTotalPrice;
+  if (anchor === null || anchor === undefined || !Number.isFinite(anchor)) {
+    return totalPrice;
+  }
+  return totalPrice - anchor + breakfastTotal;
+}
+
+/**
  * Recompute the denormalized `breakfastTotal` for a booking.
  *
  * Iterates every entry in `selections`, skips entries whose

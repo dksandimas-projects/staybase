@@ -194,6 +194,14 @@ import {
   evaluateCancelPreview,
   buildCancellationLiabilitySnapshot,
   assertBookingRevenueAllocationInvariant,
+  // Per the P1 revenue-reporting audit (2026-10-22): the shared
+  // helper that REBUILDS a booking's revenue allocation after a
+  // post-create money change (a discount / voucher applied, a
+  // voucher removed, a government discount rejected). Those paths
+  // move `totalPrice` and used to leave the create-time
+  // allocation untouched, so the Reports revenue streams read a
+  // stale total.
+  rebuildBookingRevenueAllocation,
   // Per SR-01..05 (2026-10-12): the server-side
   // arrival-time validator (parses the hotel's
   // `checkInTime` and returns the set of valid
@@ -4045,6 +4053,18 @@ export async function handleCreateBooking(req: any, res: any) {
         // holds by construction (the aggregate is the
         // sum of children, each of which already passes
         // the invariant). The totalPrice match is exact.
+        //
+        // Per the P1 revenue-reporting audit (2026-10-22):
+        // the aggregate's total is the RESERVATION's billed
+        // total — `finalTotalPrice`, i.e. the chain total
+        // minus the points the member redeemed at creation.
+        // The points redemption is a deduction LAYER the
+        // chain does not see (it is applied to the
+        // reservation total after the chain runs), so it is
+        // added to the aggregate's deduction line here;
+        // without it the stored aggregate carried the
+        // pre-redemption total while the reservation doc
+        // carried the post-redemption one.
         aggregateRevenueAllocation: assertBookingRevenueAllocationInvariant(
           {
             roomNet: childPricing.reduce(
@@ -4067,10 +4087,10 @@ export async function handleCreateBooking(req: any, res: any) {
                   0
                 ),
               0
-            ),
-            totalNet: totalPrice
+            ) + (Number(selfRedeemedValue) || 0),
+            totalNet: finalTotalPrice
           },
-          totalPrice
+          finalTotalPrice
         ),
         source: corporateDetails.isCorporate ? "corporate" : "online",
         isCorporate: corporateDetails.isCorporate,
@@ -6525,6 +6545,20 @@ export async function handleApplyBookingDiscount(req: any, res: any) {
         voucherDiscount,
         totalPrice,
         rateBreakdown,
+        // Per the P1 revenue-reporting audit (2026-10-22): the
+        // MRB-11 revenue allocation is RE-SNAPSHOTTED. This path
+        // moves the bill (`totalPrice`) but used to leave the
+        // create-time allocation untouched — so the Reports
+        // revenue streams kept reading the pre-discount total
+        // while the guest was billed the discounted one. The
+        // shared helper re-derives the deduction from the same
+        // figures the new bill was computed from, so the
+        // allocation's total IS the new bill.
+        revenueAllocation: rebuildBookingRevenueAllocation({
+          existingAllocation: booking.revenueAllocation,
+          grossSubtotal: subtotal,
+          totalPrice
+        }),
         updatedAt: new Date()
       };
       if (voucherRef) transaction.update(voucherRef, { usageCount: voucherUsageCount, updatedAt: new Date() });
@@ -6766,6 +6800,18 @@ export async function handleApplyReservationDiscount(req: any, res: any) {
           voucherDiscount,
           totalPrice,
           rateBreakdown,
+          // Per the P1 revenue-reporting audit (2026-10-22): the
+          // MRB-11 revenue allocation is RE-SNAPSHOTTED per child.
+          // This path moves each child's bill (`totalPrice`) but
+          // used to leave the create-time allocation untouched — so
+          // the Reports revenue streams kept reading the
+          // pre-discount total while the guest was billed the
+          // discounted one.
+          revenueAllocation: rebuildBookingRevenueAllocation({
+            existingAllocation: booking.revenueAllocation,
+            grossSubtotal: subtotal,
+            totalPrice
+          }),
           updatedAt: new Date()
         };
         transaction.update(child.ref, updates);
@@ -6948,6 +6994,17 @@ export async function handleRemoveVoucher(req: any, res: any) {
         staffRemovedVoucherAt: new Date(),
         totalPrice: restoredTotalPrice,
         ...(rateBreakdown ? { rateBreakdown } : {}),
+        // Per the P1 revenue-reporting audit (2026-10-22): the
+        // MRB-11 revenue allocation is RE-SNAPSHOTTED. Removing a
+        // voucher moves the bill back up; the create-time
+        // allocation (which still carried the voucher deduction)
+        // used to stay behind, so the Reports revenue streams read
+        // a total the guest was no longer billed.
+        revenueAllocation: rebuildBookingRevenueAllocation({
+          existingAllocation: bookingData.revenueAllocation,
+          grossSubtotal: Number(originalTotalPrice) || 0,
+          totalPrice: restoredTotalPrice
+        }),
         updatedAt: new Date()
       };
 
@@ -7059,6 +7116,17 @@ export async function handleRejectDiscount(req: any, res: any) {
       discountPct: 0,
       totalPrice: restoredTotalPrice,
       ...(rateBreakdown ? { rateBreakdown } : {}),
+      // Per the P1 revenue-reporting audit (2026-10-22): the
+      // MRB-11 revenue allocation is RE-SNAPSHOTTED. Rejecting a
+      // government discount moves the bill back up; the
+      // create-time allocation (which still carried the senior
+      // deduction) used to stay behind, so the Reports revenue
+      // streams read a total the guest was no longer billed.
+      revenueAllocation: rebuildBookingRevenueAllocation({
+        existingAllocation: bookingData.revenueAllocation,
+        grossSubtotal: Number(originalTotalPrice) || 0,
+        totalPrice: restoredTotalPrice
+      }),
       updatedAt: new Date()
     };
 
@@ -14373,18 +14441,42 @@ export async function handleAddRoomToReservation(req: any, res: any) {
       const newTotalPrice = Number(reservation.totalPrice || 0) + finalTotalPrice;
       const newAggregateRevenueAllocation = (() => {
         const existingAlloc = (reservation as any).aggregateRevenueAllocation;
-        if (!existingAlloc) {
-          return newChildRevenueAllocation;
-        }
+        // Per the P1 revenue-reporting audit (2026-10-22): the
+        // aggregate's total is the RESERVATION's billed total
+        // (`newTotalPrice`) — the same number the header
+        // persists as its `totalPrice`. The legacy branch (a
+        // pre-MRB-11 reservation with no stored aggregate)
+        // attributes the reservation's existing total to the
+        // room stream — the same assumption the legacy revenue
+        // heuristic makes — so the per-stream sum still ties to
+        // the billed total.
+        const baseRoomNet = existingAlloc
+          ? Number(existingAlloc.roomNet || 0)
+          : Number(reservation.totalPrice || 0);
+        const baseBreakfastNet = existingAlloc
+          ? Number(existingAlloc.breakfastNet || 0)
+          : 0;
+        const baseAddOnNet = existingAlloc
+          ? Number(existingAlloc.addOnNet || 0)
+          : 0;
+        const roomNet = baseRoomNet + newChildRevenueAllocation.roomNet;
+        const breakfastNet = baseBreakfastNet + newChildRevenueAllocation.breakfastNet;
+        const addOnNet = baseAddOnNet + newChildRevenueAllocation.addOnNet;
+        const grossTotal = roomNet + breakfastNet + addOnNet;
         return assertBookingRevenueAllocationInvariant(
           {
-            roomNet: Number(existingAlloc.roomNet || 0) + newChildRevenueAllocation.roomNet,
-            breakfastNet: Number(existingAlloc.breakfastNet || 0) + newChildRevenueAllocation.breakfastNet,
-            addOnNet: Number(existingAlloc.addOnNet || 0) + newChildRevenueAllocation.addOnNet,
-            deductionNet: Number(existingAlloc.deductionNet || 0) + newChildRevenueAllocation.deductionNet,
-            totalNet: Number(existingAlloc.totalNet || 0) + newChildRevenueAllocation.totalNet
+            roomNet,
+            breakfastNet,
+            addOnNet,
+            // The deduction is the difference between the gross
+            // streams and the billed total, so the per-stream
+            // sum always ties to the total the header persists
+            // (in the normal case this is byte-identical to
+            // `existing.deductionNet + newChild.deductionNet`).
+            deductionNet: grossTotal - newTotalPrice,
+            totalNet: newTotalPrice
           },
-          Number(existingAlloc.totalNet || 0) + newChildRevenueAllocation.totalNet
+          newTotalPrice
         );
       })();
       const newChildrenDates = [

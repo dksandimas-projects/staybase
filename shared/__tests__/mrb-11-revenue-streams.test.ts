@@ -321,6 +321,74 @@ describe("assertBookingRevenueAllocationInvariant", () => {
       allocation
     );
   });
+
+  // Per the P1 revenue-reporting audit (2026-10-22): the guard
+  // gained a SECOND check — `allocation.totalNet` must be the
+  // booking's billed `totalPrice`. The first check only proved
+  // that the four streams add up to the allocation's own
+  // `totalNet`, so an allocation whose total was not the
+  // billed total sailed through.
+  it("throws when the allocation's own totalNet is not the booking's totalPrice", () => {
+    // The streams tie to 4,000 (the first check passes) but
+    // the allocation claims a total of 5,000 — the shape a
+    // write path produces when it re-derives the streams but
+    // forgets to carry the billed total into the snapshot.
+    const allocation: BookingRevenueAllocation = {
+      roomNet: 4_000,
+      breakfastNet: 1_000,
+      addOnNet: 0,
+      deductionNet: 1_000,
+      totalNet: 5_000
+    };
+    expect(() =>
+      assertBookingRevenueAllocationInvariant(allocation, 4_000)
+    ).toThrow(/revenue allocation total mismatch/);
+  });
+
+  it("throws with the [MRB-11] prefix so the server can catch and re-throw as a 500", () => {
+    const allocation: BookingRevenueAllocation = {
+      roomNet: 4_000,
+      breakfastNet: 1_000,
+      addOnNet: 0,
+      deductionNet: 1_000,
+      totalNet: 5_000
+    };
+    expect(() =>
+      assertBookingRevenueAllocationInvariant(allocation, 4_000)
+    ).toThrow(/\[MRB-11\] revenue allocation total mismatch/);
+  });
+
+  it("names the stale snapshot when the allocation still carries the pre-discount gross", () => {
+    // The production shape of a stale allocation: a 20%
+    // senior discount applied AFTER the create write. The
+    // snapshot still carries the gross 4,800; the bill is
+    // 3,840. The guard must refuse it so the write path
+    // re-snapshots the allocation — and the message must name
+    // the TOTAL mismatch (not the per-stream sum), because
+    // that is the actionable diagnosis.
+    const allocation: BookingRevenueAllocation = {
+      roomNet: 4_800,
+      breakfastNet: 0,
+      addOnNet: 0,
+      deductionNet: 0,
+      totalNet: 4_800
+    };
+    expect(() =>
+      assertBookingRevenueAllocationInvariant(allocation, 3_840)
+    ).toThrow(/revenue allocation total mismatch/);
+  });
+
+  it("leaves the legacy fallback reachable for a booking with no allocation", () => {
+    // A pre-MRB-11 booking has NO `revenueAllocation`. The
+    // guard is never reached for it (the read path falls back
+    // to the legacy heuristic), so the tightening must not make
+    // those docs unreadable.
+    const streams = getBookingRevenueStreams(
+      makeBooking({ revenueAllocation: null, totalPrice: 5_000 })
+    );
+    expect(streams.allocation).toBe("legacy-heuristic");
+    expect(streams.totalNet).toBe(5_000);
+  });
 });
 
 describe("computeBookingRevenueAllocation", () => {
