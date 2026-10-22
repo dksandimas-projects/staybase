@@ -910,3 +910,30 @@ run against production without reading code.
    ordered by `expiresAt`.
 2. **Expected:** it returns rows (production: 6 stale holds) instead of
    `FAILED_PRECONDITION`.
+
+#### BASE-05 — The drawer's Add-Ons tab must render the real catalog
+1. `curl -s https://www.sparkinnbohol.com/api/bookings/addons/config | head -c 120`
+2. **Expected:** `{"success":true,"addOns":[…]` — the rows are under
+   **`addOns`**, NOT under `data` (`data` is the *breakfast* config
+   endpoint's shape).
+3. Sign in to the admin app → **Bookings** → open a booking → the
+   **Add-Ons** tab.
+4. **Expected (fixed):** the catalog renders (production: *Airport transfer —
+   ₱500, per-person, 24 h cut-off*).
+5. **Before the fix:** *"The add-on catalog is empty. Add a row in Settings →
+   Other Add-Ons to start selling add-ons."* — even though the endpoint was
+   serving that row and the hotel's add-ons were switched ON.
+6. **Note:** the client must NOT re-apply the `isEnabled` filter to the public
+   payload — the endpoint already filtered, and the payload carries no
+   `isEnabled` field, so re-filtering drops every row.
+
+#### BASE-06 — No source comment may appear in the UI
+1. Open any booking drawer.
+2. **Expected (fixed):** the overview summary shows only the room, the date
+   range, the nights, the guests and the meal count — no prose.
+3. **Before the fix:** the BR-08 note was painted as text above "4 meals",
+   because a bare `//` line inside JSX children is literal text, not a
+   comment.
+4. **Rule:** a comment inside JSX must be a `{/* … */}` JSX comment. The
+   admin-app test suite parses every `.tsx` file in both apps with the
+   TypeScript AST and fails on any `JsxText` node that starts with `//`.
