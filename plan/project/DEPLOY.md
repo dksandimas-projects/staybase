@@ -108,8 +108,62 @@ Do not leave the root directory unset. If the guest project is deployed from the
 
 ### Headers and cron
 Each Vercel project reads the `vercel.json` in its configured root directory:
-- `guest-app/vercel.json` configures the guest/API project headers, SPA fallback, and daily checkin-reminder cron at `0 0 * * *` (midnight UTC) → `/api/email/checkin-reminder` with `CRON_SECRET` auth
+- `guest-app/vercel.json` configures the guest/API project headers, SPA fallback, and the **5 daily crons**: `/api/email/checkin-reminder` (`0 0 * * *`), `/api/holds/expire` (`0 1 * * *`), `/api/holds/sweep` (`0 2 * * *`), `/api/notifications/prune` (`0 3 * * *`), `/api/janitor/storage-sweep` (`0 19 * * *`) — all with `CRON_SECRET` auth
 - `admin-app/vercel.json` configures the admin dashboard headers and SPA fallback
+
+The repo-root `vercel.json` belongs to **no** Vercel project (both projects set a
+root directory). It is kept for its CSP headers only — its `crons` array was
+dead config and was removed.
+
+### Deploying a release — use the deploy hook, not the GitHub webhook
+
+**The GitHub webhook does NOT fire on a `main` push in this repo.** Two
+releases in a row (RPT-13, 2026-10-21, and the 2026-10-22 QA fix batch)
+were pushed to `main` and `dev` with no build ever starting; the live asset
+hashes were unchanged. Always trigger the build through the project's
+**deploy hook**:
+
+```bash
+cd guest-app
+TOKEN=$(grep "^VERCEL_TOKEN=" .env | cut -d= -f2-)   # never print this value
+# guest project — existing hook "SEO Publisher", ref=main
+curl -s -X POST \
+  "https://api.vercel.com/v1/integrations/deploy/prj_FR63Ir0KERwPQxP7ay9soSofH7Ou/eDtUtJY271" \
+  -H "Authorization: Bearer $TOKEN"
+# admin project — hook "Manual Production Deploy", ref=main
+curl -s -X POST \
+  "https://api.vercel.com/v1/integrations/deploy/prj_LcrRZLFEgjzT7HX5Opi3j3uLXNJE/tWv2MUbAsf" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Verify the deploy actually happened** — a hook POST only queues a build:
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://api.vercel.com/v6/deployments?projectId=prj_FR63Ir0KERwPQxP7ay9soSofH7Ou&limit=3"
+```
+
+`meta.githubCommitSha` must equal the commit you pushed **and** `readyState`
+must be `READY`. Then confirm the live bundles:
+
+```bash
+curl -s https://www.sparkinnbohol.com/ | grep -o 'assets/index-[A-Za-z0-9_-]*\.js'
+curl -s https://admin.sparkinnbohol.com/ | grep -o 'assets/index-[A-Za-z0-9_-]*\.js'
+```
+
+**Gotchas that cost time:**
+- The working Vercel token is in **`guest-app/.env`**. The
+  `guest-app/.env.spark-inn-prod` file holds a **stale** token (HTTP 403
+  `invalidToken`).
+- `guest-app/.env` points at the **staging** Firebase project. The production
+  Firebase config (`VITE_FIREBASE_API_KEY`, `authDomain`, `projectId`) lives
+  in `guest-app/.env.spark-inn-prod`. Use the right file for the right job:
+  `.env` for the Vercel token, `.env.spark-inn-prod` for the prod Firebase
+  client config and the service account.
+- The API bundle must be rebuilt after every commit that changes
+  `guest-app/server/`, `shared/`, or `hotel.config.ts`
+  (`npm run build:api -w guest-app` + a `chore(bundle):` commit) — the
+  `fix:`/`feat:` hook bumps `shared/VERSION.ts`, which the bundle embeds.
 
 ---
 
