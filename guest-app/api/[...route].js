@@ -222881,6 +222881,15 @@ function sumBreakfastRateLines(breakdown) {
   }
   return Math.round(total * 100) / 100;
 }
+function computeBreakfastAdjustedTotalPrice(input) {
+  const totalPrice = Number(input.totalPrice) || 0;
+  const breakfastTotal = Number(input.breakfastTotal) || 0;
+  const anchor = input.breakfastInTotalPrice;
+  if (anchor === null || anchor === void 0 || !Number.isFinite(anchor)) {
+    return totalPrice;
+  }
+  return totalPrice - anchor + breakfastTotal;
+}
 function recomputeBreakfastTotal(selections) {
   if (!selections) return 0;
   let total = 0;
@@ -225504,6 +225513,7 @@ __export(shared_exports, {
   compressImageFile: () => compressImageFile,
   computeBookingFolio: () => computeBookingFolio,
   computeBookingRevenueAllocation: () => computeBookingRevenueAllocation,
+  computeBreakfastAdjustedTotalPrice: () => computeBreakfastAdjustedTotalPrice,
   computeBreakfastCutoffState: () => computeBreakfastCutoffState,
   computeCancellationLiabilityState: () => computeCancellationLiabilityState,
   computeExtendedInFlowHoldExpiresAt: () => computeExtendedInFlowHoldExpiresAt,
@@ -243045,7 +243055,11 @@ async function handleGetBreakfastManage(req, res) {
   );
   const balance = Math.max(
     0,
-    (breakfastInTotalPrice === null ? totalPrice : totalPrice - breakfastInTotalPrice + recomputedTotal) - paidAmount
+    computeBreakfastAdjustedTotalPrice({
+      totalPrice,
+      breakfastInTotalPrice,
+      breakfastTotal: recomputedTotal
+    }) - paidAmount
   );
   const served = booking.breakfastServed && typeof booking.breakfastServed === "object" ? booking.breakfastServed : {};
   const refunds = await loadPendingBreakfastRefunds(booking.id);
@@ -243326,7 +243340,11 @@ async function handleUpdateBreakfast(req, res) {
       );
       const newBalance = Math.max(
         0,
-        (breakfastInTotalPrice === null ? totalPriceNum : totalPriceNum - breakfastInTotalPrice + newBreakfastTotal) - paidAmountNum
+        computeBreakfastAdjustedTotalPrice({
+          totalPrice: totalPriceNum,
+          breakfastInTotalPrice,
+          breakfastTotal: newBreakfastTotal
+        }) - paidAmountNum
       );
       resultSummary.newBalance = Number(newBalance.toFixed(2));
       resultSummary.refundLiabilityCreated = refundLiabilityCreated;
@@ -243773,10 +243791,15 @@ async function handleStaffUpdateBreakfast(req, res) {
       const newBreakfastTotal = recomputeBreakfastTotal(nextSelections);
       const totalPriceNum = Number(booking.totalPrice || 0);
       const paidAmountNum = Number(booking.paidAmount || 0);
-      const newBalance = Math.max(
-        0,
-        totalPriceNum + newBreakfastTotal - paidAmountNum
+      const breakfastInTotalPrice = sumBreakfastRateLines(
+        booking.rateBreakdown
       );
+      const currentTotalPrice = computeBreakfastAdjustedTotalPrice({
+        totalPrice: totalPriceNum,
+        breakfastInTotalPrice,
+        breakfastTotal: newBreakfastTotal
+      });
+      const newBalance = Math.max(0, currentTotalPrice - paidAmountNum);
       transaction.update(bookingRef2, {
         breakfastSelections: nextSelections,
         breakfastTotal: newBreakfastTotal,

@@ -41,11 +41,19 @@ describe("OCT-H1 — the guest balance does not double-count the breakfast", () 
   });
 
   it("the GET path subtracts the breakfast already inside `totalPrice`", () => {
-    // The formula must be
+    // The formula is
     //   (totalPrice - breakfastInTotalPrice + recomputedTotal) - paidAmount
     // and NOT `totalPrice + recomputedTotal - paidAmount`.
+    //
+    // Per the P1 revenue-reporting audit (2026-10-22) the
+    // arithmetic was EXTRACTED into the shared helper
+    // `computeBreakfastAdjustedTotalPrice` (in
+    // `shared/utils/breakfastTotal.ts`) so the guest path and the
+    // staff update path can never disagree about the same
+    // booking. The helper's own behaviour is pinned in
+    // `shared/__tests__/breakfast-adjusted-total-price.test.ts`.
     expect(code).toMatch(
-      /breakfastInTotalPrice\s*===\s*null\s*\?\s*totalPrice\s*:\s*totalPrice\s*-\s*breakfastInTotalPrice\s*\+\s*recomputedTotal/
+      /computeBreakfastAdjustedTotalPrice\(\{[\s\S]{0,200}?breakfastInTotalPrice,[\s\S]{0,120}?breakfastTotal:\s*recomputedTotal/
     );
     expect(code).not.toMatch(
       /totalPrice\s*\+\s*recomputedTotal\s*-\s*paidAmount/
@@ -54,7 +62,7 @@ describe("OCT-H1 — the guest balance does not double-count the breakfast", () 
 
   it("the update path subtracts the breakfast already inside `totalPrice`", () => {
     expect(code).toMatch(
-      /breakfastInTotalPrice\s*===\s*null\s*\?\s*totalPriceNum\s*:\s*totalPriceNum\s*-\s*breakfastInTotalPrice\s*\+\s*newBreakfastTotal/
+      /computeBreakfastAdjustedTotalPrice\(\{[\s\S]{0,200}?breakfastInTotalPrice,[\s\S]{0,120}?breakfastTotal:\s*newBreakfastTotal/
     );
   });
 

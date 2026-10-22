@@ -49,6 +49,8 @@ import {
   computeBreakfastCutoffState,
   MIN_BREAKFAST_OVERRIDE_REASON_LENGTH,
   recomputeBreakfastTotal,
+  sumBreakfastRateLines,
+  computeBreakfastAdjustedTotalPrice,
   type BreakfastMeal,
   type BreakfastSelectionEntry,
   type PublicBreakfastConfig
@@ -578,10 +580,28 @@ export async function handleStaffUpdateBreakfast(
 
       const totalPriceNum = Number(booking.totalPrice || 0);
       const paidAmountNum = Number(booking.paidAmount || 0);
-      const newBalance = Math.max(
-        0,
-        totalPriceNum + newBreakfastTotal - paidAmountNum
+      // Per OCT-H1 (2026-10-20, decision #282) the breakfast
+      // inside `totalPrice` must be SUBTRACTED before the new
+      // breakfast total is added — `totalPrice` already contains
+      // the original breakfast (per BR-01 / BR-03), so the
+      // pre-fix `totalPrice + newBreakfastTotal - paidAmount`
+      // charged the guest for the breakfast TWICE. The anchor is
+      // the booking's `rateBreakdown.addOns[]`, which still holds
+      // the ORIGINAL breakfast amount.
+      //
+      // The helper is the SINGLE source of truth for that
+      // arithmetic — the guest Manage path routes through the
+      // same one, so the guest and the desk can never disagree
+      // about the same booking.
+      const breakfastInTotalPrice = sumBreakfastRateLines(
+        (booking as any).rateBreakdown as any
       );
+      const currentTotalPrice = computeBreakfastAdjustedTotalPrice({
+        totalPrice: totalPriceNum,
+        breakfastInTotalPrice,
+        breakfastTotal: newBreakfastTotal
+      });
+      const newBalance = Math.max(0, currentTotalPrice - paidAmountNum);
 
       transaction.update(bookingRef, {
         breakfastSelections: nextSelections,
