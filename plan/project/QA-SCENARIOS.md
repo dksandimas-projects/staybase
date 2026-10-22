@@ -640,3 +640,191 @@ npx tsc --noEmit --skipLibCheck --target es2022 --module esnext \
 regression test `guest-app/tests/api/rpt-05-server-undefined-identifiers.test.ts`
 enforces this on every run. `guest-app/server/` is **outside** the tsconfig
 `include`, so without that test nothing else catches a missing identifier.
+
+---
+
+## 13. Regression scenarios from phases P3–P5 (2026-10-21)
+
+Hand-runnable scenarios for the defects the P3–P5 phases found. Each names the
+observable symptom, so it can be run against production without reading code.
+
+### 13.1 Kitchen list (the P0)
+
+#### KIT-01 — The kitchen list returns the meals that are actually booked
+1. Pick a service date that has a booking with breakfast selections
+   (production has 7 such dates: 2026-10-21, 11-03, 11-04, 11-05, 11-06, 11-12,
+   11-13).
+2. `GET /api/bookings/breakfast/kitchen-list?date=<that date>`.
+3. Cross-check the count against the bookings' `breakfastSelections` slot keys
+   for that date.
+
+**Expected:** `summary.totalMeals` equals the number of non-`removedAt` slots.
+**Before the fix:** `totalMeals` was **0 for every date** — 13 booked meals
+across 7 dates were invisible, because the query filtered on
+`hasAnyBreakfast == true` and the walk-in write path never set that flag.
+
+#### KIT-02 — A cancelled booking's meals do not reappear
+1. Take a booking that had breakfast, cancel it, then query the kitchen list
+   for its service date.
+
+**Expected:** its meals are gone (`removedAt != null` slots are skipped) and the
+booking contributes 0 meals. **This guards the KIT-01 fix against resurrecting
+cancelled meals.**
+
+#### KIT-03 — The kitchen list follows the configured cut-off
+1. Change `settings/breakfastConfig.cutoffTime` to a non-default time.
+2. Compare the guest manage view, the staff breakfast view and the kitchen
+   list for the same date.
+
+**Expected:** all three agree. **Before the fix:** the kitchen list used the
+hardcoded `DEFAULT_BREAKFAST_CUTOFF_TIME` (20:00 Asia/Manila) while the other
+two used the configured value.
+
+#### KIT-04 — Guest slots and admin slots are the same slot
+1. Create a 2-guest booking with a breakfast selection on each guest.
+2. Open the booking in the admin drawer, then open the guest's "manage
+   breakfast" page.
+
+**Expected:** the same guest's meal appears on the same guest's row in both
+places. **Before the fix:** the guest app keyed slots **0-based** and every
+admin surface keyed them **1-based**, so the drawer showed guest 2's meal on
+guest 1's row and a staff-added meal for the last guest was invisible to the
+guest.
+
+### 13.2 Money identity (MRB-11)
+
+#### MRB-11a — The allocation total equals the billed total
+1. Create a booking with a discount (senior citizen, or a voucher) — use the
+   walk-in path and then the guest path.
+2. Read the booking doc: compare `revenueAllocation.totalNet` with
+   `totalPrice`.
+
+**Expected:** identical. **Before the fix:** the discount was applied to the
+allocation but **not** to `totalPrice` on some write paths (one production row
+showed `roomNet 5,100 − deductionNet 1,836 = 3,264` against a `totalPrice` of
+`4,284` — a ₱1,836 discount missing from the billed total).
+
+#### MRB-11b — The add-on total reaches the booking total
+1. Create a booking with the `airport-transfer` add-on (₱500/person) for 2
+   guests.
+2. Compare `otherAddOnTotal`, `totalPrice`, `rateBreakdown.addOns[]` and
+   `revenueAllocation.addOnNet`.
+
+**Expected:** `totalPrice` includes the add-on and `addOnNet` equals
+`otherAddOnTotal`. **Before the fix:** `otherAddOnTotal: 1500` with
+`totalPrice: 8100` and `addOnNet: 0` — **₱1,500 of add-on revenue was missing
+from the total, the breakdown and the MRB-11 revenue stream**, while the guest
+was still charged ₱9,600 through the folio.
+
+#### MRB-11c — A corporate booking carries an allocation
+1. Convert a corporate inquiry into a booking (or create a corporate booking).
+2. Read the booking doc.
+
+**Expected:** a `revenueAllocation` is present and its `totalNet` equals
+`totalPrice`. **Before the fix:** the corporate write path wrote its own
+booking object with **no allocation at all**, so Reports read
+`Number(allocation.totalNet || 0)` = **0**.
+
+#### MRB-11d — A staff breakfast/add-on update re-derives the total
+1. Staff adds a breakfast to a booking via the drawer (or adds an add-on).
+2. Compare the returned `newBalance` with the persisted `totalPrice`,
+   `breakfastTotal` and `revenueAllocation`.
+
+**Expected:** they agree. **Before the fix:** the handler returned a
+`newBalance` (e.g. 5,300) but persisted only `breakfastSelections` +
+`breakfastTotal`, leaving `totalPrice: 5200` with `breakfastTotal: 200`.
+
+#### MRB-11e — The finance scanner sees the violations
+```bash
+node --env-file=guest-app/.env.spark-inn-prod --experimental-strip-types \
+  scripts/finance-integrity-scan.ts --output=/tmp/finance-scan.csv
+```
+**Expected:** any booking whose `revenueAllocation.totalNet != totalPrice`, or
+which carries an add-on total missing from `totalPrice`, or which is a
+corporate booking with no allocation, is **reported**. **Before the fix:** the
+scanner read `bookings` + `storeOrders` and nothing else, so it reported
+**0 findings** on bookings that were demonstrably unbalanced.
+
+### 13.3 Security
+
+#### SEC-10 — The reservation-ref email path requires the guest credential
+```bash
+# no Authorization header
+curl -s -X POST https://www.sparkinnbohol.com/api/email/booking-submitted \
+  -H 'Content-Type: application/json' \
+  -d '{"bookingRef":"R-20261021-99999"}'
+```
+**Expected:** **400** `{"error":"Booking reference and guest email are
+required."}` — byte-identical to the `SI-…` ref response. **Before the fix:**
+**404** `{"error":"Booking not found."}`, which proved the branch was entered
+without a credential and let an unauthenticated caller resolve the booking and
+fire the guest email.
+
+#### SEC-11 — A wrong guest email is a 404, not an email
+```bash
+curl -s -X POST https://www.sparkinnbohol.com/api/email/booking-submitted \
+  -H 'Content-Type: application/json' \
+  -d '{"bookingRef":"R-<real ref>","guestEmail":"not-the-guest@example.com"}'
+```
+**Expected:** **404** "Booking not found." and **no email sent**. The
+regression test is
+`guest-app/tests/api/rpt-16-reservation-ref-credential.test.ts`.
+
+#### SEC-12 — Front desk cannot write a voucher
+Using a front-desk token, attempt `setDoc(doc(db,"vouchers",<code>), …)` and
+`updateDoc(doc(db,"vouchers",<id>), …)` from the client SDK.
+
+**Expected:** **PERMISSION_DENIED**. Front desk may still **create** a
+corporate code from the Corporate Inquiries page (a documented front-desk
+workflow), but may not reprice or deactivate an existing one, and may not touch
+vouchers at all.
+
+#### SEC-13 — The daily holds sweep runs
+1. Insert an expired `bookingHolds` doc with `status: "active"`.
+2. Confirm the sweep query no longer fails with
+   `FAILED_PRECONDITION: The query requires an index`, and that the sweep
+   expires it.
+
+**Expected:** the doc is expired by the daily sweep. **Before the fix:** the
+query threw on prod **and** staging, and the throw aborted the whole loop, so
+`staffInventoryHolds` was never swept either.
+
+### 13.4 Cron and deploy operations
+
+#### OP-04 — Both live crons are scheduled
+1. Read the guest project's cron definitions from the Vercel API:
+   `GET /v9/projects/prj_FR63Ir0KERwPQxP7ay9soSofH7Ou` → `crons.definitions`.
+2. Confirm `/api/janitor/storage-sweep` and `/api/notifications/prune` are
+   present.
+
+**Expected:** 5 crons — `checkin-reminder`, `holds/expire`, `holds/sweep`,
+`janitor/storage-sweep`, `notifications/prune`. **Before the fix:** 3 — the
+two missing ones lived only in the repo-root `vercel.json`, which the guest
+project does not read (its root directory is `guest-app`).
+
+#### OP-05 — The storage janitor and notification prune actually run
+1. `GET /api/janitor/stats` with the production `CRON_SECRET`.
+2. Count `notifications` older than 30 days.
+
+**Expected:** `runs` > 0 and `lastRunAt` set; no notification older than the
+retention window. **Before the fix:** `{"runs":0,"lastRunAt":null}` and 3
+notifications older than 30 days.
+
+#### OP-06 — A `main` push actually deploys
+1. Push a commit to `main`.
+2. `GET /v6/deployments?projectId=…` — check `meta.githubCommitSha` and
+   `readyState`.
+
+**Expected:** a `production` deployment for the pushed SHA within ~60 s.
+**Gotcha:** during the 2026-10-21 pass the GitHub webhook did **not** fire and
+no build started; the deploy had to be triggered manually with the project's
+deploy hook (see `plan/project/QA-REPORT-2026-10-21.md §5.1b`). Always verify
+with the Vercel API, not by watching the asset hash.
+
+#### OP-07 — The reports receivables table includes incidental charges
+1. Open Reports → Receivables.
+2. Cross-check against `collectionGroup(db, "charges")` — each charge's
+   `data.bookingId` must resolve to a booking row.
+
+**Expected:** every charge appears against its booking. **Before the fix:** all
+5 production charges were dropped, hiding **₱1,350** of incidental revenue.
