@@ -149,6 +149,7 @@ import { deleteObject, getDownloadURL, listAll, ref as storageRef, uploadBytes }
 import { db, storage } from "../firebase/config";
 import { notify } from "../components/Toast";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import { PrivateStoragePathCache } from "../utils/privateStorageCache";
 import { useAudioRouting, type AudioSurface } from "../hooks/useAudioRouting";
 import { setSinkIdSafe } from "../utils/audioOutputDevices";
 import { renderRingtoneWav } from "../utils/renderRingtoneWav";
@@ -176,11 +177,26 @@ const rtcConfiguration: RTCConfiguration = {
   iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
 };
 
-const privateStorageUrlCache = new Map<string, { url: string; refreshAfter: number }>();
+// Per P1-STORAGE-404 (2026-10-22): the MISSES need a cache too.
+//
+// The janitor's storage sweep (`/api/janitor/storage-sweep`, now
+// actually scheduled since the dead cron was fixed) deletes orphaned
+// files under `bookings/`. A booking keeps its `paymentProofPath` after
+// the file is gone, so the admin list asked the API to sign a file that
+// no longer existed — 7 × HTTP 404 on every bookings-list load,
+// repeated on every render, because only SUCCESSES were cached.
+//
+// The 404 is the correct answer (the file really is gone). The waste
+// was asking again and again. The miss is cached for a shorter window
+// than a hit, so a file that is uploaded later still appears promptly.
+// The cache itself is a pure, unit-tested module
+// (`admin-app/src/utils/privateStorageCache.ts`).
+const privateStorageUrlCache = new PrivateStoragePathCache();
 
 async function resolvePrivateStorageUrl(path: string): Promise<string> {
-  const cached = privateStorageUrlCache.get(path);
-  if (cached && cached.refreshAfter > Date.now()) return cached.url;
+  const cached = privateStorageUrlCache.getHit(path);
+  if (cached) return cached;
+  if (privateStorageUrlCache.isKnownMissing(path)) return "";
 
   try {
     const token = await auth.currentUser?.getIdToken();
@@ -194,12 +210,17 @@ async function resolvePrivateStorageUrl(path: string): Promise<string> {
       body: JSON.stringify({ path })
     });
     const result = await response.json();
-    if (!response.ok || !result?.success || typeof result.data?.url !== "string") return "";
+    if (!response.ok || !result?.success || typeof result.data?.url !== "string") {
+      // A 404 means the file is gone; a 5xx means the request failed.
+      // Only a 404 is worth remembering — a transient failure must be
+      // retried.
+      if (response.status === 404) {
+        privateStorageUrlCache.rememberMiss(path);
+      }
+      return "";
+    }
 
-    privateStorageUrlCache.set(path, {
-      url: result.data.url,
-      refreshAfter: Date.now() + 50 * 60 * 1000
-    });
+    privateStorageUrlCache.rememberHit(path, result.data.url);
     return result.data.url;
   } catch {
     return "";
