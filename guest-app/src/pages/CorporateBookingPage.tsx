@@ -103,6 +103,7 @@ import { SpecialRequestsBlock } from "../components/SpecialRequestsBlock";
 // derives its 24h options from the same source the
 // public booking page uses.
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
+import { fetchPublicHotelConfig } from "../hooks/usePublicHotelConfig";
 // In-flow hold (Steps 2 + 3 countdown banner). The
 // banner is a thin wrapper around `useInFlowHold` that
 // renders the live MM:SS countdown + the "Hold
@@ -551,6 +552,13 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
   // personal-pay selector. The flag defaults to `true` when
   // missing (pre-#111 entries are treated as "visible on all
   // surfaces"), so no migration is required.
+  //
+  // Per F09 / SEC-6 (2026-10-22): the source is now the PUBLIC
+  // PROJECTION of the hotel config (`GET /api/public/hotel-config`).
+  // The raw `settings/hotelConfig` document is no longer readable by
+  // an unauthenticated client, and the projection additionally drops
+  // the `accountNumber` of any method the admin hid from the
+  // corporate surface (`showInCorporate === false`).
   const [paymentMethodsConfig, setPaymentMethodsConfig] = useState<
     Array<{
       method: string;
@@ -564,16 +572,54 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
     }>
   >([]);
   useEffect(() => {
-    const db = getFirestore();
-    getDoc(doc(db, "settings", "hotelConfig"))
-      .then((snap) => {
-        if (!snap.exists()) return;
-        const d = snap.data() as { paymentMethods?: unknown } | undefined;
-        if (Array.isArray(d?.paymentMethods)) {
-          setPaymentMethodsConfig(d!.paymentMethods as any);
+    let cancelled = false;
+    void fetchPublicHotelConfig()
+      .then((config) => {
+        if (cancelled || !config) return;
+        if (Array.isArray(config.paymentMethods)) {
+          setPaymentMethodsConfig(config.paymentMethods as any);
         }
       })
       .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Per F09 / SEC-5 / SEC-6 (2026-10-22): the PUBLISHED flat
+  // corporate rate card. The negotiated corporate ladder must not be
+  // compiled into the guest bundle, so the flat rate is served by the
+  // server (`GET /api/corporate/rates` — the hotel's public
+  // corporate rate per `plan/features/RATE-MANAGEMENT.md`) and the
+  // guest room types carry no `corporateRate` at all.
+  //
+  // The NEGOTIATED per-company rates come from a different server
+  // route (`POST /api/validate/corporate-code`) and land in
+  // `ratePerRoomType`.
+  const [flatCorporateRates, setFlatCorporateRates] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const response = await fetch("/api/corporate/rates", {
+          method: "GET",
+          headers: { Accept: "application/json" }
+        });
+        if (!response.ok) return;
+        const json = await response.json();
+        if (cancelled) return;
+        if (json?.success && json?.ratePerRoomType && typeof json.ratePerRoomType === "object") {
+          setFlatCorporateRates(json.ratePerRoomType as Record<string, number>);
+        }
+      } catch {
+        // The preview falls back to the standard rate; the server
+        // still applies the corporate rate at booking creation.
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Personal-pay selector source — enabled + corporate-visible
@@ -879,7 +925,10 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
     return distributedRoomCart.map((stay) => {
       const stayType = roomTypes.find((type) => type.value === stay.roomType);
       const baseRate = Number(stayType?.pricePerNight) || 0;
-      const typeCorp = Number(stayType?.corporateRate) || 0;
+      // Per F09 / SEC-5 (2026-10-22): the flat corporate rate comes
+      // from the server-served rate card, not from the room type
+      // (the guest room types carry no `corporateRate`).
+      const typeCorp = Number(flatCorporateRates[stay.roomType]) || 0;
       const negotiated = ratePerRoomType && ratePerRoomType[stay.roomType] !== undefined
         ? ratePerRoomType[stay.roomType]
         : null;
@@ -908,7 +957,7 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
         staySubtotal: stayRoomSubtotal + stayBreakfastSubtotal + stayExtraBedSubtotal
       };
     });
-  }, [distributedRoomCart, roomTypes, ratePerRoomType, isFlatRate, breakfastConfig, breakfastRatePerPerson, nights]);
+  }, [distributedRoomCart, roomTypes, ratePerRoomType, isFlatRate, breakfastConfig, breakfastRatePerPerson, nights, flatCorporateRates]);
 
   // Per MRB-08: the aggregate totals. Each is the
   // sum over the distributed room cart's per-stay
@@ -930,7 +979,10 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
   // flag the rest of the file already reads).
   const negotiatedRate = selectedTypeEntry && ratePerRoomType && ratePerRoomType[selectedTypeEntry.value] !== undefined
     ? ratePerRoomType[selectedTypeEntry.value]
-    : (selectedRoomRates?.corporateRate || selectedRoomRates?.pricePerNight || 0);
+    // Per F09 / SEC-5 (2026-10-22): the flat corporate rate comes from
+    // the server-served rate card (`flatCorporateRates`), never from
+    // the guest room type (which carries no `corporateRate`).
+    : ((selectedTypeEntry ? Number(flatCorporateRates[selectedTypeEntry.value]) || 0 : 0) || selectedRoomRates?.pricePerNight || 0);
   const baseRate = negotiatedRate;
   const ratePerNight = baseRate;
 
@@ -2038,7 +2090,7 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
                     const stayNegotiated = ratePerRoomType && ratePerRoomType[stay.roomType] !== undefined
                       ? ratePerRoomType[stay.roomType]
                       : null;
-                    const stayCorp = Number(stayType?.corporateRate) || 0;
+                    const stayCorp = Number(flatCorporateRates[stay.roomType]) || 0;
                     const stayBase = Number(stayType?.pricePerNight) || 0;
                     const stayRate = stayNegotiated !== null
                       ? stayNegotiated
@@ -2144,9 +2196,12 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
                 // negotiated map override first (S4.1 / decision #101).
                 // Per BI-04: never render ₱0 when the type has no
                 // corporateRate — fall back to the standard rate.
+                // Per F09 / SEC-5 (2026-10-22): the flat corporate
+                // rate comes from the server-served rate card, not
+                // from the guest room type.
                 const baseCorp = (ratePerRoomType && ratePerRoomType[type.value] !== undefined)
                   ? ratePerRoomType[type.value]
-                  : (type.corporateRate || type.pricePerNight || 0);
+                  : (Number(flatCorporateRates[type.value]) || type.pricePerNight || 0);
 
                 return (
                   <motion.article

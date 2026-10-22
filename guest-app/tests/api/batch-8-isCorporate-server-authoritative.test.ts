@@ -202,17 +202,24 @@ describe("Phase 11.6 Batch 8 — server-authoritative isCorporate + ratePerRoomT
       );
     });
 
-    it("baseRate prefers ratePerRoomType[roomType] over room's flat corporateRate", () => {
+    it("baseRate prefers ratePerRoomType[roomType] over the flat corporate rate", () => {
       // The baseRate calculation must look up the chosen room type
       // in the ratePerRoomType map. If absent, it falls back to
-      // the type's flat corporateRate (per W3.6 — `room.corporateRate`
-      // is no longer a thing; pricing lives on the room type).
+      // the flat corporate rate (per W3.6 — pricing lives on the
+      // room type).
+      //
+      // Per F09 / SEC-5 (2026-10-22): the flat corporate rate is
+      // served by the SERVER (`GET /api/corporate/rates`) instead of
+      // being read off the guest room type — the negotiated ladder
+      // must never be compiled into the guest bundle. The guest room
+      // type carries no `corporateRate` at all.
       const baseRateBlock = corporateBookingSrc.match(
         /const\s+negotiatedRate\s*=[\s\S]*?;\s*const\s+baseRate\s*=\s*negotiatedRate/
       );
       expect(baseRateBlock, "expected the baseRate calculation block").toBeTruthy();
       expect(baseRateBlock![0]).toMatch(/ratePerRoomType\[selectedTypeEntry\.value\]/);
-      expect(baseRateBlock![0]).toMatch(/selectedRoomRates\?\.corporateRate/);
+      expect(baseRateBlock![0]).toMatch(/flatCorporateRates\[selectedTypeEntry\.value\]/);
+      expect(baseRateBlock![0]).not.toMatch(/selectedRoomRates\?\.corporateRate/);
     });
 
     it("CorporateBookingPage booking body no longer sets isCorporate: true", () => {

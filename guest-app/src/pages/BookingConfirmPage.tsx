@@ -14,6 +14,7 @@ import { PriceBreakdown } from "../components/PriceBreakdown";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { useGuestAuth } from "../context/GuestAuthContext";
 import { useRoomTypes } from "../hooks/useRoomTypes";
+import { fetchPublicHotelConfig } from "../hooks/usePublicHotelConfig";
 // Per SR-01..05 (2026-10-12): the confirmation page's
 // `feat/special-requests-redirect` card is retired.
 //
@@ -94,11 +95,14 @@ export function BookingConfirmPage() {
     let cancelled = false;
     (async () => {
       try {
-        const snap = await getDoc(doc(db, "settings", "hotelConfig"));
+        // Per F09 / SEC-6 (2026-10-22): the payment-method labels
+        // come from the PUBLIC PROJECTION of the hotel config
+        // (`GET /api/public/hotel-config`). The raw
+        // `settings/hotelConfig` document is no longer readable by an
+        // unauthenticated client.
+        const publicConfig = await fetchPublicHotelConfig();
         if (cancelled) return;
-        const raw = snap.exists()
-          ? (snap.data() as { paymentMethods?: unknown }).paymentMethods
-          : null;
+        const raw = publicConfig ? publicConfig.paymentMethods : null;
         const safe: ReadonlyArray<{ method: string; label: string }> = Array.isArray(raw)
           ? (raw as Array<{ method?: unknown; label?: unknown }>)
               .filter(

@@ -34,6 +34,7 @@ import {
   services as fallbackServices,
   rewardPerks as fallbackRewardPerks
 } from "../data/homepage";
+import { fetchPublicHotelConfig, resetPublicHotelConfigCache } from "./usePublicHotelConfig";
 
 export interface SparkRewardsPromo {
   heading: string;
@@ -499,17 +500,29 @@ function buildEmptyState(): PublicSiteContent {
 
 let cachedPromise: Promise<{ websiteContent: Record<string, unknown> | null; hotelConfig: Record<string, unknown> | null }> | null = null;
 
+// Per F09 / SEC-6 (2026-10-22): `settings/hotelConfig` is NO LONGER
+// read from Firestore by the guest app. The rules used to allow
+// `allow read: if true` on `settings/{documentId}`, so this document —
+// which holds the hotel's negotiated corporate rate ladder
+// (`roomTypes[].corporateRate`) and the payment methods' bank
+// details — was world-readable from any browser.
+//
+// The hotel's PUBLIC content now arrives through the corporate-rate-
+// free projection served by `GET /api/public/hotel-config`
+// (`usePublicHotelConfig`). `settings/websiteContent` stays a direct
+// Firestore read: it is the page copy and holds no negotiated pricing
+// or bank detail.
 function loadFromFirestore() {
   if (cachedPromise) return cachedPromise;
   cachedPromise = (async () => {
     try {
-      const [wcSnap, hcSnap] = await Promise.all([
+      const [wcSnap, hotelConfig] = await Promise.all([
         getDoc(doc(db, "settings", "websiteContent")),
-        getDoc(doc(db, "settings", "hotelConfig"))
+        fetchPublicHotelConfig()
       ]);
       return {
         websiteContent: wcSnap.exists() ? (wcSnap.data() as Record<string, unknown>) : null,
-        hotelConfig: hcSnap.exists() ? (hcSnap.data() as Record<string, unknown>) : null
+        hotelConfig: (hotelConfig ?? null) as Record<string, unknown> | null
       };
     } catch {
       return { websiteContent: null, hotelConfig: null };
@@ -563,6 +576,11 @@ export function usePublicSiteContent(): PublicSiteContent {
     // the admin's edit immediately.
     function refetch() {
       cachedPromise = null;
+      // Per F09 / SEC-6 (2026-10-22): the hotel config now comes
+      // from the public projection, which has its own module-scoped
+      // promise cache. Drop it too, otherwise the guest tab would
+      // keep rendering the pre-save room types / payment methods.
+      resetPublicHotelConfigCache();
       loadFromFirestore().then(({ websiteContent, hotelConfig }) => {
         if (cancelled) return;
         applyFirestoreData(websiteContent, hotelConfig);

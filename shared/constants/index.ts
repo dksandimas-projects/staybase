@@ -56,6 +56,21 @@ export const ROOM_STATUSES = ["available", "occupied", "blocked"] as const;
 export const HOUSEKEEPING_STATUSES = ["clean", "dirty", "in-progress"] as const;
 
 export const DEFAULT_ROOM_TYPES: readonly RoomTypeEntry[] = [
+  // Per F09 / SEC-5 / SEC-6 (2026-10-22, P2 revenue leak): the seed
+  // `corporateRate` is 0 for every type and MUST stay 0. This module
+  // is imported by the guest app (through the `@spark-inn/shared`
+  // barrel), so a non-zero literal here is compiled into the
+  // JavaScript every guest downloads — the hotel's NEGOTIATED
+  // corporate ladder must never ship in a browser bundle.
+  //
+  // The corporate rate ladder now lives in the server-only module
+  // `guest-app/server/lib/corporateRates.ts` (staff + server). The
+  // staff admin app does not need it: the corporate rate calendar
+  // reads the LIVE `settings/hotelConfig.roomTypes[]` through the
+  // staff-only Firestore rules, which is the authoritative source.
+  // A `corporateRate` of 0 means "no corporate rate configured" and
+  // the booking server falls back to the standard rate (never ₱0).
+  //
   // Per SR-01..05 (2026-10-12): `bedSetupValues` is the per-type
   // subset of `HotelConfig.bedSetups[].value` offered to the guest on
   // the booking Step 2. The seed below mirrors the original
@@ -64,11 +79,11 @@ export const DEFAULT_ROOM_TYPES: readonly RoomTypeEntry[] = [
   // apply — Single is a solo product, Family has fixed
   // 2-double configuration). Admins edit the subset via the Room
   // Types editor → Bed Set-ups picker.
-  { value: "single",          label: "Single",          shortLabel: "Single",      imageUrls: [], bedDefinition: "1 single bed",         description: "A compact private room for solo guests, short work stays, and travelers who value quiet consistency.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 1, maxChildren: 0, pricePerNight: 1800, weekendRate: 2100, corporateRate: 1600, bedSetupValues: [] },
-  { value: "standard-double", label: "Standard Double", shortLabel: "Std Double",  imageUrls: [], bedDefinition: "1 double bed",          description: "Simple comfort for couples or business travelers who want an easy, consistent stay near the city center.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2400, weekendRate: 2700, corporateRate: 2200, bedSetupValues: ["large-bed", "twin-beds"] },
-  { value: "standard-twin",   label: "Standard Twin",   shortLabel: "Std Twin",    imageUrls: [], bedDefinition: "2 single beds",         description: "Twin-bed comfort for colleagues or friends who want a simple, tidy stay with all essentials close by.",     amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2600, weekendRate: 2900, corporateRate: 2300, bedSetupValues: ["twin-beds", "large-bed"] },
-  { value: "executive",       label: "Executive",       shortLabel: "Executive",   imageUrls: [], bedDefinition: "1 queen size bed",      description: "A warm, spacious retreat with premium bedding, soft lighting, and room to settle in after a day in Bohol.",     amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 3200, weekendRate: 3600, corporateRate: 2800, bedSetupValues: ["large-bed", "twin-beds"] },
-  { value: "family",          label: "Family",          shortLabel: "Family",      imageUrls: [], bedDefinition: "2 double beds",         description: "Extra space for small families, with thoughtful essentials and a calm base for Bohol plans.",                   amenities: ["WiFi", "AC", "Mini Fridge", "Cable TV"], maxCapacity: 4, maxChildren: 2, pricePerNight: 4200, weekendRate: 4600, corporateRate: 3900, bedSetupValues: [] }
+  { value: "single",          label: "Single",          shortLabel: "Single",      imageUrls: [], bedDefinition: "1 single bed",         description: "A compact private room for solo guests, short work stays, and travelers who value quiet consistency.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 1, maxChildren: 0, pricePerNight: 1800, weekendRate: 2100, corporateRate: 0, bedSetupValues: [] },
+  { value: "standard-double", label: "Standard Double", shortLabel: "Std Double",  imageUrls: [], bedDefinition: "1 double bed",          description: "Simple comfort for couples or business travelers who want an easy, consistent stay near the city center.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2400, weekendRate: 2700, corporateRate: 0, bedSetupValues: ["large-bed", "twin-beds"] },
+  { value: "standard-twin",   label: "Standard Twin",   shortLabel: "Std Twin",    imageUrls: [], bedDefinition: "2 single beds",         description: "Twin-bed comfort for colleagues or friends who want a simple, tidy stay with all essentials close by.",     amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2600, weekendRate: 2900, corporateRate: 0, bedSetupValues: ["twin-beds", "large-bed"] },
+  { value: "executive",       label: "Executive",       shortLabel: "Executive",   imageUrls: [], bedDefinition: "1 queen size bed",      description: "A warm, spacious retreat with premium bedding, soft lighting, and room to settle in after a day in Bohol.",     amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 3200, weekendRate: 3600, corporateRate: 0, bedSetupValues: ["large-bed", "twin-beds"] },
+  { value: "family",          label: "Family",          shortLabel: "Family",      imageUrls: [], bedDefinition: "2 double beds",         description: "Extra space for small families, with thoughtful essentials and a calm base for Bohol plans.",                   amenities: ["WiFi", "AC", "Mini Fridge", "Cable TV"], maxCapacity: 4, maxChildren: 2, pricePerNight: 4200, weekendRate: 4600, corporateRate: 0, bedSetupValues: [] }
 ];
 
 export type RoomTypeEntry = {
