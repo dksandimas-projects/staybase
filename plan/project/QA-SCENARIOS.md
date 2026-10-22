@@ -829,3 +829,84 @@ with the Vercel API, not by watching the asset hash.
 
 **Expected:** every charge appears against its booking. **Before the fix:** all
 5 production charges were dropped, hiding **₱1,350** of incidental revenue.
+
+---
+
+## 14. Regression scenarios from the 2026-10-22 fix batch
+
+Hand-runnable scenarios for the defects the final production verification found
+and the 2026-10-22 batch fixed. Each names the observable symptom, so it can be
+run against production without reading code.
+
+### 14.1 The admin app's API base (P0-7, decision #312)
+
+#### BASE-01 — The admin app's own origin must never answer a guest-API call
+1. `curl -s -o /dev/null -w "%{http_code} %{content_type} %{size_download}\n" \
+   https://admin.sparkinnbohol.com/api/bookings/breakfast/config`
+2. **Expected (fixed):** the admin origin has **no** `/api` route, so this
+   returns the SPA shell — `200 text/html`. That response is the *symptom*, not
+   the success signal.
+3. `curl -s https://www.sparkinnbohol.com/api/bookings/breakfast/config | head -c 120`
+4. **Expected:** `{"success":true,"data":{"isEnabled":true,…` — the real
+   catalog, on the **guest** origin.
+5. **Rule:** an admin-app staff API call must resolve its base through
+   `getApiBaseUrl()`. A relative `/api` or a `window.location.origin` base
+   lands on the SPA shell, and the feature silently renders its empty state.
+
+#### BASE-02 — The booking drawer's Breakfast tab must render the meal grid
+1. Sign in to `https://admin.sparkinnbohol.com` as an admin.
+2. **Bookings** → search `BR0203` → open `SI-20261021-00052`
+   (2 guests, `2026-11-05 → 2026-11-07`).
+3. The drawer's **Breakfast** tab.
+4. **Expected (fixed):** the meal grid — `Total: ₱400 · 4 meals`, a section
+   per service date, and **two guest rows per date, each with a meal**:
+   2026-11-05 → Guest 1 `Tapsilog`, Guest 2 `Longsilog`;
+   2026-11-06 → Guest 1 `Cornsilog`, Guest 2 `Hotsilog`.
+   Each date shows `Order by <date>, 20:00` — the **configured** cut-off.
+5. **Before the fix:** the tab read *"Breakfast is not enabled"*, and the
+   walk-in creation grid read *"Breakfast not enabled"* — while
+   `settings/breakfastConfig.isEnabled` was `true`.
+
+#### BASE-03 — The walk-in grids must load their catalogs
+1. **Bookings** → **New Booking** (walk-in form).
+2. **Expected (fixed):** the breakfast section lists the 6 configured meals
+   (Tapsilog / Longsilog / Tocilog / Bangsilog / Cornsilog / Hotsilog, ₱100
+   each) and the other-add-ons section lists the enabled add-ons.
+3. **Before the fix:** both sections were empty.
+
+#### BASE-04 — The refund "Mark as paid" must reach the API
+1. Open a booking with a **pending refund** → the Refunds panel →
+   **Mark as paid** → confirm.
+2. **Expected (fixed):** the request goes to
+   `https://www.sparkinnbohol.com/api/refunds/mark-paid` with a staff Bearer
+   token, and the row flips to paid.
+3. **Before the fix:** it posted to the admin origin's `/api/refunds/mark-paid`
+   (the SPA shell) with no token.
+
+### 14.2 The 2026-10-22 money + access fixes
+
+#### MONEY-01 — The MRB-11 allocation total must equal the booking total
+1. Create a walk-in booking with a breakfast and an add-on.
+2. Read the booking doc: `revenueAllocation.totalNet` vs `totalPrice`.
+3. **Expected:** equal. A mismatch is a P1 — the write boundary now asserts it.
+
+#### ACCESS-01 — Pricing writes belong to admins
+1. Sign in as the **front-desk** account.
+2. Try to update a voucher or an existing corporate code directly in
+   Firestore.
+3. **Expected:** `PERMISSION_DENIED`.
+4. As the **admin** account, the same writes succeed. `corporateCodes` is
+   split by **operation**: `create` is staff-wide (issuing a negotiated rate is
+   the desk's job); `update` / `delete` are admin-only.
+
+#### CRON-01 — The two recovered crons must be scheduled
+1. `GET /v9/projects/<guest-project>` → `crons.definitions`.
+2. **Expected:** **5** entries, including `/api/janitor/storage-sweep @ 0 19 * * *`
+   and `/api/notifications/prune @ 0 3 * * *`.
+
+#### CRON-02 — The holds sweep must not fail with FAILED_PRECONDITION
+1. Run the sweep query as the Admin SDK:
+   `bookingHolds` where `status == "active"` and `expiresAt < now`,
+   ordered by `expiresAt`.
+2. **Expected:** it returns rows (production: 6 stale holds) instead of
+   `FAILED_PRECONDITION`.
