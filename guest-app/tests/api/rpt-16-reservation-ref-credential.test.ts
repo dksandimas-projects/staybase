@@ -326,6 +326,73 @@ describe("RPT-16 — the `SI-…` branch behaviour is unchanged", () => {
   });
 });
 
+// Per RPT-16 follow-on (2026-10-22): the `SI-…` branch was still
+// CASE-SENSITIVE while the `R-…` branch was not.
+//
+// The stored `guestEmail` is lowercased + trimmed on write (SEV-1 #4),
+// and Firestore has no case-insensitive equality query, so the `SI-…`
+// branch used `where("guestEmail", "==", guestEmail)` — a
+// case-sensitive filter. A guest who typed `Maria@Example.com` got a
+// 404 on an `SI-…` ref but a 200 on an `R-…` ref. The two branches
+// are now identical.
+describe("RPT-16 follow-on — the `SI-…` branch compares the email case-insensitively", () => {
+  test("`SI-…` + an UPPERCASED email → 200 + one email (was 404)", async () => {
+    const res = mockResponse();
+    await handleEmailTrigger(
+      guestReq({ bookingRef: BOOKING_REF, guestEmail: GUEST_EMAIL.toUpperCase() }),
+      res,
+      "booking-submitted"
+    );
+
+    expect(statusOf(res)).toBe(200);
+    expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+
+  test("`SI-…` + a PADDED email → 200 + one email (was 404)", async () => {
+    const res = mockResponse();
+    await handleEmailTrigger(
+      guestReq({ bookingRef: BOOKING_REF, guestEmail: `  ${GUEST_EMAIL}  ` }),
+      res,
+      "booking-submitted"
+    );
+
+    expect(statusOf(res)).toBe(200);
+    expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+
+  test("`SI-…` + a wrong email is STILL a 404 and fires no email (no regression)", async () => {
+    const res = mockResponse();
+    await handleEmailTrigger(
+      guestReq({ bookingRef: BOOKING_REF, guestEmail: "attacker@example.test" }),
+      res,
+      "booking-submitted"
+    );
+
+    expect(statusOf(res)).toBe(404);
+    expect(bodyOf(res).error).toBe("Booking not found.");
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  test("the `SI-…` and `R-…` branches now answer identically for a mixed-case email", async () => {
+    const si = mockResponse();
+    await handleEmailTrigger(
+      guestReq({ bookingRef: BOOKING_REF, guestEmail: `  ${GUEST_EMAIL.toUpperCase()}  ` }),
+      si,
+      "booking-submitted"
+    );
+
+    const r = mockResponse();
+    await handleEmailTrigger(
+      guestReq({ bookingRef: RESERVATION_REF, guestEmail: `  ${GUEST_EMAIL.toUpperCase()}  ` }),
+      r,
+      "booking-submitted"
+    );
+
+    expect(statusOf(si)).toBe(statusOf(r));
+    expect(bodyOf(si).success).toBe(bodyOf(r).success);
+  });
+});
+
 describe("RPT-16 — the `bookingId` branch behaviour is unchanged", () => {
   test("`bookingId` + no email → 400 'Guest email is required.' (the bookingId branch keeps its own message)", async () => {
     const res = mockResponse();
@@ -468,5 +535,36 @@ describe("RPT-16 — source tripwire (the gate must precede the reservations que
     expect(findBookingSlice).toMatch(/requiresGuestEmail/);
     expect(findBookingSlice).toMatch(/bookingEmail\s*!==\s*providedEmail/);
     expect(findBookingSlice).toMatch(/providedEmail\s*=\s*String\(guestEmail\)\.trim\(\)\.toLowerCase\(\)/);
+  });
+});
+
+describe("RPT-16 follow-on — source tripwire (the `SI-…` branch must not use a case-sensitive filter)", () => {
+  const emailHandlerSrc = readFileSync(
+    resolve(__dirname, "../../server/handlers/email.ts"),
+    "utf8"
+  );
+  const findBookingStart = emailHandlerSrc.indexOf("async function findBooking(");
+  const findBookingEnd = emailHandlerSrc.indexOf("return booking;\n}", findBookingStart);
+  const findBookingSlice =
+    findBookingStart >= 0 && findBookingEnd > findBookingStart
+      ? emailHandlerSrc.slice(findBookingStart, findBookingEnd + "return booking;\n}".length)
+      : "";
+
+  test("the `SI-…` branch no longer pushes the guest email into a Firestore equality filter", () => {
+    // A `where("guestEmail", "==", …)` filter is CASE-SENSITIVE in
+    // Firestore, which is what made the `SI-…` branch disagree with
+    // the `R-…` branch.
+    // The `.where(` prefix keeps the assertion on CODE, not on the
+    // explanatory comment that names the old filter.
+    expect(findBookingSlice).not.toMatch(/\.where\(\s*["']guestEmail["']\s*,\s*["']==["']/);
+  });
+
+  test("the `SI-…` branch compares the email in memory, case-insensitively", () => {
+    expect(findBookingSlice).toMatch(/providedEmail\s*=\s*String\(guestEmail\)\.trim\(\)\.toLowerCase\(\)/);
+    expect(findBookingSlice).toMatch(/bookingEmail\s*!==\s*providedEmail/);
+  });
+
+  test("a wrong email on the `SI-…` branch still returns null (the same 404)", () => {
+    expect(findBookingSlice).toMatch(/if \(bookingEmail !== providedEmail\) return null;/);
   });
 });

@@ -27,6 +27,22 @@
 //   4. Returns the new `paidAmount` + the refund entry
 //      + an `alreadyPaid` idempotency flag.
 //
+// PER PAY-01 (P1 MONEY, 2026-10-22): step 2 is a DECREMENT, and
+// until this fix it was the ONLY writer of `booking.paidAmount` —
+// no production path ever INCREMENTED it, so a booking with money
+// collected against it carried no `paidAmount` at all and every
+// read fell back to 0. The two production payment-record paths
+// (`handleAddPayment` + `handleVerifyAndRecordPayment` in
+// `server/handlers/bookings.ts`) now maintain the field with the
+// shared helper `computeNextBookingPaidAmount`
+// (`shared/utils/bookingPaidAmount.ts`), so this decrement now has
+// a real base. The field stays INCREMENTAL on purpose: it must NOT
+// be recomputed from the ledger here, because the booking-scoped
+// breakfast / other-add-on refunds live in
+// `bookings/{id}/refunds` (a DIFFERENT subcollection from
+// `bookings/{id}/payments`) and a recompute would silently
+// resurrect money that was already refunded.
+//
 // The helper is **transaction-internal** — the CALLER
 // owns the Firestore transaction (per project convention:
 // every refund mutation runs inside the booking-side
@@ -159,7 +175,16 @@ export interface MarkRefundPaidInput {
    * synchronously.
    */
   existingDoc?: DocumentSnapshot | null;
-  /** The booking's current `paidAmount` (pre-write). */
+  /**
+   * The booking's current `paidAmount` (pre-write).
+   *
+   * Per PAY-01 (P1 MONEY, 2026-10-22): the field is maintained by
+   * the two production payment-record paths
+   * (`handleAddPayment` + `handleVerifyAndRecordPayment`), so this
+   * value is the money actually collected against the booking. A
+   * caller that cannot find the field (a pre-fix booking) passes
+   * `0` — the legacy fallback every read path uses.
+   */
   currentPaidAmount?: number;
 }
 

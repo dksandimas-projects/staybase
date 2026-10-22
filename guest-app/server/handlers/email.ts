@@ -1218,20 +1218,38 @@ async function findBooking(req: VercelRequest, options: { requireGuestMatch: boo
         if (bookingEmail !== providedEmail) return null;
       }
     } else {
-      query = adminDb.collection("bookings").where("bookingRef", "==", trimmed).limit(1);
-      if (options.requireGuestMatch && !user.uid) {
-        if (!guestEmail) {
-          throw new Error("Booking reference and guest email are required.");
-        }
-        query = adminDb
-          .collection("bookings")
-          .where("bookingRef", "==", trimmed)
-          .where("guestEmail", "==", String(guestEmail).trim())
-          .limit(1);
+      // Per RPT-16 follow-on (2026-10-22): the `SI-…` branch now
+      // compares the guest email the SAME WAY the `R-…` branch does —
+      // case-insensitively and trimmed.
+      //
+      // The two branches were asymmetric. Firestore has no
+      // case-insensitive equality query, so the `SI-…` branch pushed
+      // the email into the query as
+      // `where("guestEmail", "==", guestEmail)` — CASE-SENSITIVE —
+      // while the stored `guestEmail` is lowercased + trimmed on write
+      // (SEV-1 #4). A guest who typed `Maria@Example.com` therefore
+      // got a 404 on an `SI-…` ref but a 200 on an `R-…` ref.
+      //
+      // The fix resolves the booking by its (unique) reference and
+      // compares the email in memory, exactly like the `R-…` branch.
+      // A mismatch still returns `null` — the same 404 "Booking not
+      // found." — so nothing is disclosed and there is no enumeration
+      // oracle either way.
+      const needsEmail = Boolean(options.requireGuestMatch && !user.uid);
+      if (needsEmail && !guestEmail) {
+        throw new Error("Booking reference and guest email are required.");
       }
+      query = adminDb.collection("bookings").where("bookingRef", "==", trimmed).limit(1);
       const results = await query.get();
       if (results.empty) return null;
       snapshot = results.docs[0];
+      if (needsEmail) {
+        const bookingEmail = String((snapshot.data() as any)?.guestEmail || "")
+          .trim()
+          .toLowerCase();
+        const providedEmail = String(guestEmail).trim().toLowerCase();
+        if (bookingEmail !== providedEmail) return null;
+      }
     }
   } else {
     throw new Error("Booking ID or booking reference is required.");

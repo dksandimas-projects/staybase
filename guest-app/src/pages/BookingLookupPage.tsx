@@ -2,11 +2,9 @@ import { AlertTriangle, ArrowLeft, BedDouble, Calendar, ListChecks, Mail, Search
 import { motion, useReducedMotion } from "framer-motion";
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { doc, getDoc } from "firebase/firestore";
 import { GUEST_CANCELLABLE_STATUSES, RESERVATION_REF_REGEX, resolvePaymentMethodLabel, scaleIn, addDaysToIsoDate, isValidIsoDate } from "@spark-inn/shared";
 import type { BookingRateBreakdown, CancellationPreview } from "@spark-inn/shared";
 import config from "@config";
-import { db } from "../firebase/config";
 import { Footer } from "../components/Footer";
 import { GhostButton } from "../components/GhostButton";
 import { Modal } from "../components/Modal";
@@ -18,6 +16,7 @@ import { PriceBreakdown } from "../components/PriceBreakdown";
 import { formatPrice } from "../utils/format";
 import { cn } from "../utils/cn";
 import { useTurnstileToken } from "../hooks/useTurnstileToken";
+import { fetchPublicHotelConfig } from "../hooks/usePublicHotelConfig";
 
 interface BookingData {
   id: string;
@@ -432,11 +431,15 @@ export function BookingLookupPage() {
     let cancelled = false;
     (async () => {
       try {
-        const snap = await getDoc(doc(db, "settings", "hotelConfig"));
+        // Per F09 / SEC-6 (2026-10-22): the payment-method labels
+        // come from the PUBLIC PROJECTION of the hotel config
+        // (`GET /api/public/hotel-config`). The raw
+        // `settings/hotelConfig` document is no longer readable by an
+        // unauthenticated client.
+        const publicConfig = await fetchPublicHotelConfig();
         if (cancelled) return;
-        const data = snap.exists() ? snap.data() : null;
-        const raw = data && Array.isArray((data as { paymentMethods?: unknown }).paymentMethods)
-          ? (data as { paymentMethods: Array<{ method?: unknown; label?: unknown }> }).paymentMethods
+        const raw = publicConfig && Array.isArray(publicConfig.paymentMethods)
+          ? (publicConfig.paymentMethods as Array<{ method?: unknown; label?: unknown }>)
           : null;
         const safe: ReadonlyArray<{ method: string; label: string }> = raw
           ? raw

@@ -114,8 +114,13 @@ describe("BookingConfirmPage.tsx — regression nets", () => {
   // collection (Firestore rules allow guest reads on settings).
   // The fix keeps those reads. The two must remain.
 
-  it("keeps the hotelConfig fetch via settings/hotelConfig", () => {
-    expect(bookingConfirmPage).toMatch(
+  it("reads the hotel config through the PUBLIC projection, not the raw document", () => {
+    // Per F09 / SEC-6 (2026-10-22): `settings/hotelConfig` is no
+    // longer anonymously readable, so the confirm page reads the
+    // corporate-rate-free projection served by
+    // `GET /api/public/hotel-config`.
+    expect(bookingConfirmPage).toMatch(/fetchPublicHotelConfig\(\)/);
+    expect(bookingConfirmPage).not.toMatch(
       /getDoc\(\s*doc\(\s*db\s*,\s*["']settings["']\s*,\s*["']hotelConfig["']/
     );
   });

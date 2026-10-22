@@ -121,6 +121,7 @@ import { PriceBreakdown } from "../components/PriceBreakdown";
 // other-add-ons section + the catalog hook.
 import { OtherAddOnsStep2Section } from "../components/OtherAddOnsStep2Section";
 import { useOtherAddOnsCatalog } from "../hooks/useOtherAddOnsCatalog";
+import { fetchPublicHotelConfig } from "../hooks/usePublicHotelConfig";
 import { StepIndicator } from "../components/StepIndicator";
 import { BookingStickyFooter } from "../components/BookingStickyFooter";
 import { RoomCartLines } from "../components/RoomCartLines";
@@ -1414,9 +1415,17 @@ export function BookingPage() {
         if (rSnap.exists()) {
           setRewardsConfig(rSnap.data());
         }
-        const hSnap = await getDoc(doc(db, "settings", "hotelConfig"));
-        if (hSnap.exists()) {
-          setHotelConfig(hSnap.data());
+        // Per F09 / SEC-6 (2026-10-22): `settings/hotelConfig` is no
+        // longer readable by an unauthenticated client, so the booking
+        // flow reads the PUBLIC PROJECTION of the hotel config
+        // (`GET /api/public/hotel-config`) instead. The projection
+        // carries the payment methods (with the `accountNumber` of any
+        // method the admin hid from the corporate surface removed)
+        // and the `seniorPwdOnlineEnabled` flag — but never a
+        // `corporateRate`.
+        const hotelConfig = await fetchPublicHotelConfig();
+        if (hotelConfig) {
+          setHotelConfig(hotelConfig as unknown as Record<string, unknown>);
         }
         const wSnap = await getDoc(doc(db, "settings", "websiteContent"));
         if (wSnap.exists()) {

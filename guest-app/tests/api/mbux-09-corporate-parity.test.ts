@@ -81,7 +81,11 @@ describe("MBUX-09 — Step 1: the vestigial rate control is gone", () => {
   it("keeps the negotiated-rate badge and the access-code gate", () => {
     expect(corporate).toContain("Negotiated rate");
     expect(corporate).toMatch(/\{activeCode && \(/);
-    expect(corporate).toMatch(/type\.corporateRate/);
+    // Per F09 / SEC-5 (2026-10-22): the flat corporate rate is served
+    // by the SERVER (`GET /api/corporate/rates`), so the guest room
+    // type carries no `corporateRate` any more.
+    expect(corporate).toMatch(/flatCorporateRates\[type\.value\]/);
+    expect(corporate).not.toMatch(/type\.corporateRate/);
   });
 
   it("keeps `selectRoomType` — it owns the deep-link URL writes", () => {
@@ -202,9 +206,11 @@ describe("MBUX-09 — contracts that must survive parity", () => {
   });
 
   it("the corporate rate still falls back to the standard rate when no negotiated rate exists", () => {
-    // Per BI-04: never render ₱0 for a type with no corporateRate.
+    // Per BI-04: never render ₱0 for a type with no corporate rate.
+    // Per F09 / SEC-5 (2026-10-22): the flat corporate rate comes
+    // from the server-served rate card, not from the guest room type.
     expect(corporate).toMatch(
-      /ratePerRoomType && ratePerRoomType\[type\.value\] !== undefined\)\s*\n?\s*\? ratePerRoomType\[type\.value\]\s*\n?\s*: \(type\.corporateRate \|\| type\.pricePerNight \|\| 0\)/
+      /ratePerRoomType && ratePerRoomType\[type\.value\] !== undefined\)\s*\n?\s*\? ratePerRoomType\[type\.value\]\s*\n?\s*: \(Number\(flatCorporateRates\[type\.value\]\) \|\| type\.pricePerNight \|\| 0\)/
     );
   });
 

@@ -353,10 +353,40 @@ service cloud.firestore {
       }
     }
 
+    // Per F09 / SEC-6 (2026-10-22, P2 revenue leak): the `settings`
+    // collection was `allow read: if true`, so EVERY document in it
+    // was world-readable straight from an unauthenticated browser —
+    // including `settings/hotelConfig`, which carries the hotel's
+    // NEGOTIATED corporate rate ladder (`roomTypes[].corporateRate`)
+    // and the bank details of the payment methods (the
+    // `accountNumber` of a method the admin hid from the corporate
+    // surface with `showInCorporate: false`), plus `settings/rooms`.
+    //
+    // The collection is now staff-read / admin-write. The guest site
+    // reads the hotel's PUBLIC content through the public projection
+    // served by `GET /api/public/hotel-config`
+    // (`guest-app/server/handlers/public-config.ts`) — the server
+    // reads the document with the Admin SDK and projects an explicit
+    // allow-list that contains no corporate rate and no hidden bank
+    // detail.
+    //
+    // New `settings/*` documents are therefore staff-only by
+    // DEFAULT: a doc only becomes publicly readable by being listed
+    // explicitly in the blocks below.
     match /settings/{documentId} {
-      allow read: if true;
+      allow read: if isStaff();
       allow write: if isAdmin();
     }
+
+    // The marketing / published-content documents the guest site
+    // reads directly. Each one is a public artefact by design — page
+    // copy, the published SEO card, the rewards tiers, and the
+    // breakfast menu. None of them carries negotiated pricing, a bank
+    // detail, PII, or a staff-only field.
+    match /settings/websiteContent { allow read: if true; }
+    match /settings/breakfastConfig { allow read: if true; }
+    match /settings/rewardsConfig { allow read: if true; }
+    match /settings/seo { allow read: if true; }
 
     // Per PR-AUDIT-B1 (2026-10-20): the breakfast-config change
     // log lives in a SUBCOLLECTION of `settings/breakfastConfig`

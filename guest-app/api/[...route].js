@@ -152310,7 +152310,7 @@ var require_html2canvas = __commonJS({
       var isTransparent = function(color2) {
         return (255 & color2) === 0;
       };
-      var asString = function(color2) {
+      var asString2 = function(color2) {
         var alpha = 255 & color2;
         var blue = 255 & color2 >> 8;
         var green = 255 & color2 >> 16;
@@ -157288,12 +157288,12 @@ var require_html2canvas = __commonJS({
                   paintOrder2.forEach(function(paintOrderLayer) {
                     switch (paintOrderLayer) {
                       case 0:
-                        _this.ctx.fillStyle = asString(styles.color);
+                        _this.ctx.fillStyle = asString2(styles.color);
                         _this.renderTextWithLetterSpacing(text2, styles.letterSpacing, baseline);
                         var textShadows = styles.textShadow;
                         if (textShadows.length && text2.text.trim().length) {
                           textShadows.slice(0).reverse().forEach(function(textShadow2) {
-                            _this.ctx.shadowColor = asString(textShadow2.color);
+                            _this.ctx.shadowColor = asString2(textShadow2.color);
                             _this.ctx.shadowOffsetX = textShadow2.offsetX.number * _this.options.scale;
                             _this.ctx.shadowOffsetY = textShadow2.offsetY.number * _this.options.scale;
                             _this.ctx.shadowBlur = textShadow2.blur.number;
@@ -157305,7 +157305,7 @@ var require_html2canvas = __commonJS({
                           _this.ctx.shadowBlur = 0;
                         }
                         if (styles.textDecorationLine.length) {
-                          _this.ctx.fillStyle = asString(styles.textDecorationColor || styles.color);
+                          _this.ctx.fillStyle = asString2(styles.textDecorationColor || styles.color);
                           styles.textDecorationLine.forEach(function(textDecorationLine2) {
                             switch (textDecorationLine2) {
                               case 1:
@@ -157323,7 +157323,7 @@ var require_html2canvas = __commonJS({
                         break;
                       case 1:
                         if (styles.webkitTextStrokeWidth && text2.text.trim().length) {
-                          _this.ctx.strokeStyle = asString(styles.webkitTextStrokeColor);
+                          _this.ctx.strokeStyle = asString2(styles.webkitTextStrokeColor);
                           _this.ctx.lineWidth = styles.webkitTextStrokeWidth;
                           _this.ctx.lineJoin = !!window.chrome ? "miter" : "round";
                           _this.ctx.strokeText(text2.text, text2.bounds.left, text2.bounds.top + baseline);
@@ -157441,7 +157441,7 @@ var require_html2canvas = __commonJS({
                             new Vector(container.bounds.left + size * 0.84, container.bounds.top + size * 0.34085),
                             new Vector(container.bounds.left + size * 0.39363, container.bounds.top + size * 0.79)
                           ]);
-                          this.ctx.fillStyle = asString(INPUT_COLOR);
+                          this.ctx.fillStyle = asString2(INPUT_COLOR);
                           this.ctx.fill();
                           this.ctx.restore();
                         }
@@ -157450,7 +157450,7 @@ var require_html2canvas = __commonJS({
                           this.ctx.save();
                           this.ctx.beginPath();
                           this.ctx.arc(container.bounds.left + size / 2, container.bounds.top + size / 2, size / 4, 0, Math.PI * 2, true);
-                          this.ctx.fillStyle = asString(INPUT_COLOR);
+                          this.ctx.fillStyle = asString2(INPUT_COLOR);
                           this.ctx.fill();
                           this.ctx.restore();
                         }
@@ -157460,7 +157460,7 @@ var require_html2canvas = __commonJS({
                       _b = this.createFontStyle(styles), fontFamily2 = _b[0], fontSize2 = _b[1];
                       baseline = this.fontMetrics.getMetrics(fontFamily2, fontSize2).baseline;
                       this.ctx.font = fontFamily2;
-                      this.ctx.fillStyle = asString(styles.color);
+                      this.ctx.fillStyle = asString2(styles.color);
                       this.ctx.textBaseline = "alphabetic";
                       this.ctx.textAlign = canvasTextAlign(container.styles.textAlign);
                       bounds = contentBox(container);
@@ -157515,7 +157515,7 @@ var require_html2canvas = __commonJS({
                     if (paint.listValue && container.styles.listStyleType !== -1) {
                       fontFamily2 = this.createFontStyle(styles)[0];
                       this.ctx.font = fontFamily2;
-                      this.ctx.fillStyle = asString(styles.color);
+                      this.ctx.fillStyle = asString2(styles.color);
                       this.ctx.textBaseline = "middle";
                       this.ctx.textAlign = "right";
                       bounds = new Bounds(container.bounds.left, container.bounds.top + getAbsoluteValue(container.styles.paddingTop, container.bounds.width), container.bounds.width, computeLineHeight(styles.lineHeight, styles.fontSize.number) / 2 + 1);
@@ -157747,7 +157747,7 @@ var require_html2canvas = __commonJS({
                               ctx = canvas.getContext("2d");
                               gradient_1 = ctx.createLinearGradient(x0, y0, x1, y1);
                               processColorStops(backgroundImage3.stops, lineLength).forEach(function(colorStop) {
-                                return gradient_1.addColorStop(colorStop.stop, asString(colorStop.color));
+                                return gradient_1.addColorStop(colorStop.stop, asString2(colorStop.color));
                               });
                               ctx.fillStyle = gradient_1;
                               ctx.fillRect(0, 0, width, height);
@@ -157768,7 +157768,7 @@ var require_html2canvas = __commonJS({
                               if (rx > 0 && ry > 0) {
                                 radialGradient_1 = this_1.ctx.createRadialGradient(left2 + x4, top_1 + y2, 0, left2 + x4, top_1 + y2, rx);
                                 processColorStops(backgroundImage3.stops, rx * 2).forEach(function(colorStop) {
-                                  return radialGradient_1.addColorStop(colorStop.stop, asString(colorStop.color));
+                                  return radialGradient_1.addColorStop(colorStop.stop, asString2(colorStop.color));
                                 });
                                 this_1.path(path);
                                 this_1.ctx.fillStyle = radialGradient_1;
@@ -157824,7 +157824,7 @@ var require_html2canvas = __commonJS({
             return __awaiter(this, void 0, void 0, function() {
               return __generator(this, function(_a4) {
                 this.path(parsePathForBorder(curvePoints, side));
-                this.ctx.fillStyle = asString(color2);
+                this.ctx.fillStyle = asString2(color2);
                 this.ctx.fill();
                 return [
                   2
@@ -157850,7 +157850,7 @@ var require_html2canvas = __commonJS({
                   case 2:
                     outerPaths = parsePathForBorderDoubleOuter(curvePoints, side);
                     this.path(outerPaths);
-                    this.ctx.fillStyle = asString(color2);
+                    this.ctx.fillStyle = asString2(color2);
                     this.ctx.fill();
                     innerPaths = parsePathForBorderDoubleInner(curvePoints, side);
                     this.path(innerPaths);
@@ -157888,7 +157888,7 @@ var require_html2canvas = __commonJS({
                     this.path(backgroundPaintingArea);
                     this.ctx.clip();
                     if (!isTransparent(styles.backgroundColor)) {
-                      this.ctx.fillStyle = asString(styles.backgroundColor);
+                      this.ctx.fillStyle = asString2(styles.backgroundColor);
                       this.ctx.fill();
                     }
                     return [4, this.renderBackgroundImage(paint.container)];
@@ -157911,9 +157911,9 @@ var require_html2canvas = __commonJS({
                       }
                       _this.ctx.shadowOffsetX = shadow.offsetX.number + maskOffset;
                       _this.ctx.shadowOffsetY = shadow.offsetY.number;
-                      _this.ctx.shadowColor = asString(shadow.color);
+                      _this.ctx.shadowColor = asString2(shadow.color);
                       _this.ctx.shadowBlur = shadow.blur.number;
-                      _this.ctx.fillStyle = shadow.inset ? asString(shadow.color) : "rgba(0,0,0,1)";
+                      _this.ctx.fillStyle = shadow.inset ? asString2(shadow.color) : "rgba(0,0,0,1)";
                       _this.ctx.fill();
                       _this.ctx.restore();
                     });
@@ -158045,7 +158045,7 @@ var require_html2canvas = __commonJS({
                 } else {
                   this.ctx.lineWidth = width * 2 + 1.1;
                 }
-                this.ctx.strokeStyle = asString(color2);
+                this.ctx.strokeStyle = asString2(color2);
                 this.ctx.stroke();
                 this.ctx.setLineDash([]);
                 if (style === 2) {
@@ -158079,7 +158079,7 @@ var require_html2canvas = __commonJS({
                 switch (_a4.label) {
                   case 0:
                     if (this.options.backgroundColor) {
-                      this.ctx.fillStyle = asString(this.options.backgroundColor);
+                      this.ctx.fillStyle = asString2(this.options.backgroundColor);
                       this.ctx.fillRect(this.options.x, this.options.y, this.options.width, this.options.height);
                     }
                     stack = parseStackingContexts(element);
@@ -158162,7 +158162,7 @@ var require_html2canvas = __commonJS({
                   case 1:
                     img = _a4.sent();
                     if (this.options.backgroundColor) {
-                      this.ctx.fillStyle = asString(this.options.backgroundColor);
+                      this.ctx.fillStyle = asString2(this.options.backgroundColor);
                       this.ctx.fillRect(0, 0, this.options.width * this.options.scale, this.options.height * this.options.scale);
                     }
                     this.ctx.drawImage(img, -this.options.x * this.options.scale, -this.options.y * this.options.scale);
@@ -166887,10 +166887,10 @@ var require_lib5 = __commonJS({
           if (!this.hasValue()) {
             return false;
           }
-          var asString = this.getString();
+          var asString2 = this.getString();
           switch (true) {
-            case asString.endsWith("px"):
-            case /^[0-9]+$/.test(asString):
+            case asString2.endsWith("px"):
+            case /^[0-9]+$/.test(asString2):
               return true;
             default:
               return false;
@@ -167046,13 +167046,13 @@ var require_lib5 = __commonJS({
       }, {
         key: "getDefinition",
         value: function getDefinition() {
-          var asString = this.getString();
-          var name2 = /#([^)'"]+)/.exec(asString);
+          var asString2 = this.getString();
+          var name2 = /#([^)'"]+)/.exec(asString2);
           if (name2) {
             name2 = name2[1];
           }
           if (!name2) {
-            name2 = asString;
+            name2 = asString2;
           }
           return this.document.definitions[name2];
         }
@@ -221220,7 +221220,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.18.18";
+    VERSION2 = "2.18.19";
   }
 });
 
@@ -221295,6 +221295,21 @@ var init_constants = __esm({
     ROOM_STATUSES = ["available", "occupied", "blocked"];
     HOUSEKEEPING_STATUSES = ["clean", "dirty", "in-progress"];
     DEFAULT_ROOM_TYPES = [
+      // Per F09 / SEC-5 / SEC-6 (2026-10-22, P2 revenue leak): the seed
+      // `corporateRate` is 0 for every type and MUST stay 0. This module
+      // is imported by the guest app (through the `@spark-inn/shared`
+      // barrel), so a non-zero literal here is compiled into the
+      // JavaScript every guest downloads — the hotel's NEGOTIATED
+      // corporate ladder must never ship in a browser bundle.
+      //
+      // The corporate rate ladder now lives in the server-only module
+      // `guest-app/server/lib/corporateRates.ts` (staff + server). The
+      // staff admin app does not need it: the corporate rate calendar
+      // reads the LIVE `settings/hotelConfig.roomTypes[]` through the
+      // staff-only Firestore rules, which is the authoritative source.
+      // A `corporateRate` of 0 means "no corporate rate configured" and
+      // the booking server falls back to the standard rate (never ₱0).
+      //
       // Per SR-01..05 (2026-10-12): `bedSetupValues` is the per-type
       // subset of `HotelConfig.bedSetups[].value` offered to the guest on
       // the booking Step 2. The seed below mirrors the original
@@ -221303,11 +221318,11 @@ var init_constants = __esm({
       // apply — Single is a solo product, Family has fixed
       // 2-double configuration). Admins edit the subset via the Room
       // Types editor → Bed Set-ups picker.
-      { value: "single", label: "Single", shortLabel: "Single", imageUrls: [], bedDefinition: "1 single bed", description: "A compact private room for solo guests, short work stays, and travelers who value quiet consistency.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 1, maxChildren: 0, pricePerNight: 1800, weekendRate: 2100, corporateRate: 1600, bedSetupValues: [] },
-      { value: "standard-double", label: "Standard Double", shortLabel: "Std Double", imageUrls: [], bedDefinition: "1 double bed", description: "Simple comfort for couples or business travelers who want an easy, consistent stay near the city center.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2400, weekendRate: 2700, corporateRate: 2200, bedSetupValues: ["large-bed", "twin-beds"] },
-      { value: "standard-twin", label: "Standard Twin", shortLabel: "Std Twin", imageUrls: [], bedDefinition: "2 single beds", description: "Twin-bed comfort for colleagues or friends who want a simple, tidy stay with all essentials close by.", amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2600, weekendRate: 2900, corporateRate: 2300, bedSetupValues: ["twin-beds", "large-bed"] },
-      { value: "executive", label: "Executive", shortLabel: "Executive", imageUrls: [], bedDefinition: "1 queen size bed", description: "A warm, spacious retreat with premium bedding, soft lighting, and room to settle in after a day in Bohol.", amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 3200, weekendRate: 3600, corporateRate: 2800, bedSetupValues: ["large-bed", "twin-beds"] },
-      { value: "family", label: "Family", shortLabel: "Family", imageUrls: [], bedDefinition: "2 double beds", description: "Extra space for small families, with thoughtful essentials and a calm base for Bohol plans.", amenities: ["WiFi", "AC", "Mini Fridge", "Cable TV"], maxCapacity: 4, maxChildren: 2, pricePerNight: 4200, weekendRate: 4600, corporateRate: 3900, bedSetupValues: [] }
+      { value: "single", label: "Single", shortLabel: "Single", imageUrls: [], bedDefinition: "1 single bed", description: "A compact private room for solo guests, short work stays, and travelers who value quiet consistency.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 1, maxChildren: 0, pricePerNight: 1800, weekendRate: 2100, corporateRate: 0, bedSetupValues: [] },
+      { value: "standard-double", label: "Standard Double", shortLabel: "Std Double", imageUrls: [], bedDefinition: "1 double bed", description: "Simple comfort for couples or business travelers who want an easy, consistent stay near the city center.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2400, weekendRate: 2700, corporateRate: 0, bedSetupValues: ["large-bed", "twin-beds"] },
+      { value: "standard-twin", label: "Standard Twin", shortLabel: "Std Twin", imageUrls: [], bedDefinition: "2 single beds", description: "Twin-bed comfort for colleagues or friends who want a simple, tidy stay with all essentials close by.", amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2600, weekendRate: 2900, corporateRate: 0, bedSetupValues: ["twin-beds", "large-bed"] },
+      { value: "executive", label: "Executive", shortLabel: "Executive", imageUrls: [], bedDefinition: "1 queen size bed", description: "A warm, spacious retreat with premium bedding, soft lighting, and room to settle in after a day in Bohol.", amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 3200, weekendRate: 3600, corporateRate: 0, bedSetupValues: ["large-bed", "twin-beds"] },
+      { value: "family", label: "Family", shortLabel: "Family", imageUrls: [], bedDefinition: "2 double beds", description: "Extra space for small families, with thoughtful essentials and a calm base for Bohol plans.", amenities: ["WiFi", "AC", "Mini Fridge", "Cable TV"], maxCapacity: 4, maxChildren: 2, pricePerNight: 4200, weekendRate: 4600, corporateRate: 0, bedSetupValues: [] }
     ];
     DEFAULT_BED_SETUPS = [
       { value: "large-bed", label: "I'd like a large bed", icon: "bed" },
@@ -222283,10 +222298,18 @@ var init_seo = __esm({
   }
 });
 
+// ../shared/types/publicHotelConfig.ts
+var init_publicHotelConfig = __esm({
+  "../shared/types/publicHotelConfig.ts"() {
+    "use strict";
+  }
+});
+
 // ../shared/types/index.ts
 var init_types3 = __esm({
   "../shared/types/index.ts"() {
     "use strict";
+    init_publicHotelConfig();
   }
 });
 
@@ -225102,6 +225125,41 @@ var init_bookingAddOnReschedule = __esm({
   }
 });
 
+// ../shared/utils/bookingPaidAmount.ts
+function sumLedgerEntryAmounts(entries) {
+  let sum = 0;
+  for (const entry of entries || []) {
+    if (!entry) continue;
+    const amount = Number(entry.amount || 0);
+    if (!Number.isFinite(amount)) continue;
+    sum += amount;
+  }
+  return roundToTwoDecimals(sum);
+}
+function sumAttributedLedgerEntryAmounts(entries, bookingId) {
+  const target = String(bookingId || "").trim();
+  if (!target) return 0;
+  const attributed = (entries || []).filter((entry) => {
+    if (!entry) return false;
+    return String(entry.bookingId || "").trim() === target;
+  });
+  return sumLedgerEntryAmounts(attributed);
+}
+function computeNextBookingPaidAmount(params) {
+  const current = Number(params.currentPaidAmount);
+  const recorded = Number(params.recordedAmount);
+  const legacy = Number(params.legacyCollectedAmount);
+  const base = Number.isFinite(current) ? current : Number.isFinite(legacy) ? legacy : 0;
+  const increment = Number.isFinite(recorded) ? recorded : 0;
+  return roundToTwoDecimals(base + increment);
+}
+var init_bookingPaidAmount = __esm({
+  "../shared/utils/bookingPaidAmount.ts"() {
+    "use strict";
+    init_money();
+  }
+});
+
 // ../shared/utils/firestorePayload.ts
 function stripUndefinedValues(value) {
   return stripValue(value);
@@ -225629,6 +225687,7 @@ __export(shared_exports, {
   computeExtendedInFlowHoldExpiresAt: () => computeExtendedInFlowHoldExpiresAt,
   computeHoldExpiresAt: () => computeHoldExpiresAt,
   computeInFlowHoldExpiresAt: () => computeInFlowHoldExpiresAt,
+  computeNextBookingPaidAmount: () => computeNextBookingPaidAmount,
   computeOtherAddOnCutoffState: () => computeOtherAddOnCutoffState,
   computeRequestFingerprint: () => computeRequestFingerprint,
   computeReservationActualDateRange: () => computeReservationActualDateRange,
@@ -225745,7 +225804,9 @@ __export(shared_exports, {
   startOfDayUtc: () => startOfDayUtc,
   stripUndefinedValues: () => stripUndefinedValues,
   subscribeToPublicSiteContentBust: () => subscribeToPublicSiteContentBust,
+  sumAttributedLedgerEntryAmounts: () => sumAttributedLedgerEntryAmounts,
   sumBreakfastRateLines: () => sumBreakfastRateLines,
+  sumLedgerEntryAmounts: () => sumLedgerEntryAmounts,
   sweepBookingsStorage: () => sweepBookingsStorage,
   toDateOrNow: () => toDateOrNow,
   toDateOrNull: () => toDateOrNull,
@@ -225804,6 +225865,7 @@ var init_shared = __esm({
     init_breakfastTotal();
     init_breakfastSlotKey();
     init_bookingAddOnReschedule();
+    init_bookingPaidAmount();
     init_firestorePayload();
     init_breakfastConfig();
     init_otherAddOnCutoff();
@@ -228264,16 +228326,19 @@ async function findBooking(req, options) {
         if (bookingEmail !== providedEmail) return null;
       }
     } else {
-      query = adminDb.collection("bookings").where("bookingRef", "==", trimmed).limit(1);
-      if (options.requireGuestMatch && !user.uid) {
-        if (!guestEmail) {
-          throw new Error("Booking reference and guest email are required.");
-        }
-        query = adminDb.collection("bookings").where("bookingRef", "==", trimmed).where("guestEmail", "==", String(guestEmail).trim()).limit(1);
+      const needsEmail = Boolean(options.requireGuestMatch && !user.uid);
+      if (needsEmail && !guestEmail) {
+        throw new Error("Booking reference and guest email are required.");
       }
+      query = adminDb.collection("bookings").where("bookingRef", "==", trimmed).limit(1);
       const results = await query.get();
       if (results.empty) return null;
       snapshot = results.docs[0];
+      if (needsEmail) {
+        const bookingEmail = String(snapshot.data()?.guestEmail || "").trim().toLowerCase();
+        const providedEmail = String(guestEmail).trim().toLowerCase();
+        if (bookingEmail !== providedEmail) return null;
+      }
     }
   } else {
     throw new Error("Booking ID or booking reference is required.");
@@ -230503,6 +230568,7 @@ function refundPaidErrorToMessage(code) {
 }
 
 // server/handlers/bookings.ts
+init_shared();
 init_shared();
 init_shared();
 init_shared();
@@ -236479,6 +236545,20 @@ async function handleAddPayment(req, res) {
       const loyaltyMemberRef = settlesCheckedOutFolio && bookingData.memberId ? adminDb.collection("members").doc(String(bookingData.memberId)) : null;
       const loyaltyMemberDoc = loyaltyMemberRef ? await transaction.get(loyaltyMemberRef) : null;
       const bookingUpdates = {};
+      const legacyCollectedAmount = bookingReservationId.length > 0 ? sumAttributedLedgerEntryAmounts(
+        paymentsSnapshot.docs.map((docSnap) => ({
+          amount: docSnap.data()?.amount,
+          bookingId: docSnap.data()?.bookingId
+        })),
+        bookingId
+      ) : sumLedgerEntryAmounts(
+        paymentsSnapshot.docs.map((docSnap) => ({ amount: docSnap.data()?.amount }))
+      );
+      bookingUpdates.paidAmount = computeNextBookingPaidAmount({
+        currentPaidAmount: bookingData.paidAmount,
+        recordedAmount: numericAmount,
+        legacyCollectedAmount
+      });
       if (hadPaymentProof && staffPaymentMarkerMissing) {
         bookingUpdates["emailNotificationsSent.staffNewPayment"] = /* @__PURE__ */ new Date();
       }
@@ -237105,6 +237185,20 @@ async function handleVerifyAndRecordPayment(req, res) {
       const bookingUpdates = {
         updatedAt: now
       };
+      const legacyCollectedAmount = bookingReservationId.length > 0 ? sumAttributedLedgerEntryAmounts(
+        paymentsSnapshot.docs.map((docSnap) => ({
+          amount: docSnap.data()?.amount,
+          bookingId: docSnap.data()?.bookingId
+        })),
+        bookingId
+      ) : sumLedgerEntryAmounts(
+        paymentsSnapshot.docs.map((docSnap) => ({ amount: docSnap.data()?.amount }))
+      );
+      bookingUpdates.paidAmount = computeNextBookingPaidAmount({
+        currentPaidAmount: data.paidAmount,
+        recordedAmount: numericAmount,
+        legacyCollectedAmount
+      });
       if (targetPostStatus !== data.status) {
         bookingUpdates.status = targetPostStatus;
         bookingUpdates.handledBy = staffUid2;
@@ -241988,6 +242082,7 @@ var MAX_GUEST_NAME_LENGTH = 120;
 var MAX_ROOM_NUMBER_LENGTH = 12;
 var MAX_ORDER_REF_LENGTH = 40;
 var MAX_REASON_LENGTH = 500;
+var MAX_SESSION_TOKEN_LENGTH = 64;
 async function handleDeliverStoreOrder(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -242070,11 +242165,37 @@ async function handleDeliverStoreOrder(req, res) {
     });
   }
 }
+async function verifyStoreOrderSession(params) {
+  const { roomNumber, sessionToken } = params;
+  const intercomSnap = await adminDb.collection("intercoms").doc(roomNumber).get();
+  const intercom = intercomSnap.exists ? intercomSnap.data() || {} : {};
+  const issuedToken = String(intercom.currentStayToken || "");
+  const stayId = String(intercom.currentStayId || "");
+  if (!issuedToken || !stayId || issuedToken !== sessionToken) {
+    return {
+      ok: false,
+      status: 403,
+      error: "Your in-room session is not valid for this room. Please verify your stay again."
+    };
+  }
+  return { ok: true, stayId };
+}
 async function handleCreateStoreOrder(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
   const body = req.body || {};
+  const isStaffRequest = !!(req.staff && req.staff.uid);
+  let sessionStayId = null;
+  if (!isStaffRequest) {
+    const sessionToken = typeof body.sessionToken === "string" ? body.sessionToken.trim() : "";
+    if (!sessionToken || sessionToken.length > MAX_SESSION_TOKEN_LENGTH) {
+      return res.status(401).json({
+        success: false,
+        error: "Your in-room session has expired. Please verify your stay again."
+      });
+    }
+  }
   if (!body || !body.roomId || !body.roomNumber || !body.guestName || !Array.isArray(body.items) || body.items.length === 0) {
     return res.status(400).json({ success: false, error: "Missing required store order fields." });
   }
@@ -242089,6 +242210,14 @@ async function handleCreateStoreOrder(req, res) {
   }
   if (guestName.length === 0 || guestName.length > MAX_GUEST_NAME_LENGTH) {
     return res.status(400).json({ success: false, error: "Please share the guest's name (up to 120 characters)." });
+  }
+  if (!isStaffRequest) {
+    const sessionToken = String(body.sessionToken).trim();
+    const verified = await verifyStoreOrderSession({ roomNumber, sessionToken });
+    if (!verified.ok) {
+      return res.status(verified.status).json({ success: false, error: verified.error });
+    }
+    sessionStayId = verified.stayId;
   }
   if (typeof body.paymentMethod !== "string" || body.paymentMethod.length === 0) {
     return res.status(400).json({ success: false, error: "Invalid store payment method." });
@@ -242162,10 +242291,24 @@ async function handleCreateStoreOrder(req, res) {
         };
       });
       let bookingId = null;
-      const activeBookingQuery = adminDb.collection("bookings").where("roomNumber", "==", roomNumber).where("status", "in", ["confirmed", "checked-in"]).limit(1);
-      const activeBookingSnapshot = await transaction.get(activeBookingQuery);
-      if (!activeBookingSnapshot.empty) {
-        bookingId = activeBookingSnapshot.docs[0].id;
+      if (sessionStayId) {
+        const staySnap = await transaction.get(adminDb.collection("bookings").doc(sessionStayId));
+        if (!staySnap.exists) {
+          throw new Error("NO_ACTIVE_BOOKING");
+        }
+        const stay = staySnap.data() || {};
+        const stayRoom = String(stay.roomNumber || "").trim();
+        const stayStatus = String(stay.status || "");
+        if (stayRoom !== roomNumber || stayStatus !== "confirmed" && stayStatus !== "checked-in") {
+          throw new Error("NO_ACTIVE_BOOKING");
+        }
+        bookingId = staySnap.id;
+      } else {
+        const activeBookingQuery = adminDb.collection("bookings").where("roomNumber", "==", roomNumber).where("status", "in", ["confirmed", "checked-in"]).limit(1);
+        const activeBookingSnapshot = await transaction.get(activeBookingQuery);
+        if (!activeBookingSnapshot.empty) {
+          bookingId = activeBookingSnapshot.docs[0].id;
+        }
       }
       if (!bookingId) {
         throw new Error("NO_ACTIVE_BOOKING");
@@ -244374,6 +244517,14 @@ async function handleMarkRefundPaid(req, res) {
           transaction,
           db: adminDb,
           existingDoc: refundSnap,
+          // Per PAY-01 (P1 MONEY, 2026-10-22): the `|| 0` fallback
+          // STAYS — a booking created before the fix carries no
+          // `paidAmount` at all, and "no money collected" is the
+          // correct reading for it. The field is now written by the
+          // two production payment-record paths
+          // (`handleAddPayment` + `handleVerifyAndRecordPayment`), so
+          // a booking with money collected against it carries the
+          // real running total and this decrement has a real base.
           currentPaidAmount: Number(bookingSnap.data()?.paidAmount || 0),
           slotKey: String(refundSnap.data()?.slotKey || "")
         });
@@ -246394,6 +246545,260 @@ async function handleGetPrivateStorageUrl(req, res) {
   }
 }
 
+// server/handlers/public-config.ts
+init_firebase_admin();
+
+// server/lib/publicHotelConfig.ts
+init_firebase_admin();
+var DEFAULT_VAT_ENABLED = true;
+function asRecord(value) {
+  return value && typeof value === "object" ? value : {};
+}
+function asString(value, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+function asNumber(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+function asBoolean(value, fallback) {
+  return typeof value === "boolean" ? value : fallback;
+}
+function asStringArray(value) {
+  return Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : [];
+}
+function buildRoomTypes(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const entry of raw) {
+    const type = asRecord(entry);
+    const value = asString(type.value);
+    if (!value) continue;
+    out.push({
+      value,
+      label: asString(type.label, value),
+      shortLabel: asString(type.shortLabel, asString(type.label, value)),
+      imageUrls: asStringArray(type.imageUrls),
+      bedDefinition: asString(type.bedDefinition),
+      description: asString(type.description),
+      amenities: asStringArray(type.amenities),
+      maxCapacity: asNumber(type.maxCapacity, 1),
+      maxChildren: asNumber(type.maxChildren, 0),
+      pricePerNight: asNumber(type.pricePerNight, 0),
+      weekendRate: asNumber(type.weekendRate, 0),
+      maxExtraBeds: asNumber(type.maxExtraBeds, 0),
+      extraBedRate: asNumber(type.extraBedRate, 0),
+      bedSetupValues: asStringArray(type.bedSetupValues)
+      // Per F09 / SEC-6: `corporateRate` is DELIBERATELY not copied.
+      // The negotiated corporate ladder never reaches a browser
+      // through this payload.
+    });
+  }
+  return out;
+}
+function buildPaymentMethods(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const entry of raw) {
+    const method = asRecord(entry);
+    const key = asString(method.method);
+    if (!key) continue;
+    const showInCorporate = asBoolean(method.showInCorporate, true);
+    out.push({
+      method: key,
+      label: asString(method.label, key),
+      accountName: asString(method.accountName),
+      // Per F09 / SEC-6: the account number of a method the admin hid
+      // from the corporate surface is staff-only and is dropped here.
+      // The methods that stay visible on `/corporate/book` keep their
+      // account number — the hotel already publishes those.
+      accountNumber: showInCorporate ? asString(method.accountNumber) : "",
+      qrUrl: asString(method.qrUrl),
+      isEnabled: asBoolean(method.isEnabled, true),
+      showInCorporate,
+      showInStore: asBoolean(method.showInStore, true),
+      requireReferenceNumber: asBoolean(method.requireReferenceNumber, false)
+    });
+  }
+  return out;
+}
+function buildSeasonalRateOverrides(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const entry of raw) {
+    const override = asRecord(entry);
+    const id = asString(override.id);
+    if (!id) continue;
+    out.push({
+      id,
+      name: asString(override.name),
+      startDate: asString(override.startDate),
+      endDate: asString(override.endDate),
+      rate: asNumber(override.rate, 0),
+      roomTypeValues: asStringArray(override.roomTypeValues),
+      isActive: asBoolean(override.isActive, true)
+    });
+  }
+  return out;
+}
+function buildBedSetups(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const entry of raw) {
+    const option2 = asRecord(entry);
+    const value = asString(option2.value);
+    const label = asString(option2.label);
+    if (!value || !label) continue;
+    const icon = asString(option2.icon);
+    out.push({ value, label, ...icon ? { icon } : {} });
+  }
+  return out;
+}
+function buildBookingPreferences(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const entry of raw) {
+    const option2 = asRecord(entry);
+    const value = asString(option2.value);
+    const label = asString(option2.label);
+    if (!value || !label) continue;
+    const icon = asString(option2.icon);
+    const surchargeNote = asString(option2.surchargeNote);
+    out.push({
+      value,
+      label,
+      ...icon ? { icon } : {},
+      ...surchargeNote ? { surchargeNote } : {}
+    });
+  }
+  return out;
+}
+function buildVatConfig(raw) {
+  const vat = asRecord(raw);
+  return { enabled: asBoolean(vat.enabled, DEFAULT_VAT_ENABLED) };
+}
+function buildPublicHotelConfig(source, options) {
+  const config2 = asRecord(source);
+  const rawMaxStayNights = config2.maxStayNights;
+  return {
+    brandName: asString(config2.brandName),
+    address: asString(config2.address),
+    frontDeskPhone: asString(config2.frontDeskPhone),
+    supportEmail: asString(config2.supportEmail),
+    dpoEmail: asString(config2.dpoEmail),
+    facebookUrl: asString(config2.facebookUrl),
+    instagramUrl: asString(config2.instagramUrl),
+    twitterHandle: asString(config2.twitterHandle),
+    checkInTime: asString(config2.checkInTime),
+    checkOutTime: asString(config2.checkOutTime),
+    seniorPwdOnlineEnabled: asBoolean(config2.seniorPwdOnlineEnabled, true),
+    vatConfig: buildVatConfig(config2.vatConfig),
+    // `null` = "the admin never set a cap" — the consumer applies the
+    // documented default. A stored `0` is the admin's explicit
+    // "no limit" choice and is preserved verbatim.
+    maxStayNights: rawMaxStayNights === void 0 || rawMaxStayNights === null || rawMaxStayNights === "" ? null : Number.isFinite(Number(rawMaxStayNights)) && Number(rawMaxStayNights) >= 0 ? Number(rawMaxStayNights) : null,
+    // Per OCT-M1 (decision #295): only an explicit `false` disables
+    // the add-ons category.
+    otherAddOnsEnabled: asBoolean(config2.otherAddOnsEnabled, true),
+    roomTypes: buildRoomTypes(config2.roomTypes),
+    seasonalRateOverrides: buildSeasonalRateOverrides(config2.seasonalRateOverrides),
+    bedSetups: buildBedSetups(config2.bedSetups),
+    bookingPreferences: buildBookingPreferences(config2.bookingPreferences),
+    paymentMethods: buildPaymentMethods(config2.paymentMethods),
+    intercomQuickRequests: asStringArray(config2.intercomQuickRequests),
+    storeEnabled: options?.storeEnabled !== false
+  };
+}
+async function loadPublicHotelConfig() {
+  const [hotelSnapshot, storeSnapshot] = await Promise.all([
+    adminDb.collection("settings").doc("hotelConfig").get(),
+    adminDb.collection("settings").doc("storeConfig").get()
+  ]);
+  const storeConfig = storeSnapshot.exists ? asRecord(storeSnapshot.data()) : {};
+  return buildPublicHotelConfig(hotelSnapshot.exists ? hotelSnapshot.data() : null, {
+    storeEnabled: storeConfig.isEnabled !== false
+  });
+}
+
+// server/lib/corporateRates.ts
+var DEFAULT_CORPORATE_RATES = Object.freeze({
+  single: 1600,
+  "standard-double": 2200,
+  "standard-twin": 2300,
+  executive: 2800,
+  family: 3900
+});
+function resolveCorporateRate(entry, typeValue) {
+  const stored = entry && typeof entry === "object" ? Number(entry.corporateRate) : 0;
+  if (Number.isFinite(stored) && stored > 0) return stored;
+  const seeded = Number(DEFAULT_CORPORATE_RATES[typeValue]);
+  return Number.isFinite(seeded) && seeded > 0 ? seeded : 0;
+}
+function buildCorporateRateCard(source) {
+  const card2 = {};
+  const roomTypes = source && typeof source === "object" ? source.roomTypes : null;
+  if (!Array.isArray(roomTypes)) {
+    for (const [typeValue, rate] of Object.entries(DEFAULT_CORPORATE_RATES)) {
+      card2[typeValue] = rate;
+    }
+    return card2;
+  }
+  for (const entry of roomTypes) {
+    if (!entry || typeof entry !== "object") continue;
+    const typeValue = String(entry.value ?? "");
+    if (!typeValue) continue;
+    const rate = resolveCorporateRate(entry, typeValue);
+    if (rate > 0) card2[typeValue] = rate;
+  }
+  return card2;
+}
+
+// server/handlers/public-config.ts
+var CACHE_TTL_SECONDS2 = 60;
+async function handleGetPublicHotelConfig(req, res) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  try {
+    const config2 = await loadPublicHotelConfig();
+    res.setHeader(
+      "Cache-Control",
+      `public, max-age=${CACHE_TTL_SECONDS2}, s-maxage=${CACHE_TTL_SECONDS2}`
+    );
+    return res.status(200).json({ success: true, data: config2 });
+  } catch (error) {
+    const code = String(error?.code || "");
+    const isInfra = code.includes("UNAVAILABLE") || code.includes("DEADLINE_EXCEEDED") || code.includes("RESOURCE_EXHAUSTED");
+    return res.status(isInfra ? 503 : 500).json({
+      success: false,
+      error: "Failed to load the hotel configuration."
+    });
+  }
+}
+async function handleGetCorporateRates(req, res) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  try {
+    const snapshot = await adminDb.collection("settings").doc("hotelConfig").get();
+    const ratePerRoomType = buildCorporateRateCard(
+      snapshot.exists ? snapshot.data() : null
+    );
+    res.setHeader(
+      "Cache-Control",
+      `public, max-age=${CACHE_TTL_SECONDS2}, s-maxage=${CACHE_TTL_SECONDS2}`
+    );
+    return res.status(200).json({ success: true, ratePerRoomType });
+  } catch (error) {
+    const code = String(error?.code || "");
+    const isInfra = code.includes("UNAVAILABLE") || code.includes("DEADLINE_EXCEEDED") || code.includes("RESOURCE_EXHAUSTED");
+    return res.status(isInfra ? 503 : 500).json({
+      success: false,
+      error: "Failed to load the corporate rates."
+    });
+  }
+}
+
 // server/apiRouter.ts
 init_test_runs();
 init_hotel_config();
@@ -247239,6 +247644,18 @@ async function handler(req, res) {
     }
     return await handleGetAddOnsConfig(req, res);
   }
+  if (domain === "public" && action === "hotel-config" && req.method === "GET") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`public-hotel-config:${ip}`, 60, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many hotel-config requests. Please try again in a minute." });
+    }
+    return await handleGetPublicHotelConfig(req, res);
+  }
+  if (domain === "corporate" && action === "rates" && req.method === "GET") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`corporate-rates:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many corporate-rates requests. Please try again in a minute." });
+    }
+    return await handleGetCorporateRates(req, res);
+  }
   if (domain === "validate" && action === "voucher" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`validate-voucher:${ip}`, 20, 6e4)) {
       return res.status(429).json({ success: false, error: "Too many requests. Please try again later." });
@@ -247505,6 +247922,10 @@ async function handler(req, res) {
   if (domain === "store" && action === "create-order" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`store:${ip}`, 10, 6e4)) {
       return res.status(429).json({ success: false, error: "Too many store order requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (authResult.success) {
+      req.staff = authResult;
     }
     return await handleCreateStoreOrder(req, res);
   }

@@ -208,11 +208,16 @@ describe("Phase 11.9 — Room type drives pricing + maxCapacity (W3.6)", () => {
       expect(useRoomTypesSrc).toMatch(/return\s*\{[\s\S]*?maxCapacity:\s*t\.maxCapacity[\s\S]*?pricePerNight:\s*t\.pricePerNight[\s\S]*?weekendRate:\s*t\.weekendRate[\s\S]*?corporateRate:\s*t\.corporateRate[\s\S]*?\};/);
     });
 
-    it("useRoomTypes mapper normalizes the 4 new fields from Firestore", () => {
+    it("useRoomTypes mapper normalizes the rate fields from the public projection", () => {
       expect(useRoomTypesSrc).toMatch(/maxCapacity:\s*Number\(entry\.maxCapacity\)/);
       expect(useRoomTypesSrc).toMatch(/pricePerNight:\s*Number\(entry\.pricePerNight\)/);
       expect(useRoomTypesSrc).toMatch(/weekendRate:\s*Number\(entry\.weekendRate\)/);
-      expect(useRoomTypesSrc).toMatch(/corporateRate:\s*Number\(entry\.corporateRate\)/);
+      // Per F09 / SEC-5 (2026-10-22): the guest mapper NEVER reads a
+      // corporate rate — the negotiated ladder must not be compiled
+      // into the guest bundle. The corporate booking path resolves
+      // its rate from the server instead.
+      expect(useRoomTypesSrc).not.toMatch(/corporateRate:\s*Number\(entry\.corporateRate\)/);
+      expect(useRoomTypesSrc).toMatch(/corporateRate:\s*0/);
     });
   });
 
@@ -241,13 +246,21 @@ describe("Phase 11.9 — Room type drives pricing + maxCapacity (W3.6)", () => {
       expect(bookingPageSrc).not.toMatch(/selectedRoom\.maxCapacity/);
     });
 
-    it("CorporateBookingPage falls back to the type's corporateRate (not room.corporateRate)", () => {
+    it("CorporateBookingPage falls back to the standard rate (never ₱0)", () => {
       // Per BI-04 (booking-intercom audit 2026-07-06): the fallback
       // chain is corporateRate → standard pricePerNight — never ₱0
       // (CORPORATE-BOOKING.md edge case: "corporateRate not set …
       // fall back to standard rate, do not show ₱0").
+      //
+      // Per F09 / SEC-5 (2026-10-22): the flat corporate rate now
+      // comes from the SERVER-served rate card (`flatCorporateRates`)
+      // instead of the guest room type — the negotiated ladder must
+      // never ship in the guest bundle.
       expect(corporateBookingPageSrc).toMatch(
-        /selectedRoomRates\?\.corporateRate\s*\|\|\s*selectedRoomRates\?\.pricePerNight\s*\|\|\s*0/
+        /flatCorporateRates\[type\.value\]/
+      );
+      expect(corporateBookingPageSrc).toMatch(
+        /selectedRoomRates\?\.pricePerNight\s*\|\|\s*0/
       );
       expect(corporateBookingPageSrc).not.toMatch(/selectedRoom\.corporateRate/);
     });

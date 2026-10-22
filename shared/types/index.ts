@@ -1919,3 +1919,11 @@ export interface PointsHistoryEntry {
   createdAt: Date;
   createdBy?: string;        // staff uid for adjust / welcome / free-night
 }
+
+// Per F09 / SEC-6 (2026-10-22): the PUBLIC projection contract of
+// `settings/hotelConfig` — the corporate-rate-free, bank-detail-free
+// shape served by `GET /api/public/hotel-config`. Re-exported from
+// here (and therefore from the `@spark-inn/shared` barrel) so the
+// guest app and the server agree on one contract. Type-only: the
+// runtime shape is built by the server-side projection module.
+export * from "./publicHotelConfig";

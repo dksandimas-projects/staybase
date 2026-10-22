@@ -39,6 +39,7 @@ import { handleNotificationsPrune } from "./handlers/notifications-prune";
 import { handleHoldExpiryCron } from "./handlers/hold-expiry";
 import { handleExtendInFlowHold, handleReadInFlowHold, handleStartInFlowHold, handleSweepInFlowHolds } from "./handlers/in-flow-hold";
 import { handleGetPrivateStorageUrl } from "./handlers/storage";
+import { handleGetCorporateRates, handleGetPublicHotelConfig } from "./handlers/public-config";
 import { handleCreateTestRun, handleCloseTestRun, handleDeleteTestRun, handleListTestRuns, handleStagingRefreshPreview, handleStagingRefreshImport, handleStagingRefreshDestroy, handleStagingResetPreview, handleStagingResetExecute } from "./handlers/test-runs";
 import config from "../../hotel.config";
 
@@ -1513,6 +1514,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleGetAddOnsConfig(req, res);
   }
 
+  // Per F09 / SEC-6 (2026-10-22, P2 revenue leak): the public
+  // projection of `settings/hotelConfig`
+  // (`GET /api/public/hotel-config`). The Firestore rules no longer
+  // serve `settings/hotelConfig` to an unauthenticated client, so the
+  // guest site reads the hotel's PUBLIC content — name, contact
+  // details, room types, amenities, public prices, booking
+  // preferences, payment methods — through this endpoint instead.
+  //
+  // The payload is a corporate-rate-free projection: no
+  // `roomTypes[].corporateRate`, and no `accountNumber` for a
+  // payment method the admin hid from the corporate surface.
+  // Rate-limited at 60/min/IP, cached 60s.
+  if (
+    domain === "public" &&
+    action === "hotel-config" &&
+    req.method === "GET"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`public-hotel-config:${ip}`, 60, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many hotel-config requests. Please try again in a minute." });
+    }
+    return await handleGetPublicHotelConfig(req, res);
+  }
+
+  // Per F09 / SEC-5 / SEC-6 (2026-10-22): the PUBLISHED flat
+  // corporate rate card (`GET /api/corporate/rates`). This is the
+  // hotel's public corporate rate (RATE-MANAGEMENT.md: "This is the
+  // public rate at `/corporate/book`"), served from the server so the
+  // ladder never ships inside the guest's JavaScript bundle. The
+  // NEGOTIATED per-company rates stay behind
+  // `POST /api/validate/corporate-code`. Rate-limited at 30/min/IP.
+  if (
+    domain === "corporate" &&
+    action === "rates" &&
+    req.method === "GET"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`corporate-rates:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many corporate-rates requests. Please try again in a minute." });
+    }
+    return await handleGetCorporateRates(req, res);
+  }
+
   if (domain === "validate" && action === "voucher" && req.method === "POST") {
     // 20 requests / IP / minute
     if (process.env.NODE_ENV !== "test" && isRateLimited(`validate-voucher:${ip}`, 20, 60000)) {
@@ -1888,6 +1930,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(429).json({ success: false, error: "Too many store order requests. Please try again in a minute." });
     }
 
+    // Per RPT-17 / F08 (2026-10-22): `create-order` has TWO
+    // credentials, and the route has to offer both.
+    //   - the GUEST in the room presents the intercom session
+    //     capability token (`sessionToken`), which the handler
+    //     verifies against `intercoms/{roomNumber}.currentStayToken`
+    //     — the same binding `handleSendGuestMessage` uses. A
+    //     missing / unknown / mismatched token is rejected 401/403.
+    //   - STAFF present a Firebase ID token. `authenticateStaff`
+    //     is attempted FIRST: on success the handler runs its
+    //     staff path and skips the guest-session check, exactly
+    //     like the other staff routes in this router.
+    // Staff auth that does not apply (no bearer header) falls
+    // through to the guest path rather than failing the request —
+    // the guest has no Firebase session.
+    const authResult = await authenticateStaff(req);
+    if (authResult.success) {
+      (req as any).staff = authResult;
+    }
 
     return await handleCreateStoreOrder(req, res);
   }

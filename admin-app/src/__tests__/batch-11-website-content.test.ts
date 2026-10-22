@@ -49,9 +49,14 @@ describe("Phase 11.6 Batch 11 — public pages read settings", () => {
       expect(hookSrc).toMatch(/export\s+function\s+usePublicSiteContent\s*\(/);
     });
 
-    it("reads settings/websiteContent and settings/hotelConfig", () => {
+    it("reads settings/websiteContent and the PUBLIC hotel-config projection", () => {
       expect(hookSrc).toMatch(/getDoc\(doc\(db,\s*["']settings["'],\s*["']websiteContent["']\)/);
-      expect(hookSrc).toMatch(/getDoc\(doc\(db,\s*["']settings["'],\s*["']hotelConfig["']\)/);
+      // Per F09 / SEC-6 (2026-10-22): `settings/hotelConfig` is no
+      // longer anonymously readable, so the hook reads the
+      // corporate-rate-free projection served by
+      // `GET /api/public/hotel-config`.
+      expect(hookSrc).toMatch(/fetchPublicHotelConfig\(\)/);
+      expect(hookSrc).not.toMatch(/getDoc\(doc\(db,\s*["']settings["'],\s*["']hotelConfig["']\)/);
     });
 
     it("exposes homepage, about, corporate, rewards, and branding sections", () => {
