@@ -116,9 +116,15 @@ describe("Phase 11.8 — Room type photos (type-driven gallery)", () => {
       expect(useRoomTypesSrc).toMatch(/export function getRoomTypeImages/);
     });
 
-    it("subscribes to settings/hotelConfig via onSnapshot", () => {
-      expect(useRoomTypesSrc).toMatch(/doc\(db,\s*["']settings["'],\s*["']hotelConfig["']\)/);
-      expect(useRoomTypesSrc).toMatch(/onSnapshot/);
+    it("reads the room-type catalog from the PUBLIC hotel-config projection", () => {
+      // Per F09 / SEC-6 (2026-10-22): `settings/hotelConfig` is no
+      // longer anonymously readable, so the guest hook reads the
+      // corporate-rate-free projection served by
+      // `GET /api/public/hotel-config` instead of a Firestore
+      // `onSnapshot` on the raw document.
+      expect(useRoomTypesSrc).toMatch(/usePublicHotelConfig/);
+      expect(useRoomTypesSrc).not.toMatch(/doc\(db,\s*["']settings["'],\s*["']hotelConfig["']\)/);
+      expect(useRoomTypesSrc).not.toMatch(/onSnapshot\s*\(/);
     });
 
     it("falls back to DEFAULT_ROOM_TYPES when the field is missing or empty", () => {
