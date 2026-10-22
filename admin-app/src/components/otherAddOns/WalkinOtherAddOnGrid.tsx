@@ -34,7 +34,11 @@ import {
   Trash2
 } from "lucide-react";
 import {
-  getEnabledAddOnsByHotel,
+  // NOTE: `getEnabledAddOnsByHotel` is deliberately NOT applied to the
+  // public catalog payload. The endpoint already applied the `isEnabled`
+  // filter and the hotel-wide master switch, and the public payload
+  // carries no `isEnabled` field — re-filtering client-side would drop
+  // every row.
   type AddOn
 } from "@spark-inn/shared";
 import { cn } from "../../utils/cn";
@@ -105,8 +109,20 @@ export function WalkinOtherAddOnGrid({
           { method: "GET" }
         );
         const data: any = await res.json();
-        if (!cancelled && data?.success && Array.isArray(data?.data)) {
-          setAddOns(getEnabledAddOnsByHotel(data.data as AddOn[]));
+        // The public add-ons catalog endpoint answers
+        // `{ success, addOns: [...], otherAddOnsEnabled, preSeeded }` —
+        // the rows live under `addOns`, NOT under `data` (that is the
+        // BREAKFAST config endpoint's shape). The pre-fix check read
+        // `data.data`, which is always undefined here, so the grid
+        // rendered no add-on rows at all.
+        //
+        // The rows are used AS-IS: the endpoint already applied the
+        // `isEnabled` filter and the hotel-wide master switch, and the
+        // public payload does not carry `isEnabled` at all — so
+        // re-running `getEnabledAddOnsByHotel` client-side would drop
+        // EVERY row.
+        if (!cancelled && data?.success && Array.isArray(data?.addOns)) {
+          setAddOns(data.addOns as AddOn[]);
         }
       } catch {
         // silent — keep null
