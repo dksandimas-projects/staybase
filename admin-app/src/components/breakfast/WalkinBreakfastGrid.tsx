@@ -27,6 +27,9 @@ import {
   type PublicBreakfastMeal
 } from "@spark-inn/shared";
 import { cn } from "../../utils/cn";
+// Per P0-ADMIN-API-BASE (2026-10-22): the admin app must call the
+// guest app's API through `getApiBaseUrl()`, never a relative `/api`.
+import { getApiBaseUrl } from "../../utils/apiBaseUrl";
 
 export interface WalkinBreakfastSelections {
   breakfastSelections: Record<string, {
@@ -96,10 +99,15 @@ export function WalkinBreakfastGrid({
     setConfigLoading(true);
     (async () => {
       try {
-        const base = typeof window !== "undefined" ? window.location.origin : "";
-        const res = await fetch(`${base}/api/bookings/breakfast/config`, {
-          method: "GET"
-        });
+        // Per P0-ADMIN-API-BASE (2026-10-22): the guest API lives on a
+        // different origin than the admin app, whose catch-all rewrite
+        // serves the SPA shell for any unmatched path. The pre-fix
+        // `window.location.origin` fetch returned HTML, `res.json()`
+        // threw, and the grid rendered "Breakfast not enabled".
+        const res = await fetch(
+          `${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/breakfast/config`,
+          { method: "GET" }
+        );
         const data: any = await res.json();
         if (!cancelled && data?.success && data?.data) {
           setConfig(data.data as PublicBreakfastConfig);

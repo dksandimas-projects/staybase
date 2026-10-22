@@ -55,6 +55,15 @@ import {
 } from "@spark-inn/shared";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
+// Per P0-ADMIN-API-BASE (2026-10-22): the admin app is a SEPARATE
+// Vercel project from the guest app that serves `/api/*`. The admin
+// project's `vercel.json` rewrites every unmatched path to
+// `index.html`, so a relative `/api/...` fetch lands on the SPA shell
+// (HTTP 200 `text/html`) instead of the API. Every staff API call must
+// therefore go through `getApiBaseUrl()`, which resolves the guest
+// origin (prod / staging / localhost) from the admin hostname.
+import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import { auth } from "../firebase/auth";
 import { useToast } from "./Toast";
 import { StatusBadge } from "./StatusBadge";
 import { Modal } from "./Modal";
@@ -88,12 +97,27 @@ async function postMarkRefundPaid(input: {
   // The admin-app posts to the same `apiBaseUrl` the rest
   // of the staff app uses (mirrors the existing
   // `markBreakfastRefundPaid` wrapper in AdminContext).
-  const apiBaseUrl = (typeof window !== "undefined" && (window as any).__API_BASE_URL) || "/api";
+  //
+  // Per P0-ADMIN-API-BASE (2026-10-22): the pre-fix code read a
+  // `window.__API_BASE_URL` global that is injected NOWHERE, so it
+  // silently fell back to the relative "/api" — which, on the admin
+  // origin, hits the SPA rewrite and returns HTML. The endpoint also
+  // requires a staff Bearer token (`authenticateStaff`), which the
+  // pre-fix call never sent. Both are fixed here.
+  const apiBaseUrl = getApiBaseUrl().replace(/\/$/, "");
   try {
-    const resp = await fetch(`${apiBaseUrl}/refunds/mark-paid`, {
+    const token = await auth.currentUser?.getIdToken();
+    const resp = await fetch(`${apiBaseUrl}/api/refunds/mark-paid`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: token ? `Bearer ${token}` : ""
+      },
+      // No `credentials: "include"` — the guest API echoes the admin
+      // origin but does NOT send `Access-Control-Allow-Credentials`,
+      // so a credentialed cross-origin request would have its
+      // response blocked by the browser. The staff Bearer token is
+      // the credential.
       body: JSON.stringify({
         bookingId: input.bookingId,
         refundId: input.refundId,
@@ -832,10 +856,16 @@ export function BookingDrawerBreakfastTab({
     setConfigLoading(true);
     (async () => {
       try {
-        const baseUrl = (typeof window !== "undefined" ? window.location.origin : "");
-        const res = await fetch(`${baseUrl}/api/bookings/breakfast/config`, {
-          method: "GET"
-        });
+        // Per P0-ADMIN-API-BASE (2026-10-22): the guest API lives on a
+        // different origin. `window.location.origin` here pointed at the
+        // admin app, whose catch-all rewrite returned the SPA shell —
+        // `res.json()` then threw and `config` stayed null, which the
+        // "Breakfast is not enabled" gate rendered. The endpoint itself
+        // is public and returns `isEnabled: true` + the meal catalog.
+        const res = await fetch(
+          `${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/breakfast/config`,
+          { method: "GET" }
+        );
         const data: any = await res.json();
         if (!cancelled) {
           if (data?.success && data?.data) setConfig(data.data as PublicBreakfastConfig);
@@ -2111,10 +2141,14 @@ export function BookingDrawerOtherAddOnsTab({
     setCatalogLoading(true);
     (async () => {
       try {
-        const base = typeof window !== "undefined" ? window.location.origin : "";
-        const res = await fetch(`${base}/api/bookings/addons/config`, {
-          method: "GET"
-        });
+        // Per P0-ADMIN-API-BASE (2026-10-22): the add-ons catalog lives
+        // on the guest origin, not the admin origin — see the breakfast
+        // config fetch above. Without this the catalog stayed null and
+        // the Add-Ons tab rendered no rows at all.
+        const res = await fetch(
+          `${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/addons/config`,
+          { method: "GET" }
+        );
         const data: any = await res.json();
         if (!cancelled && data?.success && Array.isArray(data?.data)) {
           setCatalog(getEnabledAddOnsByHotel(data.data as AddOn[]));
