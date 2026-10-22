@@ -240021,6 +240021,29 @@ async function handleConvertInquiryToBooking(req, res) {
         ratePerNight,
         totalPrice: finalTotalPrice,
         originalTotalPrice: finalTotalPrice,
+        // Per MRB-11 (2026-08-03, per decision #177): the
+        // per-stream revenue allocation snapshot. The
+        // corporate conversion path used to write `totalPrice`
+        // WITHOUT one, so the Reports revenue streams fell
+        // back to the legacy proportional split and tagged the
+        // row `allocation: "legacy-heuristic"` — a corporate
+        // booking was mis-attributed to the room stream and
+        // carried no MRB-11 identity at all.
+        //
+        // The snapshot is computed by the SHARED helper the
+        // other write paths use (`computeBookingRevenueAllocation`),
+        // so the streams and the total come from the same
+        // figures — never a second, hand-rolled computation.
+        // A corporate conversion has no breakfast (per BR-08),
+        // no extra bed, no voucher, no senior discount and no
+        // points, so the allocation is the gross room amount.
+        revenueAllocation: computeBookingRevenueAllocation({
+          ratePerNight,
+          numNights,
+          breakfastTotal: 0,
+          extraBedTotal: 0,
+          totalPrice: finalTotalPrice
+        }),
         // Per H2 (hardening batch 2026-06-26): the
         // corporate convert flow writes a token too so
         // the inquiry-to-booking email can carry the
