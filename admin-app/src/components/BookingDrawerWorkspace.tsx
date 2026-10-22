@@ -50,10 +50,11 @@ import {
   // drop every row.
   computeOtherAddOnCutoffState,
   recomputeOtherAddOnTotal,
-  type AddOn,
   type BreakfastSelectionEntry,
   type BreakfastServedEntry,
   type OtherAddOnSelectionEntry,
+  type OtherAddOnsCatalogResponse,
+  type OtherAddOnsCatalogRow,
   type PublicBreakfastConfig,
   type PublicBreakfastMeal
 } from "@spark-inn/shared";
@@ -67,6 +68,10 @@ import { formatPrice } from "../utils/format";
 // therefore go through `getApiBaseUrl()`, which resolves the guest
 // origin (prod / staging / localhost) from the admin hostname.
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import {
+  ADDONS_CATALOG_LOAD_ERROR,
+  resolveAddOnsCatalogView
+} from "../utils/addOnsCatalogView";
 import { auth } from "../firebase/auth";
 import { useToast } from "./Toast";
 import { StatusBadge } from "./StatusBadge";
@@ -2090,6 +2095,23 @@ interface BookingDrawerOtherAddOnsTabProps {
   onAfterSave?: () => void | Promise<void>;
 }
 
+/**
+ * The fields the other-add-ons quantity editor needs from a catalog row.
+ *
+ * The PUBLIC catalog row (`OtherAddOnsCatalogRow`) satisfies it, and so
+ * does the snapshot rebuilt from a booking's frozen entry — which is why
+ * the old `as AddOn` cast was a lie: the internal `AddOn` also demands
+ * `isEnabled` + `updatedAt` + `updatedBy`, and NEITHER source carries
+ * them (the public payload drops `isEnabled` on purpose).
+ */
+type OtherAddOnQuantityFields = {
+  id: string;
+  name: string;
+  price: number;
+  unit: "per-person" | "per-stay";
+  cutoffHoursBeforeCheckIn: number;
+};
+
 export function BookingDrawerOtherAddOnsTab({
   booking,
   onAfterSave
@@ -2105,7 +2127,7 @@ export function BookingDrawerOtherAddOnsTab({
   // on mount + after save so the staff sees the latest
   // enabled rows (a row hidden by Settings doesn't keep
   // a stale dropdown option visible).
-  const [catalog, setCatalog] = useState<AddOn[] | null>(null);
+  const [catalog, setCatalog] = useState<OtherAddOnsCatalogRow[] | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(true);
   // Per OCT-M1 (decision #295): the hotel-wide "Add-ons enabled"
   // master switch, echoed by the public catalog endpoint. It lets the
@@ -2113,6 +2135,19 @@ export function BookingDrawerOtherAddOnsTab({
   // from "the hotel has no other add-ons" — the two need different
   // copy, and only the first is a state the staff can change.
   const [catalogEnabled, setCatalogEnabled] = useState(true);
+  // Per P0-9 (2026-10-22): a FAILED read is NOT the same thing as an
+  // empty catalog, and the tab used to conflate them. A failed fetch
+  // left `catalog` null, which rendered "The add-on catalog is empty.
+  // Add a row in Settings → Other Add-Ons to start selling add-ons." —
+  // telling the staff to go create an add-on when the real problem was
+  // that the REQUEST failed. The tab also never re-fetched (the fetch
+  // runs once on mount), so a single transient failure pinned that
+  // misleading copy until the whole page was reloaded.
+  //
+  // `catalogError` gives the failure its own state, and
+  // `catalogRetryToken` re-runs the fetch without a page reload.
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogRetryToken, setCatalogRetryToken] = useState(0);
 
   // Local `pending` map: { date-addOnId: { kind, quantity, ... } }.
   // Edits accumulate here; the "Save changes" button flushes
@@ -2150,10 +2185,11 @@ export function BookingDrawerOtherAddOnsTab({
   const [saving, setSaving] = useState(false);
   const [servedRefresh, setServedRefresh] = useState(0);
 
-  // Catalog fetch on mount.
+  // Catalog fetch on mount (and again on retry).
   useEffect(() => {
     let cancelled = false;
     setCatalogLoading(true);
+    setCatalogError(null);
     (async () => {
       try {
         // Per P0-ADMIN-API-BASE (2026-10-22): the add-ons catalog lives
@@ -2164,7 +2200,7 @@ export function BookingDrawerOtherAddOnsTab({
           `${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/addons/config`,
           { method: "GET" }
         );
-        const data: any = await res.json();
+        const data: OtherAddOnsCatalogResponse = await res.json();
         // The public add-ons catalog endpoint answers
         // `{ success, addOns: [...], otherAddOnsEnabled, preSeeded }` —
         // the rows live under `addOns`, NOT under `data` (that is the
@@ -2178,12 +2214,22 @@ export function BookingDrawerOtherAddOnsTab({
         // public payload does not carry `isEnabled` at all — so
         // re-running `getEnabledAddOnsByHotel` client-side would drop
         // EVERY row.
-        if (!cancelled && data?.success && Array.isArray(data?.addOns)) {
-          setCatalog(data.addOns as AddOn[]);
-          setCatalogEnabled(data?.otherAddOnsEnabled !== false);
+        if (cancelled) return;
+        if (!res.ok || !data?.success || !Array.isArray(data?.addOns)) {
+          // Per P0-9: a failed read is its own state, NOT "the catalog
+          // is empty". Falling through to the empty copy here is what
+          // made the owner's report ("the catalog is empty even though
+          // it was turned on") impossible to act on.
+          setCatalog(null);
+          setCatalogError(ADDONS_CATALOG_LOAD_ERROR);
+          return;
         }
+        setCatalog(data.addOns);
+        setCatalogEnabled(data?.otherAddOnsEnabled !== false);
       } catch {
-        // silent — keep null
+        if (cancelled) return;
+        setCatalog(null);
+        setCatalogError(ADDONS_CATALOG_LOAD_ERROR);
       } finally {
         if (!cancelled) setCatalogLoading(false);
       }
@@ -2191,7 +2237,7 @@ export function BookingDrawerOtherAddOnsTab({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [catalogRetryToken]);
 
   // Stay dates from the booking (one card per service date).
   const dates = useMemo(() => {
@@ -2296,7 +2342,7 @@ export function BookingDrawerOtherAddOnsTab({
     });
   };
 
-  const handleQuantityChange = (date: string, addOn: AddOn, nextQty: number) => {
+  const handleQuantityChange = (date: string, addOn: OtherAddOnQuantityFields, nextQty: number) => {
     const key = `${date}-${addOn.id}`;
     const q = Math.max(0, Math.min(50, Math.floor(Number(nextQty) || 0)));
     const prior = (selections[date] || []).find((e) => e && e.addOnId === addOn.id);
@@ -2463,7 +2509,18 @@ export function BookingDrawerOtherAddOnsTab({
 
   // ---------- Render ----------
 
-  if (catalogLoading) {
+  // Per P0-9: ONE resolver decides what this surface shows, so the
+  // "a failed read is never rendered as an empty catalog" rule is
+  // unit-tested (`admin-app/src/__tests__/p1-addons-catalog-view.test.ts`)
+  // instead of only observable in a running browser.
+  const catalogView = resolveAddOnsCatalogView({
+    loading: catalogLoading,
+    error: catalogError,
+    catalog,
+    enabled: catalogEnabled
+  });
+
+  if (catalogView.kind === "loading") {
     return (
       <div className="flex items-center gap-2 text-xs text-gray-500">
         <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Loading add-on catalog…
@@ -2471,7 +2528,31 @@ export function BookingDrawerOtherAddOnsTab({
     );
   }
 
-  if (!catalog || catalog.length === 0) {
+  if (catalogView.kind === "error") {
+    // Per P0-9: the failed read gets its own state. The "add a row in
+    // Settings" copy is only true when the catalog really IS empty.
+    return (
+      <div
+        data-testid="booking-drawer-addons-error"
+        className="rounded-card border border-red-200 bg-red-50 p-4"
+      >
+        <p className="font-heading text-base text-gray-950">Other Add-Ons</p>
+        <p className="mt-2 text-xs text-red-800">{catalogView.message}</p>
+        <p className="mt-1 text-xs text-gray-600">
+          Your add-ons on this booking are untouched — only the catalog list failed to load.
+        </p>
+        <button
+          type="button"
+          onClick={() => setCatalogRetryToken((n) => n + 1)}
+          className="mt-3 inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  if (catalogView.kind === "empty") {
     return (
       <div
         data-testid="booking-drawer-addons-empty"
@@ -2479,13 +2560,15 @@ export function BookingDrawerOtherAddOnsTab({
       >
         <p className="font-heading text-base text-gray-950">Other Add-Ons</p>
         <p className="mt-2 text-xs text-amber-800">
-          {catalogEnabled
-            ? "The add-on catalog is empty. Add a row in Settings → Other Add-Ons to start selling add-ons."
-            : "Other add-ons are switched off for the hotel. Turn them back on in Settings → Other Add-Ons."}
+          {catalogView.reason === "switched-off"
+            ? "Other add-ons are switched off for the hotel. Turn them back on in Settings → Other Add-Ons."
+            : "The add-on catalog is empty. Add a row in Settings → Other Add-Ons to start selling add-ons."}
         </p>
       </div>
     );
   }
+
+  const catalogRows = catalogView.rows;
 
   return (
     <div className="space-y-4" data-testid="booking-drawer-addons-tab">
@@ -2584,7 +2667,7 @@ export function BookingDrawerOtherAddOnsTab({
                               price,
                               unit: entry.unitSnapshot || "per-person",
                               cutoffHoursBeforeCheckIn: entry.cutoffHoursBeforeCheckInSnapshot || 24
-                            } as AddOn, Number(e.target.value))}
+                            }, Number(e.target.value))}
                             className="min-h-[36px] w-16 rounded border border-gray-250 bg-white px-2 text-center text-[11px] disabled:opacity-50"
                             aria-label={`Quantity for ${entry.nameSnapshot} on ${date}`}
                           />
@@ -2633,7 +2716,7 @@ export function BookingDrawerOtherAddOnsTab({
                   enabled catalog not already on the day. */}
               <OtherAddOnAddRow
                 date={date}
-                catalog={catalog}
+                catalog={catalogRows}
                 alreadyAddedIds={list.map((e: any) => e.addOnId)}
                 onAdd={(addOnId, qty) => handleAdd(date, addOnId, qty)}
               />
@@ -2717,7 +2800,7 @@ function OtherAddOnAddRow({
   onAdd
 }: {
   date: string;
-  catalog: AddOn[];
+  catalog: OtherAddOnsCatalogRow[];
   alreadyAddedIds: string[];
   onAdd: (addOnId: string, qty: number) => void;
 }) {

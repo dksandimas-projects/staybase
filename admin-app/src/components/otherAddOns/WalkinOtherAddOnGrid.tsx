@@ -39,9 +39,14 @@ import {
   // filter and the hotel-wide master switch, and the public payload
   // carries no `isEnabled` field — re-filtering client-side would drop
   // every row.
-  type AddOn
+  type OtherAddOnsCatalogResponse,
+  type OtherAddOnsCatalogRow
 } from "@spark-inn/shared";
 import { cn } from "../../utils/cn";
+import {
+  ADDONS_CATALOG_LOAD_ERROR,
+  resolveAddOnsCatalogView
+} from "../../utils/addOnsCatalogView";
 // Per P0-ADMIN-API-BASE (2026-10-22): the admin app must call the
 // guest app's API through `getApiBaseUrl()`, never a relative `/api`.
 import { getApiBaseUrl } from "../../utils/apiBaseUrl";
@@ -83,7 +88,18 @@ export function WalkinOtherAddOnGrid({
   staffUid,
   onChange
 }: WalkinOtherAddOnGridProps) {
-  const [addOns, setAddOns] = useState<AddOn[] | null>(null);
+  const [addOns, setAddOns] = useState<OtherAddOnsCatalogRow[] | null>(null);
+  // Per P0-9 (2026-10-22): a FAILED read is not the same thing as an
+  // empty catalog. The old code swallowed the failure and fell through
+  // to "Add-ons are currently disabled — ask an admin to enable
+  // add-ons in Settings", which is wrong twice over: the request
+  // failed (so the switch may well be ON), and the grid never re-read
+  // the catalog, so the wrong message stuck until the page reloaded.
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogRetryToken, setCatalogRetryToken] = useState(0);
+  // The hotel-wide master switch, echoed by the endpoint — it lets the
+  // empty state say "switched off" instead of "you have no add-ons".
+  const [catalogEnabled, setCatalogEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   // Per-date, per-addOnId live quantity (0 = no selection).
   // The "add" action stamps a new entry; "remove" deletes
@@ -97,6 +113,7 @@ export function WalkinOtherAddOnGrid({
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setCatalogError(null);
     (async () => {
       try {
         // Per P0-ADMIN-API-BASE (2026-10-22): the guest API lives on a
@@ -108,7 +125,7 @@ export function WalkinOtherAddOnGrid({
           `${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/addons/config`,
           { method: "GET" }
         );
-        const data: any = await res.json();
+        const data: OtherAddOnsCatalogResponse = await res.json();
         // The public add-ons catalog endpoint answers
         // `{ success, addOns: [...], otherAddOnsEnabled, preSeeded }` —
         // the rows live under `addOns`, NOT under `data` (that is the
@@ -121,11 +138,18 @@ export function WalkinOtherAddOnGrid({
         // public payload does not carry `isEnabled` at all — so
         // re-running `getEnabledAddOnsByHotel` client-side would drop
         // EVERY row.
-        if (!cancelled && data?.success && Array.isArray(data?.addOns)) {
-          setAddOns(data.addOns as AddOn[]);
+        if (cancelled) return;
+        if (!res.ok || !data?.success || !Array.isArray(data?.addOns)) {
+          setAddOns(null);
+          setCatalogError(ADDONS_CATALOG_LOAD_ERROR);
+          return;
         }
+        setAddOns(data.addOns);
+        setCatalogEnabled(data?.otherAddOnsEnabled !== false);
       } catch {
-        // silent — keep null
+        if (cancelled) return;
+        setAddOns(null);
+        setCatalogError(ADDONS_CATALOG_LOAD_ERROR);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -133,7 +157,7 @@ export function WalkinOtherAddOnGrid({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [catalogRetryToken]);
 
   const dates = useMemo(() => {
     const startMs = Date.parse(`${(checkIn || "").slice(0, 10)}T00:00:00Z`);
@@ -199,7 +223,17 @@ export function WalkinOtherAddOnGrid({
     });
   }, [addOns, dates, live, staffUid, onChange]);
 
-  if (loading) {
+  // Per P0-9: ONE resolver decides what this surface shows, so the
+  // "a failed read is never rendered as an empty catalog" rule is
+  // unit-tested instead of only observable in a running browser.
+  const catalogView = resolveAddOnsCatalogView({
+    loading,
+    error: catalogError,
+    catalog: addOns,
+    enabled: catalogEnabled
+  });
+
+  if (catalogView.kind === "loading") {
     return (
       <div className="flex items-center gap-2 text-xs text-gray-500">
         <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Loading add-on catalog…
@@ -207,19 +241,50 @@ export function WalkinOtherAddOnGrid({
     );
   }
 
-  if (!addOns || addOns.length === 0) {
+  if (catalogView.kind === "error") {
+    // Per P0-9: the failed read gets its own state — the "add-ons are
+    // disabled" copy is only true when the catalog really IS empty.
+    return (
+      <div
+        data-testid="walkin-addons-error"
+        className="rounded-lg border border-red-200 bg-red-50 p-3 text-[11px] text-red-800"
+      >
+        <p className="font-bold">{catalogView.message}</p>
+        <p className="mt-1 text-red-700">
+          The add-ons on this booking are untouched — only the catalog list failed to load.
+        </p>
+        <button
+          type="button"
+          onClick={() => setCatalogRetryToken((n) => n + 1)}
+          className="mt-2 inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[11px] font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-95"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  if (catalogView.kind === "empty") {
     return (
       <div
         data-testid="walkin-addons-empty"
         className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800"
       >
-        <p className="font-bold">Add-ons are currently disabled</p>
+        <p className="font-bold">
+          {catalogView.reason === "switched-off"
+            ? "Other add-ons are switched off for the hotel"
+            : "Add-ons are currently disabled"}
+        </p>
         <p className="mt-1 text-amber-700">
-          Ask an admin to enable add-ons in Settings → Other Add-Ons.
+          {catalogView.reason === "switched-off"
+            ? "Turn them back on in Settings → Other Add-Ons."
+            : "Ask an admin to enable add-ons in Settings → Other Add-Ons."}
         </p>
       </div>
     );
   }
+
+  const addOnRows = catalogView.rows;
 
   if (dates.length === 0) {
     return (
@@ -278,7 +343,7 @@ export function WalkinOtherAddOnGrid({
           const pending = pendingAdd[date] || { addOnId: "", quantity: 1 };
           // Filter out add-ons already in the day's list
           // so the "add" select doesn't offer duplicates.
-          const available = addOns.filter((a) => !day[a.id]);
+          const available = addOnRows.filter((a) => !day[a.id]);
           return (
             <section
               key={date}
@@ -300,7 +365,7 @@ export function WalkinOtherAddOnGrid({
                   </li>
                 ) : (
                   entries.map(([addOnId, quantity]) => {
-                    const cat = addOns.find((a) => a.id === addOnId);
+                    const cat = addOnRows.find((a) => a.id === addOnId);
                     if (!cat) return null;
                     const subtotal = cat.price * quantity;
                     return (

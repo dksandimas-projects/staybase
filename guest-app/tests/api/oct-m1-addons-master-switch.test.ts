@@ -159,10 +159,19 @@ describe("OCT-M1 — the server reads the switch (wiring)", () => {
 
   it("the catalog endpoint applies the switch", () => {
     expect(addonsConfigSrc).toMatch(/loadOtherAddOnsHotelEnabled\(\)/);
-    expect(addonsConfigSrc).toMatch(/getEnabledAddOnsByHotel\(rawAddOns, hotelEnabled\)/);
+    // Per P0-9 (2026-10-22) the switch + the per-row `isEnabled` filter
+    // are applied by the pure `buildPublicAddOnsCatalog` helper
+    // (`shared/utils/addOns.ts`); the endpoint passes the switch in.
+    expect(addonsConfigSrc).toMatch(/buildPublicAddOnsCatalog\(\{/);
+    expect(addonsConfigSrc).toMatch(/hotelEnabled,/);
+    expect(read("shared/utils/addOns.ts")).toMatch(
+      /getEnabledAddOnsByHotel\(input\.rows, input\.hotelEnabled !== false\)/
+    );
     // The flag is echoed so the guest UI can tell "the hotel turned
     // other add-ons off" apart from "the hotel has no other add-ons".
-    expect(addonsConfigSrc).toMatch(/otherAddOnsEnabled: hotelEnabled/);
+    expect(read("shared/utils/addOns.ts")).toMatch(
+      /otherAddOnsEnabled: input\.hotelEnabled !== false/
+    );
   });
 
   it("the guest Manage page applies the switch", () => {

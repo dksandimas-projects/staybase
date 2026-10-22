@@ -225347,6 +225347,23 @@ function getEnabledAddOnsByHotel(addOns, hotelEnabled) {
     return String(a.name || "").localeCompare(String(b3.name || ""));
   });
 }
+function buildPublicAddOnsCatalog(input) {
+  const enabled = getEnabledAddOnsByHotel(input.rows, input.hotelEnabled !== false);
+  return {
+    success: true,
+    addOns: enabled.map((a) => ({
+      id: a.id,
+      name: a.name,
+      description: a.description,
+      price: a.price,
+      unit: a.unit,
+      cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn,
+      displayOrder: a.displayOrder
+    })),
+    otherAddOnsEnabled: input.hotelEnabled !== false,
+    preSeeded: input.usedFallback === true
+  };
+}
 function sortAddOnsByDisplayOrder(addOns) {
   if (!Array.isArray(addOns)) return [];
   return addOns.slice().sort((a, b3) => {
@@ -225583,6 +225600,7 @@ __export(shared_exports, {
   buildIcsContent: () => buildIcsContent,
   buildOtherAddOnDraftSelections: () => buildOtherAddOnDraftSelections,
   buildOtherAddOnSelectionKey: () => buildOtherAddOnSelectionKey,
+  buildPublicAddOnsCatalog: () => buildPublicAddOnsCatalog,
   bustPublicSiteContentCache: () => bustPublicSiteContentCache,
   calculateBookingTotal: () => calculateBookingTotal,
   calculateBreakfastMealsTotal: () => calculateBreakfastMealsTotal,
@@ -244430,7 +244448,8 @@ async function handleGetAddOnsConfig(req, res) {
       const norm = normalizeAddOn({ id: doc.id, ...doc.data() }, doc.id);
       if (norm) rawAddOns.push(norm);
     }
-    if (rawAddOns.length === 0) {
+    const usedFallback = rawAddOns.length === 0;
+    if (usedFallback) {
       const pre = {
         id: "airport-transfer",
         ...AIRPORT_TRANSFER_PRESEED,
@@ -244440,27 +244459,13 @@ async function handleGetAddOnsConfig(req, res) {
       rawAddOns.push(pre);
     }
     const hotelEnabled = await loadOtherAddOnsHotelEnabled();
-    const enabled = getEnabledAddOnsByHotel(rawAddOns, hotelEnabled);
-    res.setHeader("Cache-Control", "public, max-age=60");
-    return res.status(200).json({
-      success: true,
-      addOns: enabled.map((a) => ({
-        id: a.id,
-        name: a.name,
-        description: a.description,
-        price: a.price,
-        unit: a.unit,
-        cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn,
-        displayOrder: a.displayOrder
-      })),
-      // Per OCT-M1: the master switch is echoed so the guest UI
-      // can tell "the hotel turned other add-ons off" apart from
-      // "the hotel has no other add-ons" — both render an empty
-      // grid, but only one of them is a temporary state the guest
-      // should hear about.
-      otherAddOnsEnabled: hotelEnabled,
-      preSeeded: rawAddOns.length === 1 && rawAddOns[0].id === "airport-transfer"
+    const response = buildPublicAddOnsCatalog({
+      rows: rawAddOns,
+      hotelEnabled,
+      usedFallback
     });
+    res.setHeader("Cache-Control", "public, max-age=60");
+    return res.status(200).json(response);
   } catch (err) {
     return res.status(500).json({
       success: false,

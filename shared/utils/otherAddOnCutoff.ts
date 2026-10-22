@@ -20,8 +20,6 @@
 // `isEnabled === false`, the helper returns `isLocked: true`
 // directly — the catalog disable is itself a lock.
 
-import type { AddOn } from "../types";
-
 export interface OtherAddOnCutoffState {
   isLocked: boolean;
   cutoffAt: string;
@@ -33,8 +31,21 @@ export interface OtherAddOnCutoffState {
 export interface ComputeOtherAddOnCutoffStateInput {
   /** The booking's check-in date (`yyyy-mm-dd`). */
   checkInDate: string;
-  /** Snapshot from the catalog (the `AddOn` row at the booking's snapshot time, NOT the live doc). */
-  addOn: Pick<AddOn, "isEnabled" | "cutoffHoursBeforeCheckIn">;
+  /**
+   * Snapshot from the catalog (the `AddOn` row at the booking's snapshot time, NOT the live doc).
+   *
+   * `isEnabled` is OPTIONAL on purpose: the PUBLIC catalog payload
+   * (`GET /api/bookings/addons/config`) deliberately does not carry it
+   * — the endpoint already dropped the disabled rows — so a row read
+   * from that endpoint has no `isEnabled` at all. Making the field
+   * required forced the admin app to cast the public rows to the
+   * internal `AddOn` shape (`as AddOn[]`), which is a type lie that
+   * hid the fact that `isEnabled` was `undefined` at runtime.
+   * `undefined` is treated as "not disabled" (rule 1 only fires on an
+   * explicit `false`), which is exactly right for an
+   * already-filtered public row.
+   */
+  addOn: { cutoffHoursBeforeCheckIn: number; isEnabled?: boolean };
   /** Defaults to `new Date()` when omitted. */
   now?: Date;
 }

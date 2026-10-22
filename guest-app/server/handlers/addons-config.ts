@@ -22,7 +22,7 @@ import { loadOtherAddOnsHotelEnabled } from "../lib/otherAddOns-settings";
 import {
   AIRPORT_TRANSFER_PRESEED,
   normalizeAddOn,
-  getEnabledAddOnsByHotel,
+  buildPublicAddOnsCatalog,
   type AddOn
 } from "@spark-inn/shared";
 
@@ -49,7 +49,19 @@ export async function handleGetAddOnsConfig(
     // Settings. The actual write happens in the admin
     // Settings tab (`handleSaveAddOns`) — until then the
     // pre-seed is read-only.
-    if (rawAddOns.length === 0) {
+    //
+    // Per P0-9 (2026-10-22): whether the FALLBACK was used
+    // has to be tracked explicitly. The old test was
+    // `rawAddOns.length === 1 && rawAddOns[0].id ===
+    // "airport-transfer"`, which is ALSO true for a hotel
+    // that saved a REAL `airport-transfer` row in Settings →
+    // Other Add-Ons — so a hotel with its own catalog was
+    // told (through `preSeeded`) that it was looking at a
+    // read-only placeholder. The flag now means exactly one
+    // thing: "this row came from the hard-coded fallback
+    // because the collection was empty".
+    const usedFallback = rawAddOns.length === 0;
+    if (usedFallback) {
       const pre: AddOn = {
         id: "airport-transfer",
         ...AIRPORT_TRANSFER_PRESEED,
@@ -68,28 +80,20 @@ export async function handleGetAddOnsConfig(
     // is enough.
     const hotelEnabled = await loadOtherAddOnsHotelEnabled();
 
-    const enabled = getEnabledAddOnsByHotel(rawAddOns, hotelEnabled);
+    // The envelope is the SHARED contract (`OtherAddOnsCatalogResponse`),
+    // built by the pure `buildPublicAddOnsCatalog` helper so the guest
+    // app and the admin app cannot drift onto two different shapes of
+    // the same endpoint again (decision #313) — and so the payload
+    // rules are unit-testable instead of only observable through a
+    // live request.
+    const response = buildPublicAddOnsCatalog({
+      rows: rawAddOns,
+      hotelEnabled,
+      usedFallback
+    });
 
     res.setHeader("Cache-Control", "public, max-age=60");
-    return res.status(200).json({
-      success: true,
-      addOns: enabled.map((a) => ({
-        id: a.id,
-        name: a.name,
-        description: a.description,
-        price: a.price,
-        unit: a.unit,
-        cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn,
-        displayOrder: a.displayOrder
-      })),
-      // Per OCT-M1: the master switch is echoed so the guest UI
-      // can tell "the hotel turned other add-ons off" apart from
-      // "the hotel has no other add-ons" — both render an empty
-      // grid, but only one of them is a temporary state the guest
-      // should hear about.
-      otherAddOnsEnabled: hotelEnabled,
-      preSeeded: rawAddOns.length === 1 && rawAddOns[0].id === "airport-transfer"
-    });
+    return res.status(200).json(response);
   } catch (err: any) {
     return res.status(500).json({
       success: false,

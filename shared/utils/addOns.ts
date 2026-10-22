@@ -20,6 +20,7 @@
 // the `isEnabled === true` rows, sorted by `displayOrder` asc.
 
 import type { AddOn } from "../types";
+import type { OtherAddOnsCatalogResponse } from "./otherAddOnDrafts";
 
 /**
  * Per the BR-12 spec: the pre-seed catalog row used by the
@@ -144,6 +145,53 @@ export function getEnabledAddOnsByHotel(
       if (da !== db) return da - db;
       return String(a.name || "").localeCompare(String(b.name || ""));
     });
+}
+
+/**
+ * Build the PUBLIC other-add-ons catalog payload — the exact envelope
+ * `GET /api/bookings/addons/config` answers.
+ *
+ * PURE (no Firestore), so the endpoint stays a thin adapter and the
+ * payload rules are unit-testable instead of only observable through
+ * a live request:
+ *
+ *  1. The hotel-wide master switch + the per-row `isEnabled` filter are
+ *     applied HERE, exactly once. The rows are never re-filtered by a
+ *     client: the public payload carries no `isEnabled`, so a client
+ *     that re-filters would drop EVERY row (decision #313).
+ *  2. Each row carries EXACTLY seven fields. `isEnabled` is
+ *     deliberately dropped — the disabled rows are already gone — and
+ *     `updatedAt`/`updatedBy` are admin-only metadata.
+ *  3. `preSeeded` means ONE thing: "these rows came from the hard-coded
+ *     fallback because the collection was EMPTY". It must NOT be
+ *     derived from the row's id — a hotel that saved a REAL
+ *     `airport-transfer` row in Settings → Other Add-Ons was being told
+ *     (through this flag) that it was looking at a read-only
+ *     placeholder.
+ */
+export function buildPublicAddOnsCatalog(input: {
+  /** The normalized catalog rows (collection rows + the fallback row, if one was added). */
+  rows: AddOn[] | null | undefined;
+  /** The hotel-wide master switch (OCT-M1). `false` = the catalog is empty for every surface. */
+  hotelEnabled: boolean;
+  /** True when the rows came from the hard-coded fallback (the collection was empty). */
+  usedFallback: boolean;
+}): OtherAddOnsCatalogResponse {
+  const enabled = getEnabledAddOnsByHotel(input.rows, input.hotelEnabled !== false);
+  return {
+    success: true,
+    addOns: enabled.map((a) => ({
+      id: a.id,
+      name: a.name,
+      description: a.description,
+      price: a.price,
+      unit: a.unit,
+      cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn,
+      displayOrder: a.displayOrder
+    })),
+    otherAddOnsEnabled: input.hotelEnabled !== false,
+    preSeeded: input.usedFallback === true
+  };
 }
 
 /**

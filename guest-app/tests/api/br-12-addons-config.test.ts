@@ -183,7 +183,10 @@ describe("BR-12 — Zod schemas", () => {
 describe("BR-12 — handlers (source-text tripwires)", () => {
   it("handleGetAddOnsConfig falls back to the pre-seed when addOns collection is empty", () => {
     expect(configSrc).toMatch(/AIRPORT_TRANSFER_PRESEED/);
-    expect(configSrc).toMatch(/getEnabledAddOnsByHotel/);
+    // Per P0-9 (2026-10-22) the per-row `isEnabled` filter moved into
+    // the pure shared builder, so the handler stays a thin adapter.
+    expect(configSrc).toMatch(/buildPublicAddOnsCatalog/);
+    expect(addOnsSrc).toMatch(/getEnabledAddOnsByHotel/);
   });
 
   it("handleGetAddOnsManage returns dateLockByAddOn + otherAddOnSelections + otherAddOnServed", () => {

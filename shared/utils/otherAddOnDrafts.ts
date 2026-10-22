@@ -34,6 +34,44 @@ export interface OtherAddOnDraftCatalogRow {
 }
 
 /**
+ * A row of the PUBLIC other-add-ons catalog — the exact shape
+ * `GET /api/bookings/addons/config` returns. The handler maps to
+ * precisely these seven fields and deliberately does NOT expose
+ * `isEnabled` or `updatedAt` (the per-row switch has already been
+ * applied server-side, and `updatedAt` is admin-only metadata).
+ */
+export interface OtherAddOnsCatalogRow {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  unit: "per-person" | "per-stay";
+  cutoffHoursBeforeCheckIn: number;
+  displayOrder: number;
+}
+
+/**
+ * The response envelope of `GET /api/bookings/addons/config`.
+ *
+ * **The rows live under `addOns` — NOT under `data`.** `data` is the
+ * BREAKFAST config endpoint's shape (`{ success, data: {...} }`), and
+ * the admin app's add-on consumers were written against it, so the
+ * catalog read as permanently empty (decision #313).
+ *
+ * Both the guest app and the admin app parse this same envelope, so
+ * the two cannot drift onto two different shapes of the same endpoint
+ * again.
+ */
+export interface OtherAddOnsCatalogResponse {
+  success: boolean;
+  addOns: OtherAddOnsCatalogRow[];
+  /** The hotel-wide master switch (OCT-M1, decision #295). `false` = the hotel took other add-ons off sale. */
+  otherAddOnsEnabled: boolean;
+  /** True when the catalog is the read-only pre-seed row (a fresh install with no admin catalog yet). */
+  preSeeded: boolean;
+}
+
+/**
  * The composite key for one (service date × add-on) cell — the same
  * shape the audit + refund records use
  * (`yyyy-mm-dd-{addOnId}`, per `buildOtherAddOnSelectionKey`).

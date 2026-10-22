@@ -35,7 +35,16 @@ const addOnsUtil = read("shared/utils/addOns.ts");
 describe("BR-12.1 — Add-ons enabled flag (public booking flow)", () => {
   describe("public config endpoint", () => {
     it("the handler serves only `isEnabled === true` rows via getEnabledAddOnsByHotel", () => {
-      expect(addOnsConfigHandler).toContain("getEnabledAddOnsByHotel");
+      // Per P0-9 (2026-10-22) the per-row filter moved OUT of the
+      // endpoint into the pure `buildPublicAddOnsCatalog` helper
+      // (`shared/utils/addOns.ts`), so the handler stays a thin adapter
+      // and the payload rules are unit-testable. The filter itself is
+      // unchanged — it is still `getEnabledAddOnsByHotel`.
+      expect(addOnsConfigHandler).toContain("buildPublicAddOnsCatalog");
+      expect(addOnsUtil).toMatch(/export function buildPublicAddOnsCatalog/);
+      expect(addOnsUtil).toMatch(
+        /getEnabledAddOnsByHotel\(input\.rows, input\.hotelEnabled !== false\)/
+      );
     });
 
     it("the handler reads the `addOns` collection from Firestore", () => {

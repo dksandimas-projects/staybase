@@ -13,7 +13,10 @@
 // guest cannot buy.
 
 import { useEffect, useState } from "react";
-import type { OtherAddOnDraftCatalogRow } from "@spark-inn/shared";
+import type {
+  OtherAddOnDraftCatalogRow,
+  OtherAddOnsCatalogResponse
+} from "@spark-inn/shared";
 
 export interface OtherAddOnsCatalogPayload {
   addOns: OtherAddOnDraftCatalogRow[];
@@ -56,9 +59,19 @@ export function useOtherAddOnsCatalog(): UseOtherAddOnsCatalogResult {
           setIsLoading(false);
           return;
         }
-        const json = await response.json();
+        const json: OtherAddOnsCatalogResponse = await response.json();
         if (cancelled) return;
-        const rows = Array.isArray(json?.addOns) ? json.addOns : [];
+        // The rows live under `addOns` — NOT under `data` (that is the
+        // BREAKFAST config endpoint's shape). The envelope is the shared
+        // `OtherAddOnsCatalogResponse` contract (decision #313) so the
+        // guest app and the admin app cannot drift onto two different
+        // shapes of the same endpoint again.
+        if (!json?.success || !Array.isArray(json?.addOns)) {
+          setError("We couldn't load the other add-ons. You can still finish your booking without them.");
+          setIsLoading(false);
+          return;
+        }
+        const rows = json.addOns;
         setPayload({
           addOns: rows,
           otherAddOnsEnabled: json?.otherAddOnsEnabled !== false,
