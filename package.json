@@ -25,10 +25,14 @@
     "spec:audit": "node scripts/spec-handlers-audit.mjs",
     "test:rules": "node scripts/resolve-jdk.mjs firebase emulators:exec --only firestore --project spark-inn-rules-test \"vitest run --config vitest.rules.config.ts\"",
     "test:fast": "npm run test -w shared && npm run test:api -w guest-app && npm run test -w admin-app && npm run test:infra",
+    "test:e2e": "playwright test --config=e2e/playwright.config.ts",
+    "test:e2e:report": "playwright show-report e2e/.artifacts/report",
+    "qa:reconcile": "esbuild scripts/qa/reconcile-production.ts --bundle --platform=node --format=esm --outfile=tmp/qa/reconcile.mjs --external:firebase-admin && node tmp/qa/reconcile.mjs --out=tmp/qa/reconciliation.json",
     "preflight": "node scripts/preflight.mjs"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^4.0.1",
+    "@playwright/test": "^1.64.1",
     "@types/node": "^22.10.2",
     "dotenv": "^17.4.2",
     "firebase": "^11.10.0",

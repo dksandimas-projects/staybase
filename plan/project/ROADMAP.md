@@ -787,6 +787,34 @@ The current breakfast model is a flat-rate toggle with a per-date/per-guest `Rec
 
 ---
 
+## AI Browser QA Pass — 2026-10-23 (production)
+
+Executed against **production** (`www.sparkinnbohol.com` + `admin.sparkinnbohol.com`, `v2.18.20`) on branch `feature/qa-browser-playwright`. Full report, evidence and the 108-ID scenario matrix: **`plan/project/QA-REPORT-2026-10-23.md`**. **No production record was created, modified or deleted.**
+
+- 🔴 **Six staff mutations are dead in production — the admin app sends no Turnstile token** *(found 2026-10-23)* — `guest-app/server/apiRouter.ts` gates `breakfast/staff-update`, `breakfast/mark-served`, `breakfast/mark-refund-paid`, `addons/staff-update`, `addons/mark-served` and `addons/mark-refund-paid` behind `verifyTurnstile`. `admin-app/src/context/AdminContext.tsx` mounts **no** Turnstile widget and sends `turnstileToken: undefined` (two wrappers) or no token at all (four). Every one of those staff actions returns **HTTP 400 `Bot verification token is missing.`** ⇒ staff cannot mark a meal served, cannot record a breakfast refund liability, and cannot add or remove an other-add-on. `addons/mark-refund-paid` has **no admin client at all**. The repo's own tests assert only that the URL string appears in the source, so the suite stays green. **Regression guard added:** `e2e/tests/deploy-posture.spec.ts` (`admin-turnstile-token`) — deliberately red until fixed. **This also corrects the handoff:** §5.2's "Staff endpoints are ungated" no longer holds; only the core booking-lifecycle staff endpoints are ungated.
+
+- 🔴 **Google sign-in is broken on the guest site — the guest CSP omits `https://apis.google.com`** *(found 2026-10-23)* — `guest-app/vercel.json` `script-src` lacks the host, so the browser blocks the Firebase Auth script the guest app injects for `signInWithPopup` and logs a CSP violation on guest pages. The root `vercel.json` and `admin-app/vercel.json` **have** it — only the file that governs the guest deployment is missing it (the MBUX-10 fix, commit `03b18d4`, landed in two of three files, and `mbux-10-phase-15-closeout.test.ts` asserts the rule for two files). **Fix:** one token in `guest-app/vercel.json`. **Regression guard added:** `e2e/tests/deploy-posture.spec.ts` (`SEC-CSP`) — deliberately red until fixed.
+
+- 🟠 **Other add-on revenue still never reaches the revenue allocation (MRB-11b is NOT fixed on 2 rows)** *(found 2026-10-23)* — `SI-20261021-00053` (`otherAddOnTotal` ₱1,500) and `SI-20261021-00055` (₱1,000) carry `revenueAllocation.addOnNet: 0` and `rateBreakdown.addOns: []`, while the folio bills ₱9,600 and ₱6,600. Every revenue stream that reads the allocation under-reports by **₱3,950** across the book (allocation totalNet ₱282,760 vs folio billed ₱286,710). The repo's own `scripts/finance-integrity-scan.ts` (report-only, production) finds the **same two rows**. The historical report lists AO-04 as fixed 2026-10-22; the data is unchanged. **There is currently no working path that can set `addOnNet`** — the staff path is dead (above) and the guest path is Turnstile-gated.
+
+- 🟠 **The admin folio nets PENDING refund liabilities against money already collected** *(found 2026-10-23)* — `BREAKFAST.md §Removal semantics` says a pending refund is a liability and `paidAmount` must stay unchanged, but `normalizeLedgerDoc` (`admin-app/src/utils/bookingPaymentEntries.ts`) drops `status`, so a `status: "pending"` refund is subtracted from `paymentsTotal`. `SI-20261021-00058` (cancelled, ₱2,800 collected) is therefore shown as owing **₱100**, and `SI-20261021-00060` shows a flat "paid" instead of ₱100 overpaid. Correcting for it reproduces the handoff's independently recorded truth exactly: **14 paid / 55 balance due**, against the app's 0 / 69 / 10.
+
+- 🟠 **`booking.paidAmount` went negative on one booking** *(found 2026-10-23)* — `SI-20261021-00011` has `paidAmount: -1000` on a ₱5,400 booking (the refund path decremented a base that was never seeded; the ledger says ₱4,400). `shared/utils/bookingAddOnReschedule.ts` reads `paidAmount` as the "was this meal paid for?" budget, so a paid breakfast removed on this booking would **not** open a refund liability. 14 further legacy rows carry ledger entries but no `paidAmount` field at all.
+
+- 🟡 **Store-order tender gaps (F-C1 / F-C2, unchanged)** *(found 2026-10-23)* — delivered store revenue ₱250 vs tenders ₱180 (Δ +₱70); `SO-20261021-00012` is cancelled but still holds a ₱30 tender; four orders sit at `status: "placed"` with `total: 0` and can never be delivered into a non-zero folio.
+
+- 🟡 **The 404 handler leaks `undefined` into the error message** *(found 2026-10-23)* — `GET /api/version` answers `Endpoint /api/version/undefined not found.` The router's `domain`/`action` split interpolates the missing segment verbatim. Note there is **no `/api/version` endpoint** — the handoff's §4 description of one is inaccurate; the version is inlined into the shipped bundles, and both contain `2.18.20` (matching `shared/VERSION`).
+
+### Verified healthy by this pass (no action)
+
+`MONEY-01` (69/69 allocations equal `totalPrice`) · `MRB-11a` · `MRB-11c` · `MRB-11e` (the finance scanner sees the MRB-11b violations) · `CRON-01` (5 crons scheduled) · `CRON-02` (the holds sweep runs; 6 stale holds are now `expired`) · `OP-01` / `OP-05` (the notification prune ran — 0 of 114 are older than 30 days) · `SEC-12` / `ACCESS-01` (`vouchers` write = admin only; `corporateCodes` create = staff, update/delete = admin) · `VC-07` (cancelling releases the voucher cap slot — 0 mismatches across all 4 vouchers) · `KIT-01` / `KIT-02` (11 live meals across 6 service dates; cancelled bookings contribute none) · `ST-02` (the add-to-bill store charge lands on the room folio) · `FL-05` · `BASE-01` / `BASE-05` / `BASE-06` / `BASE-07` · `OP-02`.
+
+### Environment limitation recorded (not a product defect)
+
+Cloudflare's challenge-platform hostnames (`brunhild.` / `hagen.` / `valid.alchallenges.`) **do not resolve from the QA host**, so no Turnstile token can be issued and every guest-write scenario is blocked. `challenges.cloudflare.com` itself is reachable and the server-side `siteverify` correctly rejects a bad token. The gate's *posture* is verified: an unverified caller is refused with HTTP 400 **before** schema validation.
+
+---
+
 ## Open Follow-Ups (post-ship, low-priority)
 
 Cross-referenced from the most recent `Recently shipped` entries below. These are filed tickets for future iterations — NOT active work, NOT blocking anything. Each entry points at the decision that filed it + the source location.
