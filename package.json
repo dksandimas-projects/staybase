@@ -28,6 +28,7 @@
     "test:e2e": "playwright test --config=e2e/playwright.config.ts",
     "test:e2e:report": "playwright show-report e2e/.artifacts/report",
     "qa:reconcile": "esbuild scripts/qa/reconcile-production.ts --bundle --platform=node --format=esm --outfile=tmp/qa/reconcile.mjs --external:firebase-admin && node tmp/qa/reconcile.mjs --out=tmp/qa/reconciliation.json",
+    "qa:matrix": "esbuild scripts/qa/verify-matrix.ts --bundle --platform=node --format=esm --outfile=tmp/qa/verify-matrix.mjs && node tmp/qa/verify-matrix.mjs",
     "preflight": "node scripts/preflight.mjs"
   },
   "devDependencies": {

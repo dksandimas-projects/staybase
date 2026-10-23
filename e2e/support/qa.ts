@@ -86,16 +86,29 @@ export function requireIdentity(kind: string, identity: Identity | null): Identi
   return identity as Identity;
 }
 
-/** Staff sign-in on the admin app. */
+/**
+ * Staff sign-in on the ADMIN app.
+ *
+ * The Playwright `baseURL` is the GUEST origin (both projects target the
+ * guest site), so the admin app must be addressed with its own absolute
+ * URL — a relative "/login" would land on the guest site.
+ */
 export async function staffLogin(page: Page, identity: Identity) {
-  await page.goto("/login", { waitUntil: "domcontentloaded" });
+  await page.goto(`${ENV_CONFIG.adminBaseUrl}/login`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1500);
   await page.locator('input[type="email"]').fill(identity.email);
   await page.locator("#pwd").fill(identity.password);
   await page.getByRole("button", { name: /sign in/i }).click();
   await page.waitForURL(/\/admin\/|\/$|\/bookings/i, { timeout: 45_000 });
   // The admin app renders the signed-in shell only once the role claim
   // resolves; a rejected role signs the user straight back out.
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(2500);
+}
+
+/** Open a path on the ADMIN app by absolute URL. */
+export async function openAdmin(page: Page, path: string) {
+  await page.goto(`${ENV_CONFIG.adminBaseUrl}${path}`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
 }
 
 /** Guest sign-in on the rewards/account surface. */
