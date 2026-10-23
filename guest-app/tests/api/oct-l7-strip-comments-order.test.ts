@@ -34,15 +34,27 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 
 const repoRoot = resolve(__dirname, "../../..");
 
 function listTestFiles(): string[] {
-  const out = execSync("git ls-files '*__tests__/*.ts' '*tests/api/*.ts'", {
-    cwd: repoRoot,
-    encoding: "utf-8"
-  });
+  // Use `execFileSync` with an argument ARRAY, not a shell command string.
+  // The pathspecs used to be single-quoted inside an `execSync` string,
+  // which only works where the shell strips single quotes. On Windows
+  // `cmd.exe` passes the quotes through literally, so the pathspecs
+  // matched NOTHING and this tripwire policed zero helpers — its
+  // ordering assertions "passed" while asserting nothing, which is
+  // exactly the failure mode this file exists to prevent. Passing the
+  // pathspecs as separate argv entries removes the shell entirely.
+  const out = execFileSync(
+    "git",
+    ["ls-files", "*__tests__/*.ts", "*tests/api/*.ts"],
+    {
+      cwd: repoRoot,
+      encoding: "utf-8"
+    }
+  );
   return out
     .split("\n")
     .map((l) => l.trim())
@@ -160,8 +172,22 @@ describe("OCT-L7 — the comment-strip helpers cannot swallow real code", () => 
   it("the codebase really does write `/*` inside `//` comments", () => {
     // If this ever stops being true the ordering rule above could be
     // relaxed — but until then the ordering must hold.
-    const phantom = execSync(
-      "grep -rn --include=*.ts --include=*.tsx -E '^\\s*//.*\\*/' guest-app/src admin-app/src shared | head -3",
+    //
+    // `execFileSync` with an argument array, for the same reason as
+    // `listTestFiles`: a shell string with single-quoted arguments and
+    // a `| head -3` pipe only works on a POSIX shell.
+    const phantom = execFileSync(
+      "grep",
+      [
+        "-rn",
+        "--include=*.ts",
+        "--include=*.tsx",
+        "-E",
+        "^\\s*//.*\\*/",
+        "guest-app/src",
+        "admin-app/src",
+        "shared"
+      ],
       { cwd: repoRoot, encoding: "utf-8" }
     );
     expect(phantom.length).toBeGreaterThan(0);
