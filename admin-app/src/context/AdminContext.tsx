@@ -1311,6 +1311,14 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   // Auth State
   const [authLoading, setAuthLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<AdminContextType["currentUser"]>(null);
+  // Per RPT-01 (2026-10-23 handoff §4): tracks the uid whose staff
+  // `role` claim has already been force-refreshed, so the auth handler
+  // refreshes the ID token ONCE per uid instead of on every auth event.
+  // A forced refresh mints a new token, which fires
+  // `onAuthStateChanged` again — forcing one on every event is a
+  // feedback loop. Declared at the component level (never inside an
+  // effect body) so it survives for the provider's lifetime.
+  const forcedRoleForUidRef = useRef<string | null>(null);
 
   // Per-staff intercom audio routing (see `plan/features/INTERCOM-AUDIO-ROUTING.md`).
   // Subscribed once at the provider level so every consumer — the
@@ -1322,28 +1330,68 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   useEffect(() => {
     void setPersistence(auth, browserSessionPersistence).catch(() => undefined);
 
+    // Per RPT-01 (QA pass 2026-10-21) + the 2026-10-23 handoff §4:
+    // the staff `role` custom claim only reaches the client after a
+    // forced token refresh, so the FIRST sign-in for a uid must force
+    // one. Forcing it on EVERY auth event, however, is a feedback
+    // loop: `getIdTokenResult(user, true)` mints a new ID token, the
+    // SDK fires `onAuthStateChanged` again for the new token, and the
+    // handler forces another refresh — forever. The observed symptom
+    // was five forced refreshes in ~3ms at load, then one every 30s.
+    //
+    // That churn was the RPT-01 defect's engine: every firing built a
+    // BRAND-NEW `currentUser` object, so every effect whose dependency
+    // array listed `currentUser` was torn down and re-attached on each
+    // refresh. The Bookings LIST's ledger listeners
+    // (`collectionGroup("payments")` / `collectionGroup("refunds")`)
+    // were re-subscribed before their first snapshot could land, so the
+    // ledger index stayed EMPTY and every row read "₱0 paid". The
+    // booking DRAWER was unaffected because its listener depends on
+    // `selectedBooking?.id` — a stable primitive — so it stayed
+    // attached. The live proof: the list reported Balance due 69 /
+    // Needs attention 10 (exactly what an empty index produces) while
+    // the drawer showed the real amounts, with NO console error.
+    //
+    // Two changes close it:
+    //   1. force the token refresh only ONCE per uid (below), and
+    //   2. keep `currentUser`'s identity STABLE across refreshes by
+    //      returning the previous object when nothing meaningful
+    //      changed (below). A stable identity means the listener
+    //      effects are not re-subscribed at all.
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (!firebaseUser) {
+        forcedRoleForUidRef.current = null;
         setCurrentUser(null);
         setAuthLoading(false);
         return;
       }
 
       try {
-        const tokenResult = await getIdTokenResult(firebaseUser, true);
+        const needsForcedRefresh = forcedRoleForUidRef.current !== firebaseUser.uid;
+        const tokenResult = await getIdTokenResult(firebaseUser, needsForcedRefresh);
         if (!isStaffRole(tokenResult.claims.role)) {
           await firebaseSignOut(auth);
           setCurrentUser(null);
           return;
         }
         const role = tokenResult.claims.role;
+        forcedRoleForUidRef.current = firebaseUser.uid;
 
-        setCurrentUser({
-          uid: firebaseUser.uid,
-          email: firebaseUser.email ?? "",
-          displayName: firebaseUser.displayName ?? null,
-          role
-        });
+        const email = firebaseUser.email ?? "";
+        const displayName = firebaseUser.displayName ?? null;
+
+        // Keep the identity stable when nothing meaningful changed, so
+        // the `[currentUser]`-dependency effects are not re-subscribed
+        // on every token refresh. See the note above.
+        setCurrentUser((prev) =>
+          prev &&
+          prev.uid === firebaseUser.uid &&
+          prev.email === email &&
+          prev.displayName === displayName &&
+          prev.role === role
+            ? prev
+            : { uid: firebaseUser.uid, email, displayName, role }
+        );
       } catch {
         setCurrentUser(null);
       } finally {
@@ -2676,49 +2724,89 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   // row so `listReservationBalance` is independent of the
   // active filter (MRB-12-01).
   useEffect(() => {
-    if (!currentUser) {
+    // Per RPT-01 (2026-10-23 handoff §4): depend on the staff UID, not
+    // the `currentUser` OBJECT. The object's identity used to change on
+    // every ID-token refresh, which re-subscribed this listener before
+    // its first snapshot could land — so the ledger index stayed EMPTY
+    // and every list row read "₱0 paid" while the booking DRAWER (whose
+    // listener depends on a stable `selectedBooking?.id`) showed the
+    // real amounts. A UID is a stable primitive.
+    const staffUid = currentUser?.uid;
+    if (!staffUid) {
       setReservationPaidAmount({});
+      setPaymentLedgerDocs([]);
       return;
     }
 
-    const unsubscribe = onSnapshot(
-      collectionGroup(db, "payments"),
-      (snapshot) => {
-        const paidByReservation: Record<string, number> = {};
-        for (const paymentDoc of snapshot.docs) {
-          // The path is `reservations/{reservationId}/payments/{paymentId}`
-          // for new reservations. Legacy `bookings/{id}/payments/{...}`
-          // entries do NOT match — they are excluded.
-          const match = paymentDoc.ref.path.match(/^reservations\/([^/]+)\/payments\//);
-          if (!match) continue;
-          const reservationId = match[1];
-          const amount = Number(paymentDoc.data()?.amount || 0);
-          if (!Number.isFinite(amount)) continue;
-          paidByReservation[reservationId] = (paidByReservation[reservationId] || 0) + amount;
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+
+    // Force-refresh the ID token so the listener attaches with a token
+    // that definitely carries the staff `role` custom claim — the same
+    // handshake the reservations listener above uses (MRB-12).
+    void auth.currentUser?.getIdToken(true).then(() => {
+      if (cancelled) return;
+
+      // One-shot hydration. `onSnapshot` delivers its first snapshot
+      // asynchronously, so a listener that is re-subscribed before that
+      // snapshot lands can leave the index empty. A single `getDocs`
+      // read is immune to that timing — one round trip that always
+      // returns the docs. The listener below then keeps it live.
+      void getDocs(collectionGroup(db, "payments"))
+        .then((snap) => {
+          if (cancelled) return;
+          setPaymentLedgerDocs(
+            snap.docs.map((paymentDoc) =>
+              normalizeLedgerDoc(paymentDoc.ref.path, paymentDoc.data() as Record<string, unknown>)
+            )
+          );
+        })
+        .catch((error) => {
+          console.error("Error hydrating the reservation payments ledger:", error);
+        });
+
+      unsubscribe = onSnapshot(
+        collectionGroup(db, "payments"),
+        (snapshot) => {
+          const paidByReservation: Record<string, number> = {};
+          for (const paymentDoc of snapshot.docs) {
+            // The path is `reservations/{reservationId}/payments/{paymentId}`
+            // for new reservations. Legacy `bookings/{id}/payments/{...}`
+            // entries do NOT match — they are excluded.
+            const match = paymentDoc.ref.path.match(/^reservations\/([^/]+)\/payments\//);
+            if (!match) continue;
+            const reservationId = match[1];
+            const amount = Number(paymentDoc.data()?.amount || 0);
+            if (!Number.isFinite(amount)) continue;
+            paidByReservation[reservationId] = (paidByReservation[reservationId] || 0) + amount;
+          }
+          setReservationPaidAmount(paidByReservation);
+
+          // Per RPT-01 (QA pass 2026-10-21): the same snapshot also
+          // feeds the per-booking ledger index. The reservation
+          // aggregate above is unchanged (it deliberately excludes the
+          // legacy per-booking path); this is a second, independent
+          // projection of the SAME docs onto the booking they belong
+          // to. Store-order tenders are excluded by the path filter
+          // inside `buildBookingPaymentIndex` — they are not room
+          // folio payments.
+          setPaymentLedgerDocs(
+            snapshot.docs.map((paymentDoc) =>
+              normalizeLedgerDoc(paymentDoc.ref.path, paymentDoc.data() as Record<string, unknown>)
+            )
+          );
+        },
+        (error) => {
+          console.error("Error listening to reservation payments collectionGroup:", error);
         }
-        setReservationPaidAmount(paidByReservation);
+      );
+    });
 
-        // Per RPT-01 (QA pass 2026-10-21): the same snapshot also
-        // feeds the per-booking ledger index. The reservation
-        // aggregate above is unchanged (it deliberately excludes the
-        // legacy per-booking path); this is a second, independent
-        // projection of the SAME docs onto the booking they belong
-        // to. Store-order tenders are excluded by the path filter
-        // inside `buildBookingPaymentIndex` — they are not room
-        // folio payments.
-        setPaymentLedgerDocs(
-          snapshot.docs.map((paymentDoc) =>
-            normalizeLedgerDoc(paymentDoc.ref.path, paymentDoc.data() as Record<string, unknown>)
-          )
-        );
-      },
-      (error) => {
-        console.error("Error listening to reservation payments collectionGroup:", error);
-      }
-    );
-
-    return unsubscribe;
-  }, [currentUser]);
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [currentUser?.uid]);
 
   // Per RPT-01 (QA pass 2026-10-21): the refunds collection group.
   //
@@ -2734,27 +2822,53 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   // `firebase/firestore.rules` (the `match /{path=**}/refunds/...`
   // group rule), so the admin client can read it directly.
   useEffect(() => {
-    if (!currentUser) {
+    // Per RPT-01 (2026-10-23 handoff §4): same stable-UID dependency
+    // and the same one-shot hydration as the payments listener above.
+    const staffUid = currentUser?.uid;
+    if (!staffUid) {
       setRefundLedgerDocs([]);
       return;
     }
 
-    const unsubscribe = onSnapshot(
-      collectionGroup(db, "refunds"),
-      (snapshot) => {
-        setRefundLedgerDocs(
-          snapshot.docs.map((refundDoc) =>
-            normalizeLedgerDoc(refundDoc.ref.path, refundDoc.data() as Record<string, unknown>)
-          )
-        );
-      },
-      (error) => {
-        console.error("Error listening to refunds collectionGroup:", error);
-      }
-    );
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
 
-    return unsubscribe;
-  }, [currentUser]);
+    void auth.currentUser?.getIdToken(true).then(() => {
+      if (cancelled) return;
+
+      void getDocs(collectionGroup(db, "refunds"))
+        .then((snap) => {
+          if (cancelled) return;
+          setRefundLedgerDocs(
+            snap.docs.map((refundDoc) =>
+              normalizeLedgerDoc(refundDoc.ref.path, refundDoc.data() as Record<string, unknown>)
+            )
+          );
+        })
+        .catch((error) => {
+          console.error("Error hydrating the refunds ledger:", error);
+        });
+
+      unsubscribe = onSnapshot(
+        collectionGroup(db, "refunds"),
+        (snapshot) => {
+          setRefundLedgerDocs(
+            snapshot.docs.map((refundDoc) =>
+              normalizeLedgerDoc(refundDoc.ref.path, refundDoc.data() as Record<string, unknown>)
+            )
+          );
+        },
+        (error) => {
+          console.error("Error listening to refunds collectionGroup:", error);
+        }
+      );
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [currentUser?.uid]);
 
   const [roomBlocks, setRoomBlocks] = useState<RoomBlock[]>([]);
 
