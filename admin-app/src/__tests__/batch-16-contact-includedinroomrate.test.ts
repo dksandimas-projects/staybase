@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 // Regression test for Phase 11.6 Batch 16 — #75 (drop includedInRoomRate)
@@ -52,10 +52,41 @@ describe("Phase 11.6 Batch 16 — contact form wired + includedInRoomRate absent
     });
 
     it("the field is not present in guest-app/src code", () => {
-      // Walk every source file in guest-app/src (skip generated + node_modules).
-      const { execSync } = require("node:child_process");
-      const files = execSync("rg -l includedInRoomRate /Users/danielkennethsandimas/GitHub/staybase/guest-app/src /Users/danielkennethsandimas/GitHub/staybase/shared 2>/dev/null || true", { encoding: "utf8" });
-      expect(files.trim(), "expected no source files to reference includedInRoomRate").toBe("");
+      // Walk every source file in guest-app/src and shared (skip
+      // generated output + node_modules).
+      //
+      // This used to shell out to `rg -l ... /Users/<author>/GitHub/
+      // staybase/...` — an absolute path hardcoded to the original
+      // author's machine, with bash-only `2>/dev/null || true`. It
+      // therefore failed on every other machine (and on CI) even
+      // though the code under test was fine. The scan is now pure
+      // Node, resolved relative to the repo root, so it passes
+      // everywhere.
+      const repoRoot = resolve(__dirname, "../../..");
+      const scanRoots = [
+        resolve(repoRoot, "guest-app/src"),
+        resolve(repoRoot, "shared")
+      ];
+      const offenders: string[] = [];
+      const walk = (dir: string) => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          if (entry.name === "node_modules" || entry.name === "dist") continue;
+          const full = resolve(dir, entry.name);
+          if (entry.isDirectory()) {
+            walk(full);
+            continue;
+          }
+          if (!/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(entry.name)) continue;
+          if (readFileSync(full, "utf8").includes("includedInRoomRate")) {
+            offenders.push(full.slice(repoRoot.length + 1));
+          }
+        }
+      };
+      for (const root of scanRoots) walk(root);
+      expect(
+        offenders,
+        "expected no source files to reference includedInRoomRate"
+      ).toEqual([]);
     });
   });
 
