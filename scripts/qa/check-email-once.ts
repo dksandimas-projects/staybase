@@ -141,6 +141,15 @@ const corporate = corporateSnap.docs
 // ── the check ────────────────────────────────────────────────────────
 const problems: string[] = [];
 
+// THIS PASS's references — the scope of the duplicate scan. The
+// provider's log keeps every send for ever, so an older record's repeat
+// (fixed in an earlier pass) would otherwise pin this check red.
+const passRefs = new Set<string>();
+for (const b of bookings) {
+  if (b.bookingRef) passRefs.add(b.bookingRef);
+  if (b.reservationRef) passRefs.add(b.reservationRef);
+}
+
 // 1. Reference-bearing events: exactly one send per (shape, recipient, ref).
 const groups = new Map<string, Send[]>();
 for (const send of sends) {
@@ -151,8 +160,12 @@ for (const send of sends) {
   list.push(send);
   groups.set(k, list);
 }
+const olderRepeats: string[] = [];
 for (const [k, list] of groups) {
-  if (list.length > 1) problems.push(`DUPLICATE send — ${k} × ${list.length}`);
+  if (list.length <= 1) continue;
+  const ref = refOf(k.split("|").slice(-1)[0] || "");
+  if (passRefs.has(ref)) problems.push(`DUPLICATE send — ${k} × ${list.length}`);
+  else olderRepeats.push(`${k} × ${list.length}`);
 }
 
 // 2. Every QA booking must have produced exactly one staff notification.
@@ -203,6 +216,12 @@ console.log(`QA bookings                : ${bookings.length}`);
 console.log(`QA contact inquiries        : ${contacts.length}`);
 console.log(`QA corporate inquiries      : ${corporate.length}`);
 console.log(`delivery events             : ${[...events].map(([k, v]) => `${k}=${v}`).join(" · ")}`);
+
+if (olderRepeats.length) {
+  console.log("\nrepeats on records OUTSIDE this pass (reported, not a failure — the provider's");
+  console.log("log keeps them for ever, and their defects were fixed in an earlier pass):");
+  for (const r of olderRepeats) console.log(`  · ${r}`);
+}
 
 if (problems.length) {
   console.log("\nPROBLEMS:");
