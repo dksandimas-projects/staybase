@@ -193,11 +193,20 @@ test.describe("Guest write paths (browser, bot protection off)", () => {
       "the guest's bed set-up must be on the wire"
     ).toBe("large-bed");
 
-    // And the guest can look their own booking up again.
-    const lookup = await page.request.post("/api/bookings/lookup", {
-      data: { bookingRef: result.bookingRef, email: FLOW_EMAIL }
-    });
-    expect(lookup.status(), "the guest must be able to look their booking up").toBe(200);
+    // And the guest can look their own booking up again. The lookup is
+    // rate limited (10/min per IP, shared by the whole suite), so a
+    // refused lookup waits for the window instead of failing the run.
+    let lookupStatus = 0;
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      const lookup = await page.request.post("/api/bookings/lookup", {
+        data: { bookingRef: result.bookingRef, email: FLOW_EMAIL }
+      });
+      lookupStatus = lookup.status();
+      if (lookupStatus === 200) break;
+      if (lookupStatus !== 429) break;
+      await page.waitForTimeout(15_000);
+    }
+    expect(lookupStatus, "the guest must be able to look their booking up").toBe(200);
   });
 
   test("BF-02 · a guest uploads a GCash proof and the booking goes through", async ({ page }) => {
@@ -269,11 +278,23 @@ test.describe("Guest write paths (browser, bot protection off)", () => {
     await page.goto("/my-booking", { waitUntil: "domcontentloaded" });
     await page.locator('input[placeholder*="SI-"]').fill(created.bookingRef);
     await page.locator('input[placeholder*="example.com"]').fill(FLOW_EMAIL);
-    await page.getByRole("button", { name: /find my booking/i }).click();
 
+    // The lookup endpoint is rate limited at 10/min per IP, and the WHOLE
+    // suite shares this host's IP — so a lookup can be refused while the
+    // budget is spent. The spec waits for the window and asks again
+    // rather than failing on the limiter (which is the limiter working).
     const cancelButton = page.getByRole("button", { name: /cancel booking/i });
+    let found = false;
+    for (let attempt = 1; attempt <= 4 && !found; attempt++) {
+      await page.getByRole("button", { name: /find my booking/i }).click();
+      found = await cancelButton
+        .waitFor({ state: "visible", timeout: 8000 })
+        .then(() => true)
+        .catch(() => false);
+      if (!found && attempt < 4) await page.waitForTimeout(15_000);
+    }
     await expect(cancelButton, "a pending booking must be cancellable by the guest").toBeVisible({
-      timeout: 25_000
+      timeout: 15_000
     });
     await cancelButton.click();
 
