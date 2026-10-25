@@ -855,6 +855,20 @@ Nine of the ten items are fixed. **Nothing was deployed and no production record
 
 Cloudflare's challenge-platform hostnames (`brunhild.` / `hagen.` / `valid.alchallenges.`) **do not resolve from the QA host**, so no Turnstile token can be issued and every guest-write scenario is blocked. `challenges.cloudflare.com` itself is reachable and the server-side `siteverify` correctly rejects a bad token. The gate's *posture* is verified: an unverified caller is refused with HTTP 400 **before** schema validation.
 
+### Guest-write scenarios executed — 2026-10-25 (bot-protection switch open)
+
+The owner opened the hotel-wide bot-protection switch (`settings/hotelConfig.botProtectionMode: "disabled"`, admin-only, fail-closed, audited — report §11.3) so the seven guest-write scenarios could run. **They found three real defects**, all fixed and deployed; **the switch must be set back to `"turnstile"` when the window closes** (report §11.6).
+
+| Fix | Change | Guard |
+|---|---|---|
+| §3.13 | **A signed-in member was quoted the 10% member rate and charged the full rate.** The server resolves the member from the booking create's `Authorization: Bearer` header; the guest client never sent one. Measured live: the review step showed ₱2,160 and the server charged ₱2,400. Both booking flows (public + corporate) now attach the ID token. | `guest-app/tests/api/rw-02-member-rate-token.test.ts` + `e2e/tests/guest-write.spec.ts` · *RW-02* |
+| §3.14 | **Removing an other add-on reported a failure for a change that had succeeded.** The guest page emitted BOTH a `change` op with quantity 0 and a `remove` op for the same line; the server processes removals first, so the change op failed with `SELECTION_NOT_ORDERED` → *"Nothing to change — add the add-on first."* The batch is now assembled by the shared `buildOtherAddOnManageOps` — a quantity of 0 is a REMOVAL, never a change with quantity 0. | `guest-app/tests/api/oct-m6-addon-removal-ops.test.ts` + `e2e/tests/guest-write.spec.ts` · *AO-08* |
+| §3.15 | **A guest booking WITH breakfast could not be created at all (HTTP 500).** Per BR-03 the breakfast is a reservation-level term and the create path's per-STAY total is 0, but the MRB-11 allocation still read the per-STAY field while the child's total carried the reservation's breakfast — so the invariant threw by exactly the breakfast amount. The child's share of the breakfast is now allocated with the same weights as the child's total. | `guest-app/tests/api/br-03-breakfast-allocation.test.ts` + `e2e/tests/guest-write.spec.ts` · *BF-03* |
+
+**The matrix moved:** 47 PASS → **55 PASS**; 14 BLOCKED → **7 BLOCKED** (the rest are email-, configuration- or setup-bound). Verified mechanically by `npm run qa:matrix` — 115 rows, 115 unique ids, zero missing.
+
+**Every record the scenarios created is tagged and listed** — report §9.1.1. The product's own `testRuns` instrument removes them: the run is closed (not deleted) and `POST /api/test-runs/delete` with its id removes exactly what it touched.
+
 ---
 
 ## Open Follow-Ups (post-ship, low-priority)
