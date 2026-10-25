@@ -3511,6 +3511,23 @@ export async function handleCreateBooking(req: any, res: any) {
       });
       const roomStayWeights = roomStayPricing.map((stay) => stay.subtotal);
       const allocatedChildTotals = allocateRoundedAmount(totalPrice, roomStayWeights);
+      // Per BR-03 (2026-10-12, decision #232) the breakfast is a
+      // RESERVATION-level term (per date × per guest), not a per-room one:
+      // the per-STAY `breakfastTotal` is 0 in the create path. The child's
+      // share of the reservation's breakfast is therefore allocated with
+      // the SAME weights the child's total is allocated with — which is
+      // what makes the per-child invariant balance:
+      //
+      //   childTotal = w_i/Σw · (Σw + breakfast − deductions)
+      //   room_i + extraBed_i = w_i
+      //   ⇒ breakfast_i = w_i/Σw · breakfast
+      //
+      // Without this the allocation read `breakfastNet: 0` while the
+      // child's total carried the breakfast, and the MRB-11 invariant
+      // threw — a guest booking WITH breakfast could not be created at
+      // all (HTTP 500). Found by the AI-BROWSER-QA pass, 2026-10-25,
+      // scenario BF-03.
+      const allocatedBreakfastTotals = allocateRoundedAmount(breakfastTotal, roomStayWeights);
       const allocatedVoucherDiscounts = allocateRoundedAmount(voucherDiscount, roomStayWeights);
       const allocatedDeductions = rateBreakdown.deductions.map((deduction) => ({
         label: deduction.label,
@@ -4155,10 +4172,7 @@ export async function handleCreateBooking(req: any, res: any) {
               (sum, pricing) => sum + (Number(pricing.roomTotal) || 0),
               0
             ),
-            breakfastNet: childPricing.reduce(
-              (sum, pricing) => sum + (Number(pricing.breakfastTotal) || 0),
-              0
-            ),
+            breakfastNet: allocatedBreakfastTotals.reduce((sum, value) => sum + (Number(value) || 0), 0),
             addOnNet: childPricing.reduce(
               (sum, pricing) => sum + (Number(pricing.extraBedTotal) || 0),
               0
@@ -4370,8 +4384,10 @@ export async function handleCreateBooking(req: any, res: any) {
             // surface to Reports.
             revenueAllocation: assertBookingRevenueAllocationInvariant(
               {
+                // Per BR-03 the breakfast is a reservation-level term — the
+                // child's share comes from the weighted allocation above.
                 roomNet: pricingForRoom.roomTotal,
-                breakfastNet: pricingForRoom.breakfastTotal,
+                breakfastNet: round2(allocatedBreakfastTotals[bookingIdx] ?? 0),
                 // Per MRB-11b (QA pass 2026-10-25): the BR-12 other
                 // add-ons join the add-on stream. They are attributed
                 // to the FIRST child only — the create path spreads

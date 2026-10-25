@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.20.0";
+    VERSION2 = "2.20.1";
   }
 });
 
@@ -233017,6 +233017,7 @@ async function handleCreateBooking(req, res) {
       });
       const roomStayWeights = roomStayPricing.map((stay) => stay.subtotal);
       const allocatedChildTotals = allocateRoundedAmount(totalPrice, roomStayWeights);
+      const allocatedBreakfastTotals = allocateRoundedAmount(breakfastTotal, roomStayWeights);
       const allocatedVoucherDiscounts = allocateRoundedAmount(voucherDiscount, roomStayWeights);
       const allocatedDeductions = rateBreakdown.deductions.map((deduction) => ({
         label: deduction.label,
@@ -233540,10 +233541,7 @@ async function handleCreateBooking(req, res) {
               (sum, pricing) => sum + (Number(pricing.roomTotal) || 0),
               0
             ),
-            breakfastNet: childPricing.reduce(
-              (sum, pricing) => sum + (Number(pricing.breakfastTotal) || 0),
-              0
-            ),
+            breakfastNet: allocatedBreakfastTotals.reduce((sum, value) => sum + (Number(value) || 0), 0),
             addOnNet: childPricing.reduce(
               (sum, pricing) => sum + (Number(pricing.extraBedTotal) || 0),
               0
@@ -233722,8 +233720,10 @@ async function handleCreateBooking(req, res) {
             // surface to Reports.
             revenueAllocation: assertBookingRevenueAllocationInvariant(
               {
+                // Per BR-03 the breakfast is a reservation-level term — the
+                // child's share comes from the weighted allocation above.
                 roomNet: pricingForRoom.roomTotal,
-                breakfastNet: pricingForRoom.breakfastTotal,
+                breakfastNet: round2(allocatedBreakfastTotals[bookingIdx] ?? 0),
                 // Per MRB-11b (QA pass 2026-10-25): the BR-12 other
                 // add-ons join the add-on stream. They are attributed
                 // to the FIRST child only — the create path spreads
