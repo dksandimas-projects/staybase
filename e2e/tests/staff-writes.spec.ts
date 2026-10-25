@@ -125,42 +125,53 @@ test.describe("Staff-side scenario writes (approved 2026-10-25)", () => {
     await page.getByRole("button", { name: /sign in|log in/i }).first().click();
     await page.waitForTimeout(3500);
 
+    // A cut-off that has already passed today, and that is NOT the
+    // hardcoded 20:00 - so a surface that still used the hardcoded value
+    // would quote "8:00 PM" and disagree.
+    const cutOff = "00:01";
+    const clock = "12:01 AM";
+
     await page.goto(`${ADMIN_BASE}/settings?tab=breakfast`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(3000);
     const cutoff = page.getByTestId("breakfast-cutoff-time");
     await expect(cutoff, "the cut-off field must render").toBeVisible({ timeout: 20_000 });
     const original = await cutoff.inputValue();
 
-    // A cut-off that has already passed today, so tonight's meals are
-    // locked. Per KIT-03 the kitchen list used the HARDCODED 20:00 while
-    // the guest and staff views used the configured value — the three
-    // must agree.
-    await cutoff.fill("00:01");
-    await page.getByRole("button", { name: /save dining settings/i }).click();
-    await page.waitForTimeout(3000);
-
     try {
-      // A booking for tonight with a breakfast on it.
-      const today = new Date();
-      const checkIn = today.toISOString().slice(0, 10);
-      const checkOut = new Date(today.getTime() + 86400000).toISOString().slice(0, 10);
-      const created = await createBookingViaBrowser(page, {
-        checkIn,
-        checkOut,
-        paymentMethod: "pay-at-hotel",
-        breakfastMealId: "tapsilog",
-        breakfastSlots: 1
-      });
-      expect(created.createStatus).toBe(200);
+      await cutoff.fill(cutOff);
+      await page.getByRole("button", { name: /save dining settings/i }).click();
+      await page.waitForTimeout(3500);
 
-      // The STAFF view: the kitchen list for today.
+      // The setting must actually have taken (per 3.17 it used to be
+      // written from the seeded default instead).
+      await page.goto(`${ADMIN_BASE}/settings?tab=breakfast`, { waitUntil: "domcontentloaded" });
+      await page.waitForTimeout(3000);
+      expect(
+        await page.getByTestId("breakfast-cutoff-time").inputValue(),
+        "the configured cut-off must stick"
+      ).toBe(cutOff);
+
+      // 1. The kitchen list must quote the CONFIGURED cut-off.
       await page.goto(`${ADMIN_BASE}/kitchen-list`, { waitUntil: "domcontentloaded" });
       await page.waitForTimeout(4000);
-      const kitchenText = await page.locator("body").innerText();
-      console.log(`      KIT-03 · the kitchen list mentions today: ${kitchenText.includes(checkIn)}`);
+      const kitchenCutoff = await page.getByText(/Cutoff:/i).first().innerText();
+      console.log(`      KIT-03 · the kitchen list says "${kitchenCutoff.replace(/\s+/g, " ")}"`);
+      expect(kitchenCutoff, "the kitchen list must use the CONFIGURED cut-off").toContain(clock);
+      expect(kitchenCutoff, "the kitchen list must not use the hardcoded 20:00").not.toMatch(/8:00\s*PM/i);
 
-      // The STAFF drawer's breakfast view for the same booking.
+      // 2. The STAFF view for a booking whose service date is today must
+      //    also read the configured cut-off. The drawer quotes it on the
+      //    booking's own breakfast state.
+      const today = new Date().toISOString().slice(0, 10);
+      const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+      const created = await createBookingViaBrowser(page, {
+        checkIn: today,
+        checkOut: tomorrow,
+        paymentMethod: "pay-at-hotel"
+      });
+      expect(created.createStatus).toBe(200);
       const ids = await readBookingIds(created.bookingRef);
+
       await page.goto(`${ADMIN_BASE}/bookings?bookingId=${ids.id}`, { waitUntil: "domcontentloaded" });
       await page.waitForTimeout(5000);
       const drawer = page.getByRole("dialog").first();
@@ -170,18 +181,11 @@ test.describe("Staff-side scenario writes (approved 2026-10-25)", () => {
         await page.waitForTimeout(2500);
       }
       const drawerText = await drawer.innerText();
-      console.log(`      KIT-03 · the staff drawer says the meal is locked: ${/locked|cut-?off/i.test(drawerText)}`);
-
-      // The GUEST view: the manage-breakfast page for the same booking.
-      const guest = await page.context().newPage();
-      await guest.goto(
-        `${API_BASE}/my-booking/breakfast?ref=${created.bookingRef}&token=${ids.token}`,
-        { waitUntil: "domcontentloaded" }
+      console.log(
+        `      KIT-03 · the staff drawer's breakfast tab: ${drawerText.replace(/\s+/g, " ").slice(0, 180)}`
       );
-      await guest.waitForTimeout(4000);
-      const guestText = await guest.locator("body").innerText();
-      console.log(`      KIT-03 · the guest view says the meal is locked: ${/locked|cut-?off/i.test(guestText)}`);
-      await guest.close();
+      // The staff view must not quote the hardcoded 20:00 either.
+      expect(drawerText, "the staff view must not use the hardcoded 20:00").not.toMatch(/8:00\s*PM/i);
     } finally {
       // Put the cut-off back.
       await page.goto(`${ADMIN_BASE}/settings?tab=breakfast`, { waitUntil: "domcontentloaded" });
