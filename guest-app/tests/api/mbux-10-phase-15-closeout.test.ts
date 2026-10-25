@@ -14,18 +14,26 @@ import { join, resolve } from "node:path";
 //   2. The hooks-rule regression net still holds everywhere the
 //      pattern is non-trivial (BookingPage, CorporateBookingPage,
 //      BookingConfirmPage, BookingLookupPage, ManageBreakfastPage).
-//   3. The CSP permits the Google auth iframe script in BOTH
-//      vercel.json files (the production bug found after MBUX-08).
+//   3. The CSP permits the Google auth iframe script in ALL THREE
+//      vercel.json files (the production bug found after MBUX-08,
+//      and the guest-only regression found 2026-10-23: the fix
+//      landed in two of three files and this assertion only
+//      covered two of three, so the guest deployment stayed
+//      broken in production).
 //   4. VERSION and VERSION2 drift are documented; the bundle may
 //      be one version behind shared/VERSION.ts and that is INTENTIONAL.
 //   5. The `apis.google.com` reference in source is exactly one
-//      call site (GuestAuthContext) and both CSPs allow it.
+//      call site (GuestAuthContext) and all three CSPs allow it.
 
 const repoRoot = resolve(__dirname, "../../..");
 
 const vercelRoot = readFileSync(resolve(repoRoot, "vercel.json"), "utf8");
 const vercelAdmin = readFileSync(
   resolve(repoRoot, "admin-app/vercel.json"),
+  "utf8"
+);
+const vercelGuest = readFileSync(
+  resolve(repoRoot, "guest-app/vercel.json"),
   "utf8"
 );
 const guestAuth = readFileSync(
@@ -80,20 +88,37 @@ describe("MBUX-10 — shared shell components appear in BOTH booking flows", () 
   }
 });
 
-describe("MBUX-10 — Google auth iframe is configured and allowed in BOTH CSPs", () => {
+describe("MBUX-10 — Google auth iframe is configured and allowed in ALL THREE CSPs", () => {
   it("GuestAuthContext uses signInWithPopup with GoogleAuthProvider", () => {
     expect(guestAuth).toMatch(/new GoogleAuthProvider\(\)/);
     expect(guestAuth).toMatch(/signInWithPopup\(auth,\s*provider\)/);
   });
 
-  it("both vercel.json files allow apis.google.com in script-src", () => {
+  it("every vercel.json file allows apis.google.com in script-src", () => {
     // The CSP value is a single big string with semicolon-separated
     // directives; match the host in script-src's URL list, not the
     // directive opener.
+    //
+    // All THREE files are asserted — the 2026-10-23 QA pass found
+    // the guest deployment's CSP still missing the host even though
+    // the root and admin files had it, because this assertion only
+    // covered two of the three. `guest-app/vercel.json` is the file
+    // that governs the GUEST deployment (www.sparkinnbohol.com),
+    // the one whose sign-in page ships "Continue with Google".
     const inScriptSrc = (v: string) =>
       /script-src[^;]*https:\/\/apis\.google\.com/.test(v);
-    expect(inScriptSrc(vercelRoot)).toBe(true);
-    expect(inScriptSrc(vercelAdmin)).toBe(true);
+    expect(
+      inScriptSrc(vercelGuest),
+      "guest-app/vercel.json (the guest deployment's CSP) must allow https://apis.google.com"
+    ).toBe(true);
+    expect(
+      inScriptSrc(vercelRoot),
+      "vercel.json (the root deployment's CSP) must allow https://apis.google.com"
+    ).toBe(true);
+    expect(
+      inScriptSrc(vercelAdmin),
+      "admin-app/vercel.json (the admin deployment's CSP) must allow https://apis.google.com"
+    ).toBe(true);
   });
 
   it("Google sign-in uses Firebase's GoogleAuthProvider + signInWithPopup in exactly one source location", () => {
