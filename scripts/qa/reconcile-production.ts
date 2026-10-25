@@ -827,6 +827,78 @@ function peson(n: number) {
 }
 
 // ---------------------------------------------------------------------------
+// I18 — the LIST's chips, recomputed with the LIST's model
+// ---------------------------------------------------------------------------
+// The Bookings LIST builds its folio WITHOUT the incidental charges:
+// `getBookingFolio` passes `selectedBookingCharges` only for the
+// SELECTED booking, so a row in the list has `chargesTotal = 0` (the
+// drawer loads them per booking). The store orders ARE included.
+//
+// So the list's chips are a DIFFERENT (and smaller) total than the
+// folio's, and the list's "Balance due" legitimately differs from the
+// folio's. I11 recomputes the FOLIO model; this recomputes the LIST
+// model, so the Playwright chip assertion can be checked against an
+// independent figure instead of against the app's own output.
+//
+// The list's "Fully paid" pill (mobile card only) is
+// `paid >= row.totalPrice` — the ROOM bill, not the folio total.
+
+{
+  let listPaid = 0;
+  let listPartial = 0;
+  let listUnpaid = 0;
+  let listBalanceDue = 0;
+  let listNeedsAttention = 0;
+  let listPaidPill = 0;
+  const rows: string[] = [];
+  for (const b of bookings) {
+    const f = folioOf(b);
+    // The list's folio: room bill + BR-12 other add-ons + the
+    // add-to-bill store orders. NO incidental charges.
+    const listGrandTotal = r2(f.totalPrice + f.otherAddOnTotal + f.storeTotal);
+    const listBalance = r2(listGrandTotal - f.ledgerGross);
+    // The advanced filter's three payment states, on the list's folio
+    // (BookingsPage `matchesBookingAdvanced`).
+    if (f.ledgerGross >= listGrandTotal && listGrandTotal > 0) listPaid++;
+    else if (f.ledgerGross > 0 && f.ledgerGross < listGrandTotal) listPartial++;
+    else listUnpaid++;
+    if (listBalance > 0) listBalanceDue++;
+    // The mobile "Fully paid" pill compares the collected amount with
+    // the booking's ROOM total.
+    if (f.ledgerGross >= f.totalPrice && f.totalPrice > 0) listPaidPill++;
+
+    let reason = "";
+    if (b.status === "payment-uploaded") reason = "status=payment-uploaded";
+    else if (b.status === "confirmed" && b.checkIn < today)
+      reason = `confirmed but checkIn ${b.checkIn} < today`;
+    else if (b.status === "pending" && b.checkIn <= today)
+      reason = `pending and checkIn ${b.checkIn} <= today`;
+    else if (b.raw.earlyCheckIn?.status === "requested") reason = "early check-in requested";
+    else if (b.status === "checked-in" && b.checkOut < today)
+      reason = `checked-in but checkOut ${b.checkOut} < today`;
+    else if (b.status === "checked-out" && listBalance > 0)
+      reason = `checked-out with balance ${peso(listBalance)}`;
+    if (reason) {
+      listNeedsAttention++;
+      rows.push(`${b.ref} [${b.status}] ${reason}`);
+    }
+  }
+  check(
+    "I18",
+    "The Bookings LIST's chips — recomputed with the LIST's model (no incidental charges)",
+    "INFO",
+    `PAID ${listPaid} · PARTIAL ${listPartial} · UNPAID ${listUnpaid} · ` +
+      `Balance due ${listBalanceDue} · Needs attention ${listNeedsAttention} · ` +
+      `"Fully paid" pills ${listPaidPill} · (today=${today} Asia/Manila)`,
+    rows
+  );
+  console.log(
+    `     → the LIST omits the incidental charges (the drawer loads them per booking), so its ` +
+      `"Balance due" is LOWER than the folio's (I11). Both figures are correct for their own model.`
+  );
+}
+
+// ---------------------------------------------------------------------------
 // I12 — voucher usage counts
 // ---------------------------------------------------------------------------
 
