@@ -2409,14 +2409,11 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           // re-hydration effect can fall back to it later without
           // re-reading the booking doc.
           //
-          // Per RPT-01b (QA pass 2026-10-23): ONLY the fallback is
+          // Per RPT-01b (QA pass 2026-10-23): only the FALLBACK is
           // captured here. The ledger itself is resolved at COMMIT time
-          // (see below) — resolving it here captured the index as it was
-          // at snapshot time, and the `await` that follows (the private
-          // storage URLs) is long enough for the payments listener to
-          // land in between. The mapper then committed a STALE,
-          // un-hydrated array over the rows the re-hydration effect had
-          // already fixed, and nothing ever re-derived them.
+          // (see below) and, decisively, by the re-hydration effect,
+          // which now also depends on the rows so that no arrival
+          // order can leave them stale.
           const mappedBooking = bookingsData[bookingIndex];
           legacyOnsitePaymentsRef.current[docSnap.id] = mappedBooking.onsitePayments ?? [];
         });
@@ -2431,9 +2428,18 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         }));
         if (!active) return;
 
-        // Per RPT-01b (QA pass 2026-10-23): resolve the payment ledger
-        // at COMMIT time — after the `await` above, immediately before
+        // Per RPT-01b (QA pass 2026-10-23): resolve the payment ledger at
+        // COMMIT time — after the `await` above, immediately before
         // the rows are written to state.
+        //
+        // This is a belt-and-braces improvement, not the fix: the
+        // `await` above yields, and the payments listener can land
+        // during it, so the index ref can be newer by the time the
+        // rows are written than it was when the snapshot arrived.
+        // Resolving here picks the freshest index up.
+        //
+        // THE fix is in the re-hydration effect below, which now also
+        // depends on the rows - see the note on its dependency array.
         //
         // The two listeners are INDEPENDENT, so the ledger index and
         // the bookings rows can arrive in either order:
@@ -2444,11 +2450,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         //   * index first → the rows arrive with a populated index and
         //     commit hydrated.
         //   * index lands DURING the `await` → resolving here (rather
-        //     than before it) picks the fresh index up. Resolving
-        //     before the await is what shipped the zeroed ledger: the
-        //     mapper committed an un-hydrated array OVER the rows the
-        //     re-hydration effect had already repaired, and nothing
-        //     re-derived them afterwards.
+        //     than before it) picks the fresh index up.
         //
         // `paymentIndexRef.current` is the latest index — the
         // re-hydration effect keeps it in step.
@@ -2563,7 +2565,30 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       });
       return changed ? next : prev;
     });
-  }, [paymentIndex, currentUser]);
+    // Per RPT-01b (QA pass 2026-10-23) — THE ROOT CAUSE.
+    //
+    // The effect used to depend on `[paymentIndex, currentUser]` ONLY.
+    // The two listeners are independent, so there is an order in which
+    // the effect can run BEFORE the rows arrive:
+    //
+    //   1. the payments listener delivers -> the index is built ->
+    //      this effect runs -> `prev.length` is 0 -> it short-circuits
+    //   2. the bookings listener delivers -> the rows are committed
+    //      UNHYDRATED
+    //   3. the index does not change again -> this effect never runs
+    //      again -> nothing ever re-derives the rows
+    //
+    // The result was the zeroed ledger in production: every row read
+    // "PHP 0 paid", the list reported "Balance due 69 / Needs attention
+    // 10" instead of 55 / 6, and no "Fully paid" pill was rendered on
+    // any of the 68 rows.
+    //
+    // Depending on the ROWS as well makes the effect order-independent:
+    // whichever arrives last re-derives the rows.
+    //
+    // No render loop: the updater returns `prev` when nothing changed,
+    // so React bails out and the effect does not run again.
+  }, [paymentIndex, currentUser, bookings]);
 
   // Per MRB-12 (2026-08-03, per decision #179 — proposed):
   // subscribe to the `reservations` collection and hydrate
