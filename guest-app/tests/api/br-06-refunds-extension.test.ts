@@ -174,13 +174,24 @@ describe("BR-06 — Refunds extension (source-text + smoke tripwires)", () => {
     expect(computeRefundPaidAmountDelta(1000, 500)).toBe(500);
     // Edge cases — NaN inputs default to 0 (the
     // defensive coercion the helper uses).
-    expect(computeRefundPaidAmountDelta(NaN, 500)).toBe(-500);
+    //
+    // Per FIN-PAID-AMOUNT-FLOOR (QA pass 2026-10-24) the result is
+    // floored at 0: `paidAmount` is "what the guest has paid" and can
+    // never be negative. It used to be — the refund path decremented it
+    // from a base that was never seeded, so `SI-20261021-00011` ended at
+    // −₱1,000 (a guest who paid ₱5,400 read as owing ₱1,000). A refund
+    // larger than what was collected is a LIABILITY, recorded by the
+    // refund doc itself.
+    expect(computeRefundPaidAmountDelta(NaN, 500)).toBe(0);
     expect(computeRefundPaidAmountDelta(1000, NaN)).toBe(1000);
     // Negative refund inputs clamp to 0 (the helper
     // uses `Math.max(0, refundAmountPositive)` to
     // defend against stray negatives from upstream
     // calculations). The total is unchanged.
     expect(computeRefundPaidAmountDelta(1000, -10)).toBe(1000);
+    // A refund larger than the paid amount floors at 0 — it never goes
+    // negative.
+    expect(computeRefundPaidAmountDelta(500, 1000)).toBe(0);
   });
 
   // The bug-scenario regression test (per the layman

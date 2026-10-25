@@ -87,6 +87,14 @@ import {
   // stored value and the value the public catalog endpoint reads can
   // never disagree on what "off" means.
   normalizeOtherAddOnsEnabled,
+  // Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide
+  // bot-protection mode. Shared with the guest-app server gate so the
+  // stored value and the value the server reads can never disagree on
+  // what "off" means. FAIL CLOSED — only the exact string "disabled"
+  // opens the gate.
+  normalizeBotProtectionMode,
+  BOT_PROTECTION_MODE_DEFAULT,
+  type BotProtectionMode,
   // Per MSL-01 (2026-10-15): the stay-length cap. Stored RESOLVED
   // (`Infinity` when the admin chose "no limit"), so every admin
   // read gets a safe number. The Settings editor maps `Infinity` back
@@ -284,6 +292,17 @@ export interface OnsitePayment {
   amount: number;
   method: string;
   note: string;
+  /**
+   * Per FIN-REFUND-LIABILITY (QA pass 2026-10-24): a refund's lifecycle
+   * status. `"pending"` = the hotel has approved the refund but has NOT
+   * paid it out yet — the money is still held and is a LIABILITY, not
+   * collected money. `"paid"` = the money has left the till.
+   *
+   * `null`/absent means "no status on the doc", which the folio treats
+   * as pending (the same convention the dashboard's pending-refunds
+   * counter uses).
+   */
+  status?: string | null;
   transactionReference?: string | null;
   reason: string | null;
   approvedBy: string | null;
@@ -2389,13 +2408,17 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           // The denormalized array is stashed in a ref first so the
           // re-hydration effect can fall back to it later without
           // re-reading the booking doc.
+          //
+          // Per RPT-01b (QA pass 2026-10-23): ONLY the fallback is
+          // captured here. The ledger itself is resolved at COMMIT time
+          // (see below) — resolving it here captured the index as it was
+          // at snapshot time, and the `await` that follows (the private
+          // storage URLs) is long enough for the payments listener to
+          // land in between. The mapper then committed a STALE,
+          // un-hydrated array over the rows the re-hydration effect had
+          // already fixed, and nothing ever re-derived them.
           const mappedBooking = bookingsData[bookingIndex];
           legacyOnsitePaymentsRef.current[docSnap.id] = mappedBooking.onsitePayments ?? [];
-          mappedBooking.onsitePayments = resolveBookingOnsitePayments(
-            docSnap.id,
-            mappedBooking.onsitePayments ?? [],
-            paymentIndexRef.current
-          ) as OnsitePayment[];
         });
 
         await Promise.all(bookingsData.map(async (booking) => {
@@ -2407,6 +2430,35 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           }
         }));
         if (!active) return;
+
+        // Per RPT-01b (QA pass 2026-10-23): resolve the payment ledger
+        // at COMMIT time — after the `await` above, immediately before
+        // the rows are written to state.
+        //
+        // The two listeners are INDEPENDENT, so the ledger index and
+        // the bookings rows can arrive in either order:
+        //
+        //   * rows first → the index is still empty here, the rows
+        //     commit un-hydrated, and the re-hydration effect below
+        //     re-derives them when the index lands.
+        //   * index first → the rows arrive with a populated index and
+        //     commit hydrated.
+        //   * index lands DURING the `await` → resolving here (rather
+        //     than before it) picks the fresh index up. Resolving
+        //     before the await is what shipped the zeroed ledger: the
+        //     mapper committed an un-hydrated array OVER the rows the
+        //     re-hydration effect had already repaired, and nothing
+        //     re-derived them afterwards.
+        //
+        // `paymentIndexRef.current` is the latest index — the
+        // re-hydration effect keeps it in step.
+        bookingsData.forEach((booking) => {
+          booking.onsitePayments = resolveBookingOnsitePayments(
+            booking.id,
+            legacyOnsitePaymentsRef.current[booking.id] ?? booking.onsitePayments ?? [],
+            paymentIndexRef.current
+          ) as OnsitePayment[];
+        });
 
         // Natural sort by createdAt descending
         bookingsData.sort((a, b) => {
@@ -2741,10 +2793,12 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
 
-    // Force-refresh the ID token so the listener attaches with a token
-    // that definitely carries the staff `role` custom claim — the same
-    // handshake the reservations listener above uses (MRB-12).
-    void auth.currentUser?.getIdToken(true).then(() => {
+    // Per SD-4 (QA pass 2026-10-23): the attach is a named function so
+    // it can be RETRIED. A rejected token refresh used to leave the
+    // subscription NEVER created — and an unhandled promise rejection is
+    // not a `console.error`, so it was invisible: the ledger simply
+    // stayed empty and every row read "₱0 paid".
+    const attachPaymentsLedger = () => {
       if (cancelled) return;
 
       // One-shot hydration. `onSnapshot` delivers its first snapshot
@@ -2800,7 +2854,28 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           console.error("Error listening to reservation payments collectionGroup:", error);
         }
       );
-    });
+    };
+
+    // Force-refresh the ID token so the listener attaches with a token
+    // that definitely carries the staff `role` custom claim — the same
+    // handshake the reservations listener above uses (MRB-12).
+    void auth.currentUser?.getIdToken(true)
+      .then(attachPaymentsLedger)
+      .catch((error) => {
+        console.error("Error attaching the reservation payments ledger listener:", error);
+        // Retry with the SDK's CACHED token. The auth handler has
+        // already validated the staff `role` claim on it, so the
+        // listener can still attach — and a ledger that never attaches
+        // is a ledger that reads "₱0 paid" for every booking.
+        void auth.currentUser?.getIdToken(false)
+          .then(attachPaymentsLedger)
+          .catch((retryError) => {
+            console.error(
+              "Error attaching the reservation payments ledger listener (retry):",
+              retryError
+            );
+          });
+      });
 
     return () => {
       cancelled = true;
@@ -2833,7 +2908,11 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
 
-    void auth.currentUser?.getIdToken(true).then(() => {
+    // Per SD-4 (QA pass 2026-10-23): named attach function so a
+    // rejected token refresh can be RETRIED instead of leaving the
+    // subscription never created — silently, because an unhandled
+    // promise rejection is not a `console.error`.
+    const attachRefundsLedger = () => {
       if (cancelled) return;
 
       void getDocs(collectionGroup(db, "refunds"))
@@ -2862,7 +2941,18 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           console.error("Error listening to refunds collectionGroup:", error);
         }
       );
-    });
+    };
+
+    void auth.currentUser?.getIdToken(true)
+      .then(attachRefundsLedger)
+      .catch((error) => {
+        console.error("Error attaching the refunds ledger listener:", error);
+        void auth.currentUser?.getIdToken(false)
+          .then(attachRefundsLedger)
+          .catch((retryError) => {
+            console.error("Error attaching the refunds ledger listener (retry):", retryError);
+          });
+      });
 
     return () => {
       cancelled = true;
@@ -3410,19 +3500,23 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             // that needs the staff's Firebase ID
             // token. The `Bearer` prefix matches the
             // existing `authenticateStaff` reader.
-            "Authorization": token ? `Bearer ${token}` : "",
-            // Per `plan/docs/SECURITY.md`: Cloudflare
-            // Turnstile at the route's public edge
-            // produces a server-validated token that
-            // the client must echo on every mutation.
-            // The apiRouter's `verifyTurnstile` reads
-            // it from `req.body.turnstileToken`.
-            "X-Spark-Inn-Turnstile": "client-echo"
+            //
+            // Per P0-STAFF-TURNSTILE (2026-10-24): NO
+            // Turnstile token is sent. The server
+            // skips the bot gate for an AUTHENTICATED
+            // staff write (`enforceBotGate` in
+            // `guest-app/server/apiRouter.ts`) — the
+            // request already carries a signature-
+            // verified ID token with a staff role
+            // claim. The Turnstile echo header this
+            // used to send was never read by the
+            // server, and the placeholder body field
+            // made every one of these six staff
+            // mutations fail with HTTP 400 "Bot
+            // verification token is missing."
+            "Authorization": token ? `Bearer ${token}` : ""
           },
-          body: JSON.stringify({
-            ...input,
-            turnstileToken: undefined
-          })
+          body: JSON.stringify(input)
         }
       );
       const data = await res.json();
@@ -3555,13 +3649,13 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": token ? `Bearer ${token}` : "",
-            "X-Spark-Inn-Turnstile": "client-echo"
+            // Per P0-STAFF-TURNSTILE (2026-10-24): no Turnstile
+            // token — the server skips the bot gate for an
+            // AUTHENTICATED staff write. See the note on
+            // `staffUpdateBreakfast` above.
+            "Authorization": token ? `Bearer ${token}` : ""
           },
-          body: JSON.stringify({
-            ...input,
-            turnstileToken: undefined
-          })
+          body: JSON.stringify(input)
         }
       );
       const data = await res.json();
@@ -6613,7 +6707,21 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
     //
     // The default is `true` so a legacy settings doc without the
     // field never silently switches a hotel's revenue stream off.
-    otherAddOnsEnabled: true
+    otherAddOnsEnabled: true,
+    // Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide
+    // bot-protection mode. `"turnstile"` (the default) = the bot gate
+    // is ON for every public guest write endpoint. `"disabled"` = the
+    // gate is open (a testing window).
+    //
+    // The default is `"turnstile"` so a legacy settings doc without the
+    // field never silently opens every guest write endpoint.
+    botProtectionMode: BOT_PROTECTION_MODE_DEFAULT,
+    // The audit trail for a disabled gate: WHICH admin turned it off,
+    // WHEN, and WHY. Written by the Settings → Environment Testing tab
+    // and cleared when the gate is switched back on.
+    botProtectionDisabledBy: "",
+    botProtectionDisabledAt: "",
+    botProtectionReason: ""
   });
 
   // Tracks whether the first `settings/websiteContent` snapshot
@@ -6981,7 +7089,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
           const docId = docSnap.id;
           switch (docId) {
             case "hotelConfig":
-              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope), paymentHoldWindowHours: normalizePaymentHoldWindowHours((data as Partial<typeof hotelConfig>)?.paymentHoldWindowHours), inFlowHoldMinutes: normalizeInFlowHoldMinutes((data as Partial<typeof hotelConfig>)?.inFlowHoldMinutes), vatConfig: normalizeVatConfig((data as Partial<typeof hotelConfig>)?.vatConfig), maxStayNights: resolveMaxStayNights((data as Partial<typeof hotelConfig>)?.maxStayNights), otherAddOnsEnabled: normalizeOtherAddOnsEnabled((data as Partial<typeof hotelConfig>)?.otherAddOnsEnabled) })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`. // Per PEX-01 (2026-08-01): always normalize the incoming window so legacy settings (or values outside the admin-allowed 1..72h range) hydrate to the 24h default. The per-booking `holdExpiresAt` is the only field the rest of the system reads; the Settings window is just the input. // Per VAT-01 (2026-10-12): always normalize the incoming `vatConfig` so legacy settings without the field hydrate to the BIR-compliant default (`enabled: true`); the 12% breakdown keeps showing everywhere until the admin opts out via the Settings → Discounts tab Tax card. // Per OCT-M1 (2026-10-20, decision #295): always normalize the incoming `otherAddOnsEnabled` so a legacy doc without the field hydrates to `true` and a hand-edited `"false"` string is read as the boolean it spells.
+              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope), paymentHoldWindowHours: normalizePaymentHoldWindowHours((data as Partial<typeof hotelConfig>)?.paymentHoldWindowHours), inFlowHoldMinutes: normalizeInFlowHoldMinutes((data as Partial<typeof hotelConfig>)?.inFlowHoldMinutes), vatConfig: normalizeVatConfig((data as Partial<typeof hotelConfig>)?.vatConfig), maxStayNights: resolveMaxStayNights((data as Partial<typeof hotelConfig>)?.maxStayNights), otherAddOnsEnabled: normalizeOtherAddOnsEnabled((data as Partial<typeof hotelConfig>)?.otherAddOnsEnabled), botProtectionMode: normalizeBotProtectionMode((data as Partial<typeof hotelConfig>)?.botProtectionMode), botProtectionDisabledBy: String((data as Partial<typeof hotelConfig>)?.botProtectionDisabledBy || ""), botProtectionDisabledAt: String((data as Partial<typeof hotelConfig>)?.botProtectionDisabledAt || ""), botProtectionReason: String((data as Partial<typeof hotelConfig>)?.botProtectionReason || "") })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`. // Per PEX-01 (2026-08-01): always normalize the incoming window so legacy settings (or values outside the admin-allowed 1..72h range) hydrate to the 24h default. The per-booking `holdExpiresAt` is the only field the rest of the system reads; the Settings window is just the input. // Per VAT-01 (2026-10-12): always normalize the incoming `vatConfig` so legacy settings without the field hydrate to the BIR-compliant default (`enabled: true`); the 12% breakdown keeps showing everywhere until the admin opts out via the Settings → Discounts tab Tax card. // Per OCT-M1 (2026-10-20, decision #295): always normalize the incoming `otherAddOnsEnabled` so a legacy doc without the field hydrates to `true` and a hand-edited `"false"` string is read as the boolean it spells. // Per QA-2026-10-23 §3.2 (2026-10-25): always normalize the incoming `botProtectionMode` so a legacy doc without the field hydrates to `"turnstile"` (the bot gate ON) and a hand-edited typo never opens the gate. // The three audit fields are mirrored explicitly so the admin state mirrors the doc exactly — a doc that no longer carries them (the gate was switched back on) hydrates to an EMPTY audit trail instead of keeping the previous window's values.
               break;
             case "websiteContent":
               setWebsiteContent(mergeWebsiteContent(data as Record<string, unknown>));

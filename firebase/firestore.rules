@@ -746,6 +746,37 @@ service cloud.firestore {
       }
     }
 
+    // Per QA-REPORT-2026-10-23 §3.10 (the desk's incoming-call
+    // listener is denied in production — "Missing or insufficient
+    // permissions" on EVERY admin sign-in, for BOTH staff roles): the
+    // admin app listens for incoming room calls with a COLLECTION-GROUP
+    // query over "callSessions" (`AdminContext.tsx` —
+    // `collectionGroup(db, "callSessions")`).
+    //
+    // A group query is only provable if the rules guarantee that EVERY
+    // document in the group is readable, at EVERY depth. The capability
+    // block above covers ONLY the top-level `callSessions/{sessionToken}`
+    // (a `match` block does NOT cascade into subcollections), so with no
+    // rule for a nested `<any-depth>/callSessions/{sessionToken}` path the group
+    // query could not be proven safe and Firestore DENIED it outright —
+    // even for a signed-in admin, and even though `collection("callSessions")`
+    // (top level only) returned 200.
+    //
+    // This block is the same shape as the `messages` group rule below and
+    // as the `charges` / `payments` / `refunds` group rules at the bottom
+    // of this file: a recursive wildcard that grants STAFF the read at any
+    // depth. It grants the desk nothing new — the concrete call-session
+    // documents the desk touches are the top-level ones, already
+    // staff-readable — and it does NOT widen the guest's access: the
+    // guest still reaches its own session through the capability block
+    // above, and a NON-STAFF group query stays DENIED, because a group
+    // query is only allowed for a caller when EVERY arm in the group is
+    // provably satisfied for them (this arm is conditional on
+    // `isStaff()`).
+    match /{path=**}/callSessions/{sessionToken} {
+      allow read: if isStaff();
+    }
+
     // Per PR-AUDIT-B3 (2026-10-20): the desk's inbox reads BOTH the
     // legacy `intercoms/{room}/messages` thread and the guest's
     // `intercomSessions/{token}/messages` thread with a single

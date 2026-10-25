@@ -144089,6 +144089,250 @@ var init_firebase_admin = __esm({
   }
 });
 
+// ../shared/VERSION.ts
+var VERSION2;
+var init_VERSION = __esm({
+  "../shared/VERSION.ts"() {
+    "use strict";
+    VERSION2 = "2.18.21";
+  }
+});
+
+// ../shared/animations.ts
+var premiumEase, fadeUp, fadeIn, staggerContainer, staggerChild, scaleIn, slideInRight, slideInLeft, slideInBottom;
+var init_animations = __esm({
+  "../shared/animations.ts"() {
+    "use strict";
+    premiumEase = [0.25, 0.1, 0.25, 1];
+    fadeUp = {
+      hidden: { opacity: 0, y: 16 },
+      visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: premiumEase } }
+    };
+    fadeIn = {
+      hidden: { opacity: 0 },
+      visible: { opacity: 1, transition: { duration: 0.35, ease: "easeOut" } }
+    };
+    staggerContainer = {
+      hidden: {},
+      visible: { transition: { staggerChildren: 0.08, delayChildren: 0.1 } }
+    };
+    staggerChild = {
+      hidden: { opacity: 0, y: 12 },
+      visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: premiumEase } }
+    };
+    scaleIn = {
+      hidden: { opacity: 0, scale: 0.97 },
+      visible: { opacity: 1, scale: 1, transition: { duration: 0.3, ease: premiumEase } }
+    };
+    slideInRight = {
+      hidden: { opacity: 0, x: 48 },
+      visible: { opacity: 1, x: 0, transition: { duration: 0.35, ease: premiumEase } },
+      exit: { opacity: 0, x: 48, transition: { duration: 0.2, ease: "easeIn" } }
+    };
+    slideInLeft = {
+      hidden: { opacity: 0, x: -48 },
+      visible: { opacity: 1, x: 0, transition: { duration: 0.35, ease: premiumEase } },
+      exit: { opacity: 0, x: -48, transition: { duration: 0.2, ease: "easeIn" } }
+    };
+    slideInBottom = {
+      hidden: { opacity: 0, y: 32 },
+      visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: premiumEase } },
+      exit: { opacity: 0, y: 32, transition: { duration: 0.2, ease: "easeIn" } }
+    };
+  }
+});
+
+// ../shared/constants/index.ts
+var BOOKING_STATUSES, BOOKING_SOURCES, DEFAULT_BOOKING_SOURCES, PROTECTED_BOOKING_SOURCES, ROOM_STATUSES, HOUSEKEEPING_STATUSES, DEFAULT_ROOM_TYPES, DEFAULT_BED_SETUPS, DEFAULT_BOOKING_PREFERENCES, ADDITIONAL_REQUEST_MAX_LENGTH, ARRIVAL_WINDOW_HOURS, MAX_ROOM_TYPE_PHOTOS, DEFAULT_BREAKFAST_CUTOFF_TIME, DEFAULT_BREAKFAST_CUTOFF_TIMEZONE, DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES, MIN_BREAKFAST_OVERRIDE_REASON_LENGTH, DEFAULT_CORPORATE_PERKS, KNOWN_CONTENT_ICONS, DEFAULT_CORPORATE_PAGE_CONTENT, MAX_FEATURED_TYPES, MAX_FEATURED_ROOMS, SUPPORTED_PAYMENT_METHODS, UNSUPPORTED_PAYMENT_METHODS, PROTECTED_PAYMENT_METHODS, MAX_PAYMENT_METHOD_QR_BYTES, MAX_BREAKFAST_MEAL_IMAGE_BYTES, BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES, MAX_STAY_NIGHTS, MAX_ADVANCE_DAYS, PUBLIC_SITE_CONTENT_CACHE_KEY, PUBLIC_SITE_CONTENT_CACHE_TTL_MS, PUBLIC_SITE_CONTENT_CACHE_BUST_KEY, DEFAULT_TERMS_VERSION, TERMS_BODY_MAX_LENGTH;
+var init_constants = __esm({
+  "../shared/constants/index.ts"() {
+    "use strict";
+    BOOKING_STATUSES = [
+      "pending",
+      "payment-uploaded",
+      "payment-confirmed",
+      "confirmed",
+      "checked-in",
+      "checked-out",
+      "cancelled"
+    ];
+    BOOKING_SOURCES = ["online", "walk-in", "phone", "facebook", "corporate"];
+    DEFAULT_BOOKING_SOURCES = [
+      { source: "online", label: "Online Booking", isEnabled: true, selectableAtFrontDesk: false },
+      { source: "walk-in", label: "Walk-in Desk", isEnabled: true, selectableAtFrontDesk: false },
+      { source: "corporate", label: "Corporate Codes", isEnabled: true, selectableAtFrontDesk: false },
+      { source: "phone", label: "Phone Call", isEnabled: true, selectableAtFrontDesk: true },
+      { source: "facebook", label: "Facebook / Messenger", isEnabled: true, selectableAtFrontDesk: true },
+      { source: "agoda", label: "Agoda (OTA)", isEnabled: true, selectableAtFrontDesk: true }
+    ];
+    PROTECTED_BOOKING_SOURCES = ["online", "walk-in", "corporate"];
+    ROOM_STATUSES = ["available", "occupied", "blocked"];
+    HOUSEKEEPING_STATUSES = ["clean", "dirty", "in-progress"];
+    DEFAULT_ROOM_TYPES = [
+      // Per F09 / SEC-5 / SEC-6 (2026-10-22, P2 revenue leak): the seed
+      // `corporateRate` is 0 for every type and MUST stay 0. This module
+      // is imported by the guest app (through the `@spark-inn/shared`
+      // barrel), so a non-zero literal here is compiled into the
+      // JavaScript every guest downloads — the hotel's NEGOTIATED
+      // corporate ladder must never ship in a browser bundle.
+      //
+      // The corporate rate ladder now lives in the server-only module
+      // `guest-app/server/lib/corporateRates.ts` (staff + server). The
+      // staff admin app does not need it: the corporate rate calendar
+      // reads the LIVE `settings/hotelConfig.roomTypes[]` through the
+      // staff-only Firestore rules, which is the authoritative source.
+      // A `corporateRate` of 0 means "no corporate rate configured" and
+      // the booking server falls back to the standard rate (never ₱0).
+      //
+      // Per SR-01..05 (2026-10-12): `bedSetupValues` is the per-type
+      // subset of `HotelConfig.bedSetups[].value` offered to the guest on
+      // the booking Step 2. The seed below mirrors the original
+      // booking-flow design ("T1 for Twin types, both set-ups for the
+      // Double", and "no set-up selection" for types where it doesn't
+      // apply — Single is a solo product, Family has fixed
+      // 2-double configuration). Admins edit the subset via the Room
+      // Types editor → Bed Set-ups picker.
+      { value: "single", label: "Single", shortLabel: "Single", imageUrls: [], bedDefinition: "1 single bed", description: "A compact private room for solo guests, short work stays, and travelers who value quiet consistency.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 1, maxChildren: 0, pricePerNight: 1800, weekendRate: 2100, corporateRate: 0, bedSetupValues: [] },
+      { value: "standard-double", label: "Standard Double", shortLabel: "Std Double", imageUrls: [], bedDefinition: "1 double bed", description: "Simple comfort for couples or business travelers who want an easy, consistent stay near the city center.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2400, weekendRate: 2700, corporateRate: 0, bedSetupValues: ["large-bed", "twin-beds"] },
+      { value: "standard-twin", label: "Standard Twin", shortLabel: "Std Twin", imageUrls: [], bedDefinition: "2 single beds", description: "Twin-bed comfort for colleagues or friends who want a simple, tidy stay with all essentials close by.", amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2600, weekendRate: 2900, corporateRate: 0, bedSetupValues: ["twin-beds", "large-bed"] },
+      { value: "executive", label: "Executive", shortLabel: "Executive", imageUrls: [], bedDefinition: "1 queen size bed", description: "A warm, spacious retreat with premium bedding, soft lighting, and room to settle in after a day in Bohol.", amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 3200, weekendRate: 3600, corporateRate: 0, bedSetupValues: ["large-bed", "twin-beds"] },
+      { value: "family", label: "Family", shortLabel: "Family", imageUrls: [], bedDefinition: "2 double beds", description: "Extra space for small families, with thoughtful essentials and a calm base for Bohol plans.", amenities: ["WiFi", "AC", "Mini Fridge", "Cable TV"], maxCapacity: 4, maxChildren: 2, pricePerNight: 4200, weekendRate: 4600, corporateRate: 0, bedSetupValues: [] }
+    ];
+    DEFAULT_BED_SETUPS = [
+      { value: "large-bed", label: "I'd like a large bed", icon: "bed" },
+      { value: "twin-beds", label: "I'd like twin beds", icon: "bed" }
+    ];
+    DEFAULT_BOOKING_PREFERENCES = [
+      { value: "high-floor", label: "I'd like a room on a high floor" },
+      { value: "luggage-storage", label: "I'd like luggage storage" },
+      { value: "near-elevator", label: "I'd like to be near the elevator" },
+      { value: "honeymoon", label: "I'd like honeymoon arrangements" },
+      { value: "airport-transfer", label: "I'd like an airport transfer" },
+      { value: "quiet-room", label: "I'd like a quiet room" },
+      { value: "away-from-elevator", label: "I'd like to be away from the elevator" },
+      { value: "car-parking", label: "I'd like car parking" },
+      { value: "baby-cot", label: "I'd like to have a baby cot", surchargeNote: "(additional charges may apply)" }
+    ];
+    ADDITIONAL_REQUEST_MAX_LENGTH = 500;
+    ARRIVAL_WINDOW_HOURS = 24;
+    MAX_ROOM_TYPE_PHOTOS = 10;
+    DEFAULT_BREAKFAST_CUTOFF_TIME = "20:00";
+    DEFAULT_BREAKFAST_CUTOFF_TIMEZONE = "Asia/Manila";
+    DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES = 15;
+    MIN_BREAKFAST_OVERRIDE_REASON_LENGTH = 5;
+    DEFAULT_CORPORATE_PERKS = [
+      {
+        title: "Negotiated Rates",
+        description: "Unlock exclusive fixed-rate packages tailored to your company's annual travel volume. Control and predict your hospitality budget with ease.",
+        icon: "coins",
+        isEnabled: true
+      },
+      {
+        title: "Group Bookings",
+        description: "Coordinated logistics for team building retreats, board meetings, and product launches. Keep your organization unified and fully refreshed.",
+        icon: "users",
+        isEnabled: true
+      },
+      {
+        title: "Dedicated Support",
+        description: "A personal account manager handles reservations, customized invoices, and check-in assistance, giving your team peace of mind.",
+        icon: "briefcase",
+        isEnabled: true
+      },
+      {
+        title: "High-Speed Wi-Fi",
+        description: "Dedicated high-bandwidth networks are active throughout our property. Perform remote work, host video calls, and stay in touch without delays.",
+        icon: "wifi",
+        isEnabled: true
+      },
+      {
+        title: "Premium Security",
+        description: "Enjoy a peaceful, secure stay with 24/7 staff, encrypted access locks, and strict privacy protocols for high-profile business visitors.",
+        icon: "shield",
+        isEnabled: true
+      },
+      {
+        title: "Flexible Bookings",
+        description: "Business plans change. Corporate agreements enjoy reduced cancellation fees, priority rescheduling, and same-day room re-allocations.",
+        icon: "calendar",
+        isEnabled: true
+      }
+    ];
+    KNOWN_CONTENT_ICONS = [
+      "bed",
+      "map",
+      "pin",
+      "users",
+      "people",
+      "sparkles",
+      "star",
+      "wifi",
+      "coffee",
+      "car",
+      "palmtree",
+      "gift",
+      "tag",
+      "clock",
+      "shield",
+      "briefcase",
+      "coins",
+      "percent",
+      "calendar",
+      "help",
+      "network",
+      "money",
+      "support",
+      "group",
+      "date",
+      "flexible",
+      "security"
+    ];
+    DEFAULT_CORPORATE_PAGE_CONTENT = {
+      hero: {
+        eyebrow: "Curated hospitality for executive comfort",
+        heading: "Elevated Stays for Modern Business",
+        subtext: "Redefining business travel through quiet efficiency, ergonomic spaces, and the warm hospitality of Bohol.",
+        photoUrl: "https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=1600&q=80"
+      },
+      roomsOverview: {
+        eyebrow: "Accommodation Types",
+        heading: "Rooms Built for Productivity & Rest",
+        description: "Explore our range of boutique rooms. All rooms feature workspaces, high-speed Wi-Fi, air conditioning, and premium linens. No prices are shown below; corporate rates are negotiated based on contract terms."
+      },
+      retreat: {
+        heading: "Partner with us for your next team retreat.",
+        description: "Experience the perfect blend of Bohol's natural charm and the high-efficiency environment your business demands. Fully catered planning options are available.",
+        ctaLabel: "Get in Touch"
+      }
+    };
+    MAX_FEATURED_TYPES = 3;
+    MAX_FEATURED_ROOMS = MAX_FEATURED_TYPES;
+    SUPPORTED_PAYMENT_METHODS = [
+      "gcash",
+      "maya",
+      "bank",
+      "paypal",
+      "pay-at-hotel"
+    ];
+    UNSUPPORTED_PAYMENT_METHODS = ["pesonet"];
+    PROTECTED_PAYMENT_METHODS = ["pay-at-hotel", "add-to-bill"];
+    MAX_PAYMENT_METHOD_QR_BYTES = 2 * 1024 * 1024;
+    MAX_BREAKFAST_MEAL_IMAGE_BYTES = 8 * 1024 * 1024;
+    BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES = [
+      "image/jpeg",
+      "image/png",
+      "image/webp"
+    ];
+    MAX_STAY_NIGHTS = 30;
+    MAX_ADVANCE_DAYS = 365;
+    PUBLIC_SITE_CONTENT_CACHE_KEY = "publicSiteContent:v3";
+    PUBLIC_SITE_CONTENT_CACHE_TTL_MS = 5 * 60 * 1e3;
+    PUBLIC_SITE_CONTENT_CACHE_BUST_KEY = "publicSiteContent:bust";
+    DEFAULT_TERMS_VERSION = "1.0.0";
+    TERMS_BODY_MAX_LENGTH = 5e4;
+  }
+});
+
 // ../node_modules/zod/v3/helpers/util.js
 var util, objectUtil, ZodParsedType, getParsedType;
 var init_util = __esm({
@@ -148192,6 +148436,4472 @@ var init_zod = __esm({
   "../node_modules/zod/index.js"() {
     init_external();
     init_external();
+  }
+});
+
+// ../shared/utils/references.ts
+function pad(value, length) {
+  return String(value).padStart(length, "0");
+}
+function compactDate(value) {
+  const year = value.getFullYear();
+  const month = pad(value.getMonth() + 1, 2);
+  const day = pad(value.getDate(), 2);
+  return `${year}${month}${day}`;
+}
+function generateBookingRef(prefix, date, sequence) {
+  return `${prefix}-${compactDate(date)}-${pad(sequence, 5)}`;
+}
+function generateMemberNumber(prefix, sequence) {
+  return `${prefix}-${pad(sequence, 5)}`;
+}
+function generateStoreOrderRef(date, sequence) {
+  return `SO-${compactDate(date)}-${pad(sequence, 5)}`;
+}
+function nextSequence(currentHighestSequence) {
+  return (currentHighestSequence ?? 0) + 1;
+}
+function isValidBookingRef(value) {
+  return typeof value === "string" && BOOKING_REF_REGEX.test(value.trim());
+}
+function isValidReservationRef(value) {
+  return typeof value === "string" && RESERVATION_REF_REGEX.test(value.trim());
+}
+function isValidReservationId(value) {
+  return typeof value === "string" && RESERVATION_ID_REGEX.test(value.trim());
+}
+function generateReservationId(randomUUID = defaultRandomUUID) {
+  const id = randomUUID();
+  if (!isValidReservationId(id)) {
+    throw new Error("Generated reservationId did not match the expected UUIDv4 shape.");
+  }
+  return id;
+}
+function defaultRandomUUID() {
+  const g = globalThis;
+  if (typeof g.crypto?.randomUUID === "function") {
+    return String(g.crypto.randomUUID());
+  }
+  const { randomUUID } = require("node:crypto");
+  return String(randomUUID());
+}
+function generateLookupToken(randomBytes = defaultRandomBytes) {
+  const bytes = randomBytes(LOOKUP_TOKEN_HEX_LENGTH / 2);
+  let hex = "";
+  for (let i2 = 0; i2 < bytes.length; i2++) {
+    hex += bytes[i2].toString(16).padStart(2, "0");
+  }
+  return hex;
+}
+function defaultRandomBytes(n2) {
+  const { randomBytes } = require("node:crypto");
+  return new Uint8Array(randomBytes(n2));
+}
+function isValidLookupToken(value) {
+  return typeof value === "string" && /^[a-f0-9]{32}$/i.test(value);
+}
+var BOOKING_REF_REGEX, RESERVATION_REF_REGEX, RESERVATION_ID_REGEX, LOOKUP_TOKEN_HEX_LENGTH;
+var init_references = __esm({
+  "../shared/utils/references.ts"() {
+    "use strict";
+    BOOKING_REF_REGEX = /^[A-Z]{1,4}-\d{8}-\d{3,5}$/;
+    RESERVATION_REF_REGEX = /^R-\d{8}-\d{3,5}$/;
+    RESERVATION_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    LOOKUP_TOKEN_HEX_LENGTH = 32;
+  }
+});
+
+// ../shared/utils/bookingInFlowHold.ts
+function isInFlowHoldActive(hold, now = /* @__PURE__ */ new Date()) {
+  if (!hold || hold.status !== "active") return false;
+  if (!hold.expiresAt) return false;
+  const expiresAt = hold.expiresAt instanceof Date ? hold.expiresAt : new Date(hold.expiresAt);
+  if (isNaN(expiresAt.getTime())) return false;
+  return expiresAt.getTime() > now.getTime();
+}
+function computeInFlowHoldExpiresAt(minutes, now = /* @__PURE__ */ new Date()) {
+  if (!Number.isFinite(Number(minutes)) || !minutes || minutes <= 0) {
+    return null;
+  }
+  return new Date(now.getTime() + Number(minutes) * 60 * 1e3);
+}
+function computeExtendedInFlowHoldExpiresAt(minutes, currentExpiresAt, now = /* @__PURE__ */ new Date()) {
+  let base = now;
+  if (currentExpiresAt) {
+    const parsed = currentExpiresAt instanceof Date ? currentExpiresAt : new Date(currentExpiresAt);
+    if (!isNaN(parsed.getTime()) && parsed.getTime() > now.getTime()) {
+      base = parsed;
+    }
+  }
+  return computeInFlowHoldExpiresAt(minutes, base);
+}
+function canExtendInFlowHold(hold) {
+  if (!hold) return false;
+  if (!IN_FLOW_HOLD_EXTENSION_STATUSES.includes(
+    String(hold.status)
+  )) {
+    return false;
+  }
+  const count = Number(hold.extensionCount ?? 0);
+  if (!Number.isFinite(count) || count < 0) return false;
+  return count < MAX_IN_FLOW_HOLD_EXTENSIONS;
+}
+function normalizeInFlowHoldMinutes(raw) {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return DEFAULT_IN_FLOW_HOLD_MINUTES;
+  const clamped = Math.min(
+    MAX_IN_FLOW_HOLD_MINUTES,
+    Math.max(MIN_IN_FLOW_HOLD_MINUTES, Math.floor(value))
+  );
+  return clamped;
+}
+function clampIntegerInRange(raw, min, max) {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return null;
+  const floored = Math.floor(value);
+  if (floored < min || floored > max) return null;
+  return floored;
+}
+function inFlowHoldStayMatches(hold, input) {
+  if (!hold || !input) return false;
+  if (String(hold.roomType ?? "") !== String(input.roomType ?? "")) return false;
+  if (String(hold.checkIn ?? "") !== String(input.checkIn ?? "")) return false;
+  if (String(hold.checkOut ?? "") !== String(input.checkOut ?? "")) return false;
+  return Number(hold.numNights ?? 0) === Number(input.numNights ?? 0);
+}
+function generateHoldId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c2) => {
+    const r3 = Math.random() * 16 | 0;
+    const v6 = c2 === "x" ? r3 : r3 & 3 | 8;
+    return v6.toString(16);
+  });
+}
+var IN_FLOW_HOLD_MINUTES, MIN_IN_FLOW_HOLD_MINUTES, MAX_IN_FLOW_HOLD_MINUTES, DEFAULT_IN_FLOW_HOLD_MINUTES, IN_FLOW_HOLD_STATUSES, MAX_IN_FLOW_HOLD_EXTENSIONS, IN_FLOW_HOLD_EXTENSION_STATUSES, HOLD_ID_REGEX;
+var init_bookingInFlowHold = __esm({
+  "../shared/utils/bookingInFlowHold.ts"() {
+    "use strict";
+    IN_FLOW_HOLD_MINUTES = 15;
+    MIN_IN_FLOW_HOLD_MINUTES = 5;
+    MAX_IN_FLOW_HOLD_MINUTES = 30;
+    DEFAULT_IN_FLOW_HOLD_MINUTES = IN_FLOW_HOLD_MINUTES;
+    IN_FLOW_HOLD_STATUSES = ["active", "consumed", "expired"];
+    MAX_IN_FLOW_HOLD_EXTENSIONS = 3;
+    IN_FLOW_HOLD_EXTENSION_STATUSES = ["active", "expired"];
+    HOLD_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  }
+});
+
+// ../shared/schemas/booking.ts
+var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema, StartBookingHoldSchema, BreakfastMealSchema, BreakfastConfigSchema, BreakfastSelectionEntrySchema, BreakfastServedEntrySchema, BreakfastAuditEntrySchema, BreakfastRefundContextSchema, AddOnSchema, OtherAddOnSelectionEntrySchema, OtherAddOnAuditEntrySchema, OtherAddOnRefundContextSchema, OtherAddOnUpdateSchema, StaffOtherAddOnUpdateSchema, OtherAddOnMarkServedSchema, OtherAddOnMarkRefundPaidSchema, AddOnCatalogAuditLogSchema, ExtendBookingHoldSchema;
+var init_booking = __esm({
+  "../shared/schemas/booking.ts"() {
+    "use strict";
+    init_zod();
+    init_references();
+    init_bookingInFlowHold();
+    BookingDatesSchema = external_exports.object({
+      checkIn: external_exports.string().min(1, "Choose a check-in date"),
+      checkOut: external_exports.string().min(1, "Choose a check-out date"),
+      numGuests: external_exports.coerce.number().int().min(1, "At least one guest is required"),
+      roomId: external_exports.string().min(1, "Choose a room")
+    }).refine((value) => new Date(value.checkOut) > new Date(value.checkIn), {
+      message: "Check-out date must be after check-in",
+      path: ["checkOut"]
+    });
+    GuestDetailsSchema = external_exports.object({
+      guestName: external_exports.string().min(2, "Enter the guest name"),
+      guestEmail: external_exports.string().email("Enter a valid email address"),
+      guestPhone: external_exports.string().min(7, "Enter a valid phone number"),
+      companyName: external_exports.string().optional(),
+      specialRequests: external_exports.string().optional(),
+      privacyConsent: external_exports.literal(true, {
+        errorMap: () => ({ message: "Privacy consent is required" })
+      })
+    });
+    PaymentReviewSchema = external_exports.object({
+      discountType: external_exports.enum(["", "senior", "pwd"]).default(""),
+      voucherCode: external_exports.string().optional(),
+      paymentMethod: external_exports.string().min(1, "Choose a payment method"),
+      turnstileToken: external_exports.string().optional(),
+      _hp: external_exports.string().optional()
+    });
+    WalkinGuestDetailsSchema = external_exports.object({
+      firstName: external_exports.string().trim().min(1).max(80),
+      lastName: external_exports.string().trim().min(1).max(80),
+      email: external_exports.string().trim().toLowerCase().email().max(160),
+      phone: external_exports.string().trim().min(2).max(32),
+      requests: external_exports.string().trim().max(1e3).optional().default(""),
+      consent: external_exports.boolean().optional()
+    }).strict();
+    BookingRevenueAllocationSchema = external_exports.object({
+      roomNet: external_exports.coerce.number().finite().min(0),
+      breakfastNet: external_exports.coerce.number().finite().min(0),
+      addOnNet: external_exports.coerce.number().finite().min(0),
+      deductionNet: external_exports.coerce.number().finite().min(0),
+      totalNet: external_exports.coerce.number().finite().min(0)
+    }).strict();
+    WalkinRoomLineSchema = external_exports.object({
+      roomId: external_exports.string().trim().min(1).max(64),
+      numAdults: external_exports.coerce.number().int().min(0).max(100),
+      numChildren: external_exports.coerce.number().int().min(0).max(100),
+      extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0)
+      // Per BR-08 (decision #238, 2026-10-14 — close-out):
+      // the legacy EXB-12 `extraBedBreakfast: boolean` flat-rate
+      // toggle is deleted. Extra-bed occupants are ordinary meal
+      // slots in Step 2 (the per-meal picker), so the create
+      // payload no longer carries a breakfast flag for them.
+      // The BR-08 audit-trail comment is kept here as a record
+      // of the close-out — see `plan/features/BREAKFAST.md
+      // §Decisions Locked` (decision 4 — extra-bed occupants
+      // are ordinary meal slots).
+    }).strict();
+    WalkinBookingSchema = external_exports.object({
+      bookingId: external_exports.string().trim().regex(/^[A-Za-z0-9]{10,32}$/),
+      roomId: external_exports.string().trim().min(1).max(64),
+      // Per MRB-07 (2026-08-02, per decision #159): the optional N-room
+      // room list. When absent (every pre-MRB-07 caller), the server
+      // derives a single line from the top-level `roomId` + `numAdults` +
+      // `numChildren` + `extraBedCount` — byte-equivalent to the
+      // single-room walk-in. When present, it is the canonical room list;
+      // the server rejects the request unless `roomId === rooms[0].roomId`
+      // and `guests` equals the summed per-line occupancy, so neither the
+      // room nor the guest total is trusted from two disagreeing places.
+      rooms: external_exports.array(WalkinRoomLineSchema).min(1).max(50).optional(),
+      checkIn: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      checkOut: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      guests: external_exports.coerce.number().int().min(1).max(100),
+      // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+      // legacy flat-rate `hasBreakfast: boolean` +
+      // `breakfastIncludesChildren: boolean` pair is deleted from
+      // the walk-in schema. The walk-in modal now sends the rich
+      // `breakfastSelections: Record<key, BreakfastSelectionEntry>`
+      // shape (per-date × per-guest meal entries) which is
+      // captured by `WalkinBreakfastGrid` and validated by the
+      // BR-01 `BreakfastSelectionSchema`. The BR-08 audit-trail
+      // comment is kept here as a record of the close-out — see
+      // `plan/features/BREAKFAST.md §Decisions Locked` (decision
+      // 5 — Step 1 carries no breakfast data).
+      breakfastSelections: external_exports.record(external_exports.string(), external_exports.unknown()).optional(),
+      breakfastTotal: external_exports.coerce.number().finite().min(0).optional(),
+      // Per OCT-C5 (2026-10-20, audit
+      // `plan/project/AUDIT-OCTOBER-2026.md`): the BR-12 other
+      // add-ons the desk selected in the walk-in modal
+      // (`WalkinOtherAddOnGrid`).
+      //
+      // The admin modal has been sending `otherAddOnSelections` +
+      // `otherAddOnTotal` + `hasAnyOtherAddOns` since BR-12.1
+      // (2026-10-15), but the walk-in schema had no field for them —
+      // and a Zod `z.object()` STRIPS unknown keys, so the payload
+      // was dropped silently. The walk-in transaction then wrote no
+      // add-on data at all (`otherAddOn` appeared zero times in
+      // `bookings.ts`), so the desk sold an airport transfer, the
+      // modal showed the total, the booking carried nothing, the
+      // guest never got the transfer, and the hotel earned ₱0.
+      //
+      // The values are ADVISORY: the server rebuilds every entry from
+      // the live `addOns` catalog (catalog price + name + unit), so a
+      // client-supplied price is never persisted.
+      otherAddOnSelections: external_exports.record(external_exports.string(), external_exports.array(external_exports.unknown())).optional(),
+      otherAddOnTotal: external_exports.coerce.number().finite().min(0).optional(),
+      hasAnyOtherAddOns: external_exports.boolean().optional(),
+      // Per CHD-01 (2026-08-01, per decision #144): adults/children
+      // split. Both optional — when absent, the server derives
+      // `numAdults = guests`, `numChildren = 0` (the historical
+      // "all guests are adults" shape). When present, the server
+      // validates `numAdults + numChildren === guests` and rejects
+      // any client-supplied `numGuests` that disagrees (the
+      // spec's "no trusting either value from the client" rule).
+      numAdults: external_exports.coerce.number().int().min(0).max(100).optional(),
+      numChildren: external_exports.coerce.number().int().min(0).max(100).optional(),
+      // Per EXB-01 (2026-07-31): extra-bed count. Optional — when
+      // absent, the server treats it as 0 (the "no extra bed" case).
+      // Bounded server-side by the room type's `maxExtraBeds` (a
+      // booking with `extraBedCount > maxExtraBeds` is rejected). The
+      // server snapshots the room type's `extraBedRate` onto the
+      // booking doc alongside this field.
+      extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional(),
+      // Per BR-08 (decision #238, 2026-10-14 — close-out): the
+      // legacy EXB-12 `extraBedBreakfast: boolean` flat-rate
+      // toggle is deleted from the walk-in schema. Extra-bed
+      // occupants are ordinary meal slots in Step 2 (the
+      // per-meal picker) — the walk-in modal captures them via
+      // `WalkinBreakfastGrid` which writes the rich
+      // `breakfastSelections` shape (per-date × per-guest
+      // meal entries) validated by `BreakfastSelectionSchema`.
+      // The BR-08 audit-trail comment is kept here as a record
+      // of the close-out — see `plan/features/BREAKFAST.md
+      // §Decisions Locked` (decision 4 — extra-bed occupants
+      // are ordinary meal slots).
+      guestDetails: WalkinGuestDetailsSchema,
+      paymentMethod: external_exports.string().trim().min(1).max(80),
+      // Per NBS-02 (2026-07-31): optional with `"walk-in"` default so
+      // every existing caller keeps working with no migration. The
+      // server validates the submitted value against the configured list
+      // (`settings/hotelConfig.bookingSources[]`) and derives `notes` from
+      // it — a phone / Agoda / Facebook booking no longer ships with a
+      // note claiming it was created at the desk.
+      source: external_exports.string().trim().min(1).max(80).optional().default("walk-in"),
+      status: external_exports.enum(["confirmed", "checked-in"]).optional().default("confirmed"),
+      totalPriceOverride: external_exports.coerce.number().finite().min(0).max(1e6).optional(),
+      discountType: external_exports.enum(["", "senior", "pwd"]).optional().default(""),
+      voucherCode: external_exports.string().trim().max(40).optional().default(""),
+      linkedInquiryId: external_exports.string().trim().max(64).nullable().optional(),
+      testRunId: external_exports.string().trim().max(64).nullable().optional(),
+      // Per MRB-02.x (2026-08-02, per decision #164): the
+      // optional client-preallocated `reservationId` (UUIDv4)
+      // for the reservation-level idempotency matrix. When
+      // absent (the current walk-in modal doesn't preallocate),
+      // the server auto-mints a UUIDv4 via `generateReservationId()`
+      // — same pattern as the public `/api/bookings/create` path.
+      // Walk-ins are staff-created, so the staff modal doesn't
+      // need to preallocate for retry-after-uncertain-response
+      // (the staff tab is open; the next submit starts a fresh
+      // form with a new `bookingId`); the optional field is here
+      // so a future walk-in client that does preallocate can
+      // ride the same idempotency contract.
+      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional(),
+      staffHoldId: external_exports.string().trim().regex(/^[A-Za-z0-9]{10,32}$/).optional(),
+      // Per MRB-11 (2026-08-03, per decision #177): the
+      // optional revenue allocation. Per the 2026-08-03
+      // design call, the server always computes this before
+      // the write — the input is accepted but the server
+      // recomputes via the same pricing chain and asserts
+      // the `totalNet === booking.totalPrice` invariant at
+      // the write boundary. Pre-MRB-11 callers omit it; the
+      // server fills it in. A future client preview may
+      // supply it to skip the server recompute, but the
+      // server's value is the only one written to the doc.
+      revenueAllocation: BookingRevenueAllocationSchema.optional()
+    }).strict();
+    RescheduleBookingSchema = external_exports.object({
+      bookingId: external_exports.string().trim().min(1).max(64),
+      roomId: external_exports.string().trim().min(1).max(64),
+      checkIn: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      checkOut: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      reason: external_exports.string().trim().max(500).optional().default(""),
+      // The optional `reservationId` is here so a future
+      // reschedule client that preallocates (e.g. a bulk
+      // reschedule tool that wants the staff to be able to
+      // retry the same reschedule without re-picking dates)
+      // can ride the same idempotency contract. The
+      // current staff modal doesn't preallocate, so the
+      // server derives the id from the existing booking
+      // (or, for legacy null-reservationId bookings, the
+      // server auto-mints one if `body.reservationId` is
+      // explicitly provided — a defensive path for a
+      // future migration tool).
+      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional(),
+      // Per EXT-01 (2026-01-27): the `mode: "extend"` discriminator
+      // locks `roomId` and `checkIn` to the booking's current values,
+      // allowing only `checkOut` to be extended. The server enforces
+      // the lock; the client pre-fills both fields as read-only hints.
+      mode: external_exports.enum(["extend"]).optional()
+    }).strict();
+    SetLouReceivedSchema = external_exports.object({
+      bookingId: external_exports.string().trim().min(1).max(64),
+      louReceived: external_exports.boolean()
+    }).strict();
+    AddRoomBookingSchema = external_exports.object({
+      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX),
+      roomId: external_exports.string().trim().min(1).max(64),
+      numAdults: external_exports.coerce.number().int().min(1).max(100),
+      numChildren: external_exports.coerce.number().int().min(0).max(100).optional().default(0),
+      extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0),
+      discountType: external_exports.enum(["", "senior", "pwd"]).optional().default(""),
+      voucherCode: external_exports.string().trim().max(40).optional().default(""),
+      // The optional `totalPriceOverride` matches the walkin
+      // surface; absent → server-computed.
+      totalPriceOverride: external_exports.coerce.number().finite().min(0).max(1e6).optional(),
+      // The optional `requestFingerprint` lets a future
+      // client preallocate the idempotency key for a
+      // retry-after-uncertain-response. The current staff
+      // modal doesn't preallocate — the server auto-mints
+      // `add-room-${reservationId}-${roomId}-${now}` and
+      // writes it onto the header (the same pattern the
+      // reschedule handler uses for `rescheduleFingerprint`).
+      requestFingerprint: external_exports.string().trim().min(1).max(256).optional()
+    }).strict();
+    StartBookingHoldSchema = external_exports.object({
+      holdId: external_exports.string().trim().regex(HOLD_ID_REGEX, "Invalid hold id format"),
+      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX, "Invalid reservation id format"),
+      roomType: external_exports.string().trim().min(1).max(64),
+      checkIn: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "checkIn must be YYYY-MM-DD"),
+      checkOut: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "checkOut must be YYYY-MM-DD"),
+      numNights: external_exports.coerce.number().int().min(1).max(60)
+    }).strict().refine((value) => new Date(value.checkOut) > new Date(value.checkIn), {
+      message: "Check-out must be after check-in",
+      path: ["checkOut"]
+    });
+    BreakfastMealSchema = external_exports.object({
+      id: external_exports.string().min(1).max(64),
+      name: external_exports.string().min(1).max(80),
+      description: external_exports.string().max(200).default(""),
+      price: external_exports.number().min(0).max(1e4),
+      isActive: external_exports.boolean(),
+      displayOrder: external_exports.number().int().min(0).max(1e3),
+      /**
+       * Per MBUX-04 (decision #256, 2026-10-15): optional meal thumbnail.
+       *
+       * THIS FIELD MUST STAY IN THE SCHEMA. Zod's `z.object` STRIPS
+       * unknown keys by default, so a schema without `imageUrl` would
+       * silently delete the admin's uploaded URL on every
+       * `handleSaveBreakfast` write — the upload would appear to succeed
+       * and then vanish the next time anyone touched dining settings.
+       * That is a far worse failure than a rejected save, which is why
+       * the field is declared here rather than left to the default strip.
+       *
+       * `.url()` keeps only real absolute URLs; an empty string is
+       * rejected rather than stored, because "no image" is represented
+       * by OMITTING the field, not by an empty URL.
+       */
+      imageUrl: external_exports.string().url().max(2e3).optional(),
+      createdAt: external_exports.union([external_exports.string(), external_exports.any()]).optional(),
+      updatedAt: external_exports.union([external_exports.string(), external_exports.any()]).optional()
+    });
+    BreakfastConfigSchema = external_exports.object({
+      isEnabled: external_exports.boolean(),
+      /**
+       * Per BR-10 (2026-10-14, decision #244 reserved — Phase 14):
+       * the cut-off enforcement toggle. Required (no Zod default —
+       * the legacy-fallback is handled by `normalizeBreakfastConfig`
+       * at read time, not at schema-parse time, because the writer
+       * must always be explicit about whether cut-offs apply).
+       */
+      cutoffsEnabled: external_exports.boolean(),
+      cutoffTime: external_exports.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM 24h format"),
+      cutoffTimezone: external_exports.string().min(1),
+      frontDeskOverrideEnabled: external_exports.boolean(),
+      /**
+       * Per decision #231 + open item #5: 0..60 minute window after
+       * `served` during which staff can un-serve without a reason.
+       * Default 15; min 0; max 60.
+       */
+      servedGraceMinutes: external_exports.number().int().min(0).max(60).default(15),
+      defaultMealInstructions: external_exports.string().max(2e3).default(""),
+      meals: external_exports.array(BreakfastMealSchema),
+      updatedAt: external_exports.union([external_exports.string(), external_exports.any()]).optional(),
+      updatedBy: external_exports.string().default("")
+    });
+    BreakfastSelectionEntrySchema = external_exports.object({
+      mealId: external_exports.string().min(1),
+      mealName: external_exports.string().min(1),
+      price: external_exports.number().min(0),
+      addedAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      addedBy: external_exports.string().min(1),
+      lastModifiedAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      lastModifiedBy: external_exports.string().min(1),
+      removedAt: external_exports.union([external_exports.string(), external_exports.any()]).nullable().default(null),
+      removedBy: external_exports.string().nullable().default(null),
+      overrideCutoff: external_exports.boolean().default(false),
+      overrideReason: external_exports.string().nullable().default(null)
+    });
+    BreakfastServedEntrySchema = external_exports.object({
+      servedAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      servedBy: external_exports.string().min(1),
+      unservedAt: external_exports.union([external_exports.string(), external_exports.any()]).nullable().default(null),
+      unservedBy: external_exports.string().nullable().default(null)
+    });
+    BreakfastAuditEntrySchema = external_exports.object({
+      id: external_exports.string().optional(),
+      action: external_exports.enum([
+        "add",
+        "change",
+        "remove",
+        "serve",
+        "unserve",
+        "override-add",
+        "override-change",
+        "override-remove"
+      ]),
+      slotKey: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-\d+$/, "serviceDate-guestIndex format"),
+      mealSnapshot: external_exports.object({
+        mealId: external_exports.string(),
+        mealName: external_exports.string(),
+        price: external_exports.number().min(0)
+      }).nullable(),
+      actorUid: external_exports.string().min(1),
+      actorRole: external_exports.enum(["guest", "front-desk", "admin"]),
+      reason: external_exports.string().nullable().default(null),
+      occurredAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      occurredAfterCutoff: external_exports.boolean()
+    });
+    BreakfastRefundContextSchema = external_exports.object({
+      mealId: external_exports.string().min(1),
+      slotKey: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-\d+$/),
+      mealName: external_exports.string().min(1),
+      priceSnapshot: external_exports.number().min(0)
+    });
+    AddOnSchema = external_exports.object({
+      id: external_exports.string().min(1).max(80),
+      name: external_exports.string().min(1).max(120),
+      description: external_exports.string().max(500).default(""),
+      price: external_exports.number().min(0).max(1e4),
+      unit: external_exports.enum(["per-person", "per-stay"]),
+      isEnabled: external_exports.boolean(),
+      cutoffHoursBeforeCheckIn: external_exports.number().int().min(0).max(168),
+      displayOrder: external_exports.number().int().min(0).max(1e3),
+      updatedAt: external_exports.union([external_exports.string(), external_exports.any()]).optional(),
+      updatedBy: external_exports.string().optional()
+    });
+    OtherAddOnSelectionEntrySchema = external_exports.object({
+      addOnId: external_exports.string().min(1).max(80),
+      nameSnapshot: external_exports.string().min(1).max(120),
+      priceSnapshot: external_exports.number().min(0).max(1e4),
+      quantity: external_exports.number().int().min(0).max(50),
+      unitSnapshot: external_exports.enum(["per-person", "per-stay"]),
+      addedAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      addedBy: external_exports.string().min(1),
+      lastModifiedAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      lastModifiedBy: external_exports.string().min(1),
+      removedAt: external_exports.union([external_exports.string(), external_exports.any()]).nullable().default(null),
+      removedBy: external_exports.string().nullable().default(null),
+      cutoffHoursBeforeCheckInSnapshot: external_exports.number().int().min(0).max(168)
+    });
+    OtherAddOnAuditEntrySchema = external_exports.object({
+      id: external_exports.string().optional(),
+      action: external_exports.enum([
+        "add",
+        "change",
+        "remove",
+        "mark-served",
+        "override-add",
+        "override-change",
+        "override-remove"
+      ]),
+      selectionKey: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/, "serviceDate-addOnId format"),
+      addOnSnapshot: external_exports.object({
+        addOnId: external_exports.string(),
+        name: external_exports.string(),
+        price: external_exports.number().min(0),
+        quantity: external_exports.number().int().min(0)
+      }).nullable(),
+      actorUid: external_exports.string().min(1),
+      actorRole: external_exports.enum(["guest", "front-desk", "admin"]),
+      reason: external_exports.string().nullable().default(null),
+      occurredAt: external_exports.union([external_exports.string(), external_exports.any()]),
+      occurredAfterCutoff: external_exports.boolean()
+    });
+    OtherAddOnRefundContextSchema = external_exports.object({
+      addOnId: external_exports.string().min(1),
+      selectionKey: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/),
+      addOnName: external_exports.string().min(1),
+      priceSnapshot: external_exports.number().min(0),
+      quantitySnapshot: external_exports.number().int().min(0)
+    });
+    OtherAddOnUpdateSchema = external_exports.object({
+      bookingRef: external_exports.string().trim().min(4).max(40),
+      lookupToken: external_exports.string().trim().min(8).max(200),
+      turnstileToken: external_exports.string().optional(),
+      clientBatchId: external_exports.string().trim().min(8).max(80),
+      // Per RPT-04 (QA pass 2026-10-21): `selections` is OPTIONAL.
+      //
+      // It was REQUIRED, but the mutation contract this schema guards
+      // is the OP list (`add` / `change` / `remove`) — both handlers
+      // read the ops off the raw body via `readOps(body)` and never
+      // read `selections` at all. The guest client
+      // (`ManageOtherAddOnsPage.tsx`) and the staff drawer send the
+      // ops and no `selections`, so `safeParse` failed on the missing
+      // field and the endpoint answered
+      // "Invalid other-add-ons update payload." (HTTP 400) on EVERY
+      // save: the whole BR-12 other-add-ons write path was dead, for
+      // guests and staff alike.
+      //
+      // The field is kept (optional) so a caller that DOES send a
+      // `selections` map still validates it, and so the schema keeps
+      // describing the full write shape.
+      selections: external_exports.record(
+        external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "serviceDate format"),
+        external_exports.array(OtherAddOnSelectionEntrySchema)
+      ).optional(),
+      removedKeys: external_exports.array(external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/)).default([])
+    }).passthrough();
+    StaffOtherAddOnUpdateSchema = external_exports.object({
+      bookingId: external_exports.string().trim().min(8).max(80),
+      turnstileToken: external_exports.string().optional(),
+      // Per RPT-04 (QA pass 2026-10-21): `selections` is OPTIONAL for
+      // the same reason as `OtherAddOnUpdateSchema` above — the staff
+      // handler reads the `add` / `change` / `remove` ops off the raw
+      // body and never reads `selections`, so requiring it rejected
+      // every real staff save with a 400.
+      selections: external_exports.record(
+        external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "serviceDate format"),
+        external_exports.array(OtherAddOnSelectionEntrySchema)
+      ).optional(),
+      removedKeys: external_exports.array(external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/)).default([]),
+      overrideReason: external_exports.string().trim().min(8).max(280).optional()
+    }).passthrough();
+    OtherAddOnMarkServedSchema = external_exports.object({
+      bookingId: external_exports.string().trim().min(8).max(80),
+      selectionKeys: external_exports.array(external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/)).min(1).max(50),
+      turnstileToken: external_exports.string().optional()
+    }).passthrough();
+    OtherAddOnMarkRefundPaidSchema = external_exports.object({
+      bookingId: external_exports.string().trim().min(8).max(80),
+      refundId: external_exports.string().trim().regex(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        "Invalid refundId."
+      ),
+      method: external_exports.string().trim().min(1).max(60),
+      transactionReference: external_exports.string().trim().max(200).nullable().optional().default(null),
+      note: external_exports.string().trim().max(500).nullable().optional().default(null),
+      turnstileToken: external_exports.string().optional()
+    }).passthrough();
+    AddOnCatalogAuditLogSchema = external_exports.object({
+      action: external_exports.enum(["addons.create", "addons.update", "addons.delete"]),
+      targetCollection: external_exports.string().default("addOns"),
+      targetId: external_exports.string().min(1).max(80),
+      actor: external_exports.string().min(1).max(120),
+      actorName: external_exports.string().max(120).default(""),
+      before: external_exports.any().nullable().default(null),
+      after: external_exports.any().nullable().default(null),
+      timestamp: external_exports.union([external_exports.string(), external_exports.any()]).optional()
+    });
+    ExtendBookingHoldSchema = external_exports.object({
+      holdId: external_exports.string().trim().regex(HOLD_ID_REGEX, "Invalid hold id format"),
+      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX, "Invalid reservation id format")
+    }).strict();
+  }
+});
+
+// ../shared/schemas/paymentMethod.ts
+var PaymentMethodConfigSchema, PaymentMethodsArraySchema, LegacyPaymentMethodConfigSchema;
+var init_paymentMethod = __esm({
+  "../shared/schemas/paymentMethod.ts"() {
+    "use strict";
+    init_zod();
+    PaymentMethodConfigSchema = external_exports.object({
+      method: external_exports.string().min(1, "Method key is required").max(64),
+      label: external_exports.string().min(1, "Label is required").max(120),
+      accountName: external_exports.string().max(200),
+      accountNumber: external_exports.string().max(200),
+      qrUrl: external_exports.string().max(2048),
+      isEnabled: external_exports.boolean(),
+      // Per #111 (per-method surface toggles). Both default to
+      // `true` when omitted — the helper functions read them
+      // permissively (`!== false`) so legacy data is treated as
+      // "visible on all surfaces" without an explicit migration.
+      // Optional on the schema for the same reason: pre-#111
+      // entries do not have these fields.
+      showInStore: external_exports.boolean().optional(),
+      showInCorporate: external_exports.boolean().optional(),
+      requireReferenceNumber: external_exports.boolean().optional()
+    });
+    PaymentMethodsArraySchema = external_exports.array(PaymentMethodConfigSchema).max(20, "Too many payment methods (max 20)");
+    LegacyPaymentMethodConfigSchema = external_exports.object({
+      method: external_exports.string().min(1),
+      label: external_exports.string().optional(),
+      accountName: external_exports.string().optional(),
+      accountNumber: external_exports.string().optional(),
+      accountInfo: external_exports.string().optional(),
+      qrUrl: external_exports.string().optional(),
+      isEnabled: external_exports.boolean().optional()
+    });
+  }
+});
+
+// ../shared/schemas/room.ts
+var RoomStatusEnum, HousekeepingStatusEnum, CreateRoomSchema, ACTIVE_BOOKING_STATUSES;
+var init_room = __esm({
+  "../shared/schemas/room.ts"() {
+    "use strict";
+    init_zod();
+    RoomStatusEnum = external_exports.enum(["available", "occupied", "blocked"]);
+    HousekeepingStatusEnum = external_exports.enum(["clean", "dirty", "in-progress"]);
+    CreateRoomSchema = external_exports.object({
+      name: external_exports.string().trim().min(1, "Display name is required").max(80, "Display name is too long"),
+      roomNumber: external_exports.string().trim().min(1, "Room number is required").max(20, "Room number is too long"),
+      type: external_exports.string().trim().min(1, "Room type is required").max(40, "Room type is too long"),
+      status: RoomStatusEnum.default("available"),
+      housekeepingStatus: HousekeepingStatusEnum.default("clean"),
+      isActive: external_exports.boolean().default(true),
+      blockReason: external_exports.string().trim().max(200, "Block reason is too long").default(""),
+      remarks: external_exports.string().trim().max(1e3, "Remarks are too long").default("")
+    });
+    ACTIVE_BOOKING_STATUSES = [
+      "pending",
+      "payment-uploaded",
+      "payment-confirmed",
+      "confirmed",
+      "checked-in"
+    ];
+  }
+});
+
+// ../shared/schemas/websiteContent.ts
+var PublicHeroSchema, HomepageContentSchema, AboutContentSchema, CorporateContentSchema, RewardsContentSchema, BrandingConfigSchema, WebsiteContentSchema;
+var init_websiteContent = __esm({
+  "../shared/schemas/websiteContent.ts"() {
+    "use strict";
+    init_zod();
+    PublicHeroSchema = external_exports.object({
+      heroEyebrow: external_exports.string().default(""),
+      heroHeading: external_exports.string().default(""),
+      heroSubtext: external_exports.string().default(""),
+      heroPhotoUrl: external_exports.string().default("")
+    });
+    HomepageContentSchema = PublicHeroSchema.extend({
+      sectionHeaders: external_exports.object({
+        roomsEyebrow: external_exports.string().default(""),
+        roomsHeading: external_exports.string().default(""),
+        roomsSubtext: external_exports.string().default(""),
+        amenitiesEyebrow: external_exports.string().default(""),
+        amenitiesHeading: external_exports.string().default(""),
+        amenitiesSubtext: external_exports.string().default(""),
+        servicesEyebrow: external_exports.string().default(""),
+        servicesHeading: external_exports.string().default(""),
+        servicesSubtext: external_exports.string().default("")
+      }).optional(),
+      amenities: external_exports.array(
+        external_exports.object({
+          title: external_exports.string(),
+          description: external_exports.string(),
+          icon: external_exports.string().optional(),
+          isEnabled: external_exports.boolean().optional()
+        })
+      ),
+      // Type values featured on the homepage "Stay with us" section.
+      // Each value resolves to its first active room — see
+      // `HomePage` and the `TypePicker` admin component. Capped at
+      // `MAX_FEATURED_TYPES` (3) at the editor and at the renderer.
+      //
+      // Migration note: the previous field was `featuredRoomIds`
+      // (a list of physical room doc IDs). That model was wrong —
+      // see `MAX_FEATURED_TYPES` in `shared/constants/index.ts` for
+      // the full rationale. `AdminContext.mergeWebsiteContent` does
+      // a one-time mapping from the old field to the new one.
+      featuredTypeValues: external_exports.array(external_exports.string()),
+      services: external_exports.array(
+        external_exports.object({
+          title: external_exports.string(),
+          description: external_exports.string(),
+          icon: external_exports.string().optional(),
+          isEnabled: external_exports.boolean().optional()
+        })
+      ),
+      sparkRewards: external_exports.object({
+        heading: external_exports.string(),
+        description: external_exports.string(),
+        perks: external_exports.array(
+          external_exports.object({
+            title: external_exports.string(),
+            description: external_exports.string().optional(),
+            icon: external_exports.string().optional(),
+            isEnabled: external_exports.boolean().optional()
+          })
+        ),
+        isEnabled: external_exports.boolean()
+      })
+    });
+    AboutContentSchema = external_exports.object({
+      heroEyebrow: external_exports.string().default(""),
+      heroHeading: external_exports.string().default(""),
+      heroSubtext: external_exports.string().default(""),
+      heroPhotoUrl: external_exports.string().default(""),
+      missionStatement: external_exports.string().default(""),
+      visionStatement: external_exports.string().default(""),
+      hotelStory: external_exports.string().default("")
+    });
+    CorporateContentSchema = PublicHeroSchema.extend({
+      perks: external_exports.array(
+        external_exports.object({
+          title: external_exports.string(),
+          description: external_exports.string(),
+          icon: external_exports.string().optional(),
+          isEnabled: external_exports.boolean().optional()
+        })
+      ),
+      // Rooms overview section on /corporate (eyebrow + heading + subtext).
+      // All optional — the guest app falls back to hardcoded copy in
+      // `CorporateStaysPage` when empty. Edited from Settings → Website
+      // Content → Corporate page.
+      roomsOverviewEyebrow: external_exports.string().default(""),
+      roomsOverviewHeading: external_exports.string().default(""),
+      roomsOverviewDescription: external_exports.string().default(""),
+      // Retreat CTA banner at the bottom of the "rooms" section
+      // (heading + description + button label). All optional with the
+      // same fallback behavior as the rooms overview block above.
+      retreatHeading: external_exports.string().default(""),
+      retreatDescription: external_exports.string().default(""),
+      retreatCtaLabel: external_exports.string().default("")
+    });
+    RewardsContentSchema = PublicHeroSchema;
+    BrandingConfigSchema = external_exports.object({
+      logoNavbar: external_exports.string().default(""),
+      logoNavbarOnDark: external_exports.string().default(""),
+      logoFooter: external_exports.string().default("")
+    });
+    WebsiteContentSchema = external_exports.object({
+      homepage: HomepageContentSchema,
+      about: AboutContentSchema,
+      corporate: CorporateContentSchema,
+      rewards: RewardsContentSchema,
+      branding: BrandingConfigSchema,
+      roomsCatalog: PublicHeroSchema.optional(),
+      contact: PublicHeroSchema.optional(),
+      notFound: PublicHeroSchema.optional(),
+      privacyPolicyBody: external_exports.string().optional(),
+      cancellationPolicy: external_exports.string().optional(),
+      cancellationCutoffHours: external_exports.number().optional(),
+      cancellationRefundPctBefore: external_exports.number().optional(),
+      cancellationRefundPctAfter: external_exports.number().optional(),
+      houseRules: external_exports.string().optional(),
+      privacyPolicyLastUpdated: external_exports.string().optional()
+    });
+  }
+});
+
+// ../shared/schemas/seo.ts
+var optionalUrl, SeoPublishSchema;
+var init_seo = __esm({
+  "../shared/schemas/seo.ts"() {
+    "use strict";
+    init_zod();
+    optionalUrl = external_exports.string().trim().max(500).refine(
+      (value) => value === "" || /^https:\/\//i.test(value),
+      "Enter a secure URL beginning with https://"
+    );
+    SeoPublishSchema = external_exports.object({
+      metaDescription: external_exports.string().trim().min(50).max(160),
+      priceRange: external_exports.string().trim().min(1).max(20),
+      ogImage: optionalUrl,
+      twitterHandle: external_exports.string().trim().max(50).regex(/^@?[A-Za-z0-9_]*$/, "Enter a valid X handle"),
+      address: external_exports.string().trim().min(5).max(300),
+      frontDeskPhone: external_exports.string().trim().min(5).max(50),
+      facebookUrl: optionalUrl,
+      instagramUrl: optionalUrl,
+      checkInTime: external_exports.string().trim().min(1).max(30),
+      checkOutTime: external_exports.string().trim().min(1).max(30)
+    });
+  }
+});
+
+// ../shared/types/publicHotelConfig.ts
+var init_publicHotelConfig = __esm({
+  "../shared/types/publicHotelConfig.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/types/index.ts
+var init_types3 = __esm({
+  "../shared/types/index.ts"() {
+    "use strict";
+    init_publicHotelConfig();
+  }
+});
+
+// ../shared/utils/bookingDates.ts
+function toDateOrNow(value) {
+  const d = toDateOrNull(value);
+  return d ?? /* @__PURE__ */ new Date();
+}
+function toDateOrNull(value) {
+  if (value === null || value === void 0) return null;
+  if (value instanceof Date) return new Date(value.getTime());
+  if (typeof value.toDate === "function") {
+    const result = value.toDate();
+    if (result instanceof Date) return new Date(result.getTime());
+    if (result && typeof result.toDate === "function") {
+      const nested = result.toDate();
+      if (nested instanceof Date) return new Date(nested.getTime());
+    }
+    if (typeof value === "object" && value !== null) {
+      const obj = value;
+      if (typeof obj._seconds === "number") {
+        const ms2 = obj._seconds * 1e3 + Math.floor((obj._nanoseconds ?? 0) / 1e6);
+        return new Date(ms2);
+      }
+    }
+    return null;
+  }
+  if (typeof value === "object" && value !== null) {
+    const obj = value;
+    if (typeof obj._seconds === "number") {
+      const ms2 = obj._seconds * 1e3 + Math.floor((obj._nanoseconds ?? 0) / 1e6);
+      return new Date(ms2);
+    }
+    return null;
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+function toUtcDateKey(value) {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
+  }
+  const date = toDateOrNull(value);
+  if (!date) return "";
+  const yyyy = date.getUTCFullYear();
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+function getManilaDateInfo(timezone = "Asia/Manila") {
+  const now = /* @__PURE__ */ new Date();
+  const localString = now.toLocaleString("en-US", { timeZone: timezone });
+  const localDate = new Date(localString);
+  const year = localDate.getFullYear();
+  const month = String(localDate.getMonth() + 1).padStart(2, "0");
+  const day = String(localDate.getDate()).padStart(2, "0");
+  return {
+    todayStr: `${year}-${month}-${day}`,
+    todayCompact: `${year}${month}${day}`,
+    manilaDate: localDate
+  };
+}
+function getDateKeyInTimezone(timezone = "Asia/Manila", offsetDays = 0) {
+  const { manilaDate } = getManilaDateInfo(timezone);
+  const date = new Date(manilaDate);
+  date.setDate(date.getDate() + offsetDays);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+var init_bookingDates = __esm({
+  "../shared/utils/bookingDates.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/stayRange.ts
+function isValidIsoDate(value) {
+  if (typeof value !== "string" || !ISO_DATE_PATTERN.test(value)) return false;
+  const parsed = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return false;
+  return parsed.toISOString().slice(0, 10) === value;
+}
+function addDaysToIsoDate(value, days, fallback = "") {
+  if (!isValidIsoDate(value)) return fallback;
+  const date = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+function diffNightsBetweenIso(first, second) {
+  if (!isValidIsoDate(first) || !isValidIsoDate(second)) return 0;
+  const start = Date.parse(`${first}T00:00:00Z`);
+  const end = Date.parse(`${second}T00:00:00Z`);
+  return Math.round((end - start) / 864e5);
+}
+function resolveMaxStayNights(raw) {
+  if (raw === void 0 || raw === null || raw === "") return DEFAULT_MAX_STAY_NIGHTS;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return DEFAULT_MAX_STAY_NIGHTS;
+  if (value === 0) return Infinity;
+  const floored = Math.floor(value);
+  if (floored < MIN_MAX_STAY_NIGHTS) return MIN_MAX_STAY_NIGHTS;
+  return Math.min(floored, MAX_MAX_STAY_NIGHTS);
+}
+function describeMaxStayNights(maxNights) {
+  return Number.isFinite(maxNights) ? `${maxNights} nights` : "no maximum";
+}
+function isUnlimitedStay(maxNights) {
+  return !Number.isFinite(maxNights);
+}
+function normalizeStayRange({
+  checkIn,
+  checkOut,
+  minCheckIn,
+  previousNights = null,
+  defaultNights = DEFAULT_STAY_NIGHTS,
+  maxNights = DEFAULT_MAX_STAY_NIGHTS,
+  maxCheckOut
+}) {
+  const today = isValidIsoDate(minCheckIn) ? minCheckIn : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const horizon = isValidIsoDate(maxCheckOut ?? "") && maxCheckOut > today ? maxCheckOut : addDaysToIsoDate(
+    today,
+    DEFAULT_BOOKING_HORIZON_DAYS,
+    addDaysToIsoDate(today, defaultNights, today)
+  );
+  const horizonNights = Math.max(diffNightsBetweenIso(today, horizon), defaultNights);
+  const stayCap = Math.max(Math.min(maxNights, horizonNights), 1);
+  const rawIn = isValidIsoDate(checkIn ?? "") ? checkIn : null;
+  const rawOut = isValidIsoDate(checkOut ?? "") ? checkOut : null;
+  if (!rawIn && !rawOut) {
+    const seededCheckOut = addDaysToIsoDate(today, defaultNights, today);
+    return {
+      checkIn: today,
+      checkOut: seededCheckOut <= today ? addDaysToIsoDate(today, 1, today) : seededCheckOut,
+      nights: defaultNights,
+      adjustment: "empty"
+    };
+  }
+  let adjustment = null;
+  let checkInCandidate;
+  if (!rawIn) {
+    const derived = rawOut && rawOut > today ? addDaysToIsoDate(rawOut, -defaultNights, "") : "";
+    checkInCandidate = !derived || derived < today ? today : derived;
+    adjustment = "invalid-check-in";
+  } else if (rawIn < today) {
+    checkInCandidate = today;
+    adjustment = "check-in-clamped-to-today";
+  } else {
+    checkInCandidate = rawIn;
+  }
+  const nextIn = checkInCandidate;
+  let checkOutCandidate;
+  if (!rawOut) {
+    checkOutCandidate = addDaysToIsoDate(nextIn, defaultNights, addDaysToIsoDate(nextIn, 1, nextIn));
+    if (adjustment === null) adjustment = "invalid-check-out";
+  } else if (rawOut <= nextIn) {
+    const preserveable = typeof previousNights === "number" && Number.isFinite(previousNights) ? Math.floor(previousNights) : null;
+    const nights = preserveable !== null && preserveable >= 1 ? Math.min(preserveable, stayCap) : Math.min(defaultNights, stayCap);
+    checkOutCandidate = addDaysToIsoDate(nextIn, nights, addDaysToIsoDate(nextIn, 1, nextIn));
+    adjustment = preserveable !== null && preserveable >= 1 ? "nights-preserved" : "check-out-clamped-after-check-in";
+  } else {
+    checkOutCandidate = rawOut;
+  }
+  if (diffNightsBetweenIso(nextIn, checkOutCandidate) > maxNights) {
+    checkOutCandidate = addDaysToIsoDate(nextIn, maxNights, addDaysToIsoDate(nextIn, 1, nextIn));
+    adjustment = "nights-clamped";
+  }
+  if (checkOutCandidate > horizon) {
+    checkOutCandidate = horizon;
+    adjustment = "horizon-capped";
+  }
+  if (checkOutCandidate <= nextIn) {
+    checkOutCandidate = addDaysToIsoDate(nextIn, 1, nextIn);
+    adjustment = "check-out-clamped-after-check-in";
+  }
+  const nextOut = checkOutCandidate;
+  return {
+    checkIn: nextIn,
+    checkOut: nextOut,
+    nights: Math.max(diffNightsBetweenIso(nextIn, nextOut), 1),
+    adjustment
+  };
+}
+function isValidStayRange(checkIn, checkOut, minCheckIn) {
+  if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) return false;
+  if (checkIn < minCheckIn) return false;
+  return diffNightsBetweenIso(checkIn, checkOut) >= 1;
+}
+function resolveRangeSelection({
+  from,
+  to: to3,
+  minCheckIn,
+  maxCheckOut,
+  maxNights = DEFAULT_MAX_STAY_NIGHTS
+}) {
+  if (!isValidIsoDate(from ?? "")) return { status: "cleared" };
+  const checkIn = from < minCheckIn ? minCheckIn : from;
+  if (!isValidIsoDate(to3 ?? "")) return { status: "pending", checkIn };
+  const checkOut = to3;
+  if (checkOut === checkIn) return { status: "pending", checkIn };
+  if (checkOut < checkIn) return { status: "pending", checkIn };
+  const clampedCheckIn = checkIn < minCheckIn ? minCheckIn : checkIn;
+  const nights = diffNightsBetweenIso(clampedCheckIn, checkOut);
+  if (nights < 1) return { status: "pending", checkIn: clampedCheckIn };
+  if (checkOut > maxCheckOut) return { status: "pending", checkIn: clampedCheckIn };
+  if (nights > maxNights) return { status: "pending", checkIn: clampedCheckIn };
+  return { status: "complete", checkIn: clampedCheckIn, checkOut, nights };
+}
+var ISO_DATE_PATTERN, DEFAULT_STAY_NIGHTS, DEFAULT_MAX_STAY_NIGHTS, DEFAULT_BOOKING_HORIZON_DAYS, MIN_MAX_STAY_NIGHTS, MAX_MAX_STAY_NIGHTS;
+var init_stayRange = __esm({
+  "../shared/utils/stayRange.ts"() {
+    "use strict";
+    ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+    DEFAULT_STAY_NIGHTS = 1;
+    DEFAULT_MAX_STAY_NIGHTS = 30;
+    DEFAULT_BOOKING_HORIZON_DAYS = 365;
+    MIN_MAX_STAY_NIGHTS = 1;
+    MAX_MAX_STAY_NIGHTS = DEFAULT_BOOKING_HORIZON_DAYS;
+  }
+});
+
+// ../shared/utils/bookingDiscounts.ts
+function calculatePercentDiscount(base, pct) {
+  return (Number(base) || 0) * ((Number(pct) || 0) / 100);
+}
+function calculateVoucherBase(subtotal, deduction) {
+  return Math.max(
+    (Number(subtotal) || 0) - (Number(deduction) || 0),
+    0
+  );
+}
+function normalizeDiscountScope(scope) {
+  if (!scope) return BROAD_DISCOUNT_SCOPE;
+  const fill = (cls) => ({
+    room: cls?.room !== false,
+    breakfast: cls?.breakfast !== false,
+    extraBed: cls?.extraBed !== false
+  });
+  return {
+    senior: fill(scope.senior),
+    voucher: fill(scope.voucher),
+    member: fill(scope.member)
+  };
+}
+function calculateDiscountChain(input) {
+  const roomTotal = Number(input.roomTotal) || 0;
+  const breakfastTotal = Number(input.breakfastTotal) || 0;
+  const extraBedTotal = Number(input.extraBedTotal) || 0;
+  const subtotal = roomTotal + breakfastTotal + extraBedTotal;
+  const scope = normalizeDiscountScope(input.scope);
+  const scopeBase = (cls) => (cls.room ? roomTotal : 0) + (cls.breakfast ? breakfastTotal : 0) + (cls.extraBed ? extraBedTotal : 0);
+  const seniorBase = scopeBase(scope.senior);
+  const seniorRaw = seniorBase * ((Number(input.seniorPct) || 0) / 100);
+  const seniorDeduction = input.round ? Math.round(seniorRaw) : seniorRaw;
+  const voucherBase = Math.max(0, scopeBase(scope.voucher) - seniorDeduction);
+  const voucherAmount = Number(input.voucherAmount) || 0;
+  const voucherDeduction = Math.min(Math.max(0, voucherAmount), voucherBase);
+  const memberBase = Math.max(
+    0,
+    scopeBase(scope.member) - seniorDeduction - voucherDeduction
+  );
+  const memberRaw = memberBase * ((Number(input.memberPct) || 0) / 100);
+  const memberDeduction = input.round ? Math.round(memberRaw) : memberRaw;
+  const total = Math.max(0, subtotal - seniorDeduction - voucherDeduction - memberDeduction);
+  return { seniorDeduction, voucherDeduction, memberDeduction, total };
+}
+var BROAD_DISCOUNT_SCOPE;
+var init_bookingDiscounts = __esm({
+  "../shared/utils/bookingDiscounts.ts"() {
+    "use strict";
+    BROAD_DISCOUNT_SCOPE = {
+      senior: { room: true, breakfast: true, extraBed: true },
+      voucher: { room: true, breakfast: true, extraBed: true },
+      member: { room: true, breakfast: true, extraBed: true }
+    };
+  }
+});
+
+// ../shared/utils/bookingFolio.ts
+function isUnpaidRefund(entry) {
+  const amount = Number(entry.amount) || 0;
+  const isRefund = entry.type === "refund" || amount < 0;
+  if (!isRefund) return false;
+  const status = typeof entry.status === "string" ? entry.status.trim().toLowerCase() : "";
+  return status !== "paid" && status !== "processed";
+}
+function sumCollectedPayments(entries) {
+  return entries.reduce(
+    (sum, entry) => isUnpaidRefund(entry) ? sum : sum + (Number(entry.amount) || 0),
+    0
+  );
+}
+function computeBookingFolio(input) {
+  const { booking, storeOrders } = input;
+  const folioBookingIds = new Set(
+    input.folioBookingIds?.length ? input.folioBookingIds : [booking.id]
+  );
+  const storeCharges = storeOrders.filter(
+    (o2) => typeof o2.bookingId === "string" && folioBookingIds.has(o2.bookingId) && o2.paymentMethod === "add-to-bill" && o2.status === "delivered" && o2.isBilled === true
+  );
+  const storeTotal = storeCharges.reduce(
+    (sum, o2) => sum + (Number(o2.totalAmount) || 0),
+    0
+  );
+  const charges = input.selectedBookingCharges ?? [];
+  const chargesTotal = charges.reduce(
+    (sum, c2) => sum + (Number(c2.amount) || 0),
+    0
+  );
+  const payments = input.selectedBookingPayments ? input.selectedBookingPayments : input.persistedPayments || [];
+  const paymentsTotal = sumCollectedPayments(payments);
+  const totalPrice = Number(booking.totalPrice) || 0;
+  const otherAddOnTotal = Math.max(0, Number(booking.otherAddOnTotal) || 0);
+  const grandTotal = totalPrice + otherAddOnTotal + storeTotal + chargesTotal;
+  const balance = grandTotal - paymentsTotal;
+  return {
+    storeCharges,
+    storeTotal,
+    charges,
+    chargesTotal,
+    paymentsTotal,
+    otherAddOnTotal,
+    grandTotal,
+    balance
+  };
+}
+function computeServerFolioTotals(input) {
+  const totalPrice = Number(input.totalPrice) || 0;
+  const incidentalTotal = Number(input.incidentalTotal) || 0;
+  const addToBillTotal = Number(input.addToBillTotal) || 0;
+  const collectedTotal = Number(input.collectedTotal) || 0;
+  const otherAddOnTotal = Math.max(0, Number(input.otherAddOnTotal) || 0);
+  const folioTotal = totalPrice + otherAddOnTotal + incidentalTotal + addToBillTotal;
+  const computedBalance = Math.max(folioTotal - collectedTotal, 0);
+  return { folioTotal, computedBalance };
+}
+function getReservationFolioSummary(input) {
+  const reservationTotal = Number(input.reservationTotal) || 0;
+  const otherAddOnTotal = Math.max(0, Number(input.otherAddOnTotal) || 0);
+  const refunds = input.refunds ?? [];
+  const paymentsTotal = sumCollectedPayments(input.payments) + sumCollectedPayments(refunds);
+  const chargesTotal = input.charges.reduce(
+    (sum, c2) => sum + (Number(c2.amount) || 0),
+    0
+  );
+  const balance = reservationTotal + otherAddOnTotal + chargesTotal - paymentsTotal;
+  return {
+    reservationId: input.reservationId,
+    reservationTotal,
+    otherAddOnTotal,
+    chargesTotal,
+    paymentsTotal,
+    balance,
+    source: input.source
+  };
+}
+function mapBookingStatusToReservationPaymentStatus(bookingStatus) {
+  switch (bookingStatus) {
+    case "pending":
+      return "awaiting-payment";
+    case "checked-in":
+      return "in-house";
+    case "checked-out":
+      return "completed";
+    // The 4 pass-through values: return the input as-is so
+    // the return type is assignable to `ReservationPaymentStatus`
+    // (TS narrows the literal type to the union member).
+    case "payment-uploaded":
+    case "payment-confirmed":
+    case "confirmed":
+    case "cancelled":
+      return bookingStatus;
+    // Unknown status: pass through unchanged (the field type
+    // is the runtime guard; the assignment site will reject an
+    // out-of-union value with a TS error). This is the
+    // defensive-coercion path — a malformed input never
+    // throws, it just doesn't get a relabel.
+    default:
+      return bookingStatus;
+  }
+}
+function computeReservationAggregatePaymentStatus(childStatuses) {
+  const activeStatuses = childStatuses.filter((s4) => s4 !== "cancelled");
+  if (activeStatuses.length === 0) {
+    return "cancelled";
+  }
+  const hasPreConfirmation = activeStatuses.some(
+    (s4) => s4 === "pending" || s4 === "payment-uploaded"
+  );
+  if (hasPreConfirmation) {
+    return "awaiting-payment";
+  }
+  const allConfirmed = activeStatuses.every(
+    (s4) => s4 === "payment-confirmed" || s4 === "confirmed"
+  );
+  if (allConfirmed) {
+    return "confirmed";
+  }
+  const hasCheckedOut = activeStatuses.some((s4) => s4 === "checked-out");
+  if (hasCheckedOut) {
+    return "completed";
+  }
+  return "in-house";
+}
+function deriveReservationCounters(children) {
+  const roomCount = children.length;
+  let cancelledRoomCount = 0;
+  let checkedInRoomCount = 0;
+  let checkedOutRoomCount = 0;
+  for (const child of children) {
+    const status = child.status;
+    if (status === "cancelled") {
+      cancelledRoomCount++;
+    } else if (status === "checked-in" || status === "in-house") {
+      checkedInRoomCount++;
+    } else if (status === "checked-out" || status === "completed") {
+      checkedOutRoomCount++;
+    }
+  }
+  return {
+    roomCount,
+    activeRoomCount: Math.max(roomCount - cancelledRoomCount, 0),
+    cancelledRoomCount,
+    checkedInRoomCount,
+    checkedOutRoomCount
+  };
+}
+function round2(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.round(numeric * 100) / 100;
+}
+function assertBookingRevenueAllocationInvariant(allocation, billedTotal) {
+  const computed = round2(
+    round2(allocation.roomNet) + round2(allocation.breakfastNet) + round2(allocation.addOnNet) - round2(allocation.deductionNet)
+  );
+  const expected = round2(billedTotal);
+  const allocationTotal = round2(allocation.totalNet);
+  if (Math.abs(allocationTotal - expected) > 0.05) {
+    throw new Error(
+      `[MRB-11] revenue allocation total mismatch: allocation.totalNet(${allocation.totalNet}) != the billed total(${expected}). This is a server-side bug \u2014 the allocation snapshot and the billed total were computed from different figures.`
+    );
+  }
+  if (Math.abs(computed - expected) > 0.05) {
+    throw new Error(
+      `[MRB-11] revenue allocation invariant violation: roomNet(${allocation.roomNet}) + breakfastNet(${allocation.breakfastNet}) + addOnNet(${allocation.addOnNet}) - deductionNet(${allocation.deductionNet}) = ${computed}, expected totalNet(${expected}). This is a server-side bug \u2014 the pricing chain returned an inconsistent allocation.`
+    );
+  }
+  return allocation;
+}
+function getBookingRevenueStreams(booking) {
+  if (booking.revenueAllocation) {
+    return { ...booking.revenueAllocation, allocation: "stored" };
+  }
+  const total = round2(Number(booking.totalPrice) || 0);
+  const roomSubtotalRaw = Number(booking.rateBreakdown?.roomSubtotal);
+  const roomSubtotal = Number.isFinite(roomSubtotalRaw) && roomSubtotalRaw > 0 ? roomSubtotalRaw : round2(Number(booking.ratePerNight) || 0) * Math.max(0, Number(booking.numNights) || 0);
+  const nights = Math.max(0, Number(booking.numNights) || 0);
+  const breakfastGross = round2(Math.max(0, Number(booking.breakfastTotal) || 0));
+  let room = total;
+  let breakfast = 0;
+  if (total > 0 && breakfastGross > 0 && roomSubtotal > 0) {
+    const grossTotal = roomSubtotal + breakfastGross;
+    breakfast = round2(total * breakfastGross / grossTotal);
+    room = round2(total - breakfast);
+  }
+  return {
+    roomNet: room,
+    breakfastNet: breakfast,
+    addOnNet: 0,
+    deductionNet: 0,
+    totalNet: total,
+    allocation: "legacy-heuristic"
+  };
+}
+function getReservationRevenueStreams(reservation, children) {
+  if (reservation.aggregateRevenueAllocation) {
+    return { ...reservation.aggregateRevenueAllocation, allocation: "stored" };
+  }
+  let roomNet = 0;
+  let breakfastNet = 0;
+  let addOnNet = 0;
+  let deductionNet = 0;
+  let totalNet = 0;
+  let anyChildLegacy = false;
+  let anyChild = false;
+  for (const child of children) {
+    anyChild = true;
+    const streams = getBookingRevenueStreams(child);
+    roomNet = round2(roomNet + streams.roomNet);
+    breakfastNet = round2(breakfastNet + streams.breakfastNet);
+    addOnNet = round2(addOnNet + streams.addOnNet);
+    deductionNet = round2(deductionNet + streams.deductionNet);
+    totalNet = round2(totalNet + streams.totalNet);
+    if (streams.allocation !== "stored") {
+      anyChildLegacy = true;
+    }
+  }
+  const allocation = !anyChild || anyChildLegacy ? "legacy-heuristic" : "stored";
+  return {
+    roomNet,
+    breakfastNet,
+    addOnNet,
+    deductionNet,
+    totalNet,
+    allocation
+  };
+}
+function computeBookingRevenueAllocation(input) {
+  const ratePerNight = Number(input.ratePerNight) || 0;
+  const numNights = Math.max(0, Number(input.numNights) || 0);
+  const roomTotal = round2(ratePerNight * numNights);
+  const breakfastTotal = round2(Math.max(0, Number(input.breakfastTotal) || 0));
+  const extraBedTotal = round2(Number(input.extraBedTotal) || 0);
+  const otherAddOnTotal = round2(Math.max(0, Number(input.otherAddOnTotal) || 0));
+  const chain2 = calculateDiscountChain({
+    roomTotal,
+    breakfastTotal,
+    extraBedTotal,
+    seniorPct: input.discountPct,
+    voucherAmount: input.voucherDiscount,
+    memberPct: input.memberDiscountPct,
+    scope: input.discountScope,
+    round: true
+  });
+  const deductionNet = round2(
+    chain2.seniorDeduction + chain2.voucherDeduction + chain2.memberDeduction
+  );
+  const roomNet = roomTotal;
+  const breakfastNet = breakfastTotal;
+  const addOnNet = round2(extraBedTotal + otherAddOnTotal);
+  const totalNet = round2(round2(Number(input.totalPrice) || 0) + otherAddOnTotal);
+  return assertBookingRevenueAllocationInvariant(
+    { roomNet, breakfastNet, addOnNet, deductionNet, totalNet },
+    totalNet
+  );
+}
+function rebuildBookingRevenueAllocation(input) {
+  const existing = input.existingAllocation;
+  const grossSubtotal = round2(Math.max(0, Number(input.grossSubtotal) || 0));
+  const totalPrice = round2(Number(input.totalPrice) || 0);
+  const otherAddOnTotal = round2(Math.max(0, Number(input.otherAddOnTotal) || 0));
+  const previousOtherAddOnTotal = round2(
+    Math.max(0, Number(input.previousOtherAddOnTotal) || 0)
+  );
+  const billedTotal = round2(totalPrice + otherAddOnTotal);
+  let roomNet = existing ? round2(existing.roomNet) : grossSubtotal;
+  const breakfastNet = existing ? round2(existing.breakfastNet) : 0;
+  const addOnNet = round2(
+    Math.max(
+      0,
+      (existing ? round2(existing.addOnNet) : 0) - previousOtherAddOnTotal + otherAddOnTotal
+    )
+  );
+  const shortfall = Math.max(
+    0,
+    billedTotal - round2(roomNet + breakfastNet + addOnNet)
+  );
+  roomNet = round2(roomNet + shortfall);
+  const deductionNet = round2(
+    Math.max(0, round2(roomNet + breakfastNet + addOnNet) - billedTotal)
+  );
+  return assertBookingRevenueAllocationInvariant(
+    { roomNet, breakfastNet, addOnNet, deductionNet, totalNet: billedTotal },
+    billedTotal
+  );
+}
+function computeReservationActualDateRange(headerCheckIn, headerCheckOut, children) {
+  if (children.length === 0) return null;
+  const headerIn = new Date(headerCheckIn).getTime();
+  const headerOut = new Date(headerCheckOut).getTime();
+  if (!Number.isFinite(headerIn) || !Number.isFinite(headerOut)) return null;
+  let earliest = new Date(headerIn);
+  let latest = new Date(headerOut);
+  let isDivergent = false;
+  for (const child of children) {
+    const childIn = new Date(child.checkIn).getTime();
+    const childOut = new Date(child.checkOut).getTime();
+    if (!Number.isFinite(childIn) || !Number.isFinite(childOut)) continue;
+    if (childIn < earliest.getTime()) earliest = new Date(childIn);
+    if (childOut > latest.getTime()) latest = new Date(childOut);
+    if (childIn !== headerIn || childOut !== headerOut) {
+      isDivergent = true;
+    }
+  }
+  return { earliestCheckIn: earliest, latestCheckOut: latest, isDivergent };
+}
+var init_bookingFolio = __esm({
+  "../shared/utils/bookingFolio.ts"() {
+    "use strict";
+    init_bookingDiscounts();
+  }
+});
+
+// ../shared/utils/breakfastTotal.ts
+function isBreakfastRateLine(label) {
+  const text = String(label ?? "");
+  return text === BREAKFAST_RATE_LINE_LABEL || text.startsWith(BREAKFAST_RATE_LINE_PREFIX);
+}
+function sumBreakfastRateLines(breakdown) {
+  if (!breakdown || !Array.isArray(breakdown.addOns)) return null;
+  let total = 0;
+  for (const line of breakdown.addOns) {
+    if (!line || !isBreakfastRateLine(line.label)) continue;
+    const amount = Number(line.amount);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    total += amount;
+  }
+  return Math.round(total * 100) / 100;
+}
+function computeBreakfastAdjustedTotalPrice(input) {
+  const totalPrice = Number(input.totalPrice) || 0;
+  const breakfastTotal = Number(input.breakfastTotal) || 0;
+  const anchor = input.breakfastInTotalPrice;
+  if (anchor === null || anchor === void 0 || !Number.isFinite(anchor)) {
+    return totalPrice;
+  }
+  return totalPrice - anchor + breakfastTotal;
+}
+function recomputeBreakfastTotal(selections) {
+  if (!selections) return 0;
+  let total = 0;
+  for (const key in selections) {
+    if (!Object.prototype.hasOwnProperty.call(selections, key)) continue;
+    const entry = selections[key];
+    if (!entry) continue;
+    if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+    const price = entry.price;
+    if (typeof price !== "number") continue;
+    if (!Number.isFinite(price)) continue;
+    if (price < 0) continue;
+    total += price;
+  }
+  return Math.round(total * 100) / 100;
+}
+function buildBreakfastRateBreakdownLines(selections) {
+  if (!selections) return [];
+  const byDate = /* @__PURE__ */ new Map();
+  for (const key of Object.keys(selections)) {
+    const entry = selections[key];
+    if (!entry) continue;
+    if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+    if (typeof entry.price !== "number" || !Number.isFinite(entry.price) || entry.price < 0) continue;
+    const match = /^(\d{4}-\d{2}-\d{2})-/.exec(key);
+    if (!match) continue;
+    const date = match[1];
+    const existing = byDate.get(date) ?? { count: 0, total: 0 };
+    existing.count += 1;
+    existing.total = Math.round((existing.total + entry.price) * 100) / 100;
+    byDate.set(date, existing);
+  }
+  const sortedDates = Array.from(byDate.keys()).sort();
+  return sortedDates.map((date) => {
+    const { count, total } = byDate.get(date);
+    let dateLabel = date;
+    try {
+      const parsed = /* @__PURE__ */ new Date(`${date}T00:00:00Z`);
+      if (!Number.isNaN(parsed.getTime())) {
+        const month = parsed.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
+        const day = parsed.getUTCDate();
+        dateLabel = `${month} ${day}`;
+      }
+    } catch {
+      dateLabel = date;
+    }
+    return {
+      label: `${BREAKFAST_RATE_LINE_PREFIX}${dateLabel}, ${count} meal${count === 1 ? "" : "s"})`,
+      amount: total
+    };
+  });
+}
+var BREAKFAST_RATE_LINE_LABEL, BREAKFAST_RATE_LINE_PREFIX;
+var init_breakfastTotal = __esm({
+  "../shared/utils/breakfastTotal.ts"() {
+    "use strict";
+    BREAKFAST_RATE_LINE_LABEL = "Breakfast add-on";
+    BREAKFAST_RATE_LINE_PREFIX = "Breakfast (";
+  }
+});
+
+// ../shared/utils/bookingAddOns.ts
+function calculateExtraBedAddOn(input) {
+  const count = Number(input.extraBedCount) || 0;
+  const rate = Number(input.extraBedRate) || 0;
+  const nights = Number(input.numNights) || 0;
+  if (count === 0 || rate === 0 || nights === 0) return 0;
+  return count * rate * nights;
+}
+function calculateBreakfastMealsTotal(selections) {
+  return recomputeBreakfastTotal(selections);
+}
+var init_bookingAddOns = __esm({
+  "../shared/utils/bookingAddOns.ts"() {
+    "use strict";
+    init_breakfastTotal();
+  }
+});
+
+// ../shared/utils/bookingOccupancy.ts
+function isBookingOccupyingRoom(booking, now = /* @__PURE__ */ new Date()) {
+  if (!booking || !booking.status) return false;
+  if (!BOOKING_OCCUPYING_STATUSES.includes(booking.status)) {
+    return false;
+  }
+  if (booking.status === "payment-uploaded") {
+    return true;
+  }
+  if (booking.status === "pending") {
+    const deadline = booking.holdExpiresAt;
+    if (!deadline) return true;
+    const expiresAt = deadline instanceof Date ? deadline : new Date(deadline);
+    if (isNaN(expiresAt.getTime())) return true;
+    return expiresAt.getTime() > now.getTime();
+  }
+  return true;
+}
+function computeHoldExpiresAt(windowHours, now = /* @__PURE__ */ new Date()) {
+  if (!windowHours || windowHours <= 0 || !Number.isFinite(windowHours)) return null;
+  const expires = new Date(now.getTime() + windowHours * 60 * 60 * 1e3);
+  return expires;
+}
+function normalizePaymentHoldWindowHours(raw) {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return DEFAULT_PAYMENT_HOLD_WINDOW_HOURS;
+  const clamped = Math.min(MAX_PAYMENT_HOLD_WINDOW_HOURS, Math.max(MIN_PAYMENT_HOLD_WINDOW_HOURS, Math.floor(value)));
+  return clamped;
+}
+var BOOKING_OCCUPYING_STATUSES, DEFAULT_PAYMENT_HOLD_WINDOW_HOURS, MIN_PAYMENT_HOLD_WINDOW_HOURS, MAX_PAYMENT_HOLD_WINDOW_HOURS, EXPIRED_HOLD_CANCELLATION_REASON, PAYMENT_REJECTED_FRESH_DEADLINE_FROM, CANCELLATION_SOURCES, GUEST_CANCELLABLE_STATUSES, STAFF_CANCELLABLE_STATUSES, TERMINAL_CANCELLATION_STATUSES;
+var init_bookingOccupancy = __esm({
+  "../shared/utils/bookingOccupancy.ts"() {
+    "use strict";
+    BOOKING_OCCUPYING_STATUSES = [
+      "pending",
+      "payment-uploaded",
+      "payment-confirmed",
+      "confirmed",
+      "checked-in"
+    ];
+    DEFAULT_PAYMENT_HOLD_WINDOW_HOURS = 24;
+    MIN_PAYMENT_HOLD_WINDOW_HOURS = 1;
+    MAX_PAYMENT_HOLD_WINDOW_HOURS = 72;
+    EXPIRED_HOLD_CANCELLATION_REASON = "payment-hold-expired";
+    PAYMENT_REJECTED_FRESH_DEADLINE_FROM = "paymentRejectedAt";
+    CANCELLATION_SOURCES = ["guest", "staff", "system"];
+    GUEST_CANCELLABLE_STATUSES = [
+      "pending",
+      "payment-uploaded",
+      "payment-confirmed",
+      "confirmed"
+    ];
+    STAFF_CANCELLABLE_STATUSES = [
+      "pending",
+      "payment-uploaded",
+      "payment-confirmed",
+      "confirmed"
+    ];
+    TERMINAL_CANCELLATION_STATUSES = [
+      "checked-in",
+      "cancelled"
+    ];
+  }
+});
+
+// ../shared/utils/extraBedInventory.ts
+function countExtraBedsInUse(bookings, rangeStart, rangeEnd, excludeBookingId, now = /* @__PURE__ */ new Date()) {
+  let total = 0;
+  for (const b3 of bookings) {
+    if (excludeBookingId && b3.id === excludeBookingId) continue;
+    if (!isBookingOccupyingRoom(
+      { status: b3.status, holdExpiresAt: b3.holdExpiresAt },
+      now
+    )) continue;
+    if (!b3.checkIn || !b3.checkOut) continue;
+    const existingStart = b3.checkIn instanceof Date ? b3.checkIn : new Date(b3.checkIn);
+    const existingEnd = b3.checkOut instanceof Date ? b3.checkOut : new Date(b3.checkOut);
+    if (isNaN(existingStart.getTime()) || isNaN(existingEnd.getTime())) continue;
+    if (existingEnd.getTime() <= rangeStart.getTime()) continue;
+    if (existingStart.getTime() >= rangeEnd.getTime()) continue;
+    total += Number(b3.extraBedCount) || 0;
+  }
+  return total;
+}
+function checkExtraBedInventory(inventory, inUse, requestedCount) {
+  const safeInventory = Math.max(0, Math.floor(Number(inventory) || 0));
+  const safeInUse = Math.max(0, Math.floor(Number(inUse) || 0));
+  const safeRequested = Math.max(0, Math.floor(Number(requestedCount) || 0));
+  if (safeInventory <= 0) {
+    return { inUse: safeInUse, available: Number.POSITIVE_INFINITY, ok: true };
+  }
+  const available = Math.max(0, safeInventory - safeInUse);
+  return {
+    inUse: safeInUse,
+    available,
+    ok: safeRequested <= available
+  };
+}
+var init_extraBedInventory = __esm({
+  "../shared/utils/extraBedInventory.ts"() {
+    "use strict";
+    init_bookingOccupancy();
+  }
+});
+
+// ../shared/utils/bookingVat.ts
+function calculateVatBreakdown(input) {
+  const vatRate = input.vatRate == null ? 0.12 : Number(input.vatRate) || 0;
+  const totalPrice = Math.max(0, Number(input.totalPrice) || 0);
+  const seniorDiscountAmount = Math.max(0, Number(input.seniorDiscountAmount) || 0);
+  const vatExclusiveSales = vatRate > 0 ? totalPrice / (1 + vatRate) : totalPrice;
+  const vatExemptSales = seniorDiscountAmount;
+  const vatAmount = vatExclusiveSales * vatRate;
+  return {
+    vatRate,
+    vatExclusiveSales,
+    vatExemptSales,
+    vatAmount
+  };
+}
+function getBookingVatBreakdown(booking) {
+  const totalPrice = Math.max(0, Number(booking.totalPrice) || 0);
+  const discountPct = Math.max(0, Number(booking.discountPct) || 0);
+  const isSenior = !booking.discountRejected && (booking.discountType === "senior" || booking.discountType === "pwd") && discountPct > 0;
+  const seniorDiscount = isSenior ? Math.max(0, Math.round(calculatePercentDiscount(
+    Math.max(0, Number(booking.originalTotalPrice) || 0),
+    discountPct
+  ))) : 0;
+  return calculateVatBreakdown({
+    totalPrice,
+    seniorDiscountAmount: seniorDiscount,
+    vatRate: booking.vatRate
+  });
+}
+function isVatEnabled(vatConfig) {
+  if (!vatConfig || typeof vatConfig.enabled !== "boolean") return DEFAULT_VAT_CONFIG.enabled;
+  return vatConfig.enabled;
+}
+function getEffectiveVatRate(vatConfig) {
+  if (!isVatEnabled(vatConfig)) return 0;
+  return 0.12;
+}
+function normalizeVatConfig(raw) {
+  if (raw && typeof raw === "object" && raw.enabled === false) {
+    return { enabled: false };
+  }
+  return { ...DEFAULT_VAT_CONFIG };
+}
+var DEFAULT_VAT_CONFIG;
+var init_bookingVat = __esm({
+  "../shared/utils/bookingVat.ts"() {
+    "use strict";
+    init_bookingDiscounts();
+    DEFAULT_VAT_CONFIG = {
+      enabled: true
+    };
+  }
+});
+
+// ../shared/utils/cache.ts
+function storageNotAvailable() {
+  if (typeof window === "undefined") return true;
+  if (typeof window.localStorage === "undefined") return true;
+  return false;
+}
+function readCacheWithTtl(key, ttlMs, now = Date.now()) {
+  if (storageNotAvailable()) return null;
+  let raw = null;
+  try {
+    raw = window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const envelope = parsed;
+  if (typeof envelope.fetchedAt !== "number") return null;
+  if (now - envelope.fetchedAt > ttlMs) return null;
+  return envelope.value ?? null;
+}
+function writeCache(key, value, now = Date.now()) {
+  if (storageNotAvailable()) return;
+  const envelope = { fetchedAt: now, value };
+  try {
+    window.localStorage.setItem(key, JSON.stringify(envelope));
+  } catch {
+  }
+}
+function clearCache(key) {
+  if (storageNotAvailable()) return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+  }
+}
+var init_cache = __esm({
+  "../shared/utils/cache.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/calendar.ts
+function toDate(value) {
+  if (value instanceof Date) return new Date(value.getTime());
+  return new Date(value);
+}
+function formatUtcBasic(date) {
+  const pad2 = (n2) => String(n2).padStart(2, "0");
+  return `${date.getUTCFullYear()}${pad2(date.getUTCMonth() + 1)}${pad2(date.getUTCDate())}T${pad2(date.getUTCHours())}${pad2(date.getUTCMinutes())}${pad2(date.getUTCSeconds())}Z`;
+}
+function formatDateOnly(value) {
+  const date = toDate(value);
+  const pad2 = (n2) => String(n2).padStart(2, "0");
+  return `${date.getUTCFullYear()}${pad2(date.getUTCMonth() + 1)}${pad2(date.getUTCDate())}`;
+}
+function escapeIcsText(value) {
+  return value.replace(/\\/g, "\\\\").replace(/\r\n|\r|\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;");
+}
+function foldLine(line) {
+  if (line.length <= 75) return line;
+  const chunks = [];
+  let remaining = line;
+  chunks.push(remaining.slice(0, 75));
+  remaining = remaining.slice(75);
+  while (remaining.length > 0) {
+    chunks.push(` ${remaining.slice(0, 74)}`);
+    remaining = remaining.slice(74);
+  }
+  return chunks.join("\r\n");
+}
+function buildIcsContent(input) {
+  const {
+    uid,
+    title,
+    description,
+    location,
+    start,
+    end,
+    allDay = false,
+    brand = "spark-inn"
+  } = input;
+  const stamp = formatUtcBasic(/* @__PURE__ */ new Date());
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    `PRODID:-//${brand}//Booking//EN`,
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "BEGIN:VEVENT",
+    `UID:${uid}`,
+    `DTSTAMP:${stamp}`
+  ];
+  if (allDay) {
+    lines.push(`DTSTART;VALUE=DATE:${formatDateOnly(start)}`);
+    lines.push(`DTEND;VALUE=DATE:${formatDateOnly(end)}`);
+  } else {
+    lines.push(`DTSTART:${formatUtcBasic(toDate(start))}`);
+    lines.push(`DTEND:${formatUtcBasic(toDate(end))}`);
+  }
+  lines.push(`SUMMARY:${escapeIcsText(title)}`);
+  if (description) lines.push(`DESCRIPTION:${escapeIcsText(description)}`);
+  if (location) lines.push(`LOCATION:${escapeIcsText(location)}`);
+  lines.push("END:VEVENT");
+  lines.push("END:VCALENDAR");
+  return lines.map(foldLine).join("\r\n") + "\r\n";
+}
+function buildGoogleCalendarUrl(input) {
+  const { title, description, location, start, end, allDay = false } = input;
+  const params = new URLSearchParams();
+  params.set("action", "TEMPLATE");
+  params.set("text", title);
+  if (description) params.set("details", description);
+  if (location) params.set("location", location);
+  if (allDay) {
+    const startStr = formatDateOnly(start);
+    const endStr = formatDateOnly(toDate(end));
+    params.set("dates", `${startStr}/${endStr}`);
+  } else {
+    params.set("dates", `${formatUtcBasic(toDate(start))}/${formatUtcBasic(toDate(end))}`);
+  }
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+function downloadIcsFile(filename, content) {
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+  const blob = new Blob([content], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename.endsWith(".ics") ? filename : `${filename}.ics`;
+  link.rel = "noopener";
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 1e3);
+}
+var init_calendar = __esm({
+  "../shared/utils/calendar.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/checkin.ts
+function hasValue(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+function getCheckInReadiness(input) {
+  const missingItems = [];
+  if (!CHECK_IN_ELIGIBLE_STATUSES.includes(input.status)) {
+    missingItems.push("Booking status must be confirmed or payment-confirmed");
+  }
+  if (!hasValue(input.guestIdPhotoUrl)) {
+    missingItems.push("Guest ID photo");
+  }
+  const registration = input.guestRegistration || {};
+  for (const field of REQUIRED_REGISTRATION_FIELDS) {
+    if (!hasValue(registration[field.key])) {
+      missingItems.push(field.label);
+    }
+  }
+  if (typeof registration.purposeOfStay === "string" && registration.purposeOfStay.trim().toLowerCase() === "other" && !hasValue(registration.otherPurpose)) {
+    missingItems.push("Purpose of stay (Other \u2014 reason required)");
+  }
+  if (registration.signatureStatus !== "signed") {
+    missingItems.push("Guest signature marked signed");
+  }
+  return {
+    ready: missingItems.length === 0,
+    missingItems
+  };
+}
+var CHECK_IN_ELIGIBLE_STATUSES, REQUIRED_REGISTRATION_FIELDS;
+var init_checkin = __esm({
+  "../shared/utils/checkin.ts"() {
+    "use strict";
+    CHECK_IN_ELIGIBLE_STATUSES = ["confirmed", "payment-confirmed"];
+    REQUIRED_REGISTRATION_FIELDS = [
+      { key: "nationality", label: "Nationality" },
+      { key: "address", label: "Residential address" },
+      { key: "dateOfBirth", label: "Date of birth" },
+      { key: "gender", label: "Gender" },
+      { key: "purposeOfStay", label: "Purpose of stay" },
+      { key: "idType", label: "ID type" },
+      { key: "idNumber", label: "ID number" },
+      { key: "emergencyContact", label: "Emergency contact" }
+    ];
+  }
+});
+
+// ../shared/utils/dates.ts
+function toDate2(value) {
+  return value instanceof Date ? new Date(value) : new Date(value);
+}
+function startOfDayUtc(value) {
+  const date = toDate2(value);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+function getNumNights(checkIn, checkOut) {
+  const start = startOfDayUtc(checkIn).getTime();
+  const end = startOfDayUtc(checkOut).getTime();
+  return Math.max(Math.round((end - start) / 864e5), 0);
+}
+function datesOverlap(firstCheckIn, firstCheckOut, secondCheckIn, secondCheckOut) {
+  return toDate2(firstCheckIn) < toDate2(secondCheckOut) && toDate2(firstCheckOut) > toDate2(secondCheckIn);
+}
+function eachStayNight(checkIn, checkOut) {
+  const nights = getNumNights(checkIn, checkOut);
+  const cursor = startOfDayUtc(checkIn);
+  return Array.from({ length: nights }, (_2, index) => {
+    const date = new Date(cursor);
+    date.setUTCDate(cursor.getUTCDate() + index);
+    return date;
+  });
+}
+function isWeekendNight(value) {
+  const day = startOfDayUtc(value).getUTCDay();
+  return day === 0 || day === 6;
+}
+function getWeekendNightCount(checkIn, checkOut) {
+  return eachStayNight(checkIn, checkOut).filter(isWeekendNight).length;
+}
+var init_dates = __esm({
+  "../shared/utils/dates.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/images.ts
+function canvasToBlob(canvas, mimeType, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("Unable to compress image."));
+      },
+      mimeType,
+      quality
+    );
+  });
+}
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    if (reader.onerror) {
+      reader.onerror = () => reject(reader.error ?? new Error("Unable to read compressed image."));
+    }
+    reader.readAsDataURL(blob);
+  });
+}
+async function compressImageFile(file, options = {}) {
+  if (!file.type.startsWith("image/")) {
+    throw new Error("Please choose an image file.");
+  }
+  const settings = { ...defaultImageOptions, ...options };
+  try {
+    const imageBitmap = await createImageBitmap(file);
+    const scale = Math.min(settings.maxWidth / imageBitmap.width, settings.maxHeight / imageBitmap.height, 1);
+    const width = Math.max(1, Math.round(imageBitmap.width * scale));
+    const height = Math.max(1, Math.round(imageBitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context2 = canvas.getContext("2d");
+    if (!context2) {
+      imageBitmap.close();
+      throw new Error("Unable to prepare image compression.");
+    }
+    const outputSupportsAlpha = settings.mimeType !== "image/jpeg";
+    if (!outputSupportsAlpha) {
+      context2.fillStyle = "#ffffff";
+      context2.fillRect(0, 0, width, height);
+    }
+    context2.drawImage(imageBitmap, 0, 0, width, height);
+    imageBitmap.close();
+    const blob = await canvasToBlob(canvas, settings.mimeType, settings.quality);
+    const ext = MIME_TO_EXTENSION[settings.mimeType];
+    const baseName = file.name.replace(/\.[^.]+$/, "");
+    const compressedFile = new File([blob], `${baseName}.${ext}`, {
+      type: settings.mimeType,
+      lastModified: Date.now()
+    });
+    const dataUrl = await blobToDataUrl(blob);
+    return {
+      file: compressedFile,
+      dataUrl,
+      width,
+      height,
+      originalSize: file.size,
+      compressedSize: compressedFile.size
+    };
+  } catch (error) {
+    console.warn("Image compression failed, falling back to original file:", error);
+    try {
+      const dataUrl = await blobToDataUrl(file);
+      return {
+        file,
+        dataUrl,
+        width: 0,
+        height: 0,
+        originalSize: file.size,
+        compressedSize: file.size
+      };
+    } catch (fallbackError) {
+      throw new Error("Unable to process or read the selected image file.");
+    }
+  }
+}
+var defaultImageOptions, MIME_TO_EXTENSION;
+var init_images = __esm({
+  "../shared/utils/images.ts"() {
+    "use strict";
+    defaultImageOptions = {
+      maxWidth: 1600,
+      maxHeight: 1600,
+      quality: 0.82,
+      mimeType: "image/jpeg"
+    };
+    MIME_TO_EXTENSION = {
+      "image/jpeg": "jpg",
+      "image/webp": "webp",
+      "image/png": "png"
+    };
+  }
+});
+
+// ../shared/utils/points.ts
+function calculatePointsRedemptionValue(points, pointsRedemptionRate) {
+  return Math.max(points / 100 * pointsRedemptionRate, 0);
+}
+function validatePointsRedemption(pointsToRedeem, availablePoints, pointsRedemptionRate) {
+  if (pointsToRedeem <= 0) {
+    return { valid: false, value: 0, error: "Points to redeem must be greater than zero." };
+  }
+  if (pointsToRedeem > availablePoints) {
+    return { valid: false, value: 0, error: "Insufficient points balance." };
+  }
+  return {
+    valid: true,
+    value: calculatePointsRedemptionValue(pointsToRedeem, pointsRedemptionRate),
+    error: ""
+  };
+}
+function resolveCurrentLevel(levels, completedStays) {
+  if (!levels || levels.length === 0) return null;
+  if (!Number.isFinite(completedStays) || completedStays < 0) return null;
+  const sorted = [...levels].filter((l3) => Number.isFinite(l3.fromStays) && l3.fromStays >= 0).sort((a, b3) => a.fromStays - b3.fromStays);
+  let current = null;
+  for (const level of sorted) {
+    if (level.fromStays <= completedStays) current = level;
+    else break;
+  }
+  return current;
+}
+function calculatePointsWithMultiplier(basePoints, multiplier) {
+  if (!Number.isFinite(basePoints) || basePoints <= 0) return 0;
+  const m2 = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+  return Math.max(0, Math.round(basePoints * m2));
+}
+var init_points = __esm({
+  "../shared/utils/points.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/paymentMethodLabel.ts
+function resolvePaymentMethodLabel(methodKey, paymentMethods) {
+  if (typeof methodKey !== "string" || methodKey.length === 0) {
+    return "";
+  }
+  if (Array.isArray(paymentMethods)) {
+    const match = paymentMethods.find(
+      (m2) => m2 && typeof m2.method === "string" && m2.method === methodKey
+    );
+    if (match && typeof match.label === "string" && match.label.length > 0) {
+      return match.label;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(LEGACY_PAYMENT_METHOD_LABELS, methodKey)) {
+    return LEGACY_PAYMENT_METHOD_LABELS[methodKey];
+  }
+  return methodKey;
+}
+var LEGACY_PAYMENT_METHOD_LABELS;
+var init_paymentMethodLabel = __esm({
+  "../shared/utils/paymentMethodLabel.ts"() {
+    "use strict";
+    LEGACY_PAYMENT_METHOD_LABELS = {
+      gcash: "Digital Wallet (GCash/Maya)",
+      bank: "Bank Transfer (Direct Deposit)",
+      "pay-at-hotel": "Pay at Hotel"
+    };
+  }
+});
+
+// ../shared/utils/paymentReference.ts
+function getLatestPaymentReference(booking) {
+  const payments = booking?.onsitePayments;
+  if (!Array.isArray(payments) || payments.length === 0) return null;
+  for (let i2 = payments.length - 1; i2 >= 0; i2 -= 1) {
+    const ref = payments[i2]?.transactionReference;
+    if (typeof ref === "string" && ref.trim().length > 0) return ref;
+  }
+  return null;
+}
+var init_paymentReference = __esm({
+  "../shared/utils/paymentReference.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/paymentVerification.ts
+function isPaymentVerified(booking) {
+  if (!booking) return false;
+  if (booking.status === "payment-confirmed") return true;
+  const stamp = booking.paymentConfirmedAt;
+  if (stamp === null || stamp === void 0) return false;
+  if (typeof stamp === "string") return stamp.trim().length > 0;
+  if (stamp instanceof Date) return !Number.isNaN(stamp.getTime());
+  return false;
+}
+var init_paymentVerification = __esm({
+  "../shared/utils/paymentVerification.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/pricing.ts
+function calculateBookingTotal(input) {
+  const roomTotal = input.roomTotal ?? input.ratePerNight * input.numNights;
+  const breakfastTotal = Number(input.breakfastTotal) || 0;
+  const extraBedTotal = Number(input.extraBedTotal) || 0;
+  const { total } = calculateDiscountChain({
+    roomTotal,
+    breakfastTotal,
+    extraBedTotal,
+    seniorPct: input.discountPct,
+    voucherAmount: input.voucherDiscount,
+    memberPct: input.memberDiscountPct,
+    scope: input.discountScope,
+    round: false
+  });
+  return total;
+}
+function getLockedManualNightlyRate(breakdown) {
+  const manualLine = breakdown?.roomLines?.find((line) => line.source === "manual");
+  if (!manualLine) return null;
+  const nights = Number(manualLine.nights);
+  const subtotal = Number(manualLine.subtotal);
+  if (Number.isFinite(nights) && nights > 0 && Number.isFinite(subtotal) && subtotal >= 0) {
+    return subtotal / nights;
+  }
+  const nightlyRate = Number(manualLine.nightlyRate);
+  return Number.isFinite(nightlyRate) && nightlyRate >= 0 ? nightlyRate : null;
+}
+var init_pricing = __esm({
+  "../shared/utils/pricing.ts"() {
+    "use strict";
+    init_bookingDiscounts();
+  }
+});
+
+// ../shared/utils/publicSiteCache.ts
+function bustPublicSiteContentCache(now = Date.now()) {
+  if (typeof window === "undefined" || typeof window.localStorage === "undefined") return;
+  try {
+    window.localStorage.setItem(PUBLIC_SITE_CONTENT_CACHE_BUST_KEY, String(now));
+  } catch {
+  }
+}
+function readPublicSiteContentBustTimestamp() {
+  if (typeof window === "undefined" || typeof window.localStorage === "undefined") return 0;
+  try {
+    const raw = window.localStorage.getItem(PUBLIC_SITE_CONTENT_CACHE_BUST_KEY);
+    if (!raw) return 0;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) ? parsed : 0;
+  } catch {
+    return 0;
+  }
+}
+function subscribeToPublicSiteContentBust(onBust) {
+  if (typeof window === "undefined") return () => {
+  };
+  function handler2(e3) {
+    if (e3.key !== PUBLIC_SITE_CONTENT_CACHE_BUST_KEY) return;
+    const ts2 = e3.newValue ? Number.parseInt(e3.newValue, 10) : 0;
+    clearCache(PUBLIC_SITE_CONTENT_CACHE_KEY);
+    onBust(Number.isFinite(ts2) ? ts2 : Date.now());
+  }
+  window.addEventListener("storage", handler2);
+  return () => window.removeEventListener("storage", handler2);
+}
+var init_publicSiteCache = __esm({
+  "../shared/utils/publicSiteCache.ts"() {
+    "use strict";
+    init_constants();
+    init_cache();
+  }
+});
+
+// ../shared/utils/reservationFingerprint.ts
+function defaultHasher() {
+  const { createHash } = require("node:crypto");
+  return (input) => createHash("sha256").update(input).digest("hex");
+}
+function normalizeRoomLine(line) {
+  const selections = Array.isArray(line.breakfastSelections) ? line.breakfastSelections.map((s4) => ({
+    key: String(s4.key || "").trim(),
+    mealId: String(s4.mealId || "").trim(),
+    price: Math.max(0, Number(s4.price) || 0)
+  })).sort((a, b3) => {
+    const aKey = `${a.key}|${a.mealId}|${a.price}`;
+    const bKey = `${b3.key}|${b3.mealId}|${b3.price}`;
+    return aKey < bKey ? -1 : aKey > bKey ? 1 : 0;
+  }) : [];
+  return {
+    type: String(line.type || "").trim(),
+    quantity: Math.max(0, Math.floor(Number(line.quantity) || 0)),
+    adults: Math.max(0, Math.floor(Number(line.adults) || 0)),
+    children: Math.max(0, Math.floor(Number(line.children) || 0)),
+    extraBeds: Math.max(0, Math.floor(Number(line.extraBeds) || 0)),
+    breakfastSelections: selections
+  };
+}
+function normalizeDiscountScope2(scope) {
+  const empty = {
+    senior: { room: false, breakfast: false, extraBed: false },
+    voucher: { room: false, breakfast: false, extraBed: false },
+    member: { room: false, breakfast: false, extraBed: false }
+  };
+  if (!scope) return empty;
+  return {
+    senior: {
+      room: Boolean(scope.senior?.room),
+      breakfast: Boolean(scope.senior?.breakfast),
+      extraBed: Boolean(scope.senior?.extraBed)
+    },
+    voucher: {
+      room: Boolean(scope.voucher?.room),
+      breakfast: Boolean(scope.voucher?.breakfast),
+      extraBed: Boolean(scope.voucher?.extraBed)
+    },
+    member: {
+      room: Boolean(scope.member?.room),
+      breakfast: Boolean(scope.member?.breakfast),
+      extraBed: Boolean(scope.member?.extraBed)
+    }
+  };
+}
+function buildCanonicalPayload(req) {
+  const roomLines = (Array.isArray(req.roomLines) ? req.roomLines : []).map(normalizeRoomLine).sort((a, b3) => {
+    const aKey = JSON.stringify(a);
+    const bKey = JSON.stringify(b3);
+    return aKey < bKey ? -1 : aKey > bKey ? 1 : 0;
+  });
+  const payload = {
+    reservationId: String(req.reservationId || "").trim(),
+    roomLines,
+    checkIn: String(req.checkIn || "").trim(),
+    checkOut: String(req.checkOut || "").trim(),
+    leadGuestName: String(req.leadGuestName || "").trim(),
+    leadGuestEmail: String(req.leadGuestEmail || "").trim().toLowerCase(),
+    leadGuestPhone: String(req.leadGuestPhone || "").trim(),
+    source: String(req.source || "").trim(),
+    isCorporate: Boolean(req.isCorporate),
+    corporateCode: String(req.corporateCode || "").trim().toUpperCase(),
+    companyName: String(req.companyName || "").trim(),
+    voucherCode: String(req.voucherCode || "").trim().toUpperCase(),
+    memberDiscountPct: Math.max(0, Number(req.memberDiscountPct) || 0),
+    discountScope: normalizeDiscountScope2(req.discountScope),
+    termsVersion: String(req.termsVersion || "").trim(),
+    privacyVersion: String(req.privacyVersion || "").trim()
+  };
+  return JSON.stringify(payload);
+}
+function computeRequestFingerprint(req, hasher = defaultHasher()) {
+  const canonical = buildCanonicalPayload(req);
+  return hasher(canonical);
+}
+var __test__;
+var init_reservationFingerprint = __esm({
+  "../shared/utils/reservationFingerprint.ts"() {
+    "use strict";
+    __test__ = { buildCanonicalPayload, normalizeRoomLine, normalizeDiscountScope: normalizeDiscountScope2 };
+  }
+});
+
+// ../shared/utils/roomTypes.ts
+function normalizeMaxChildren(raw, maxCapacity) {
+  const value = Number(raw);
+  if (Number.isFinite(value) && value >= 0) {
+    return Math.floor(value);
+  }
+  const cap = Number(maxCapacity);
+  if (Number.isFinite(cap) && cap > 0 && DEFAULT_MAX_CHILDREN_BY_ADULT_CAPACITY[cap] !== void 0) {
+    return DEFAULT_MAX_CHILDREN_BY_ADULT_CAPACITY[cap];
+  }
+  return FALLBACK_MAX_CHILDREN;
+}
+function requiredExtraBedsFor(input) {
+  const adults = Math.max(0, Math.floor(Number(input.numAdults) || 0));
+  const children = Math.max(0, Math.floor(Number(input.numChildren) || 0));
+  const maxCapacity = Math.max(0, Math.floor(Number(input.maxCapacity) || 0));
+  const maxChildren = Math.max(0, Math.floor(Number(input.maxChildren) || 0));
+  const overflowAdults = Math.max(0, adults - maxCapacity);
+  const overflowChildren = Math.max(0, children - maxChildren);
+  return {
+    overflowAdults,
+    overflowChildren,
+    requiredExtraBeds: overflowAdults + overflowChildren
+  };
+}
+function applyRoomTypeDefaults(raw) {
+  if (!raw || typeof raw !== "object") {
+    return {
+      value: "",
+      label: "",
+      shortLabel: "",
+      imageUrls: [],
+      bedDefinition: "",
+      description: "",
+      amenities: [],
+      maxCapacity: 0,
+      maxChildren: 0,
+      pricePerNight: 0,
+      weekendRate: 0,
+      corporateRate: 0,
+      maxExtraBeds: 0,
+      extraBedRate: 0
+    };
+  }
+  const r3 = raw;
+  const maxCapacity = Number(r3.maxCapacity) || 0;
+  return {
+    value: String(r3.value || ""),
+    label: String(r3.label || r3.value || ""),
+    shortLabel: String(r3.shortLabel || r3.label || r3.value || ""),
+    imageUrls: Array.isArray(r3.imageUrls) ? r3.imageUrls.slice() : [],
+    bedDefinition: String(r3.bedDefinition || ""),
+    description: String(r3.description || ""),
+    amenities: Array.isArray(r3.amenities) ? r3.amenities.slice() : [],
+    maxCapacity,
+    maxChildren: normalizeMaxChildren(r3.maxChildren, maxCapacity),
+    pricePerNight: Number(r3.pricePerNight) || 0,
+    weekendRate: Number(r3.weekendRate) || 0,
+    corporateRate: Number(r3.corporateRate) || 0,
+    maxExtraBeds: Number(r3.maxExtraBeds) || 0,
+    extraBedRate: Number(r3.extraBedRate) || 0,
+    // Per SR-01..05 (2026-10-12): the per-type bed-set-up
+    // subset. Same permissive "absent → empty" pattern
+    // used for the EXB-01 + CHD-02 surface flags above.
+    bedSetupValues: Array.isArray(r3.bedSetupValues) ? r3.bedSetupValues.filter((v6) => typeof v6 === "string").slice() : []
+  };
+}
+function deriveRoomTypeCapacityFit(input) {
+  const maxCapacity = Math.max(0, Math.floor(Number(input.type.maxCapacity) || 0));
+  const maxChildren = Math.max(0, Math.floor(Number(input.type.maxChildren) || 0));
+  const maxExtraBeds = Math.max(0, Math.floor(Number(input.type.maxExtraBeds) || 0));
+  const numAdults = Math.max(0, Math.floor(Number(input.numAdults) || 0));
+  const numChildren = Math.max(0, Math.floor(Number(input.numChildren) || 0));
+  const currentCartCount = Math.max(0, Math.floor(Number(input.currentCartCount) || 0));
+  const safeAdultCap = Math.max(1, maxCapacity);
+  const safeChildrenCap = Math.max(1, maxChildren);
+  const roomsNeeded = Math.max(
+    1,
+    Math.ceil(numAdults / safeAdultCap),
+    Math.ceil(numChildren / safeChildrenCap)
+  );
+  const basis = input.basis === "type" ? "type" : "cart";
+  const evaluatedCartCount = basis === "type" ? Math.max(currentCartCount, roomsNeeded) : currentCartCount;
+  const totalAdultCap = evaluatedCartCount * maxCapacity;
+  const totalChildrenCap = evaluatedCartCount * maxChildren;
+  const totalExtraBeds = evaluatedCartCount * maxExtraBeds;
+  const overflowAdults = Math.max(0, numAdults - totalAdultCap);
+  const overflowChildren = Math.max(0, numChildren - totalChildrenCap);
+  const totalOverflow = overflowAdults + overflowChildren;
+  let state;
+  if (numAdults === 0 && numChildren === 0) {
+    state = "fits";
+  } else if (totalOverflow > totalExtraBeds) {
+    state = "doesnt-fit";
+  } else if (totalOverflow === 0) {
+    const adultsAtCap = numAdults === totalAdultCap;
+    const childrenAtCap = numChildren === totalChildrenCap;
+    state = adultsAtCap && childrenAtCap ? "tight" : "fits";
+  } else {
+    state = "tight";
+  }
+  const extraBedsNeeded = totalOverflow > 0 && totalOverflow <= totalExtraBeds ? totalOverflow : 0;
+  return { state, roomsNeeded, extraBedsNeeded };
+}
+var DEFAULT_MAX_CHILDREN_BY_ADULT_CAPACITY, FALLBACK_MAX_CHILDREN;
+var init_roomTypes = __esm({
+  "../shared/utils/roomTypes.ts"() {
+    "use strict";
+    DEFAULT_MAX_CHILDREN_BY_ADULT_CAPACITY = {
+      1: 0,
+      2: 1,
+      3: 2,
+      4: 2,
+      5: 2,
+      6: 2
+    };
+    FALLBACK_MAX_CHILDREN = 2;
+  }
+});
+
+// ../shared/utils/seasonalRates.ts
+function dateKey(value) {
+  return startOfDayUtc(value).toISOString().slice(0, 10);
+}
+function appliesToRoomType(override, roomType) {
+  return override.roomTypeValues.length === 0 || override.roomTypeValues.includes(roomType);
+}
+function normalizeSeasonalRateOverride(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const entry = raw;
+  const id = String(entry.id ?? "").trim();
+  const name2 = String(entry.name ?? "").trim();
+  const startDate = String(entry.startDate ?? "").trim();
+  const endDate = String(entry.endDate ?? "").trim();
+  const rate = Number(entry.rate);
+  if (!id || !name2 || !startDate || !endDate || !Number.isFinite(rate) || rate < 0) return null;
+  return {
+    id,
+    name: name2,
+    startDate,
+    endDate,
+    rate,
+    roomTypeValues: Array.isArray(entry.roomTypeValues) ? entry.roomTypeValues.filter((value) => typeof value === "string" && value.trim().length > 0) : [],
+    isActive: entry.isActive !== false
+  };
+}
+function normalizeSeasonalRateOverrides(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.map(normalizeSeasonalRateOverride).filter((entry) => Boolean(entry));
+}
+function getSeasonalRateForNight(night, roomType, overrides) {
+  const key = dateKey(night);
+  const matches = overrides.filter(
+    (override) => override.isActive && key >= override.startDate && key <= override.endDate && appliesToRoomType(override, roomType)
+  );
+  if (matches.length === 0) return null;
+  return matches.sort((a, b3) => {
+    const specificity = Number(b3.roomTypeValues.length > 0) - Number(a.roomTypeValues.length > 0);
+    if (specificity !== 0) return specificity;
+    if (a.startDate !== b3.startDate) return b3.startDate.localeCompare(a.startDate);
+    return b3.id.localeCompare(a.id);
+  })[0];
+}
+function calculateSeasonalAwareRoomTotal(input) {
+  return calculateSeasonalAwareRoomBreakdown(input).roomSubtotal;
+}
+function calculateSeasonalAwareRoomBreakdown(input) {
+  const baseRate = Math.max(0, Number(input.baseRate) || 0);
+  const weekendRate = Math.max(0, Number(input.weekendRate) || 0);
+  const overrides = input.seasonalRateOverrides ?? [];
+  const lines = [];
+  for (const night of eachStayNight(input.checkIn, input.checkOut)) {
+    const date = dateKey(night);
+    const seasonal = getSeasonalRateForNight(night, input.roomType, overrides);
+    const line = seasonal ? { source: "seasonal", label: seasonal.name, nightlyRate: seasonal.rate } : isWeekendNight(night) && weekendRate ? { source: "weekend", label: "Weekend nights", nightlyRate: weekendRate } : { source: "regular", label: "Regular nights", nightlyRate: baseRate };
+    const previous = lines[lines.length - 1];
+    if (previous && previous.source === line.source && previous.label === line.label && previous.nightlyRate === line.nightlyRate) {
+      previous.endDate = date;
+      previous.nights += 1;
+      previous.subtotal += line.nightlyRate;
+    } else {
+      lines.push({
+        source: line.source,
+        label: line.label,
+        startDate: date,
+        endDate: date,
+        nights: 1,
+        nightlyRate: line.nightlyRate,
+        subtotal: line.nightlyRate
+      });
+    }
+  }
+  return {
+    roomSubtotal: lines.reduce((total, line) => total + line.subtotal, 0),
+    roomLines: lines
+  };
+}
+var init_seasonalRates = __esm({
+  "../shared/utils/seasonalRates.ts"() {
+    "use strict";
+    init_dates();
+  }
+});
+
+// ../shared/utils/storageJanitor.ts
+async function sweepBookingsStorage(options) {
+  const {
+    bucket,
+    db,
+    prefix = DEFAULT_PREFIX,
+    maxItems = DEFAULT_MAX_ITEMS,
+    dryRun = false,
+    pageToken,
+    now = Date.now
+  } = options;
+  const startedAt = now();
+  const errors = [];
+  const [files, nextPageToken] = await bucket.getFiles({
+    prefix,
+    delimiter: "/",
+    autoPaginate: false,
+    maxResults: maxItems,
+    pageToken
+  });
+  const subfolderIds = files.map((f5) => f5.name).filter((name2) => name2.startsWith(prefix) && name2.endsWith("/")).map((name2) => name2.slice(prefix.length, -1)).filter((id) => id.length > 0);
+  let deleted = 0;
+  let kept = 0;
+  for (const id of subfolderIds) {
+    try {
+      const snap = await db.collection("bookings").doc(id).get();
+      if (snap.exists) {
+        kept += 1;
+        continue;
+      }
+      if (!dryRun) {
+        await bucket.deleteFiles({ prefix: `${prefix}${id}/`, force: true });
+      }
+      deleted += 1;
+    } catch (err) {
+      errors.push({
+        id,
+        error: err instanceof Error ? err.message : String(err)
+      });
+    }
+  }
+  return {
+    scanned: subfolderIds.length,
+    deleted,
+    kept,
+    errors,
+    nextPageToken: nextPageToken ?? null,
+    dryRun,
+    durationMs: now() - startedAt
+  };
+}
+function recordSweepResult(result) {
+  sweepHistory.unshift({ ...result, at: Date.now() });
+  if (sweepHistory.length > MAX_HISTORY) {
+    sweepHistory.length = MAX_HISTORY;
+  }
+}
+function getSweepHistory() {
+  return sweepHistory;
+}
+function clearSweepHistory() {
+  sweepHistory.length = 0;
+}
+async function runBackfill(options) {
+  const {
+    collection,
+    needsUpdate,
+    buildPatch,
+    batchSize = 500,
+    onUpdate
+  } = options;
+  const startedAt = Date.now();
+  const afterId = null;
+  const docs = await collection.query(afterId, batchSize);
+  let scanned = 0;
+  let updated = 0;
+  let skipped = 0;
+  for (const doc of docs) {
+    scanned += 1;
+    if (!needsUpdate(doc)) {
+      skipped += 1;
+      continue;
+    }
+    const patch = buildPatch(doc);
+    await collection.update(doc.id, patch);
+    updated += 1;
+    if (onUpdate) onUpdate(doc.id);
+  }
+  const exhausted = docs.length < batchSize;
+  return {
+    scanned,
+    updated,
+    skipped,
+    nextCursor: exhausted ? null : docs[docs.length - 1]?.id ?? null,
+    exhausted,
+    durationMs: Date.now() - startedAt
+  };
+}
+var DEFAULT_PREFIX, DEFAULT_MAX_ITEMS, MAX_HISTORY, sweepHistory;
+var init_storageJanitor = __esm({
+  "../shared/utils/storageJanitor.ts"() {
+    "use strict";
+    DEFAULT_PREFIX = "bookings/";
+    DEFAULT_MAX_ITEMS = 500;
+    MAX_HISTORY = 50;
+    sweepHistory = [];
+  }
+});
+
+// ../shared/utils/storePaymentMethods.ts
+function getEffectiveStorePaymentMethods(paymentMethods) {
+  const safePaymentMethods = Array.isArray(paymentMethods) ? paymentMethods : [];
+  const isVisibleInStore = (m2) => m2.showInStore !== false;
+  return safePaymentMethods.filter(
+    (m2) => m2 && typeof m2.method === "string" && m2.method !== "pay-at-hotel" && isVisibleInStore(m2)
+  ).map((m2) => ({
+    method: m2.method,
+    label: m2.label || m2.method,
+    isEnabled: true,
+    source: "payment",
+    qrUrl: m2.qrUrl,
+    accountInfo: m2.accountInfo,
+    accountName: m2.accountName,
+    accountNumber: m2.accountNumber
+  }));
+}
+var init_storePaymentMethods = __esm({
+  "../shared/utils/storePaymentMethods.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/vouchers.ts
+function validateVoucher(voucher, roomType, now = /* @__PURE__ */ new Date()) {
+  if (!voucher.isActive) {
+    return { valid: false, error: "Voucher is inactive." };
+  }
+  if (voucher.expiresAt && voucher.expiresAt < now) {
+    return { valid: false, error: "Voucher has expired." };
+  }
+  if (voucher.usageCap !== null && voucher.usageCount >= voucher.usageCap) {
+    return { valid: false, error: "Voucher usage limit reached." };
+  }
+  if (voucher.applicableRoomTypes.length > 0 && !voucher.applicableRoomTypes.includes(roomType)) {
+    return { valid: false, error: "Voucher does not apply to this room type." };
+  }
+  return { valid: true, error: "" };
+}
+function calculateVoucherDiscount(voucher, subtotal) {
+  const discount = voucher.discountType === "percent" ? subtotal * (voucher.discountValue / 100) : voucher.discountValue;
+  return Math.min(Math.max(discount, 0), subtotal);
+}
+function applyVoucherDiscount(voucher, subtotal) {
+  return Math.max(subtotal - calculateVoucherDiscount(voucher, subtotal), 0);
+}
+function isRewardVoucher(voucher) {
+  return voucher.kind === "reward";
+}
+function isFreeNightVoucher(voucher) {
+  return voucher.kind === "reward" && voucher.valueType === "free-night";
+}
+function generateFreeNightVoucherCode(memberNumber, completedStays) {
+  const safeMember = String(memberNumber || "MEMBER").replace(/[^A-Z0-9_-]/gi, "");
+  const safeStays = Math.max(0, Math.floor(Number(completedStays) || 0));
+  return `FREENIGHT-${safeMember}-${safeStays}`;
+}
+var init_vouchers = __esm({
+  "../shared/utils/vouchers.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/corporate-codes.ts
+function validateCorporateCode(code, now = /* @__PURE__ */ new Date(), options = {}) {
+  let effectiveNow;
+  let requestedUses;
+  if (now instanceof Date) {
+    effectiveNow = now;
+    requestedUses = options.requestedUses ?? 1;
+  } else {
+    effectiveNow = /* @__PURE__ */ new Date();
+    requestedUses = now?.requestedUses ?? 1;
+  }
+  if (Number.isNaN(effectiveNow.getTime())) {
+    effectiveNow = /* @__PURE__ */ new Date();
+  }
+  if (!Number.isFinite(requestedUses) || requestedUses < 1) {
+    requestedUses = 1;
+  }
+  if (!code.isActive) {
+    return { valid: false, error: "Corporate code is inactive." };
+  }
+  if (code.expiresAt && code.expiresAt < effectiveNow) {
+    return { valid: false, error: "Corporate code has expired." };
+  }
+  if (code.usageCap !== null && code.usageCount + requestedUses > code.usageCap) {
+    return {
+      valid: false,
+      error: requestedUses > 1 ? `Corporate code usage limit reached: this code allows ${code.usageCap} use(s) and ${code.usageCount} are already recorded; the requested ${requestedUses}-room reservation would exceed the cap.` : "Corporate code usage limit reached."
+    };
+  }
+  return { valid: true, error: "" };
+}
+var init_corporate_codes = __esm({
+  "../shared/utils/corporate-codes.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/failureBackoff.ts
+function createFailureBackoffState() {
+  const cache = /* @__PURE__ */ new Map();
+  const clock = (now) => now ?? Date.now();
+  return {
+    get: (ip) => cache.get(ip) ?? null,
+    record: (ip, windowMs, now) => {
+      const t3 = clock(now);
+      const existing = cache.get(ip);
+      if (!existing || t3 > existing.resetTime) {
+        const next = { count: 1, resetTime: t3 + windowMs };
+        cache.set(ip, next);
+        return next.count;
+      }
+      existing.count += 1;
+      return existing.count;
+    },
+    clear: (ip) => {
+      cache.delete(ip);
+    },
+    isInBackoff: (ip, threshold, now) => {
+      const t3 = clock(now);
+      const existing = cache.get(ip);
+      if (!existing) return false;
+      if (t3 > existing.resetTime) {
+        cache.delete(ip);
+        return false;
+      }
+      return existing.count >= threshold;
+    }
+  };
+}
+var init_failureBackoff = __esm({
+  "../shared/utils/failureBackoff.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/financeInvariants.ts
+function assertFiniteAmount(value, label) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`Finance invariant failed: ${label} must be a finite number.`);
+  }
+}
+function assertMoneyEqual(actual, expected, label) {
+  if (Math.abs(actual - expected) >= CENTS_TOLERANCE) {
+    throw new Error(
+      `Finance invariant failed: ${label} (${actual.toFixed(2)}) does not reconcile to ${expected.toFixed(2)}.`
+    );
+  }
+}
+function assertBookingFinanceInvariant(snapshot) {
+  assertFiniteAmount(snapshot.totalPrice, "booking.totalPrice");
+  const breakdown = snapshot.rateBreakdown;
+  if (!breakdown) {
+    throw new Error("Finance invariant failed: booking.rateBreakdown is required.");
+  }
+  assertFiniteAmount(breakdown.roomSubtotal, "rateBreakdown.roomSubtotal");
+  assertFiniteAmount(breakdown.finalTotal, "rateBreakdown.finalTotal");
+  const roomLinesTotal = breakdown.roomLines.reduce((sum, line, index) => {
+    assertFiniteAmount(line.nightlyRate, `rateBreakdown.roomLines[${index}].nightlyRate`);
+    assertFiniteAmount(line.subtotal, `rateBreakdown.roomLines[${index}].subtotal`);
+    return sum + line.subtotal;
+  }, 0);
+  assertMoneyEqual(roomLinesTotal, breakdown.roomSubtotal, "room line total");
+  const addOnTotal = breakdown.addOns.reduce((sum, line, index) => {
+    assertFiniteAmount(line.amount, `rateBreakdown.addOns[${index}].amount`);
+    return sum + line.amount;
+  }, 0);
+  const deductionTotal = breakdown.deductions.reduce((sum, line, index) => {
+    assertFiniteAmount(line.amount, `rateBreakdown.deductions[${index}].amount`);
+    return sum + line.amount;
+  }, 0);
+  const visibleTotal = breakdown.roomSubtotal + addOnTotal - deductionTotal;
+  assertMoneyEqual(breakdown.finalTotal, visibleTotal, "rateBreakdown.finalTotal");
+  assertMoneyEqual(snapshot.totalPrice, breakdown.finalTotal, "booking.totalPrice");
+}
+function assertRevenueFinanceInvariant(snapshot) {
+  const revenueFields = [
+    ["roomRevenue", snapshot.roomRevenue],
+    ["breakfastRevenue", snapshot.breakfastRevenue],
+    ["storeRevenue", snapshot.storeRevenue],
+    ["incidentalRevenue", snapshot.incidentalRevenue],
+    ["totalRevenue", snapshot.totalRevenue]
+  ];
+  revenueFields.forEach(([label, value]) => assertFiniteAmount(value, label));
+  const componentTotal = snapshot.roomRevenue + snapshot.breakfastRevenue + snapshot.storeRevenue + snapshot.incidentalRevenue;
+  assertMoneyEqual(snapshot.totalRevenue, componentTotal, "totalRevenue");
+  const ownerByEntryId = /* @__PURE__ */ new Map();
+  for (const [stream, entryIds] of Object.entries(snapshot.streamEntryIds)) {
+    for (const entryId of entryIds) {
+      if (!entryId) throw new Error(`Finance invariant failed: ${stream} contains an empty entry ID.`);
+      const existingOwner = ownerByEntryId.get(entryId);
+      if (existingOwner) {
+        throw new Error(
+          `Finance invariant failed: ledger entry ${entryId} appears in both ${existingOwner} and ${stream}.`
+        );
+      }
+      ownerByEntryId.set(entryId, stream);
+    }
+  }
+}
+var CENTS_TOLERANCE;
+var init_financeInvariants = __esm({
+  "../shared/utils/financeInvariants.ts"() {
+    "use strict";
+    CENTS_TOLERANCE = 5e-3;
+  }
+});
+
+// ../shared/utils/cancellation.ts
+function parseCheckInTime(timeStr) {
+  const normalized = timeStr.trim().toLowerCase();
+  let match = normalized.match(/^(\d{1,2}):(\d{2})\s*(am|pm)?$/);
+  if (match) {
+    let hours = parseInt(match[1]);
+    const minutes = parseInt(match[2]);
+    const ampm = match[3];
+    if (ampm === "pm" && hours < 12) {
+      hours += 12;
+    } else if (ampm === "am" && hours === 12) {
+      hours = 0;
+    }
+    return { hours, minutes };
+  }
+  match = normalized.match(/^(\d{1,2})\s*(am|pm)$/);
+  if (match) {
+    let hours = parseInt(match[1]);
+    const ampm = match[2];
+    if (ampm === "pm" && hours < 12) {
+      hours += 12;
+    } else if (ampm === "am" && hours === 12) {
+      hours = 0;
+    }
+    return { hours, minutes: 0 };
+  }
+  return { hours: 14, minutes: 0 };
+}
+function timeZoneOffsetMs(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const representedAsUtc = Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+    Number(values.hour),
+    Number(values.minute),
+    Number(values.second)
+  );
+  const instantWithoutMilliseconds = Math.floor(date.getTime() / 1e3) * 1e3;
+  return representedAsUtc - instantWithoutMilliseconds;
+}
+function getCheckInInstant(dateKey2, timeStr, timeZone) {
+  const [year, month, day] = dateKey2.split("-").map(Number);
+  const { hours, minutes } = parseCheckInTime(timeStr);
+  const targetWallClock = Date.UTC(year, month - 1, day, hours, minutes, 0, 0);
+  let instant = targetWallClock;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const offset = timeZoneOffsetMs(new Date(instant), timeZone);
+    const next = targetWallClock - offset;
+    if (next === instant) break;
+    instant = next;
+  }
+  return new Date(instant);
+}
+function getLegacyCancellationPolicy() {
+  return "Cancellations made 48 hours or more before check-in are eligible for a full refund. Cancellations within 48 hours of check-in are non-refundable. No-shows will be charged the full booking amount.";
+}
+function evaluateCancellation(cancellationTime, snapshot, fallbackContext) {
+  const cancellationMs = typeof cancellationTime === "number" ? cancellationTime : cancellationTime.getTime();
+  const cutoffHours = snapshot?.cutoffHours ?? 48;
+  const refundPctBefore = snapshot?.refundPctBefore ?? 100;
+  const refundPctAfter = snapshot?.refundPctAfter ?? 0;
+  const policySource = snapshot?.source ?? "legacy-fallback";
+  let checkInMs;
+  if (snapshot?.scheduledCheckInTime) {
+    checkInMs = new Date(snapshot.scheduledCheckInTime).getTime();
+  } else if (fallbackContext?.checkInDateKey) {
+    checkInMs = getCheckInInstant(
+      fallbackContext.checkInDateKey,
+      fallbackContext.checkInTime || "14:00",
+      fallbackContext.timeZone || "Asia/Manila"
+    ).getTime();
+  } else {
+    checkInMs = Date.now();
+  }
+  const hoursRemaining = (checkInMs - cancellationMs) / (1e3 * 60 * 60);
+  const isBeforeCutoff = hoursRemaining >= cutoffHours;
+  const cutoffTimeMs = checkInMs - cutoffHours * 60 * 60 * 1e3;
+  const refundPct = isBeforeCutoff ? refundPctBefore : refundPctAfter;
+  return {
+    refundPct,
+    isBeforeCutoff,
+    cutoffTimeMs,
+    hoursRemaining,
+    policySource
+  };
+}
+function createCancellationPolicySnapshot(params) {
+  const tz = params.hotelConfig.timezone || "Asia/Manila";
+  const stdCheckInTime = params.hotelConfig.checkInTime || "14:00";
+  const checkInInstant = getCheckInInstant(params.checkInDateKey, stdCheckInTime, tz);
+  let cutoffHours = typeof params.websiteContent.cancellationCutoffHours === "number" ? params.websiteContent.cancellationCutoffHours : 48;
+  let refundPctBefore = typeof params.websiteContent.cancellationRefundPctBefore === "number" ? params.websiteContent.cancellationRefundPctBefore : 100;
+  let refundPctAfter = typeof params.websiteContent.cancellationRefundPctAfter === "number" ? params.websiteContent.cancellationRefundPctAfter : 0;
+  let policyText = params.websiteContent.cancellationPolicy || getLegacyCancellationPolicy();
+  let source = params.websiteContent.cancellationPolicy ? "settings" : "legacy-fallback";
+  if (params.corporateCodeData) {
+    let hasOverride = false;
+    const corp = params.corporateCodeData;
+    if (typeof corp.cancellationCutoffHours === "number") {
+      cutoffHours = corp.cancellationCutoffHours;
+      hasOverride = true;
+    }
+    if (typeof corp.cancellationRefundPctBefore === "number") {
+      refundPctBefore = corp.cancellationRefundPctBefore;
+      hasOverride = true;
+    }
+    if (typeof corp.cancellationRefundPctAfter === "number") {
+      refundPctAfter = corp.cancellationRefundPctAfter;
+      hasOverride = true;
+    }
+    if (typeof corp.cancellationPolicyText === "string" && corp.cancellationPolicyText.trim()) {
+      policyText = corp.cancellationPolicyText.trim();
+      hasOverride = true;
+    }
+    if (hasOverride) {
+      source = "corporate-override";
+    }
+  }
+  return {
+    cutoffHours,
+    refundPctBefore,
+    refundPctAfter,
+    policyText,
+    scheduledCheckInTime: checkInInstant.toISOString(),
+    source
+  };
+}
+function evaluateCancelPreview(input) {
+  const evalRoom = (child) => {
+    const evaluation = evaluateCancellation(
+      input.now,
+      child.cancellationPolicySnapshot,
+      // The fallback `fallbackContext` is unused when
+      // the snapshot is present; we still pass it for
+      // the legacy null-snapshot case so a child without
+      // a snapshotted policy (pre-CRL-05) still evaluates
+      // against the standard 48h / 100% / 0% rules.
+      {
+        checkInDateKey: "",
+        checkInTime: "14:00",
+        timeZone: "Asia/Manila"
+      }
+    );
+    const subtotal = Math.max(Number(child.totalPrice) || 0, 0);
+    return {
+      child,
+      evaluation,
+      subtotal
+    };
+  };
+  const children = input.scope === "room" ? [input.lookedUpBooking] : input.cancellableChildren;
+  const roomRows = children.map(evalRoom);
+  const cancellableSubtotal = roomRows.reduce((sum, r3) => sum + r3.subtotal, 0);
+  const allocationSubtotal = Math.max(
+    Number(input.allocationSubtotal) || cancellableSubtotal,
+    cancellableSubtotal
+  );
+  const availableNetCollected = Math.max(Number(input.reservationNetCollected) || 0, 0);
+  const netCollectedByRoom = roomRows.map((r3) => {
+    if (allocationSubtotal === 0) return 0;
+    return Math.round(
+      r3.subtotal / allocationSubtotal * availableNetCollected * 100
+    ) / 100;
+  });
+  const perRoom = roomRows.map((r3, idx) => {
+    const netCollected = netCollectedByRoom[idx];
+    const policyRefund = Math.round(netCollected * (r3.evaluation.refundPct / 100) * 100) / 100;
+    const retainedAmount = Math.round((netCollected - policyRefund) * 100) / 100;
+    return {
+      bookingId: r3.child.id,
+      bookingRef: r3.child.bookingRef,
+      position: r3.child.reservationPosition ?? null,
+      roomType: r3.child.roomType,
+      status: r3.child.status,
+      subtotal: r3.subtotal,
+      netCollected,
+      policyRefund,
+      retainedAmount,
+      refundPct: r3.evaluation.refundPct,
+      isBeforeCutoff: r3.evaluation.isBeforeCutoff,
+      hoursRemaining: r3.evaluation.hoursRemaining
+    };
+  });
+  const aggregateSubtotal = cancellableSubtotal;
+  const aggregateNetCollected = Math.round(
+    netCollectedByRoom.reduce((sum, n2) => sum + n2, 0) * 100
+  ) / 100;
+  const aggregatePolicyRefund = perRoom.reduce((sum, r3) => sum + r3.policyRefund, 0);
+  const aggregateRetained = Math.round((aggregateNetCollected - aggregatePolicyRefund) * 100) / 100;
+  const aggregateRefundPct = perRoom.length > 0 ? Math.min(...perRoom.map((r3) => r3.refundPct)) : 0;
+  const representativeEvaluation = roomRows[0]?.evaluation;
+  const staffProcessingRequired = aggregateNetCollected > 0 && aggregatePolicyRefund > 0;
+  const isReservation = input.scope === "reservation" && input.reservation !== null;
+  return {
+    kind: isReservation ? "reservation" : "single",
+    scope: input.scope,
+    bookingRef: input.lookedUpBooking.bookingRef,
+    reservationRef: input.reservation?.reservationRef ?? null,
+    room: isReservation ? null : perRoom[0] ?? null,
+    rooms: isReservation ? perRoom : null,
+    subtotal: Math.round(aggregateSubtotal * 100) / 100,
+    netCollected: aggregateNetCollected,
+    policyRefund: Math.round(aggregatePolicyRefund * 100) / 100,
+    retainedAmount: aggregateRetained,
+    staffProcessingRequired,
+    cutoffHours: representativeEvaluation?.refundPct !== void 0 ? representativeEvaluation.cutoffTimeMs && input.lookedUpBooking.cancellationPolicySnapshot ? input.lookedUpBooking.cancellationPolicySnapshot.cutoffHours : 48 : 48,
+    cutoffTimeMs: representativeEvaluation?.cutoffTimeMs ?? 0,
+    hoursRemaining: representativeEvaluation?.hoursRemaining ?? 0,
+    isBeforeCutoff: representativeEvaluation?.isBeforeCutoff ?? false,
+    refundPct: aggregateRefundPct,
+    policyText: input.lookedUpBooking.cancellationPolicySnapshot?.policyText ?? getLegacyCancellationPolicy(),
+    policySource: representativeEvaluation?.policySource ?? "legacy-fallback"
+  };
+}
+function computeCancellationLiabilityState(input) {
+  if (!input.liability) {
+    return {
+      state: "not-required",
+      liability: null,
+      processedAmount: 0,
+      outstandingAmount: 0,
+      retentionAmount: 0,
+      stateLabel: "No refund owed"
+    };
+  }
+  const policyRefund = Math.max(Number(input.liability.policyResult?.policyRefund) || 0, 0);
+  const approvedAmount = Math.max(Math.min(
+    Number(input.liability.approvedAmount) || 0,
+    // The exception can only reduce, never increase. A
+    // writer bug that stamped `approvedAmount >
+    // policyRefund` is clamped to the policy result.
+    policyRefund
+  ), 0);
+  const processedAmount = Math.max(Number(input.processedAmount) || 0, 0);
+  const outstandingAmount = Math.max(approvedAmount - processedAmount, 0);
+  const retentionAmount = Math.max(policyRefund - approvedAmount, 0);
+  let state;
+  let stateLabel;
+  if (policyRefund === 0) {
+    state = "not-required";
+    stateLabel = "No refund owed";
+  } else if (approvedAmount < policyRefund) {
+    state = "retained";
+    stateLabel = processedAmount >= approvedAmount ? "Exception applied \xB7 fully refunded" : "Exception applied \xB7 refund in progress";
+  } else if (processedAmount === 0) {
+    state = "pending-processing";
+    stateLabel = "Pending refund";
+  } else if (processedAmount < approvedAmount) {
+    state = "partially-processed";
+    stateLabel = "Partially refunded";
+  } else {
+    state = "processed";
+    stateLabel = "Refunded";
+  }
+  return {
+    state,
+    liability: input.liability,
+    processedAmount,
+    outstandingAmount,
+    retentionAmount,
+    stateLabel
+  };
+}
+function buildCancellationLiabilitySnapshot(input) {
+  const policyRefund = Math.round(Math.max(Number(input.policyRefund) || 0, 0) * 100) / 100;
+  const netCollected = Math.round(Math.max(Number(input.netCollected) || 0, 0) * 100) / 100;
+  const retainedAmount = Math.round(Math.max(Number(input.retainedAmount) || 0, 0) * 100) / 100;
+  const policyResult = {
+    refundPct: Math.max(Number(input.refundPct) || 0, 0),
+    policyRefund,
+    netCollected,
+    retainedAmount,
+    cutoffHours: Math.max(Number(input.cutoffHours) || 0, 0),
+    source: input.source,
+    snapshottedAt: input.now
+  };
+  return {
+    policyResult,
+    // `approvedAmount` defaults to the policy result. An
+    // exception is a separate admin-only mutation (the
+    // new `handleRecordCancellationException` endpoint)
+    // that reduces this value. The destructive cancel
+    // never auto-mutates `approvedAmount` beyond the
+    // default — CRL-04's "never auto-refund" rule.
+    approvedAmount: policyRefund,
+    exception: null
+  };
+}
+var init_cancellation = __esm({
+  "../shared/utils/cancellation.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/uploads.ts
+async function raceUploadWithTimeout(uploadPromise, timeoutMs, label = "Upload") {
+  let timeoutHandle;
+  const timeoutPromise = new Promise((_2, reject) => {
+    timeoutHandle = setTimeout(() => {
+      reject(
+        new Error(
+          `${label} timed out after ${Math.round(timeoutMs / 1e3)}s. Please check your connection and retry.`
+        )
+      );
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([uploadPromise, timeoutPromise]);
+  } finally {
+    if (timeoutHandle !== void 0) clearTimeout(timeoutHandle);
+  }
+}
+var DEFAULT_UPLOAD_TIMEOUT_MS;
+var init_uploads = __esm({
+  "../shared/utils/uploads.ts"() {
+    "use strict";
+    DEFAULT_UPLOAD_TIMEOUT_MS = 9e4;
+  }
+});
+
+// ../shared/utils/bookingPreferences.ts
+function resolveBookingPreferenceValues(raw) {
+  const values = [];
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      if (!entry || typeof entry !== "object") continue;
+      const value = entry.value;
+      if (typeof value === "string" && value) values.push(value);
+    }
+  }
+  return values.length > 0 ? values : DEFAULT_BOOKING_PREFERENCES.map((option2) => option2.value);
+}
+function parseCheckInTimeToPair(timeStr) {
+  const normalized = timeStr.trim().toLowerCase();
+  if (!normalized) return { hours: 14, minutes: 0 };
+  const ampm = normalized.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/);
+  if (ampm) {
+    let hours = Number(ampm[1]);
+    const minutes = Number(ampm[2] ?? "0");
+    const isPm = ampm[3] === "pm";
+    if (hours === 12) hours = isPm ? 12 : 0;
+    else if (isPm) hours += 12;
+    return { hours, minutes };
+  }
+  const h24 = normalized.match(/^(\d{1,2}):(\d{2})$/);
+  if (h24) {
+    const hours = Number(h24[1]);
+    const minutes = Number(h24[2]);
+    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+      return { hours, minutes };
+    }
+  }
+  return { hours: 14, minutes: 0 };
+}
+function buildArrivalTimeOptions(checkInTimeStr, locale = "en-US") {
+  const base = parseCheckInTimeToPair(checkInTimeStr);
+  const options = [
+    { value: null, label: "I don't know" }
+  ];
+  for (let i2 = 0; i2 < ARRIVAL_WINDOW_HOURS; i2 += 1) {
+    const totalMinutes = base.minutes + (base.hours + i2) * 60;
+    const hours24 = Math.floor(totalMinutes / 60) % 24;
+    const minutes = totalMinutes % 60;
+    options.push({
+      value: formatHHMM(hours24, minutes),
+      label: format12hLabel(hours24, minutes, locale)
+    });
+  }
+  return options;
+}
+function formatHHMM(hours, minutes) {
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+function format12hLabel(hours, minutes, locale) {
+  const safeHours = (hours % 24 + 24) % 24;
+  const safeMinutes = Math.max(0, Math.min(59, minutes));
+  const utcHours = (safeHours - HOTEL_TZ_OFFSET_HOURS + 24) % 24;
+  const reference = new Date(Date.UTC(1970, 0, 1, utcHours, safeMinutes, 0));
+  return new Intl.DateTimeFormat(locale, {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: HOTEL_TZ_IANA
+  }).format(reference);
+}
+var HOTEL_TZ_OFFSET_HOURS, HOTEL_TZ_IANA;
+var init_bookingPreferences = __esm({
+  "../shared/utils/bookingPreferences.ts"() {
+    "use strict";
+    init_constants();
+    HOTEL_TZ_OFFSET_HOURS = 8;
+    HOTEL_TZ_IANA = "Asia/Manila";
+  }
+});
+
+// ../shared/utils/breakfastCutoff.ts
+function parseServiceDateUtc(value) {
+  if (typeof value !== "string") return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [yearStr, monthStr, dayStr] = value.split("-");
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const day = Number(dayStr);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const candidate = new Date(Date.UTC(year, month - 1, day));
+  if (candidate.getUTCFullYear() !== year || candidate.getUTCMonth() !== month - 1 || candidate.getUTCDate() !== day) {
+    return null;
+  }
+  return candidate;
+}
+function parseCutoffTime(value) {
+  if (typeof value !== "string") return null;
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value);
+  if (!match) return null;
+  return { hour: Number(match[1]), minute: Number(match[2]) };
+}
+function isValidTimezone(timezone) {
+  if (typeof timezone !== "string" || timezone.length === 0) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+function zonedWallClockToUtc(dateUtc, hour, minute, timezone) {
+  const naiveUtcMs = Date.UTC(
+    dateUtc.getUTCFullYear(),
+    dateUtc.getUTCMonth(),
+    dateUtc.getUTCDate(),
+    hour,
+    minute,
+    0,
+    0
+  );
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  });
+  const parts = formatter.formatToParts(new Date(naiveUtcMs));
+  const get2 = (type) => {
+    const found = parts.find((p) => p.type === type);
+    if (!found) throw new Error(`Missing Intl part: ${type}`);
+    return Number(found.value);
+  };
+  const tzAsUtcMs = Date.UTC(
+    get2("year"),
+    get2("month") - 1,
+    get2("day"),
+    get2("hour") === 24 ? 0 : get2("hour"),
+    get2("minute"),
+    get2("second")
+  );
+  const offsetMs = tzAsUtcMs - naiveUtcMs;
+  return new Date(naiveUtcMs - offsetMs);
+}
+function computeBreakfastCutoffState(input) {
+  const safeReturn = (reason) => {
+    console.error(
+      `[breakfastCutoff] ${reason}; returning locked state for serviceDate=${input?.serviceDate}`
+    );
+    return {
+      isLocked: true,
+      minutesUntilCutoff: 0,
+      cutoffAt: input?.now instanceof Date ? input.now.toISOString() : (/* @__PURE__ */ new Date(0)).toISOString(),
+      serviceDate: typeof input?.serviceDate === "string" ? input.serviceDate : ""
+    };
+  };
+  if (!input || !(input.now instanceof Date)) {
+    return safeReturn("invalid `now` argument");
+  }
+  const serviceDateUtc = parseServiceDateUtc(input.serviceDate);
+  if (!serviceDateUtc) {
+    return safeReturn(`invalid serviceDate (${input.serviceDate})`);
+  }
+  const cutoff = parseCutoffTime(input.cutoffTime);
+  if (!cutoff) {
+    return safeReturn(`invalid cutoffTime (${input.cutoffTime})`);
+  }
+  if (!isValidTimezone(input.timezone)) {
+    return safeReturn(`invalid timezone (${input.timezone})`);
+  }
+  const previousDayUtc = new Date(serviceDateUtc);
+  previousDayUtc.setUTCDate(previousDayUtc.getUTCDate() - 1);
+  const cutoffAt = zonedWallClockToUtc(
+    previousDayUtc,
+    cutoff.hour,
+    cutoff.minute,
+    input.timezone
+  );
+  const nowMs = input.now.getTime();
+  const cutoffMs = cutoffAt.getTime();
+  const isLocked = nowMs >= cutoffMs;
+  const minutesUntilCutoff = Math.floor((cutoffMs - nowMs) / 6e4);
+  if (input.cutoffsEnabled === false) {
+    return {
+      isLocked: false,
+      // The countdown is meaningless when cut-offs are off,
+      // but expose a large sentinel so any client renderer
+      // accidentally feeding `minutesUntilCutoff` into a
+      // "minutes remaining" line shows "always open" instead
+      // of a negative countdown.
+      minutesUntilCutoff: Number.MAX_SAFE_INTEGER,
+      cutoffAt: cutoffAt.toISOString(),
+      serviceDate: input.serviceDate,
+      reasonOrCutoff: "cutoffs-disabled"
+    };
+  }
+  return {
+    isLocked,
+    minutesUntilCutoff,
+    cutoffAt: cutoffAt.toISOString(),
+    serviceDate: input.serviceDate
+  };
+}
+var init_breakfastCutoff = __esm({
+  "../shared/utils/breakfastCutoff.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/breakfastSlotKey.ts
+function buildBreakfastSlotId(guestIndex) {
+  return `guest-${guestIndex}`;
+}
+function buildBreakfastSlotKey(serviceDate, guestIndex) {
+  return `${serviceDate}-${buildBreakfastSlotId(guestIndex)}`;
+}
+function buildBreakfastSlotKeyForBase(serviceDate, guestIndex, base) {
+  return base === "one-based" ? `${serviceDate}-guest-${guestIndex + 1}` : buildBreakfastSlotKey(serviceDate, guestIndex);
+}
+function parseBreakfastSlotKey(slotKey) {
+  if (typeof slotKey !== "string") return null;
+  const match = /^(\d{4}-\d{2}-\d{2})-(?:(guest-)?(\d+))$/.exec(slotKey);
+  if (!match) return null;
+  const rawIndex = Number(match[3]);
+  if (!Number.isFinite(rawIndex)) return null;
+  return {
+    serviceDate: match[1],
+    rawIndex,
+    form: match[2] ? "canonical" : "bare"
+  };
+}
+function detectBreakfastSlotIndexBase(selections, numGuests) {
+  if (!selections || typeof selections !== "object") return "zero-based";
+  let highestCanonicalIndex = -1;
+  let sawIndexZero = false;
+  for (const key of Object.keys(selections)) {
+    const parsed = parseBreakfastSlotKey(key);
+    if (!parsed || parsed.form !== "canonical") continue;
+    if (parsed.rawIndex === 0) sawIndexZero = true;
+    if (parsed.rawIndex > highestCanonicalIndex) highestCanonicalIndex = parsed.rawIndex;
+  }
+  if (sawIndexZero) return "zero-based";
+  const total = Number(numGuests);
+  if (Number.isFinite(total) && total > 0 && highestCanonicalIndex >= total) {
+    return "one-based";
+  }
+  return "zero-based";
+}
+function resolveBreakfastSlotGuestIndex(slotKey, base = "zero-based") {
+  const parsed = parseBreakfastSlotKey(slotKey);
+  if (!parsed) return null;
+  const index = parsed.form === "bare" ? parsed.rawIndex : base === "one-based" ? parsed.rawIndex - 1 : parsed.rawIndex;
+  if (index < 0) return null;
+  return index;
+}
+function normalizeBreakfastSelections(selections, numGuests) {
+  const base = detectBreakfastSlotIndexBase(
+    selections,
+    numGuests
+  );
+  const slots = /* @__PURE__ */ new Map();
+  if (!selections || typeof selections !== "object") return { base, slots };
+  for (const storedKey of Object.keys(selections)) {
+    const parsed = parseBreakfastSlotKey(storedKey);
+    if (!parsed) continue;
+    const guestIndex = resolveBreakfastSlotGuestIndex(storedKey, base);
+    if (guestIndex === null) continue;
+    const canonicalKey = buildBreakfastSlotKey(parsed.serviceDate, guestIndex);
+    const existing = slots.get(canonicalKey);
+    if (existing) {
+      const existingIsBare = parseBreakfastSlotKey(existing.storedKey)?.form === "bare";
+      if (existingIsBare && parsed.form === "canonical") {
+        slots.set(canonicalKey, {
+          canonicalKey,
+          storedKey,
+          guestIndex,
+          serviceDate: parsed.serviceDate,
+          entry: selections[storedKey]
+        });
+      }
+      continue;
+    }
+    slots.set(canonicalKey, {
+      canonicalKey,
+      storedKey,
+      guestIndex,
+      serviceDate: parsed.serviceDate,
+      entry: selections[storedKey]
+    });
+  }
+  return { base, slots };
+}
+var init_breakfastSlotKey = __esm({
+  "../shared/utils/breakfastSlotKey.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/money.ts
+function roundToTwoDecimals(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.round(numeric * 100) / 100;
+}
+var init_money = __esm({
+  "../shared/utils/money.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/otherAddOnTotal.ts
+function recomputeOtherAddOnTotal(selections) {
+  if (!selections) return 0;
+  let total = 0;
+  for (const dateKey2 of Object.keys(selections)) {
+    const items = selections[dateKey2];
+    if (!Array.isArray(items)) continue;
+    for (const entry of items) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+      const price = Math.max(0, Number(entry.priceSnapshot) || 0);
+      const qty = Math.max(0, Math.floor(Number(entry.quantity) || 0));
+      total += price * qty;
+    }
+  }
+  return roundToTwoDecimals(total);
+}
+function otherAddOnBreakdownByDate(selections) {
+  if (!selections) return [];
+  const rows = [];
+  const dates = Object.keys(selections).sort();
+  for (const date of dates) {
+    const items = selections[date];
+    if (!Array.isArray(items) || items.length === 0) continue;
+    let s4 = 0;
+    let n2 = 0;
+    for (const entry of items) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+      const price = Math.max(0, Number(entry.priceSnapshot) || 0);
+      const qty = Math.max(0, Math.floor(Number(entry.quantity) || 0));
+      if (qty > 0) {
+        s4 += price * qty;
+        n2 += 1;
+      }
+    }
+    if (n2 > 0) {
+      rows.push({ date, subtotal: roundToTwoDecimals(s4), itemCount: n2 });
+    }
+  }
+  return rows;
+}
+function hasAnyOtherAddOns(selections) {
+  if (!selections) return false;
+  for (const date of Object.keys(selections)) {
+    const items = selections[date];
+    if (!Array.isArray(items)) continue;
+    for (const entry of items) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+      if (Math.max(0, Math.floor(Number(entry.quantity) || 0)) > 0) return true;
+    }
+  }
+  return false;
+}
+function buildOtherAddOnSelectionKey(date, addOnId) {
+  return `${date}-${String(addOnId).trim()}`;
+}
+function parseOtherAddOnSelectionKey(key) {
+  const trimmed = String(key || "").trim();
+  if (!trimmed) return null;
+  if (trimmed.length < 14) return null;
+  const date = trimmed.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const addOnId = trimmed.slice(11);
+  if (!addOnId) return null;
+  return { date, addOnId };
+}
+var init_otherAddOnTotal = __esm({
+  "../shared/utils/otherAddOnTotal.ts"() {
+    "use strict";
+    init_money();
+  }
+});
+
+// ../shared/utils/bookingAddOnReschedule.ts
+function enumerateStayServiceDates(window2) {
+  const dates = [];
+  const startMs = Date.parse(`${window2.checkIn}T00:00:00Z`);
+  const endMs = Date.parse(`${window2.checkOut}T00:00:00Z`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return dates;
+  const maxDays = 60;
+  for (let ms2 = startMs, i2 = 0; ms2 < endMs && i2 < maxDays; ms2 += 864e5, i2 += 1) {
+    const d = new Date(ms2);
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+    dates.push(`${yyyy}-${mm}-${dd}`);
+  }
+  return dates;
+}
+function isDateInStayWindow(serviceDate, window2) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(serviceDate)) return false;
+  return serviceDate >= window2.checkIn && serviceDate < window2.checkOut;
+}
+function serviceDateFromSlotKey(slotKey) {
+  if (typeof slotKey !== "string") return null;
+  const match = /^(\d{4}-\d{2}-\d{2})-/.exec(slotKey);
+  return match ? match[1] : null;
+}
+function shouldAutoCancelSelection(mode, serviceDate, window2, today) {
+  if (!serviceDate) return false;
+  if (mode === "cancel") {
+    return serviceDate >= today;
+  }
+  return !isDateInStayWindow(serviceDate, window2);
+}
+function redateBreakfastSelections(input) {
+  const { mode, window: window2, today, paidAmount } = input;
+  const source = input.selections || {};
+  const next = {};
+  const removed = [];
+  let remainingPaid = Math.max(0, Number(paidAmount) || 0);
+  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+  for (const key of Object.keys(source)) {
+    const entry = source[key];
+    if (!entry) {
+      next[key] = entry;
+      continue;
+    }
+    if (entry.removedAt !== null && entry.removedAt !== void 0) {
+      next[key] = entry;
+      continue;
+    }
+    const serviceDate = serviceDateFromSlotKey(key);
+    if (!shouldAutoCancelSelection(mode, serviceDate, window2, today)) {
+      next[key] = entry;
+      continue;
+    }
+    const amount = Math.max(0, Number(entry.price) || 0);
+    const wasPaid = amount > 0 && remainingPaid >= amount;
+    if (wasPaid) remainingPaid -= amount;
+    removed.push({
+      key,
+      serviceDate: serviceDate || "",
+      entry,
+      amount,
+      wasPaid
+    });
+    next[key] = {
+      ...entry,
+      removedAt: nowIso,
+      removedBy: "system",
+      lastModifiedAt: nowIso,
+      lastModifiedBy: "system"
+    };
+  }
+  return {
+    selections: next,
+    removed,
+    paidRemoved: removed.filter((r3) => r3.wasPaid),
+    total: recomputeBreakfastTotal(next)
+  };
+}
+function redateOtherAddOnSelections(input) {
+  const { mode, window: window2, today, paidAmount } = input;
+  const source = input.selections || {};
+  const next = {};
+  const removed = [];
+  let remainingPaid = Math.max(0, Number(paidAmount) || 0);
+  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+  for (const date of Object.keys(source)) {
+    const entries = source[date];
+    if (!Array.isArray(entries)) {
+      next[date] = [];
+      continue;
+    }
+    const kept = [];
+    for (const entry of entries) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) {
+        kept.push(entry);
+        continue;
+      }
+      if (!shouldAutoCancelSelection(mode, date, window2, today)) {
+        kept.push(entry);
+        continue;
+      }
+      const quantity = Math.max(0, Math.floor(Number(entry.quantity) || 0));
+      const amount = roundToTwoDecimals(Math.max(0, Number(entry.priceSnapshot) || 0) * quantity);
+      const wasPaid = amount > 0 && remainingPaid >= amount;
+      if (wasPaid) remainingPaid -= amount;
+      removed.push({
+        date,
+        addOnId: String(entry.addOnId || ""),
+        selectionKey: `${date}-${String(entry.addOnId || "")}`,
+        entry,
+        amount,
+        wasPaid
+      });
+      kept.push({
+        ...entry,
+        removedAt: nowIso,
+        removedBy: "system",
+        lastModifiedAt: nowIso,
+        lastModifiedBy: "system"
+      });
+    }
+    next[date] = kept;
+  }
+  return {
+    selections: next,
+    removed,
+    paidRemoved: removed.filter((r3) => r3.wasPaid),
+    total: recomputeOtherAddOnTotal(next)
+  };
+}
+var init_bookingAddOnReschedule = __esm({
+  "../shared/utils/bookingAddOnReschedule.ts"() {
+    "use strict";
+    init_breakfastTotal();
+    init_otherAddOnTotal();
+    init_money();
+  }
+});
+
+// ../shared/utils/bookingPaidAmount.ts
+function sumLedgerEntryAmounts(entries) {
+  let sum = 0;
+  for (const entry of entries || []) {
+    if (!entry) continue;
+    const amount = Number(entry.amount || 0);
+    if (!Number.isFinite(amount)) continue;
+    sum += amount;
+  }
+  return roundToTwoDecimals(sum);
+}
+function sumAttributedLedgerEntryAmounts(entries, bookingId) {
+  const target = String(bookingId || "").trim();
+  if (!target) return 0;
+  const attributed = (entries || []).filter((entry) => {
+    if (!entry) return false;
+    return String(entry.bookingId || "").trim() === target;
+  });
+  return sumLedgerEntryAmounts(attributed);
+}
+function computeNextBookingPaidAmount(params) {
+  const current = Number(params.currentPaidAmount);
+  const recorded = Number(params.recordedAmount);
+  const legacy = Number(params.legacyCollectedAmount);
+  const base = Number.isFinite(current) ? current : Number.isFinite(legacy) ? legacy : 0;
+  const increment = Number.isFinite(recorded) ? recorded : 0;
+  return roundToTwoDecimals(base + increment);
+}
+var init_bookingPaidAmount = __esm({
+  "../shared/utils/bookingPaidAmount.ts"() {
+    "use strict";
+    init_money();
+  }
+});
+
+// ../shared/utils/firestorePayload.ts
+function stripUndefinedValues(value) {
+  return stripValue(value);
+}
+function stripValue(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripValue(item));
+  }
+  if (isPlainObject(value)) {
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (item === void 0) continue;
+      out[key] = stripValue(item);
+    }
+    return out;
+  }
+  return value;
+}
+function isPlainObject(value) {
+  if (value === null || typeof value !== "object") return false;
+  if (Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+var init_firestorePayload = __esm({
+  "../shared/utils/firestorePayload.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/breakfastConfig.ts
+function nonNegativeFinite(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(numeric, 0) : 0;
+}
+function safeString(value, fallback) {
+  return typeof value === "string" && value.length > 0 ? value : fallback;
+}
+function safeBool(value, fallback) {
+  return typeof value === "boolean" ? value : fallback;
+}
+function safeImageUrl(value) {
+  if (typeof value !== "string" || value.length === 0) return void 0;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return void 0;
+    return value;
+  } catch {
+    return void 0;
+  }
+}
+function safeMeals(meals) {
+  if (!Array.isArray(meals)) return [];
+  return meals.filter((entry) => Boolean(entry) && typeof entry === "object").filter((entry) => entry.isActive === true).map((entry) => ({
+    id: safeString(entry.id, ""),
+    name: safeString(entry.name, "Unnamed meal"),
+    description: safeString(entry.description, ""),
+    price: nonNegativeFinite(entry.price),
+    displayOrder: nonNegativeFinite(entry.displayOrder),
+    // `undefined` keys are dropped by JSON.stringify on the wire, so
+    // a meal without an image costs nothing in the public payload.
+    ...safeImageUrl(entry.imageUrl) ? { imageUrl: safeImageUrl(entry.imageUrl) } : {}
+  })).filter((entry) => entry.id.length > 0).sort((a, b3) => a.displayOrder - b3.displayOrder || a.name.localeCompare(b3.name));
+}
+function normalizeBreakfastConfig(source) {
+  const raw = source && typeof source === "object" ? source : {};
+  void ADMIN_ONLY_FIELDS;
+  return {
+    isEnabled: safeBool(raw.isEnabled, false),
+    // Per BR-10 (decision #244 reserved, 2026-10-14 — Phase 14):
+    // legacy / pre-BR-10 settings docs may not have a
+    // `cutoffsEnabled` field. Default to `true` (the
+    // pre-BR-10 behaviour — cut-offs always enforced).
+    // New writers always pass this explicitly.
+    cutoffsEnabled: safeBool(raw.cutoffsEnabled, true),
+    cutoffTime: safeString(raw.cutoffTime, "20:00"),
+    cutoffTimezone: safeString(raw.cutoffTimezone, "Asia/Manila"),
+    defaultMealInstructions: safeString(raw.defaultMealInstructions, ""),
+    meals: safeMeals(raw.meals)
+  };
+}
+var ADMIN_ONLY_FIELDS;
+var init_breakfastConfig = __esm({
+  "../shared/utils/breakfastConfig.ts"() {
+    "use strict";
+    ADMIN_ONLY_FIELDS = /* @__PURE__ */ new Set([
+      "frontDeskOverrideEnabled",
+      "servedGraceMinutes",
+      "updatedBy",
+      "updatedAt"
+    ]);
+  }
+});
+
+// ../shared/utils/otherAddOnCutoff.ts
+function computeOtherAddOnCutoffState(input) {
+  const { checkInDate, addOn, now = /* @__PURE__ */ new Date() } = input;
+  const checkInMs = Date.parse(`${checkInDate}T00:00:00Z`);
+  if (!Number.isFinite(checkInMs)) {
+    return {
+      isLocked: false,
+      cutoffAt: now.toISOString(),
+      minutesUntilCutoff: Number.MAX_SAFE_INTEGER
+    };
+  }
+  const leadHours = Math.min(168, Math.max(0, Number(addOn.cutoffHoursBeforeCheckIn) || 24));
+  const cutoffMs = checkInMs - leadHours * 36e5;
+  const cutoffAt = new Date(cutoffMs).toISOString();
+  const minutesUntilCutoff = Math.floor((cutoffMs - now.getTime()) / 6e4);
+  if (addOn.isEnabled === false) {
+    return {
+      isLocked: true,
+      cutoffAt,
+      minutesUntilCutoff: Number.MAX_SAFE_INTEGER,
+      reasonOrCutoff: "addons-disabled"
+    };
+  }
+  if (now.getTime() >= cutoffMs) {
+    return {
+      isLocked: true,
+      cutoffAt,
+      minutesUntilCutoff,
+      reasonOrCutoff: "cutoff-passed"
+    };
+  }
+  return { isLocked: false, cutoffAt, minutesUntilCutoff };
+}
+var init_otherAddOnCutoff = __esm({
+  "../shared/utils/otherAddOnCutoff.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/otherAddOnDrafts.ts
+function otherAddOnDraftKey(date, addOnId) {
+  return `${date}-${String(addOnId).trim()}`;
+}
+function clampOtherAddOnQuantity(quantity, guestCount) {
+  const max = Math.max(0, Math.floor(Number(guestCount) || 0));
+  const raw = Math.floor(Number(quantity) || 0);
+  if (raw <= 0) return 0;
+  return Math.min(raw, max);
+}
+function buildOtherAddOnDraftSelections(input) {
+  const now = input.now ?? /* @__PURE__ */ new Date();
+  const stamp = now.toISOString();
+  const catalogById = /* @__PURE__ */ new Map();
+  for (const row2 of input.catalog || []) {
+    if (row2 && row2.id) catalogById.set(row2.id, row2);
+  }
+  const out = {};
+  for (const date of input.dates || []) {
+    const rows = [];
+    for (const addOn of catalogById.values()) {
+      const raw = input.quantities?.[otherAddOnDraftKey(date, addOn.id)];
+      const quantity = clampOtherAddOnQuantity(raw, input.guestCount);
+      if (quantity <= 0) continue;
+      rows.push({
+        addOnId: addOn.id,
+        nameSnapshot: addOn.name,
+        priceSnapshot: Math.max(0, Number(addOn.price) || 0),
+        quantity,
+        unitSnapshot: addOn.unit === "per-stay" ? "per-stay" : "per-person",
+        addedAt: stamp,
+        addedBy: "guest",
+        lastModifiedAt: stamp,
+        lastModifiedBy: "guest",
+        removedAt: null,
+        removedBy: null,
+        cutoffHoursBeforeCheckInSnapshot: Math.max(
+          0,
+          Math.min(168, Math.floor(Number(addOn.cutoffHoursBeforeCheckIn) || 24))
+        )
+      });
+    }
+    if (rows.length > 0) out[date] = rows;
+  }
+  return out;
+}
+function countOtherAddOnDraftSelections(selections) {
+  if (!selections) return 0;
+  let count = 0;
+  for (const date of Object.keys(selections)) {
+    const rows = selections[date];
+    if (!Array.isArray(rows)) continue;
+    for (const entry of rows) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+      if (Math.max(0, Math.floor(Number(entry.quantity) || 0)) > 0) count += 1;
+    }
+  }
+  return count;
+}
+var init_otherAddOnDrafts = __esm({
+  "../shared/utils/otherAddOnDrafts.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/addOns.ts
+function normalizeAddOn(raw, fallbackId) {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw;
+  const id = String(obj.id || fallbackId || "").trim();
+  const name2 = String(obj.name || "").trim();
+  if (!id || !name2) return null;
+  const price = Math.max(0, Number(obj.price) || 0);
+  const unit = obj.unit === "per-stay" ? "per-stay" : "per-person";
+  const cutoffHoursBeforeCheckIn = Math.max(
+    0,
+    Math.min(168, Math.floor(Number(obj.cutoffHoursBeforeCheckIn) || 24))
+  );
+  return {
+    id,
+    name: name2,
+    description: String(obj.description || "").trim().slice(0, 500),
+    price,
+    unit,
+    isEnabled: obj.isEnabled !== false,
+    cutoffHoursBeforeCheckIn,
+    displayOrder: Math.floor(Number(obj.displayOrder) || 0),
+    updatedAt: obj.updatedAt || (/* @__PURE__ */ new Date()).toISOString(),
+    updatedBy: String(obj.updatedBy || "")
+  };
+}
+function normalizeOtherAddOnsEnabled(raw) {
+  if (raw === false) return false;
+  if (raw === true) return true;
+  if (typeof raw === "string") {
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === "false") return false;
+    if (normalized === "true") return true;
+  }
+  return OTHER_ADD_ONS_ENABLED_DEFAULT;
+}
+function getEnabledAddOnsByHotel(addOns, hotelEnabled) {
+  if (!Array.isArray(addOns)) return [];
+  if (hotelEnabled === false) return [];
+  return addOns.filter((a) => a && a.isEnabled === true).slice().sort((a, b3) => {
+    const da3 = Math.floor(Number(a.displayOrder) || 0);
+    const db = Math.floor(Number(b3.displayOrder) || 0);
+    if (da3 !== db) return da3 - db;
+    return String(a.name || "").localeCompare(String(b3.name || ""));
+  });
+}
+function buildPublicAddOnsCatalog(input) {
+  const enabled = getEnabledAddOnsByHotel(input.rows, input.hotelEnabled !== false);
+  return {
+    success: true,
+    addOns: enabled.map((a) => ({
+      id: a.id,
+      name: a.name,
+      description: a.description,
+      price: a.price,
+      unit: a.unit,
+      cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn,
+      displayOrder: a.displayOrder
+    })),
+    otherAddOnsEnabled: input.hotelEnabled !== false,
+    preSeeded: input.usedFallback === true
+  };
+}
+function sortAddOnsByDisplayOrder(addOns) {
+  if (!Array.isArray(addOns)) return [];
+  return addOns.slice().sort((a, b3) => {
+    const da3 = Math.floor(Number(a.displayOrder) || 0);
+    const db = Math.floor(Number(b3.displayOrder) || 0);
+    if (da3 !== db) return da3 - db;
+    return String(a.name || "").localeCompare(String(b3.name || ""));
+  });
+}
+function isOtherAddOnBookingMutable(status) {
+  const normalized = String(status ?? "").trim().toLowerCase();
+  return normalized !== "checked-out" && normalized !== "cancelled";
+}
+var AIRPORT_TRANSFER_PRESEED, OTHER_ADD_ONS_ENABLED_DEFAULT, OTHER_ADD_ON_READ_ONLY_ERROR;
+var init_addOns = __esm({
+  "../shared/utils/addOns.ts"() {
+    "use strict";
+    AIRPORT_TRANSFER_PRESEED = {
+      name: "Airport transfer",
+      description: "One-way airport pickup or drop-off at Panglao International Airport (TAG). Driver meets you at arrivals with a name board. Price is per guest.",
+      price: 500,
+      unit: "per-person",
+      isEnabled: true,
+      cutoffHoursBeforeCheckIn: 24,
+      displayOrder: 10
+    };
+    OTHER_ADD_ONS_ENABLED_DEFAULT = true;
+    OTHER_ADD_ON_READ_ONLY_ERROR = "Booking is read-only.";
+  }
+});
+
+// ../shared/utils/botProtection.ts
+function normalizeBotProtectionMode(raw) {
+  if (typeof raw !== "string") return BOT_PROTECTION_MODE_DEFAULT;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === BOT_PROTECTION_MODE_DISABLED) return "disabled";
+  return BOT_PROTECTION_MODE_DEFAULT;
+}
+function isBotProtectionDisabled(raw) {
+  return normalizeBotProtectionMode(raw) === "disabled";
+}
+var BOT_PROTECTION_MODE_DEFAULT, BOT_PROTECTION_MODE_DISABLED;
+var init_botProtection = __esm({
+  "../shared/utils/botProtection.ts"() {
+    "use strict";
+    BOT_PROTECTION_MODE_DEFAULT = "turnstile";
+    BOT_PROTECTION_MODE_DISABLED = "disabled";
+  }
+});
+
+// ../shared/schemas/rewardsConfig.ts
+var LevelDefSchema, RewardsConfigSchema;
+var init_rewardsConfig = __esm({
+  "../shared/schemas/rewardsConfig.ts"() {
+    "use strict";
+    init_zod();
+    LevelDefSchema = external_exports.object({
+      id: external_exports.string().min(1).max(64),
+      name: external_exports.string().trim().min(1, "Tier name is required").max(24, "Tier name must be 24 characters or fewer"),
+      fromStays: external_exports.number().int("Threshold must be a whole number of stays").min(0, "Threshold cannot be negative"),
+      discountPct: external_exports.number().min(0, "Discount cannot be negative").max(100, "Discount cannot exceed 100%"),
+      pointsMultiplier: external_exports.number().min(0.01, "Multiplier must be greater than zero"),
+      perks: external_exports.string().trim().max(280, "Perks blurb must be 280 characters or fewer")
+    });
+    RewardsConfigSchema = external_exports.object({
+      // Phase 1 fields (required, matching seed defaults):
+      pointsEnabled: external_exports.boolean(),
+      earningMode: external_exports.enum(["per-booking", "per-spend"]),
+      pointsPerBooking: external_exports.number().int().min(0),
+      pointsPerHundred: external_exports.number().int().min(0),
+      memberDiscountEnabled: external_exports.boolean(),
+      memberDiscountPct: external_exports.number().min(0).max(100),
+      pointsRedemptionRate: external_exports.number().int().min(1, "Redemption rate must be at least 1"),
+      earlyCheckInEnabled: external_exports.boolean().optional(),
+      updatedAt: external_exports.unknown().optional(),
+      // Phase 2 fields (all optional, "off" by default):
+      welcomePoints: external_exports.number().int().min(0).max(1e5).optional(),
+      minPointsToRedeem: external_exports.number().int().min(0).max(1e6).optional(),
+      pointsCanPayUpToBillPct: external_exports.number().min(0, "Bill cap cannot be negative").max(100, "Bill cap cannot exceed 100%").optional(),
+      freeNightEvery: external_exports.number().int().min(0, "Free-night-every cannot be negative").max(365).optional(),
+      levels: external_exports.array(LevelDefSchema).optional(),
+      // Per PR #9 (2026-10-13): admin opt-in toggle for member
+      // self-service points redemption at booking checkout. Defaults
+      // to `false` so existing deployments preserve the front-desk-
+      // mediated redemption model. When `true`, the booking Step 3
+      // panel exposes an "Apply my points" input (member-authenticated
+      // endpoint). The server still owns all 7 redemption guards
+      // (min-redeem, bill cap, balance, one-per-booking, status
+      // pre-checkin, member match, booking exists) — the toggle only
+      // changes WHO clicks Apply, not WHICH guards run.
+      allowMemberPointsRedemption: external_exports.boolean().optional()
+    }).superRefine((value, ctx) => {
+      const levels = value.levels;
+      if (!levels || levels.length === 0) {
+        return;
+      }
+      const seen = /* @__PURE__ */ new Map();
+      levels.forEach((level, index) => {
+        const prior = seen.get(level.fromStays);
+        if (prior !== void 0) {
+          ctx.addIssue({
+            code: external_exports.ZodIssueCode.custom,
+            path: ["levels", index, "fromStays"],
+            message: `Duplicate threshold \u2014 also used on tier #${prior + 1}`
+          });
+        }
+        seen.set(level.fromStays, index);
+      });
+      const hasBase = levels.some((l3) => l3.fromStays === 0);
+      if (!hasBase) {
+        ctx.addIssue({
+          code: external_exports.ZodIssueCode.custom,
+          path: ["levels"],
+          message: "At least one tier must have a 0-stay threshold (the base tier)"
+        });
+      }
+    });
+  }
+});
+
+// ../shared/index.ts
+var shared_exports = {};
+__export(shared_exports, {
+  ACTIVE_BOOKING_STATUSES: () => ACTIVE_BOOKING_STATUSES,
+  ADDITIONAL_REQUEST_MAX_LENGTH: () => ADDITIONAL_REQUEST_MAX_LENGTH,
+  AIRPORT_TRANSFER_PRESEED: () => AIRPORT_TRANSFER_PRESEED,
+  ARRIVAL_WINDOW_HOURS: () => ARRIVAL_WINDOW_HOURS,
+  AboutContentSchema: () => AboutContentSchema,
+  AddOnCatalogAuditLogSchema: () => AddOnCatalogAuditLogSchema,
+  AddOnSchema: () => AddOnSchema,
+  AddRoomBookingSchema: () => AddRoomBookingSchema,
+  BOOKING_OCCUPYING_STATUSES: () => BOOKING_OCCUPYING_STATUSES,
+  BOOKING_REF_REGEX: () => BOOKING_REF_REGEX,
+  BOOKING_SOURCES: () => BOOKING_SOURCES,
+  BOOKING_STATUSES: () => BOOKING_STATUSES,
+  BOT_PROTECTION_MODE_DEFAULT: () => BOT_PROTECTION_MODE_DEFAULT,
+  BOT_PROTECTION_MODE_DISABLED: () => BOT_PROTECTION_MODE_DISABLED,
+  BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES: () => BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES,
+  BREAKFAST_RATE_LINE_LABEL: () => BREAKFAST_RATE_LINE_LABEL,
+  BREAKFAST_RATE_LINE_PREFIX: () => BREAKFAST_RATE_LINE_PREFIX,
+  BROAD_DISCOUNT_SCOPE: () => BROAD_DISCOUNT_SCOPE,
+  BookingDatesSchema: () => BookingDatesSchema,
+  BookingRevenueAllocationSchema: () => BookingRevenueAllocationSchema,
+  BrandingConfigSchema: () => BrandingConfigSchema,
+  BreakfastAuditEntrySchema: () => BreakfastAuditEntrySchema,
+  BreakfastConfigSchema: () => BreakfastConfigSchema,
+  BreakfastMealSchema: () => BreakfastMealSchema,
+  BreakfastRefundContextSchema: () => BreakfastRefundContextSchema,
+  BreakfastSelectionEntrySchema: () => BreakfastSelectionEntrySchema,
+  BreakfastServedEntrySchema: () => BreakfastServedEntrySchema,
+  CANCELLATION_SOURCES: () => CANCELLATION_SOURCES,
+  CHECK_IN_ELIGIBLE_STATUSES: () => CHECK_IN_ELIGIBLE_STATUSES,
+  CorporateContentSchema: () => CorporateContentSchema,
+  CreateRoomSchema: () => CreateRoomSchema,
+  DEFAULT_BED_SETUPS: () => DEFAULT_BED_SETUPS,
+  DEFAULT_BOOKING_HORIZON_DAYS: () => DEFAULT_BOOKING_HORIZON_DAYS,
+  DEFAULT_BOOKING_PREFERENCES: () => DEFAULT_BOOKING_PREFERENCES,
+  DEFAULT_BOOKING_SOURCES: () => DEFAULT_BOOKING_SOURCES,
+  DEFAULT_BREAKFAST_CUTOFF_TIME: () => DEFAULT_BREAKFAST_CUTOFF_TIME,
+  DEFAULT_BREAKFAST_CUTOFF_TIMEZONE: () => DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
+  DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES: () => DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES,
+  DEFAULT_CORPORATE_PAGE_CONTENT: () => DEFAULT_CORPORATE_PAGE_CONTENT,
+  DEFAULT_CORPORATE_PERKS: () => DEFAULT_CORPORATE_PERKS,
+  DEFAULT_IN_FLOW_HOLD_MINUTES: () => DEFAULT_IN_FLOW_HOLD_MINUTES,
+  DEFAULT_MAX_STAY_NIGHTS: () => DEFAULT_MAX_STAY_NIGHTS,
+  DEFAULT_PAYMENT_HOLD_WINDOW_HOURS: () => DEFAULT_PAYMENT_HOLD_WINDOW_HOURS,
+  DEFAULT_ROOM_TYPES: () => DEFAULT_ROOM_TYPES,
+  DEFAULT_STAY_NIGHTS: () => DEFAULT_STAY_NIGHTS,
+  DEFAULT_TERMS_VERSION: () => DEFAULT_TERMS_VERSION,
+  DEFAULT_UPLOAD_TIMEOUT_MS: () => DEFAULT_UPLOAD_TIMEOUT_MS,
+  DEFAULT_VAT_CONFIG: () => DEFAULT_VAT_CONFIG,
+  EXPIRED_HOLD_CANCELLATION_REASON: () => EXPIRED_HOLD_CANCELLATION_REASON,
+  ExtendBookingHoldSchema: () => ExtendBookingHoldSchema,
+  GUEST_CANCELLABLE_STATUSES: () => GUEST_CANCELLABLE_STATUSES,
+  GuestDetailsSchema: () => GuestDetailsSchema,
+  HOLD_ID_REGEX: () => HOLD_ID_REGEX,
+  HOUSEKEEPING_STATUSES: () => HOUSEKEEPING_STATUSES,
+  HomepageContentSchema: () => HomepageContentSchema,
+  HousekeepingStatusEnum: () => HousekeepingStatusEnum,
+  IN_FLOW_HOLD_EXTENSION_STATUSES: () => IN_FLOW_HOLD_EXTENSION_STATUSES,
+  IN_FLOW_HOLD_MINUTES: () => IN_FLOW_HOLD_MINUTES,
+  IN_FLOW_HOLD_STATUSES: () => IN_FLOW_HOLD_STATUSES,
+  KNOWN_CONTENT_ICONS: () => KNOWN_CONTENT_ICONS,
+  LEGACY_PAYMENT_METHOD_LABELS: () => LEGACY_PAYMENT_METHOD_LABELS,
+  LegacyPaymentMethodConfigSchema: () => LegacyPaymentMethodConfigSchema,
+  LevelDefSchema: () => LevelDefSchema,
+  MAX_ADVANCE_DAYS: () => MAX_ADVANCE_DAYS,
+  MAX_BREAKFAST_MEAL_IMAGE_BYTES: () => MAX_BREAKFAST_MEAL_IMAGE_BYTES,
+  MAX_FEATURED_ROOMS: () => MAX_FEATURED_ROOMS,
+  MAX_FEATURED_TYPES: () => MAX_FEATURED_TYPES,
+  MAX_IN_FLOW_HOLD_EXTENSIONS: () => MAX_IN_FLOW_HOLD_EXTENSIONS,
+  MAX_IN_FLOW_HOLD_MINUTES: () => MAX_IN_FLOW_HOLD_MINUTES,
+  MAX_MAX_STAY_NIGHTS: () => MAX_MAX_STAY_NIGHTS,
+  MAX_PAYMENT_HOLD_WINDOW_HOURS: () => MAX_PAYMENT_HOLD_WINDOW_HOURS,
+  MAX_PAYMENT_METHOD_QR_BYTES: () => MAX_PAYMENT_METHOD_QR_BYTES,
+  MAX_ROOM_TYPE_PHOTOS: () => MAX_ROOM_TYPE_PHOTOS,
+  MAX_STAY_NIGHTS: () => MAX_STAY_NIGHTS,
+  MIN_BREAKFAST_OVERRIDE_REASON_LENGTH: () => MIN_BREAKFAST_OVERRIDE_REASON_LENGTH,
+  MIN_IN_FLOW_HOLD_MINUTES: () => MIN_IN_FLOW_HOLD_MINUTES,
+  MIN_MAX_STAY_NIGHTS: () => MIN_MAX_STAY_NIGHTS,
+  MIN_PAYMENT_HOLD_WINDOW_HOURS: () => MIN_PAYMENT_HOLD_WINDOW_HOURS,
+  OTHER_ADD_ONS_ENABLED_DEFAULT: () => OTHER_ADD_ONS_ENABLED_DEFAULT,
+  OTHER_ADD_ON_READ_ONLY_ERROR: () => OTHER_ADD_ON_READ_ONLY_ERROR,
+  OtherAddOnAuditEntrySchema: () => OtherAddOnAuditEntrySchema,
+  OtherAddOnMarkRefundPaidSchema: () => OtherAddOnMarkRefundPaidSchema,
+  OtherAddOnMarkServedSchema: () => OtherAddOnMarkServedSchema,
+  OtherAddOnRefundContextSchema: () => OtherAddOnRefundContextSchema,
+  OtherAddOnSelectionEntrySchema: () => OtherAddOnSelectionEntrySchema,
+  OtherAddOnUpdateSchema: () => OtherAddOnUpdateSchema,
+  PAYMENT_REJECTED_FRESH_DEADLINE_FROM: () => PAYMENT_REJECTED_FRESH_DEADLINE_FROM,
+  PROTECTED_BOOKING_SOURCES: () => PROTECTED_BOOKING_SOURCES,
+  PROTECTED_PAYMENT_METHODS: () => PROTECTED_PAYMENT_METHODS,
+  PUBLIC_SITE_CONTENT_CACHE_BUST_KEY: () => PUBLIC_SITE_CONTENT_CACHE_BUST_KEY,
+  PUBLIC_SITE_CONTENT_CACHE_KEY: () => PUBLIC_SITE_CONTENT_CACHE_KEY,
+  PUBLIC_SITE_CONTENT_CACHE_TTL_MS: () => PUBLIC_SITE_CONTENT_CACHE_TTL_MS,
+  PaymentMethodConfigSchema: () => PaymentMethodConfigSchema,
+  PaymentMethodsArraySchema: () => PaymentMethodsArraySchema,
+  PaymentReviewSchema: () => PaymentReviewSchema,
+  PublicHeroSchema: () => PublicHeroSchema,
+  RESERVATION_ID_REGEX: () => RESERVATION_ID_REGEX,
+  RESERVATION_REF_REGEX: () => RESERVATION_REF_REGEX,
+  ROOM_STATUSES: () => ROOM_STATUSES,
+  RescheduleBookingSchema: () => RescheduleBookingSchema,
+  RewardsConfigSchema: () => RewardsConfigSchema,
+  RewardsContentSchema: () => RewardsContentSchema,
+  RoomStatusEnum: () => RoomStatusEnum,
+  STAFF_CANCELLABLE_STATUSES: () => STAFF_CANCELLABLE_STATUSES,
+  SUPPORTED_PAYMENT_METHODS: () => SUPPORTED_PAYMENT_METHODS,
+  SeoPublishSchema: () => SeoPublishSchema,
+  SetLouReceivedSchema: () => SetLouReceivedSchema,
+  StaffOtherAddOnUpdateSchema: () => StaffOtherAddOnUpdateSchema,
+  StartBookingHoldSchema: () => StartBookingHoldSchema,
+  TERMINAL_CANCELLATION_STATUSES: () => TERMINAL_CANCELLATION_STATUSES,
+  TERMS_BODY_MAX_LENGTH: () => TERMS_BODY_MAX_LENGTH,
+  UNSUPPORTED_PAYMENT_METHODS: () => UNSUPPORTED_PAYMENT_METHODS,
+  VERSION: () => VERSION2,
+  WalkinBookingSchema: () => WalkinBookingSchema,
+  WalkinGuestDetailsSchema: () => WalkinGuestDetailsSchema,
+  WalkinRoomLineSchema: () => WalkinRoomLineSchema,
+  WebsiteContentSchema: () => WebsiteContentSchema,
+  __test__: () => __test__,
+  addDaysToIsoDate: () => addDaysToIsoDate,
+  applyRoomTypeDefaults: () => applyRoomTypeDefaults,
+  applyVoucherDiscount: () => applyVoucherDiscount,
+  assertBookingFinanceInvariant: () => assertBookingFinanceInvariant,
+  assertBookingRevenueAllocationInvariant: () => assertBookingRevenueAllocationInvariant,
+  assertRevenueFinanceInvariant: () => assertRevenueFinanceInvariant,
+  buildArrivalTimeOptions: () => buildArrivalTimeOptions,
+  buildBreakfastRateBreakdownLines: () => buildBreakfastRateBreakdownLines,
+  buildBreakfastSlotId: () => buildBreakfastSlotId,
+  buildBreakfastSlotKey: () => buildBreakfastSlotKey,
+  buildBreakfastSlotKeyForBase: () => buildBreakfastSlotKeyForBase,
+  buildCancellationLiabilitySnapshot: () => buildCancellationLiabilitySnapshot,
+  buildGoogleCalendarUrl: () => buildGoogleCalendarUrl,
+  buildIcsContent: () => buildIcsContent,
+  buildOtherAddOnDraftSelections: () => buildOtherAddOnDraftSelections,
+  buildOtherAddOnSelectionKey: () => buildOtherAddOnSelectionKey,
+  buildPublicAddOnsCatalog: () => buildPublicAddOnsCatalog,
+  bustPublicSiteContentCache: () => bustPublicSiteContentCache,
+  calculateBookingTotal: () => calculateBookingTotal,
+  calculateBreakfastMealsTotal: () => calculateBreakfastMealsTotal,
+  calculateDiscountChain: () => calculateDiscountChain,
+  calculateExtraBedAddOn: () => calculateExtraBedAddOn,
+  calculatePercentDiscount: () => calculatePercentDiscount,
+  calculatePointsRedemptionValue: () => calculatePointsRedemptionValue,
+  calculatePointsWithMultiplier: () => calculatePointsWithMultiplier,
+  calculateSeasonalAwareRoomBreakdown: () => calculateSeasonalAwareRoomBreakdown,
+  calculateSeasonalAwareRoomTotal: () => calculateSeasonalAwareRoomTotal,
+  calculateVatBreakdown: () => calculateVatBreakdown,
+  calculateVoucherBase: () => calculateVoucherBase,
+  calculateVoucherDiscount: () => calculateVoucherDiscount,
+  canExtendInFlowHold: () => canExtendInFlowHold,
+  checkExtraBedInventory: () => checkExtraBedInventory,
+  clampIntegerInRange: () => clampIntegerInRange,
+  clampOtherAddOnQuantity: () => clampOtherAddOnQuantity,
+  clearCache: () => clearCache,
+  clearSweepHistory: () => clearSweepHistory,
+  compressImageFile: () => compressImageFile,
+  computeBookingFolio: () => computeBookingFolio,
+  computeBookingRevenueAllocation: () => computeBookingRevenueAllocation,
+  computeBreakfastAdjustedTotalPrice: () => computeBreakfastAdjustedTotalPrice,
+  computeBreakfastCutoffState: () => computeBreakfastCutoffState,
+  computeCancellationLiabilityState: () => computeCancellationLiabilityState,
+  computeExtendedInFlowHoldExpiresAt: () => computeExtendedInFlowHoldExpiresAt,
+  computeHoldExpiresAt: () => computeHoldExpiresAt,
+  computeInFlowHoldExpiresAt: () => computeInFlowHoldExpiresAt,
+  computeNextBookingPaidAmount: () => computeNextBookingPaidAmount,
+  computeOtherAddOnCutoffState: () => computeOtherAddOnCutoffState,
+  computeRequestFingerprint: () => computeRequestFingerprint,
+  computeReservationActualDateRange: () => computeReservationActualDateRange,
+  computeReservationAggregatePaymentStatus: () => computeReservationAggregatePaymentStatus,
+  computeServerFolioTotals: () => computeServerFolioTotals,
+  countExtraBedsInUse: () => countExtraBedsInUse,
+  countOtherAddOnDraftSelections: () => countOtherAddOnDraftSelections,
+  createCancellationPolicySnapshot: () => createCancellationPolicySnapshot,
+  createFailureBackoffState: () => createFailureBackoffState,
+  datesOverlap: () => datesOverlap,
+  deriveReservationCounters: () => deriveReservationCounters,
+  deriveRoomTypeCapacityFit: () => deriveRoomTypeCapacityFit,
+  describeMaxStayNights: () => describeMaxStayNights,
+  detectBreakfastSlotIndexBase: () => detectBreakfastSlotIndexBase,
+  diffNightsBetweenIso: () => diffNightsBetweenIso,
+  downloadIcsFile: () => downloadIcsFile,
+  eachStayNight: () => eachStayNight,
+  enumerateStayServiceDates: () => enumerateStayServiceDates,
+  evaluateCancelPreview: () => evaluateCancelPreview,
+  evaluateCancellation: () => evaluateCancellation,
+  fadeIn: () => fadeIn,
+  fadeUp: () => fadeUp,
+  generateBookingRef: () => generateBookingRef,
+  generateFreeNightVoucherCode: () => generateFreeNightVoucherCode,
+  generateHoldId: () => generateHoldId,
+  generateLookupToken: () => generateLookupToken,
+  generateMemberNumber: () => generateMemberNumber,
+  generateReservationId: () => generateReservationId,
+  generateStoreOrderRef: () => generateStoreOrderRef,
+  getBookingRevenueStreams: () => getBookingRevenueStreams,
+  getBookingVatBreakdown: () => getBookingVatBreakdown,
+  getCheckInInstant: () => getCheckInInstant,
+  getCheckInReadiness: () => getCheckInReadiness,
+  getDateKeyInTimezone: () => getDateKeyInTimezone,
+  getEffectiveStorePaymentMethods: () => getEffectiveStorePaymentMethods,
+  getEffectiveVatRate: () => getEffectiveVatRate,
+  getEnabledAddOnsByHotel: () => getEnabledAddOnsByHotel,
+  getLatestPaymentReference: () => getLatestPaymentReference,
+  getLegacyCancellationPolicy: () => getLegacyCancellationPolicy,
+  getLockedManualNightlyRate: () => getLockedManualNightlyRate,
+  getManilaDateInfo: () => getManilaDateInfo,
+  getNumNights: () => getNumNights,
+  getReservationFolioSummary: () => getReservationFolioSummary,
+  getReservationRevenueStreams: () => getReservationRevenueStreams,
+  getSeasonalRateForNight: () => getSeasonalRateForNight,
+  getSweepHistory: () => getSweepHistory,
+  getWeekendNightCount: () => getWeekendNightCount,
+  hasAnyOtherAddOns: () => hasAnyOtherAddOns,
+  inFlowHoldStayMatches: () => inFlowHoldStayMatches,
+  isBookingOccupyingRoom: () => isBookingOccupyingRoom,
+  isBotProtectionDisabled: () => isBotProtectionDisabled,
+  isBreakfastRateLine: () => isBreakfastRateLine,
+  isDateInStayWindow: () => isDateInStayWindow,
+  isFreeNightVoucher: () => isFreeNightVoucher,
+  isInFlowHoldActive: () => isInFlowHoldActive,
+  isOtherAddOnBookingMutable: () => isOtherAddOnBookingMutable,
+  isPaymentVerified: () => isPaymentVerified,
+  isRewardVoucher: () => isRewardVoucher,
+  isUnlimitedStay: () => isUnlimitedStay,
+  isUnpaidRefund: () => isUnpaidRefund,
+  isValidBookingRef: () => isValidBookingRef,
+  isValidIsoDate: () => isValidIsoDate,
+  isValidLookupToken: () => isValidLookupToken,
+  isValidReservationId: () => isValidReservationId,
+  isValidReservationRef: () => isValidReservationRef,
+  isValidStayRange: () => isValidStayRange,
+  isVatEnabled: () => isVatEnabled,
+  isWeekendNight: () => isWeekendNight,
+  mapBookingStatusToReservationPaymentStatus: () => mapBookingStatusToReservationPaymentStatus,
+  nextSequence: () => nextSequence,
+  normalizeAddOn: () => normalizeAddOn,
+  normalizeBotProtectionMode: () => normalizeBotProtectionMode,
+  normalizeBreakfastConfig: () => normalizeBreakfastConfig,
+  normalizeBreakfastSelections: () => normalizeBreakfastSelections,
+  normalizeDiscountScope: () => normalizeDiscountScope,
+  normalizeInFlowHoldMinutes: () => normalizeInFlowHoldMinutes,
+  normalizeMaxChildren: () => normalizeMaxChildren,
+  normalizeOtherAddOnsEnabled: () => normalizeOtherAddOnsEnabled,
+  normalizePaymentHoldWindowHours: () => normalizePaymentHoldWindowHours,
+  normalizeSeasonalRateOverride: () => normalizeSeasonalRateOverride,
+  normalizeSeasonalRateOverrides: () => normalizeSeasonalRateOverrides,
+  normalizeStayRange: () => normalizeStayRange,
+  normalizeVatConfig: () => normalizeVatConfig,
+  otherAddOnBreakdownByDate: () => otherAddOnBreakdownByDate,
+  otherAddOnDraftKey: () => otherAddOnDraftKey,
+  parseBreakfastSlotKey: () => parseBreakfastSlotKey,
+  parseCheckInTime: () => parseCheckInTime,
+  parseCheckInTimeToPair: () => parseCheckInTimeToPair,
+  parseOtherAddOnSelectionKey: () => parseOtherAddOnSelectionKey,
+  raceUploadWithTimeout: () => raceUploadWithTimeout,
+  readCacheWithTtl: () => readCacheWithTtl,
+  readPublicSiteContentBustTimestamp: () => readPublicSiteContentBustTimestamp,
+  rebuildBookingRevenueAllocation: () => rebuildBookingRevenueAllocation,
+  recomputeBreakfastTotal: () => recomputeBreakfastTotal,
+  recomputeOtherAddOnTotal: () => recomputeOtherAddOnTotal,
+  recordSweepResult: () => recordSweepResult,
+  redateBreakfastSelections: () => redateBreakfastSelections,
+  redateOtherAddOnSelections: () => redateOtherAddOnSelections,
+  requiredExtraBedsFor: () => requiredExtraBedsFor,
+  resolveBookingPreferenceValues: () => resolveBookingPreferenceValues,
+  resolveBreakfastSlotGuestIndex: () => resolveBreakfastSlotGuestIndex,
+  resolveCurrentLevel: () => resolveCurrentLevel,
+  resolveMaxStayNights: () => resolveMaxStayNights,
+  resolvePaymentMethodLabel: () => resolvePaymentMethodLabel,
+  resolveRangeSelection: () => resolveRangeSelection,
+  round2: () => round2,
+  roundToTwoDecimals: () => roundToTwoDecimals,
+  runBackfill: () => runBackfill,
+  scaleIn: () => scaleIn,
+  serviceDateFromSlotKey: () => serviceDateFromSlotKey,
+  shouldAutoCancelSelection: () => shouldAutoCancelSelection,
+  slideInBottom: () => slideInBottom,
+  slideInLeft: () => slideInLeft,
+  slideInRight: () => slideInRight,
+  sortAddOnsByDisplayOrder: () => sortAddOnsByDisplayOrder,
+  staggerChild: () => staggerChild,
+  staggerContainer: () => staggerContainer,
+  startOfDayUtc: () => startOfDayUtc,
+  stripUndefinedValues: () => stripUndefinedValues,
+  subscribeToPublicSiteContentBust: () => subscribeToPublicSiteContentBust,
+  sumAttributedLedgerEntryAmounts: () => sumAttributedLedgerEntryAmounts,
+  sumBreakfastRateLines: () => sumBreakfastRateLines,
+  sumCollectedPayments: () => sumCollectedPayments,
+  sumLedgerEntryAmounts: () => sumLedgerEntryAmounts,
+  sweepBookingsStorage: () => sweepBookingsStorage,
+  toDateOrNow: () => toDateOrNow,
+  toDateOrNull: () => toDateOrNull,
+  toUtcDateKey: () => toUtcDateKey,
+  validateCorporateCode: () => validateCorporateCode,
+  validatePointsRedemption: () => validatePointsRedemption,
+  validateVoucher: () => validateVoucher,
+  writeCache: () => writeCache
+});
+var init_shared = __esm({
+  "../shared/index.ts"() {
+    "use strict";
+    init_VERSION();
+    init_animations();
+    init_constants();
+    init_booking();
+    init_paymentMethod();
+    init_room();
+    init_websiteContent();
+    init_seo();
+    init_types3();
+    init_bookingDates();
+    init_stayRange();
+    init_bookingFolio();
+    init_bookingAddOns();
+    init_bookingDiscounts();
+    init_bookingOccupancy();
+    init_bookingInFlowHold();
+    init_extraBedInventory();
+    init_bookingVat();
+    init_cache();
+    init_calendar();
+    init_checkin();
+    init_dates();
+    init_images();
+    init_points();
+    init_paymentMethodLabel();
+    init_paymentReference();
+    init_paymentVerification();
+    init_pricing();
+    init_publicSiteCache();
+    init_references();
+    init_reservationFingerprint();
+    init_roomTypes();
+    init_seasonalRates();
+    init_storageJanitor();
+    init_storePaymentMethods();
+    init_vouchers();
+    init_corporate_codes();
+    init_failureBackoff();
+    init_financeInvariants();
+    init_cancellation();
+    init_uploads();
+    init_bookingPreferences();
+    init_breakfastCutoff();
+    init_breakfastTotal();
+    init_breakfastSlotKey();
+    init_bookingAddOnReschedule();
+    init_bookingPaidAmount();
+    init_firestorePayload();
+    init_breakfastConfig();
+    init_otherAddOnCutoff();
+    init_otherAddOnTotal();
+    init_otherAddOnDrafts();
+    init_addOns();
+    init_botProtection();
+    init_money();
+    init_rewardsConfig();
   }
 });
 
@@ -221215,4668 +225925,6 @@ var init_siteUrl = __esm({
   }
 });
 
-// ../shared/VERSION.ts
-var VERSION2;
-var init_VERSION = __esm({
-  "../shared/VERSION.ts"() {
-    "use strict";
-    VERSION2 = "2.18.19";
-  }
-});
-
-// ../shared/animations.ts
-var premiumEase, fadeUp, fadeIn, staggerContainer, staggerChild, scaleIn, slideInRight, slideInLeft, slideInBottom;
-var init_animations = __esm({
-  "../shared/animations.ts"() {
-    "use strict";
-    premiumEase = [0.25, 0.1, 0.25, 1];
-    fadeUp = {
-      hidden: { opacity: 0, y: 16 },
-      visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: premiumEase } }
-    };
-    fadeIn = {
-      hidden: { opacity: 0 },
-      visible: { opacity: 1, transition: { duration: 0.35, ease: "easeOut" } }
-    };
-    staggerContainer = {
-      hidden: {},
-      visible: { transition: { staggerChildren: 0.08, delayChildren: 0.1 } }
-    };
-    staggerChild = {
-      hidden: { opacity: 0, y: 12 },
-      visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: premiumEase } }
-    };
-    scaleIn = {
-      hidden: { opacity: 0, scale: 0.97 },
-      visible: { opacity: 1, scale: 1, transition: { duration: 0.3, ease: premiumEase } }
-    };
-    slideInRight = {
-      hidden: { opacity: 0, x: 48 },
-      visible: { opacity: 1, x: 0, transition: { duration: 0.35, ease: premiumEase } },
-      exit: { opacity: 0, x: 48, transition: { duration: 0.2, ease: "easeIn" } }
-    };
-    slideInLeft = {
-      hidden: { opacity: 0, x: -48 },
-      visible: { opacity: 1, x: 0, transition: { duration: 0.35, ease: premiumEase } },
-      exit: { opacity: 0, x: -48, transition: { duration: 0.2, ease: "easeIn" } }
-    };
-    slideInBottom = {
-      hidden: { opacity: 0, y: 32 },
-      visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: premiumEase } },
-      exit: { opacity: 0, y: 32, transition: { duration: 0.2, ease: "easeIn" } }
-    };
-  }
-});
-
-// ../shared/constants/index.ts
-var BOOKING_STATUSES, BOOKING_SOURCES, DEFAULT_BOOKING_SOURCES, PROTECTED_BOOKING_SOURCES, ROOM_STATUSES, HOUSEKEEPING_STATUSES, DEFAULT_ROOM_TYPES, DEFAULT_BED_SETUPS, DEFAULT_BOOKING_PREFERENCES, ADDITIONAL_REQUEST_MAX_LENGTH, ARRIVAL_WINDOW_HOURS, MAX_ROOM_TYPE_PHOTOS, DEFAULT_BREAKFAST_CUTOFF_TIME, DEFAULT_BREAKFAST_CUTOFF_TIMEZONE, DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES, MIN_BREAKFAST_OVERRIDE_REASON_LENGTH, DEFAULT_CORPORATE_PERKS, KNOWN_CONTENT_ICONS, DEFAULT_CORPORATE_PAGE_CONTENT, MAX_FEATURED_TYPES, MAX_FEATURED_ROOMS, SUPPORTED_PAYMENT_METHODS, UNSUPPORTED_PAYMENT_METHODS, PROTECTED_PAYMENT_METHODS, MAX_PAYMENT_METHOD_QR_BYTES, MAX_BREAKFAST_MEAL_IMAGE_BYTES, BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES, MAX_STAY_NIGHTS, MAX_ADVANCE_DAYS, PUBLIC_SITE_CONTENT_CACHE_KEY, PUBLIC_SITE_CONTENT_CACHE_TTL_MS, PUBLIC_SITE_CONTENT_CACHE_BUST_KEY, DEFAULT_TERMS_VERSION, TERMS_BODY_MAX_LENGTH;
-var init_constants = __esm({
-  "../shared/constants/index.ts"() {
-    "use strict";
-    BOOKING_STATUSES = [
-      "pending",
-      "payment-uploaded",
-      "payment-confirmed",
-      "confirmed",
-      "checked-in",
-      "checked-out",
-      "cancelled"
-    ];
-    BOOKING_SOURCES = ["online", "walk-in", "phone", "facebook", "corporate"];
-    DEFAULT_BOOKING_SOURCES = [
-      { source: "online", label: "Online Booking", isEnabled: true, selectableAtFrontDesk: false },
-      { source: "walk-in", label: "Walk-in Desk", isEnabled: true, selectableAtFrontDesk: false },
-      { source: "corporate", label: "Corporate Codes", isEnabled: true, selectableAtFrontDesk: false },
-      { source: "phone", label: "Phone Call", isEnabled: true, selectableAtFrontDesk: true },
-      { source: "facebook", label: "Facebook / Messenger", isEnabled: true, selectableAtFrontDesk: true },
-      { source: "agoda", label: "Agoda (OTA)", isEnabled: true, selectableAtFrontDesk: true }
-    ];
-    PROTECTED_BOOKING_SOURCES = ["online", "walk-in", "corporate"];
-    ROOM_STATUSES = ["available", "occupied", "blocked"];
-    HOUSEKEEPING_STATUSES = ["clean", "dirty", "in-progress"];
-    DEFAULT_ROOM_TYPES = [
-      // Per F09 / SEC-5 / SEC-6 (2026-10-22, P2 revenue leak): the seed
-      // `corporateRate` is 0 for every type and MUST stay 0. This module
-      // is imported by the guest app (through the `@spark-inn/shared`
-      // barrel), so a non-zero literal here is compiled into the
-      // JavaScript every guest downloads — the hotel's NEGOTIATED
-      // corporate ladder must never ship in a browser bundle.
-      //
-      // The corporate rate ladder now lives in the server-only module
-      // `guest-app/server/lib/corporateRates.ts` (staff + server). The
-      // staff admin app does not need it: the corporate rate calendar
-      // reads the LIVE `settings/hotelConfig.roomTypes[]` through the
-      // staff-only Firestore rules, which is the authoritative source.
-      // A `corporateRate` of 0 means "no corporate rate configured" and
-      // the booking server falls back to the standard rate (never ₱0).
-      //
-      // Per SR-01..05 (2026-10-12): `bedSetupValues` is the per-type
-      // subset of `HotelConfig.bedSetups[].value` offered to the guest on
-      // the booking Step 2. The seed below mirrors the original
-      // booking-flow design ("T1 for Twin types, both set-ups for the
-      // Double", and "no set-up selection" for types where it doesn't
-      // apply — Single is a solo product, Family has fixed
-      // 2-double configuration). Admins edit the subset via the Room
-      // Types editor → Bed Set-ups picker.
-      { value: "single", label: "Single", shortLabel: "Single", imageUrls: [], bedDefinition: "1 single bed", description: "A compact private room for solo guests, short work stays, and travelers who value quiet consistency.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 1, maxChildren: 0, pricePerNight: 1800, weekendRate: 2100, corporateRate: 0, bedSetupValues: [] },
-      { value: "standard-double", label: "Standard Double", shortLabel: "Std Double", imageUrls: [], bedDefinition: "1 double bed", description: "Simple comfort for couples or business travelers who want an easy, consistent stay near the city center.", amenities: ["WiFi", "AC", "Work Desk", "Private Bath"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2400, weekendRate: 2700, corporateRate: 0, bedSetupValues: ["large-bed", "twin-beds"] },
-      { value: "standard-twin", label: "Standard Twin", shortLabel: "Std Twin", imageUrls: [], bedDefinition: "2 single beds", description: "Twin-bed comfort for colleagues or friends who want a simple, tidy stay with all essentials close by.", amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 2600, weekendRate: 2900, corporateRate: 0, bedSetupValues: ["twin-beds", "large-bed"] },
-      { value: "executive", label: "Executive", shortLabel: "Executive", imageUrls: [], bedDefinition: "1 queen size bed", description: "A warm, spacious retreat with premium bedding, soft lighting, and room to settle in after a day in Bohol.", amenities: ["WiFi", "AC", "Hot Shower", "Cable TV"], maxCapacity: 2, maxChildren: 1, pricePerNight: 3200, weekendRate: 3600, corporateRate: 0, bedSetupValues: ["large-bed", "twin-beds"] },
-      { value: "family", label: "Family", shortLabel: "Family", imageUrls: [], bedDefinition: "2 double beds", description: "Extra space for small families, with thoughtful essentials and a calm base for Bohol plans.", amenities: ["WiFi", "AC", "Mini Fridge", "Cable TV"], maxCapacity: 4, maxChildren: 2, pricePerNight: 4200, weekendRate: 4600, corporateRate: 0, bedSetupValues: [] }
-    ];
-    DEFAULT_BED_SETUPS = [
-      { value: "large-bed", label: "I'd like a large bed", icon: "bed" },
-      { value: "twin-beds", label: "I'd like twin beds", icon: "bed" }
-    ];
-    DEFAULT_BOOKING_PREFERENCES = [
-      { value: "high-floor", label: "I'd like a room on a high floor" },
-      { value: "luggage-storage", label: "I'd like luggage storage" },
-      { value: "near-elevator", label: "I'd like to be near the elevator" },
-      { value: "honeymoon", label: "I'd like honeymoon arrangements" },
-      { value: "airport-transfer", label: "I'd like an airport transfer" },
-      { value: "quiet-room", label: "I'd like a quiet room" },
-      { value: "away-from-elevator", label: "I'd like to be away from the elevator" },
-      { value: "car-parking", label: "I'd like car parking" },
-      { value: "baby-cot", label: "I'd like to have a baby cot", surchargeNote: "(additional charges may apply)" }
-    ];
-    ADDITIONAL_REQUEST_MAX_LENGTH = 500;
-    ARRIVAL_WINDOW_HOURS = 24;
-    MAX_ROOM_TYPE_PHOTOS = 10;
-    DEFAULT_BREAKFAST_CUTOFF_TIME = "20:00";
-    DEFAULT_BREAKFAST_CUTOFF_TIMEZONE = "Asia/Manila";
-    DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES = 15;
-    MIN_BREAKFAST_OVERRIDE_REASON_LENGTH = 5;
-    DEFAULT_CORPORATE_PERKS = [
-      {
-        title: "Negotiated Rates",
-        description: "Unlock exclusive fixed-rate packages tailored to your company's annual travel volume. Control and predict your hospitality budget with ease.",
-        icon: "coins",
-        isEnabled: true
-      },
-      {
-        title: "Group Bookings",
-        description: "Coordinated logistics for team building retreats, board meetings, and product launches. Keep your organization unified and fully refreshed.",
-        icon: "users",
-        isEnabled: true
-      },
-      {
-        title: "Dedicated Support",
-        description: "A personal account manager handles reservations, customized invoices, and check-in assistance, giving your team peace of mind.",
-        icon: "briefcase",
-        isEnabled: true
-      },
-      {
-        title: "High-Speed Wi-Fi",
-        description: "Dedicated high-bandwidth networks are active throughout our property. Perform remote work, host video calls, and stay in touch without delays.",
-        icon: "wifi",
-        isEnabled: true
-      },
-      {
-        title: "Premium Security",
-        description: "Enjoy a peaceful, secure stay with 24/7 staff, encrypted access locks, and strict privacy protocols for high-profile business visitors.",
-        icon: "shield",
-        isEnabled: true
-      },
-      {
-        title: "Flexible Bookings",
-        description: "Business plans change. Corporate agreements enjoy reduced cancellation fees, priority rescheduling, and same-day room re-allocations.",
-        icon: "calendar",
-        isEnabled: true
-      }
-    ];
-    KNOWN_CONTENT_ICONS = [
-      "bed",
-      "map",
-      "pin",
-      "users",
-      "people",
-      "sparkles",
-      "star",
-      "wifi",
-      "coffee",
-      "car",
-      "palmtree",
-      "gift",
-      "tag",
-      "clock",
-      "shield",
-      "briefcase",
-      "coins",
-      "percent",
-      "calendar",
-      "help",
-      "network",
-      "money",
-      "support",
-      "group",
-      "date",
-      "flexible",
-      "security"
-    ];
-    DEFAULT_CORPORATE_PAGE_CONTENT = {
-      hero: {
-        eyebrow: "Curated hospitality for executive comfort",
-        heading: "Elevated Stays for Modern Business",
-        subtext: "Redefining business travel through quiet efficiency, ergonomic spaces, and the warm hospitality of Bohol.",
-        photoUrl: "https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=1600&q=80"
-      },
-      roomsOverview: {
-        eyebrow: "Accommodation Types",
-        heading: "Rooms Built for Productivity & Rest",
-        description: "Explore our range of boutique rooms. All rooms feature workspaces, high-speed Wi-Fi, air conditioning, and premium linens. No prices are shown below; corporate rates are negotiated based on contract terms."
-      },
-      retreat: {
-        heading: "Partner with us for your next team retreat.",
-        description: "Experience the perfect blend of Bohol's natural charm and the high-efficiency environment your business demands. Fully catered planning options are available.",
-        ctaLabel: "Get in Touch"
-      }
-    };
-    MAX_FEATURED_TYPES = 3;
-    MAX_FEATURED_ROOMS = MAX_FEATURED_TYPES;
-    SUPPORTED_PAYMENT_METHODS = [
-      "gcash",
-      "maya",
-      "bank",
-      "paypal",
-      "pay-at-hotel"
-    ];
-    UNSUPPORTED_PAYMENT_METHODS = ["pesonet"];
-    PROTECTED_PAYMENT_METHODS = ["pay-at-hotel", "add-to-bill"];
-    MAX_PAYMENT_METHOD_QR_BYTES = 2 * 1024 * 1024;
-    MAX_BREAKFAST_MEAL_IMAGE_BYTES = 8 * 1024 * 1024;
-    BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES = [
-      "image/jpeg",
-      "image/png",
-      "image/webp"
-    ];
-    MAX_STAY_NIGHTS = 30;
-    MAX_ADVANCE_DAYS = 365;
-    PUBLIC_SITE_CONTENT_CACHE_KEY = "publicSiteContent:v3";
-    PUBLIC_SITE_CONTENT_CACHE_TTL_MS = 5 * 60 * 1e3;
-    PUBLIC_SITE_CONTENT_CACHE_BUST_KEY = "publicSiteContent:bust";
-    DEFAULT_TERMS_VERSION = "1.0.0";
-    TERMS_BODY_MAX_LENGTH = 5e4;
-  }
-});
-
-// ../shared/utils/references.ts
-function pad(value, length) {
-  return String(value).padStart(length, "0");
-}
-function compactDate(value) {
-  const year = value.getFullYear();
-  const month = pad(value.getMonth() + 1, 2);
-  const day = pad(value.getDate(), 2);
-  return `${year}${month}${day}`;
-}
-function generateBookingRef(prefix, date, sequence) {
-  return `${prefix}-${compactDate(date)}-${pad(sequence, 5)}`;
-}
-function generateMemberNumber(prefix, sequence) {
-  return `${prefix}-${pad(sequence, 5)}`;
-}
-function generateStoreOrderRef(date, sequence) {
-  return `SO-${compactDate(date)}-${pad(sequence, 5)}`;
-}
-function nextSequence(currentHighestSequence) {
-  return (currentHighestSequence ?? 0) + 1;
-}
-function isValidBookingRef(value) {
-  return typeof value === "string" && BOOKING_REF_REGEX.test(value.trim());
-}
-function isValidReservationRef(value) {
-  return typeof value === "string" && RESERVATION_REF_REGEX.test(value.trim());
-}
-function isValidReservationId(value) {
-  return typeof value === "string" && RESERVATION_ID_REGEX.test(value.trim());
-}
-function generateReservationId(randomUUID = defaultRandomUUID) {
-  const id = randomUUID();
-  if (!isValidReservationId(id)) {
-    throw new Error("Generated reservationId did not match the expected UUIDv4 shape.");
-  }
-  return id;
-}
-function defaultRandomUUID() {
-  const g = globalThis;
-  if (typeof g.crypto?.randomUUID === "function") {
-    return String(g.crypto.randomUUID());
-  }
-  const { randomUUID } = require("node:crypto");
-  return String(randomUUID());
-}
-function generateLookupToken(randomBytes = defaultRandomBytes) {
-  const bytes = randomBytes(LOOKUP_TOKEN_HEX_LENGTH / 2);
-  let hex = "";
-  for (let i2 = 0; i2 < bytes.length; i2++) {
-    hex += bytes[i2].toString(16).padStart(2, "0");
-  }
-  return hex;
-}
-function defaultRandomBytes(n2) {
-  const { randomBytes } = require("node:crypto");
-  return new Uint8Array(randomBytes(n2));
-}
-function isValidLookupToken(value) {
-  return typeof value === "string" && /^[a-f0-9]{32}$/i.test(value);
-}
-var BOOKING_REF_REGEX, RESERVATION_REF_REGEX, RESERVATION_ID_REGEX, LOOKUP_TOKEN_HEX_LENGTH;
-var init_references = __esm({
-  "../shared/utils/references.ts"() {
-    "use strict";
-    BOOKING_REF_REGEX = /^[A-Z]{1,4}-\d{8}-\d{3,5}$/;
-    RESERVATION_REF_REGEX = /^R-\d{8}-\d{3,5}$/;
-    RESERVATION_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    LOOKUP_TOKEN_HEX_LENGTH = 32;
-  }
-});
-
-// ../shared/utils/bookingInFlowHold.ts
-function isInFlowHoldActive(hold, now = /* @__PURE__ */ new Date()) {
-  if (!hold || hold.status !== "active") return false;
-  if (!hold.expiresAt) return false;
-  const expiresAt = hold.expiresAt instanceof Date ? hold.expiresAt : new Date(hold.expiresAt);
-  if (isNaN(expiresAt.getTime())) return false;
-  return expiresAt.getTime() > now.getTime();
-}
-function computeInFlowHoldExpiresAt(minutes, now = /* @__PURE__ */ new Date()) {
-  if (!Number.isFinite(Number(minutes)) || !minutes || minutes <= 0) {
-    return null;
-  }
-  return new Date(now.getTime() + Number(minutes) * 60 * 1e3);
-}
-function computeExtendedInFlowHoldExpiresAt(minutes, currentExpiresAt, now = /* @__PURE__ */ new Date()) {
-  let base = now;
-  if (currentExpiresAt) {
-    const parsed = currentExpiresAt instanceof Date ? currentExpiresAt : new Date(currentExpiresAt);
-    if (!isNaN(parsed.getTime()) && parsed.getTime() > now.getTime()) {
-      base = parsed;
-    }
-  }
-  return computeInFlowHoldExpiresAt(minutes, base);
-}
-function canExtendInFlowHold(hold) {
-  if (!hold) return false;
-  if (!IN_FLOW_HOLD_EXTENSION_STATUSES.includes(
-    String(hold.status)
-  )) {
-    return false;
-  }
-  const count = Number(hold.extensionCount ?? 0);
-  if (!Number.isFinite(count) || count < 0) return false;
-  return count < MAX_IN_FLOW_HOLD_EXTENSIONS;
-}
-function normalizeInFlowHoldMinutes(raw) {
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value <= 0) return DEFAULT_IN_FLOW_HOLD_MINUTES;
-  const clamped = Math.min(
-    MAX_IN_FLOW_HOLD_MINUTES,
-    Math.max(MIN_IN_FLOW_HOLD_MINUTES, Math.floor(value))
-  );
-  return clamped;
-}
-function clampIntegerInRange(raw, min, max) {
-  const value = Number(raw);
-  if (!Number.isFinite(value)) return null;
-  const floored = Math.floor(value);
-  if (floored < min || floored > max) return null;
-  return floored;
-}
-function inFlowHoldStayMatches(hold, input) {
-  if (!hold || !input) return false;
-  if (String(hold.roomType ?? "") !== String(input.roomType ?? "")) return false;
-  if (String(hold.checkIn ?? "") !== String(input.checkIn ?? "")) return false;
-  if (String(hold.checkOut ?? "") !== String(input.checkOut ?? "")) return false;
-  return Number(hold.numNights ?? 0) === Number(input.numNights ?? 0);
-}
-function generateHoldId() {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c2) => {
-    const r3 = Math.random() * 16 | 0;
-    const v6 = c2 === "x" ? r3 : r3 & 3 | 8;
-    return v6.toString(16);
-  });
-}
-var IN_FLOW_HOLD_MINUTES, MIN_IN_FLOW_HOLD_MINUTES, MAX_IN_FLOW_HOLD_MINUTES, DEFAULT_IN_FLOW_HOLD_MINUTES, IN_FLOW_HOLD_STATUSES, MAX_IN_FLOW_HOLD_EXTENSIONS, IN_FLOW_HOLD_EXTENSION_STATUSES, HOLD_ID_REGEX;
-var init_bookingInFlowHold = __esm({
-  "../shared/utils/bookingInFlowHold.ts"() {
-    "use strict";
-    IN_FLOW_HOLD_MINUTES = 15;
-    MIN_IN_FLOW_HOLD_MINUTES = 5;
-    MAX_IN_FLOW_HOLD_MINUTES = 30;
-    DEFAULT_IN_FLOW_HOLD_MINUTES = IN_FLOW_HOLD_MINUTES;
-    IN_FLOW_HOLD_STATUSES = ["active", "consumed", "expired"];
-    MAX_IN_FLOW_HOLD_EXTENSIONS = 3;
-    IN_FLOW_HOLD_EXTENSION_STATUSES = ["active", "expired"];
-    HOLD_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  }
-});
-
-// ../shared/schemas/booking.ts
-var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema, StartBookingHoldSchema, BreakfastMealSchema, BreakfastConfigSchema, BreakfastSelectionEntrySchema, BreakfastServedEntrySchema, BreakfastAuditEntrySchema, BreakfastRefundContextSchema, AddOnSchema, OtherAddOnSelectionEntrySchema, OtherAddOnAuditEntrySchema, OtherAddOnRefundContextSchema, OtherAddOnUpdateSchema, StaffOtherAddOnUpdateSchema, OtherAddOnMarkServedSchema, OtherAddOnMarkRefundPaidSchema, AddOnCatalogAuditLogSchema, ExtendBookingHoldSchema;
-var init_booking = __esm({
-  "../shared/schemas/booking.ts"() {
-    "use strict";
-    init_zod();
-    init_references();
-    init_bookingInFlowHold();
-    BookingDatesSchema = external_exports.object({
-      checkIn: external_exports.string().min(1, "Choose a check-in date"),
-      checkOut: external_exports.string().min(1, "Choose a check-out date"),
-      numGuests: external_exports.coerce.number().int().min(1, "At least one guest is required"),
-      roomId: external_exports.string().min(1, "Choose a room")
-    }).refine((value) => new Date(value.checkOut) > new Date(value.checkIn), {
-      message: "Check-out date must be after check-in",
-      path: ["checkOut"]
-    });
-    GuestDetailsSchema = external_exports.object({
-      guestName: external_exports.string().min(2, "Enter the guest name"),
-      guestEmail: external_exports.string().email("Enter a valid email address"),
-      guestPhone: external_exports.string().min(7, "Enter a valid phone number"),
-      companyName: external_exports.string().optional(),
-      specialRequests: external_exports.string().optional(),
-      privacyConsent: external_exports.literal(true, {
-        errorMap: () => ({ message: "Privacy consent is required" })
-      })
-    });
-    PaymentReviewSchema = external_exports.object({
-      discountType: external_exports.enum(["", "senior", "pwd"]).default(""),
-      voucherCode: external_exports.string().optional(),
-      paymentMethod: external_exports.string().min(1, "Choose a payment method"),
-      turnstileToken: external_exports.string().optional(),
-      _hp: external_exports.string().optional()
-    });
-    WalkinGuestDetailsSchema = external_exports.object({
-      firstName: external_exports.string().trim().min(1).max(80),
-      lastName: external_exports.string().trim().min(1).max(80),
-      email: external_exports.string().trim().toLowerCase().email().max(160),
-      phone: external_exports.string().trim().min(2).max(32),
-      requests: external_exports.string().trim().max(1e3).optional().default(""),
-      consent: external_exports.boolean().optional()
-    }).strict();
-    BookingRevenueAllocationSchema = external_exports.object({
-      roomNet: external_exports.coerce.number().finite().min(0),
-      breakfastNet: external_exports.coerce.number().finite().min(0),
-      addOnNet: external_exports.coerce.number().finite().min(0),
-      deductionNet: external_exports.coerce.number().finite().min(0),
-      totalNet: external_exports.coerce.number().finite().min(0)
-    }).strict();
-    WalkinRoomLineSchema = external_exports.object({
-      roomId: external_exports.string().trim().min(1).max(64),
-      numAdults: external_exports.coerce.number().int().min(0).max(100),
-      numChildren: external_exports.coerce.number().int().min(0).max(100),
-      extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0)
-      // Per BR-08 (decision #238, 2026-10-14 — close-out):
-      // the legacy EXB-12 `extraBedBreakfast: boolean` flat-rate
-      // toggle is deleted. Extra-bed occupants are ordinary meal
-      // slots in Step 2 (the per-meal picker), so the create
-      // payload no longer carries a breakfast flag for them.
-      // The BR-08 audit-trail comment is kept here as a record
-      // of the close-out — see `plan/features/BREAKFAST.md
-      // §Decisions Locked` (decision 4 — extra-bed occupants
-      // are ordinary meal slots).
-    }).strict();
-    WalkinBookingSchema = external_exports.object({
-      bookingId: external_exports.string().trim().regex(/^[A-Za-z0-9]{10,32}$/),
-      roomId: external_exports.string().trim().min(1).max(64),
-      // Per MRB-07 (2026-08-02, per decision #159): the optional N-room
-      // room list. When absent (every pre-MRB-07 caller), the server
-      // derives a single line from the top-level `roomId` + `numAdults` +
-      // `numChildren` + `extraBedCount` — byte-equivalent to the
-      // single-room walk-in. When present, it is the canonical room list;
-      // the server rejects the request unless `roomId === rooms[0].roomId`
-      // and `guests` equals the summed per-line occupancy, so neither the
-      // room nor the guest total is trusted from two disagreeing places.
-      rooms: external_exports.array(WalkinRoomLineSchema).min(1).max(50).optional(),
-      checkIn: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      checkOut: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      guests: external_exports.coerce.number().int().min(1).max(100),
-      // Per BR-08 (decision #238, 2026-10-14 — close-out): the
-      // legacy flat-rate `hasBreakfast: boolean` +
-      // `breakfastIncludesChildren: boolean` pair is deleted from
-      // the walk-in schema. The walk-in modal now sends the rich
-      // `breakfastSelections: Record<key, BreakfastSelectionEntry>`
-      // shape (per-date × per-guest meal entries) which is
-      // captured by `WalkinBreakfastGrid` and validated by the
-      // BR-01 `BreakfastSelectionSchema`. The BR-08 audit-trail
-      // comment is kept here as a record of the close-out — see
-      // `plan/features/BREAKFAST.md §Decisions Locked` (decision
-      // 5 — Step 1 carries no breakfast data).
-      breakfastSelections: external_exports.record(external_exports.string(), external_exports.unknown()).optional(),
-      breakfastTotal: external_exports.coerce.number().finite().min(0).optional(),
-      // Per OCT-C5 (2026-10-20, audit
-      // `plan/project/AUDIT-OCTOBER-2026.md`): the BR-12 other
-      // add-ons the desk selected in the walk-in modal
-      // (`WalkinOtherAddOnGrid`).
-      //
-      // The admin modal has been sending `otherAddOnSelections` +
-      // `otherAddOnTotal` + `hasAnyOtherAddOns` since BR-12.1
-      // (2026-10-15), but the walk-in schema had no field for them —
-      // and a Zod `z.object()` STRIPS unknown keys, so the payload
-      // was dropped silently. The walk-in transaction then wrote no
-      // add-on data at all (`otherAddOn` appeared zero times in
-      // `bookings.ts`), so the desk sold an airport transfer, the
-      // modal showed the total, the booking carried nothing, the
-      // guest never got the transfer, and the hotel earned ₱0.
-      //
-      // The values are ADVISORY: the server rebuilds every entry from
-      // the live `addOns` catalog (catalog price + name + unit), so a
-      // client-supplied price is never persisted.
-      otherAddOnSelections: external_exports.record(external_exports.string(), external_exports.array(external_exports.unknown())).optional(),
-      otherAddOnTotal: external_exports.coerce.number().finite().min(0).optional(),
-      hasAnyOtherAddOns: external_exports.boolean().optional(),
-      // Per CHD-01 (2026-08-01, per decision #144): adults/children
-      // split. Both optional — when absent, the server derives
-      // `numAdults = guests`, `numChildren = 0` (the historical
-      // "all guests are adults" shape). When present, the server
-      // validates `numAdults + numChildren === guests` and rejects
-      // any client-supplied `numGuests` that disagrees (the
-      // spec's "no trusting either value from the client" rule).
-      numAdults: external_exports.coerce.number().int().min(0).max(100).optional(),
-      numChildren: external_exports.coerce.number().int().min(0).max(100).optional(),
-      // Per EXB-01 (2026-07-31): extra-bed count. Optional — when
-      // absent, the server treats it as 0 (the "no extra bed" case).
-      // Bounded server-side by the room type's `maxExtraBeds` (a
-      // booking with `extraBedCount > maxExtraBeds` is rejected). The
-      // server snapshots the room type's `extraBedRate` onto the
-      // booking doc alongside this field.
-      extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional(),
-      // Per BR-08 (decision #238, 2026-10-14 — close-out): the
-      // legacy EXB-12 `extraBedBreakfast: boolean` flat-rate
-      // toggle is deleted from the walk-in schema. Extra-bed
-      // occupants are ordinary meal slots in Step 2 (the
-      // per-meal picker) — the walk-in modal captures them via
-      // `WalkinBreakfastGrid` which writes the rich
-      // `breakfastSelections` shape (per-date × per-guest
-      // meal entries) validated by `BreakfastSelectionSchema`.
-      // The BR-08 audit-trail comment is kept here as a record
-      // of the close-out — see `plan/features/BREAKFAST.md
-      // §Decisions Locked` (decision 4 — extra-bed occupants
-      // are ordinary meal slots).
-      guestDetails: WalkinGuestDetailsSchema,
-      paymentMethod: external_exports.string().trim().min(1).max(80),
-      // Per NBS-02 (2026-07-31): optional with `"walk-in"` default so
-      // every existing caller keeps working with no migration. The
-      // server validates the submitted value against the configured list
-      // (`settings/hotelConfig.bookingSources[]`) and derives `notes` from
-      // it — a phone / Agoda / Facebook booking no longer ships with a
-      // note claiming it was created at the desk.
-      source: external_exports.string().trim().min(1).max(80).optional().default("walk-in"),
-      status: external_exports.enum(["confirmed", "checked-in"]).optional().default("confirmed"),
-      totalPriceOverride: external_exports.coerce.number().finite().min(0).max(1e6).optional(),
-      discountType: external_exports.enum(["", "senior", "pwd"]).optional().default(""),
-      voucherCode: external_exports.string().trim().max(40).optional().default(""),
-      linkedInquiryId: external_exports.string().trim().max(64).nullable().optional(),
-      testRunId: external_exports.string().trim().max(64).nullable().optional(),
-      // Per MRB-02.x (2026-08-02, per decision #164): the
-      // optional client-preallocated `reservationId` (UUIDv4)
-      // for the reservation-level idempotency matrix. When
-      // absent (the current walk-in modal doesn't preallocate),
-      // the server auto-mints a UUIDv4 via `generateReservationId()`
-      // — same pattern as the public `/api/bookings/create` path.
-      // Walk-ins are staff-created, so the staff modal doesn't
-      // need to preallocate for retry-after-uncertain-response
-      // (the staff tab is open; the next submit starts a fresh
-      // form with a new `bookingId`); the optional field is here
-      // so a future walk-in client that does preallocate can
-      // ride the same idempotency contract.
-      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional(),
-      staffHoldId: external_exports.string().trim().regex(/^[A-Za-z0-9]{10,32}$/).optional(),
-      // Per MRB-11 (2026-08-03, per decision #177): the
-      // optional revenue allocation. Per the 2026-08-03
-      // design call, the server always computes this before
-      // the write — the input is accepted but the server
-      // recomputes via the same pricing chain and asserts
-      // the `totalNet === booking.totalPrice` invariant at
-      // the write boundary. Pre-MRB-11 callers omit it; the
-      // server fills it in. A future client preview may
-      // supply it to skip the server recompute, but the
-      // server's value is the only one written to the doc.
-      revenueAllocation: BookingRevenueAllocationSchema.optional()
-    }).strict();
-    RescheduleBookingSchema = external_exports.object({
-      bookingId: external_exports.string().trim().min(1).max(64),
-      roomId: external_exports.string().trim().min(1).max(64),
-      checkIn: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      checkOut: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-      reason: external_exports.string().trim().max(500).optional().default(""),
-      // The optional `reservationId` is here so a future
-      // reschedule client that preallocates (e.g. a bulk
-      // reschedule tool that wants the staff to be able to
-      // retry the same reschedule without re-picking dates)
-      // can ride the same idempotency contract. The
-      // current staff modal doesn't preallocate, so the
-      // server derives the id from the existing booking
-      // (or, for legacy null-reservationId bookings, the
-      // server auto-mints one if `body.reservationId` is
-      // explicitly provided — a defensive path for a
-      // future migration tool).
-      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX).optional(),
-      // Per EXT-01 (2026-01-27): the `mode: "extend"` discriminator
-      // locks `roomId` and `checkIn` to the booking's current values,
-      // allowing only `checkOut` to be extended. The server enforces
-      // the lock; the client pre-fills both fields as read-only hints.
-      mode: external_exports.enum(["extend"]).optional()
-    }).strict();
-    SetLouReceivedSchema = external_exports.object({
-      bookingId: external_exports.string().trim().min(1).max(64),
-      louReceived: external_exports.boolean()
-    }).strict();
-    AddRoomBookingSchema = external_exports.object({
-      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX),
-      roomId: external_exports.string().trim().min(1).max(64),
-      numAdults: external_exports.coerce.number().int().min(1).max(100),
-      numChildren: external_exports.coerce.number().int().min(0).max(100).optional().default(0),
-      extraBedCount: external_exports.coerce.number().int().min(0).max(20).optional().default(0),
-      discountType: external_exports.enum(["", "senior", "pwd"]).optional().default(""),
-      voucherCode: external_exports.string().trim().max(40).optional().default(""),
-      // The optional `totalPriceOverride` matches the walkin
-      // surface; absent → server-computed.
-      totalPriceOverride: external_exports.coerce.number().finite().min(0).max(1e6).optional(),
-      // The optional `requestFingerprint` lets a future
-      // client preallocate the idempotency key for a
-      // retry-after-uncertain-response. The current staff
-      // modal doesn't preallocate — the server auto-mints
-      // `add-room-${reservationId}-${roomId}-${now}` and
-      // writes it onto the header (the same pattern the
-      // reschedule handler uses for `rescheduleFingerprint`).
-      requestFingerprint: external_exports.string().trim().min(1).max(256).optional()
-    }).strict();
-    StartBookingHoldSchema = external_exports.object({
-      holdId: external_exports.string().trim().regex(HOLD_ID_REGEX, "Invalid hold id format"),
-      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX, "Invalid reservation id format"),
-      roomType: external_exports.string().trim().min(1).max(64),
-      checkIn: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "checkIn must be YYYY-MM-DD"),
-      checkOut: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "checkOut must be YYYY-MM-DD"),
-      numNights: external_exports.coerce.number().int().min(1).max(60)
-    }).strict().refine((value) => new Date(value.checkOut) > new Date(value.checkIn), {
-      message: "Check-out must be after check-in",
-      path: ["checkOut"]
-    });
-    BreakfastMealSchema = external_exports.object({
-      id: external_exports.string().min(1).max(64),
-      name: external_exports.string().min(1).max(80),
-      description: external_exports.string().max(200).default(""),
-      price: external_exports.number().min(0).max(1e4),
-      isActive: external_exports.boolean(),
-      displayOrder: external_exports.number().int().min(0).max(1e3),
-      /**
-       * Per MBUX-04 (decision #256, 2026-10-15): optional meal thumbnail.
-       *
-       * THIS FIELD MUST STAY IN THE SCHEMA. Zod's `z.object` STRIPS
-       * unknown keys by default, so a schema without `imageUrl` would
-       * silently delete the admin's uploaded URL on every
-       * `handleSaveBreakfast` write — the upload would appear to succeed
-       * and then vanish the next time anyone touched dining settings.
-       * That is a far worse failure than a rejected save, which is why
-       * the field is declared here rather than left to the default strip.
-       *
-       * `.url()` keeps only real absolute URLs; an empty string is
-       * rejected rather than stored, because "no image" is represented
-       * by OMITTING the field, not by an empty URL.
-       */
-      imageUrl: external_exports.string().url().max(2e3).optional(),
-      createdAt: external_exports.union([external_exports.string(), external_exports.any()]).optional(),
-      updatedAt: external_exports.union([external_exports.string(), external_exports.any()]).optional()
-    });
-    BreakfastConfigSchema = external_exports.object({
-      isEnabled: external_exports.boolean(),
-      /**
-       * Per BR-10 (2026-10-14, decision #244 reserved — Phase 14):
-       * the cut-off enforcement toggle. Required (no Zod default —
-       * the legacy-fallback is handled by `normalizeBreakfastConfig`
-       * at read time, not at schema-parse time, because the writer
-       * must always be explicit about whether cut-offs apply).
-       */
-      cutoffsEnabled: external_exports.boolean(),
-      cutoffTime: external_exports.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM 24h format"),
-      cutoffTimezone: external_exports.string().min(1),
-      frontDeskOverrideEnabled: external_exports.boolean(),
-      /**
-       * Per decision #231 + open item #5: 0..60 minute window after
-       * `served` during which staff can un-serve without a reason.
-       * Default 15; min 0; max 60.
-       */
-      servedGraceMinutes: external_exports.number().int().min(0).max(60).default(15),
-      defaultMealInstructions: external_exports.string().max(2e3).default(""),
-      meals: external_exports.array(BreakfastMealSchema),
-      updatedAt: external_exports.union([external_exports.string(), external_exports.any()]).optional(),
-      updatedBy: external_exports.string().default("")
-    });
-    BreakfastSelectionEntrySchema = external_exports.object({
-      mealId: external_exports.string().min(1),
-      mealName: external_exports.string().min(1),
-      price: external_exports.number().min(0),
-      addedAt: external_exports.union([external_exports.string(), external_exports.any()]),
-      addedBy: external_exports.string().min(1),
-      lastModifiedAt: external_exports.union([external_exports.string(), external_exports.any()]),
-      lastModifiedBy: external_exports.string().min(1),
-      removedAt: external_exports.union([external_exports.string(), external_exports.any()]).nullable().default(null),
-      removedBy: external_exports.string().nullable().default(null),
-      overrideCutoff: external_exports.boolean().default(false),
-      overrideReason: external_exports.string().nullable().default(null)
-    });
-    BreakfastServedEntrySchema = external_exports.object({
-      servedAt: external_exports.union([external_exports.string(), external_exports.any()]),
-      servedBy: external_exports.string().min(1),
-      unservedAt: external_exports.union([external_exports.string(), external_exports.any()]).nullable().default(null),
-      unservedBy: external_exports.string().nullable().default(null)
-    });
-    BreakfastAuditEntrySchema = external_exports.object({
-      id: external_exports.string().optional(),
-      action: external_exports.enum([
-        "add",
-        "change",
-        "remove",
-        "serve",
-        "unserve",
-        "override-add",
-        "override-change",
-        "override-remove"
-      ]),
-      slotKey: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-\d+$/, "serviceDate-guestIndex format"),
-      mealSnapshot: external_exports.object({
-        mealId: external_exports.string(),
-        mealName: external_exports.string(),
-        price: external_exports.number().min(0)
-      }).nullable(),
-      actorUid: external_exports.string().min(1),
-      actorRole: external_exports.enum(["guest", "front-desk", "admin"]),
-      reason: external_exports.string().nullable().default(null),
-      occurredAt: external_exports.union([external_exports.string(), external_exports.any()]),
-      occurredAfterCutoff: external_exports.boolean()
-    });
-    BreakfastRefundContextSchema = external_exports.object({
-      mealId: external_exports.string().min(1),
-      slotKey: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-\d+$/),
-      mealName: external_exports.string().min(1),
-      priceSnapshot: external_exports.number().min(0)
-    });
-    AddOnSchema = external_exports.object({
-      id: external_exports.string().min(1).max(80),
-      name: external_exports.string().min(1).max(120),
-      description: external_exports.string().max(500).default(""),
-      price: external_exports.number().min(0).max(1e4),
-      unit: external_exports.enum(["per-person", "per-stay"]),
-      isEnabled: external_exports.boolean(),
-      cutoffHoursBeforeCheckIn: external_exports.number().int().min(0).max(168),
-      displayOrder: external_exports.number().int().min(0).max(1e3),
-      updatedAt: external_exports.union([external_exports.string(), external_exports.any()]).optional(),
-      updatedBy: external_exports.string().optional()
-    });
-    OtherAddOnSelectionEntrySchema = external_exports.object({
-      addOnId: external_exports.string().min(1).max(80),
-      nameSnapshot: external_exports.string().min(1).max(120),
-      priceSnapshot: external_exports.number().min(0).max(1e4),
-      quantity: external_exports.number().int().min(0).max(50),
-      unitSnapshot: external_exports.enum(["per-person", "per-stay"]),
-      addedAt: external_exports.union([external_exports.string(), external_exports.any()]),
-      addedBy: external_exports.string().min(1),
-      lastModifiedAt: external_exports.union([external_exports.string(), external_exports.any()]),
-      lastModifiedBy: external_exports.string().min(1),
-      removedAt: external_exports.union([external_exports.string(), external_exports.any()]).nullable().default(null),
-      removedBy: external_exports.string().nullable().default(null),
-      cutoffHoursBeforeCheckInSnapshot: external_exports.number().int().min(0).max(168)
-    });
-    OtherAddOnAuditEntrySchema = external_exports.object({
-      id: external_exports.string().optional(),
-      action: external_exports.enum([
-        "add",
-        "change",
-        "remove",
-        "mark-served",
-        "override-add",
-        "override-change",
-        "override-remove"
-      ]),
-      selectionKey: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/, "serviceDate-addOnId format"),
-      addOnSnapshot: external_exports.object({
-        addOnId: external_exports.string(),
-        name: external_exports.string(),
-        price: external_exports.number().min(0),
-        quantity: external_exports.number().int().min(0)
-      }).nullable(),
-      actorUid: external_exports.string().min(1),
-      actorRole: external_exports.enum(["guest", "front-desk", "admin"]),
-      reason: external_exports.string().nullable().default(null),
-      occurredAt: external_exports.union([external_exports.string(), external_exports.any()]),
-      occurredAfterCutoff: external_exports.boolean()
-    });
-    OtherAddOnRefundContextSchema = external_exports.object({
-      addOnId: external_exports.string().min(1),
-      selectionKey: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/),
-      addOnName: external_exports.string().min(1),
-      priceSnapshot: external_exports.number().min(0),
-      quantitySnapshot: external_exports.number().int().min(0)
-    });
-    OtherAddOnUpdateSchema = external_exports.object({
-      bookingRef: external_exports.string().trim().min(4).max(40),
-      lookupToken: external_exports.string().trim().min(8).max(200),
-      turnstileToken: external_exports.string().optional(),
-      clientBatchId: external_exports.string().trim().min(8).max(80),
-      // Per RPT-04 (QA pass 2026-10-21): `selections` is OPTIONAL.
-      //
-      // It was REQUIRED, but the mutation contract this schema guards
-      // is the OP list (`add` / `change` / `remove`) — both handlers
-      // read the ops off the raw body via `readOps(body)` and never
-      // read `selections` at all. The guest client
-      // (`ManageOtherAddOnsPage.tsx`) and the staff drawer send the
-      // ops and no `selections`, so `safeParse` failed on the missing
-      // field and the endpoint answered
-      // "Invalid other-add-ons update payload." (HTTP 400) on EVERY
-      // save: the whole BR-12 other-add-ons write path was dead, for
-      // guests and staff alike.
-      //
-      // The field is kept (optional) so a caller that DOES send a
-      // `selections` map still validates it, and so the schema keeps
-      // describing the full write shape.
-      selections: external_exports.record(
-        external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "serviceDate format"),
-        external_exports.array(OtherAddOnSelectionEntrySchema)
-      ).optional(),
-      removedKeys: external_exports.array(external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/)).default([])
-    }).passthrough();
-    StaffOtherAddOnUpdateSchema = external_exports.object({
-      bookingId: external_exports.string().trim().min(8).max(80),
-      turnstileToken: external_exports.string().optional(),
-      // Per RPT-04 (QA pass 2026-10-21): `selections` is OPTIONAL for
-      // the same reason as `OtherAddOnUpdateSchema` above — the staff
-      // handler reads the `add` / `change` / `remove` ops off the raw
-      // body and never reads `selections`, so requiring it rejected
-      // every real staff save with a 400.
-      selections: external_exports.record(
-        external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/, "serviceDate format"),
-        external_exports.array(OtherAddOnSelectionEntrySchema)
-      ).optional(),
-      removedKeys: external_exports.array(external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/)).default([]),
-      overrideReason: external_exports.string().trim().min(8).max(280).optional()
-    }).passthrough();
-    OtherAddOnMarkServedSchema = external_exports.object({
-      bookingId: external_exports.string().trim().min(8).max(80),
-      selectionKeys: external_exports.array(external_exports.string().regex(/^\d{4}-\d{2}-\d{2}-[\w-]+$/)).min(1).max(50),
-      turnstileToken: external_exports.string().optional()
-    }).passthrough();
-    OtherAddOnMarkRefundPaidSchema = external_exports.object({
-      bookingId: external_exports.string().trim().min(8).max(80),
-      refundId: external_exports.string().trim().regex(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-        "Invalid refundId."
-      ),
-      method: external_exports.string().trim().min(1).max(60),
-      transactionReference: external_exports.string().trim().max(200).nullable().optional().default(null),
-      note: external_exports.string().trim().max(500).nullable().optional().default(null),
-      turnstileToken: external_exports.string().optional()
-    }).passthrough();
-    AddOnCatalogAuditLogSchema = external_exports.object({
-      action: external_exports.enum(["addons.create", "addons.update", "addons.delete"]),
-      targetCollection: external_exports.string().default("addOns"),
-      targetId: external_exports.string().min(1).max(80),
-      actor: external_exports.string().min(1).max(120),
-      actorName: external_exports.string().max(120).default(""),
-      before: external_exports.any().nullable().default(null),
-      after: external_exports.any().nullable().default(null),
-      timestamp: external_exports.union([external_exports.string(), external_exports.any()]).optional()
-    });
-    ExtendBookingHoldSchema = external_exports.object({
-      holdId: external_exports.string().trim().regex(HOLD_ID_REGEX, "Invalid hold id format"),
-      reservationId: external_exports.string().trim().regex(RESERVATION_ID_REGEX, "Invalid reservation id format")
-    }).strict();
-  }
-});
-
-// ../shared/schemas/paymentMethod.ts
-var PaymentMethodConfigSchema, PaymentMethodsArraySchema, LegacyPaymentMethodConfigSchema;
-var init_paymentMethod = __esm({
-  "../shared/schemas/paymentMethod.ts"() {
-    "use strict";
-    init_zod();
-    PaymentMethodConfigSchema = external_exports.object({
-      method: external_exports.string().min(1, "Method key is required").max(64),
-      label: external_exports.string().min(1, "Label is required").max(120),
-      accountName: external_exports.string().max(200),
-      accountNumber: external_exports.string().max(200),
-      qrUrl: external_exports.string().max(2048),
-      isEnabled: external_exports.boolean(),
-      // Per #111 (per-method surface toggles). Both default to
-      // `true` when omitted — the helper functions read them
-      // permissively (`!== false`) so legacy data is treated as
-      // "visible on all surfaces" without an explicit migration.
-      // Optional on the schema for the same reason: pre-#111
-      // entries do not have these fields.
-      showInStore: external_exports.boolean().optional(),
-      showInCorporate: external_exports.boolean().optional(),
-      requireReferenceNumber: external_exports.boolean().optional()
-    });
-    PaymentMethodsArraySchema = external_exports.array(PaymentMethodConfigSchema).max(20, "Too many payment methods (max 20)");
-    LegacyPaymentMethodConfigSchema = external_exports.object({
-      method: external_exports.string().min(1),
-      label: external_exports.string().optional(),
-      accountName: external_exports.string().optional(),
-      accountNumber: external_exports.string().optional(),
-      accountInfo: external_exports.string().optional(),
-      qrUrl: external_exports.string().optional(),
-      isEnabled: external_exports.boolean().optional()
-    });
-  }
-});
-
-// ../shared/schemas/room.ts
-var RoomStatusEnum, HousekeepingStatusEnum, CreateRoomSchema, ACTIVE_BOOKING_STATUSES;
-var init_room = __esm({
-  "../shared/schemas/room.ts"() {
-    "use strict";
-    init_zod();
-    RoomStatusEnum = external_exports.enum(["available", "occupied", "blocked"]);
-    HousekeepingStatusEnum = external_exports.enum(["clean", "dirty", "in-progress"]);
-    CreateRoomSchema = external_exports.object({
-      name: external_exports.string().trim().min(1, "Display name is required").max(80, "Display name is too long"),
-      roomNumber: external_exports.string().trim().min(1, "Room number is required").max(20, "Room number is too long"),
-      type: external_exports.string().trim().min(1, "Room type is required").max(40, "Room type is too long"),
-      status: RoomStatusEnum.default("available"),
-      housekeepingStatus: HousekeepingStatusEnum.default("clean"),
-      isActive: external_exports.boolean().default(true),
-      blockReason: external_exports.string().trim().max(200, "Block reason is too long").default(""),
-      remarks: external_exports.string().trim().max(1e3, "Remarks are too long").default("")
-    });
-    ACTIVE_BOOKING_STATUSES = [
-      "pending",
-      "payment-uploaded",
-      "payment-confirmed",
-      "confirmed",
-      "checked-in"
-    ];
-  }
-});
-
-// ../shared/schemas/websiteContent.ts
-var PublicHeroSchema, HomepageContentSchema, AboutContentSchema, CorporateContentSchema, RewardsContentSchema, BrandingConfigSchema, WebsiteContentSchema;
-var init_websiteContent = __esm({
-  "../shared/schemas/websiteContent.ts"() {
-    "use strict";
-    init_zod();
-    PublicHeroSchema = external_exports.object({
-      heroEyebrow: external_exports.string().default(""),
-      heroHeading: external_exports.string().default(""),
-      heroSubtext: external_exports.string().default(""),
-      heroPhotoUrl: external_exports.string().default("")
-    });
-    HomepageContentSchema = PublicHeroSchema.extend({
-      sectionHeaders: external_exports.object({
-        roomsEyebrow: external_exports.string().default(""),
-        roomsHeading: external_exports.string().default(""),
-        roomsSubtext: external_exports.string().default(""),
-        amenitiesEyebrow: external_exports.string().default(""),
-        amenitiesHeading: external_exports.string().default(""),
-        amenitiesSubtext: external_exports.string().default(""),
-        servicesEyebrow: external_exports.string().default(""),
-        servicesHeading: external_exports.string().default(""),
-        servicesSubtext: external_exports.string().default("")
-      }).optional(),
-      amenities: external_exports.array(
-        external_exports.object({
-          title: external_exports.string(),
-          description: external_exports.string(),
-          icon: external_exports.string().optional(),
-          isEnabled: external_exports.boolean().optional()
-        })
-      ),
-      // Type values featured on the homepage "Stay with us" section.
-      // Each value resolves to its first active room — see
-      // `HomePage` and the `TypePicker` admin component. Capped at
-      // `MAX_FEATURED_TYPES` (3) at the editor and at the renderer.
-      //
-      // Migration note: the previous field was `featuredRoomIds`
-      // (a list of physical room doc IDs). That model was wrong —
-      // see `MAX_FEATURED_TYPES` in `shared/constants/index.ts` for
-      // the full rationale. `AdminContext.mergeWebsiteContent` does
-      // a one-time mapping from the old field to the new one.
-      featuredTypeValues: external_exports.array(external_exports.string()),
-      services: external_exports.array(
-        external_exports.object({
-          title: external_exports.string(),
-          description: external_exports.string(),
-          icon: external_exports.string().optional(),
-          isEnabled: external_exports.boolean().optional()
-        })
-      ),
-      sparkRewards: external_exports.object({
-        heading: external_exports.string(),
-        description: external_exports.string(),
-        perks: external_exports.array(
-          external_exports.object({
-            title: external_exports.string(),
-            description: external_exports.string().optional(),
-            icon: external_exports.string().optional(),
-            isEnabled: external_exports.boolean().optional()
-          })
-        ),
-        isEnabled: external_exports.boolean()
-      })
-    });
-    AboutContentSchema = external_exports.object({
-      heroEyebrow: external_exports.string().default(""),
-      heroHeading: external_exports.string().default(""),
-      heroSubtext: external_exports.string().default(""),
-      heroPhotoUrl: external_exports.string().default(""),
-      missionStatement: external_exports.string().default(""),
-      visionStatement: external_exports.string().default(""),
-      hotelStory: external_exports.string().default("")
-    });
-    CorporateContentSchema = PublicHeroSchema.extend({
-      perks: external_exports.array(
-        external_exports.object({
-          title: external_exports.string(),
-          description: external_exports.string(),
-          icon: external_exports.string().optional(),
-          isEnabled: external_exports.boolean().optional()
-        })
-      ),
-      // Rooms overview section on /corporate (eyebrow + heading + subtext).
-      // All optional — the guest app falls back to hardcoded copy in
-      // `CorporateStaysPage` when empty. Edited from Settings → Website
-      // Content → Corporate page.
-      roomsOverviewEyebrow: external_exports.string().default(""),
-      roomsOverviewHeading: external_exports.string().default(""),
-      roomsOverviewDescription: external_exports.string().default(""),
-      // Retreat CTA banner at the bottom of the "rooms" section
-      // (heading + description + button label). All optional with the
-      // same fallback behavior as the rooms overview block above.
-      retreatHeading: external_exports.string().default(""),
-      retreatDescription: external_exports.string().default(""),
-      retreatCtaLabel: external_exports.string().default("")
-    });
-    RewardsContentSchema = PublicHeroSchema;
-    BrandingConfigSchema = external_exports.object({
-      logoNavbar: external_exports.string().default(""),
-      logoNavbarOnDark: external_exports.string().default(""),
-      logoFooter: external_exports.string().default("")
-    });
-    WebsiteContentSchema = external_exports.object({
-      homepage: HomepageContentSchema,
-      about: AboutContentSchema,
-      corporate: CorporateContentSchema,
-      rewards: RewardsContentSchema,
-      branding: BrandingConfigSchema,
-      roomsCatalog: PublicHeroSchema.optional(),
-      contact: PublicHeroSchema.optional(),
-      notFound: PublicHeroSchema.optional(),
-      privacyPolicyBody: external_exports.string().optional(),
-      cancellationPolicy: external_exports.string().optional(),
-      cancellationCutoffHours: external_exports.number().optional(),
-      cancellationRefundPctBefore: external_exports.number().optional(),
-      cancellationRefundPctAfter: external_exports.number().optional(),
-      houseRules: external_exports.string().optional(),
-      privacyPolicyLastUpdated: external_exports.string().optional()
-    });
-  }
-});
-
-// ../shared/schemas/seo.ts
-var optionalUrl, SeoPublishSchema;
-var init_seo = __esm({
-  "../shared/schemas/seo.ts"() {
-    "use strict";
-    init_zod();
-    optionalUrl = external_exports.string().trim().max(500).refine(
-      (value) => value === "" || /^https:\/\//i.test(value),
-      "Enter a secure URL beginning with https://"
-    );
-    SeoPublishSchema = external_exports.object({
-      metaDescription: external_exports.string().trim().min(50).max(160),
-      priceRange: external_exports.string().trim().min(1).max(20),
-      ogImage: optionalUrl,
-      twitterHandle: external_exports.string().trim().max(50).regex(/^@?[A-Za-z0-9_]*$/, "Enter a valid X handle"),
-      address: external_exports.string().trim().min(5).max(300),
-      frontDeskPhone: external_exports.string().trim().min(5).max(50),
-      facebookUrl: optionalUrl,
-      instagramUrl: optionalUrl,
-      checkInTime: external_exports.string().trim().min(1).max(30),
-      checkOutTime: external_exports.string().trim().min(1).max(30)
-    });
-  }
-});
-
-// ../shared/types/publicHotelConfig.ts
-var init_publicHotelConfig = __esm({
-  "../shared/types/publicHotelConfig.ts"() {
-    "use strict";
-  }
-});
-
-// ../shared/types/index.ts
-var init_types3 = __esm({
-  "../shared/types/index.ts"() {
-    "use strict";
-    init_publicHotelConfig();
-  }
-});
-
-// ../shared/utils/bookingDates.ts
-function toDateOrNow(value) {
-  const d = toDateOrNull(value);
-  return d ?? /* @__PURE__ */ new Date();
-}
-function toDateOrNull(value) {
-  if (value === null || value === void 0) return null;
-  if (value instanceof Date) return new Date(value.getTime());
-  if (typeof value.toDate === "function") {
-    const result = value.toDate();
-    if (result instanceof Date) return new Date(result.getTime());
-    if (result && typeof result.toDate === "function") {
-      const nested = result.toDate();
-      if (nested instanceof Date) return new Date(nested.getTime());
-    }
-    if (typeof value === "object" && value !== null) {
-      const obj = value;
-      if (typeof obj._seconds === "number") {
-        const ms2 = obj._seconds * 1e3 + Math.floor((obj._nanoseconds ?? 0) / 1e6);
-        return new Date(ms2);
-      }
-    }
-    return null;
-  }
-  if (typeof value === "object" && value !== null) {
-    const obj = value;
-    if (typeof obj._seconds === "number") {
-      const ms2 = obj._seconds * 1e3 + Math.floor((obj._nanoseconds ?? 0) / 1e6);
-      return new Date(ms2);
-    }
-    return null;
-  }
-  if (typeof value === "string" || typeof value === "number") {
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? null : d;
-  }
-  return null;
-}
-function toUtcDateKey(value) {
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
-  }
-  const date = toDateOrNull(value);
-  if (!date) return "";
-  const yyyy = date.getUTCFullYear();
-  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(date.getUTCDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-function getManilaDateInfo(timezone = "Asia/Manila") {
-  const now = /* @__PURE__ */ new Date();
-  const localString = now.toLocaleString("en-US", { timeZone: timezone });
-  const localDate = new Date(localString);
-  const year = localDate.getFullYear();
-  const month = String(localDate.getMonth() + 1).padStart(2, "0");
-  const day = String(localDate.getDate()).padStart(2, "0");
-  return {
-    todayStr: `${year}-${month}-${day}`,
-    todayCompact: `${year}${month}${day}`,
-    manilaDate: localDate
-  };
-}
-function getDateKeyInTimezone(timezone = "Asia/Manila", offsetDays = 0) {
-  const { manilaDate } = getManilaDateInfo(timezone);
-  const date = new Date(manilaDate);
-  date.setDate(date.getDate() + offsetDays);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-var init_bookingDates = __esm({
-  "../shared/utils/bookingDates.ts"() {
-    "use strict";
-  }
-});
-
-// ../shared/utils/stayRange.ts
-function isValidIsoDate(value) {
-  if (typeof value !== "string" || !ISO_DATE_PATTERN.test(value)) return false;
-  const parsed = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
-  if (Number.isNaN(parsed.getTime())) return false;
-  return parsed.toISOString().slice(0, 10) === value;
-}
-function addDaysToIsoDate(value, days, fallback = "") {
-  if (!isValidIsoDate(value)) return fallback;
-  const date = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-function diffNightsBetweenIso(first, second) {
-  if (!isValidIsoDate(first) || !isValidIsoDate(second)) return 0;
-  const start = Date.parse(`${first}T00:00:00Z`);
-  const end = Date.parse(`${second}T00:00:00Z`);
-  return Math.round((end - start) / 864e5);
-}
-function resolveMaxStayNights(raw) {
-  if (raw === void 0 || raw === null || raw === "") return DEFAULT_MAX_STAY_NIGHTS;
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value < 0) return DEFAULT_MAX_STAY_NIGHTS;
-  if (value === 0) return Infinity;
-  const floored = Math.floor(value);
-  if (floored < MIN_MAX_STAY_NIGHTS) return MIN_MAX_STAY_NIGHTS;
-  return Math.min(floored, MAX_MAX_STAY_NIGHTS);
-}
-function describeMaxStayNights(maxNights) {
-  return Number.isFinite(maxNights) ? `${maxNights} nights` : "no maximum";
-}
-function isUnlimitedStay(maxNights) {
-  return !Number.isFinite(maxNights);
-}
-function normalizeStayRange({
-  checkIn,
-  checkOut,
-  minCheckIn,
-  previousNights = null,
-  defaultNights = DEFAULT_STAY_NIGHTS,
-  maxNights = DEFAULT_MAX_STAY_NIGHTS,
-  maxCheckOut
-}) {
-  const today = isValidIsoDate(minCheckIn) ? minCheckIn : (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-  const horizon = isValidIsoDate(maxCheckOut ?? "") && maxCheckOut > today ? maxCheckOut : addDaysToIsoDate(
-    today,
-    DEFAULT_BOOKING_HORIZON_DAYS,
-    addDaysToIsoDate(today, defaultNights, today)
-  );
-  const horizonNights = Math.max(diffNightsBetweenIso(today, horizon), defaultNights);
-  const stayCap = Math.max(Math.min(maxNights, horizonNights), 1);
-  const rawIn = isValidIsoDate(checkIn ?? "") ? checkIn : null;
-  const rawOut = isValidIsoDate(checkOut ?? "") ? checkOut : null;
-  if (!rawIn && !rawOut) {
-    const seededCheckOut = addDaysToIsoDate(today, defaultNights, today);
-    return {
-      checkIn: today,
-      checkOut: seededCheckOut <= today ? addDaysToIsoDate(today, 1, today) : seededCheckOut,
-      nights: defaultNights,
-      adjustment: "empty"
-    };
-  }
-  let adjustment = null;
-  let checkInCandidate;
-  if (!rawIn) {
-    const derived = rawOut && rawOut > today ? addDaysToIsoDate(rawOut, -defaultNights, "") : "";
-    checkInCandidate = !derived || derived < today ? today : derived;
-    adjustment = "invalid-check-in";
-  } else if (rawIn < today) {
-    checkInCandidate = today;
-    adjustment = "check-in-clamped-to-today";
-  } else {
-    checkInCandidate = rawIn;
-  }
-  const nextIn = checkInCandidate;
-  let checkOutCandidate;
-  if (!rawOut) {
-    checkOutCandidate = addDaysToIsoDate(nextIn, defaultNights, addDaysToIsoDate(nextIn, 1, nextIn));
-    if (adjustment === null) adjustment = "invalid-check-out";
-  } else if (rawOut <= nextIn) {
-    const preserveable = typeof previousNights === "number" && Number.isFinite(previousNights) ? Math.floor(previousNights) : null;
-    const nights = preserveable !== null && preserveable >= 1 ? Math.min(preserveable, stayCap) : Math.min(defaultNights, stayCap);
-    checkOutCandidate = addDaysToIsoDate(nextIn, nights, addDaysToIsoDate(nextIn, 1, nextIn));
-    adjustment = preserveable !== null && preserveable >= 1 ? "nights-preserved" : "check-out-clamped-after-check-in";
-  } else {
-    checkOutCandidate = rawOut;
-  }
-  if (diffNightsBetweenIso(nextIn, checkOutCandidate) > maxNights) {
-    checkOutCandidate = addDaysToIsoDate(nextIn, maxNights, addDaysToIsoDate(nextIn, 1, nextIn));
-    adjustment = "nights-clamped";
-  }
-  if (checkOutCandidate > horizon) {
-    checkOutCandidate = horizon;
-    adjustment = "horizon-capped";
-  }
-  if (checkOutCandidate <= nextIn) {
-    checkOutCandidate = addDaysToIsoDate(nextIn, 1, nextIn);
-    adjustment = "check-out-clamped-after-check-in";
-  }
-  const nextOut = checkOutCandidate;
-  return {
-    checkIn: nextIn,
-    checkOut: nextOut,
-    nights: Math.max(diffNightsBetweenIso(nextIn, nextOut), 1),
-    adjustment
-  };
-}
-function isValidStayRange(checkIn, checkOut, minCheckIn) {
-  if (!isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) return false;
-  if (checkIn < minCheckIn) return false;
-  return diffNightsBetweenIso(checkIn, checkOut) >= 1;
-}
-function resolveRangeSelection({
-  from,
-  to: to3,
-  minCheckIn,
-  maxCheckOut,
-  maxNights = DEFAULT_MAX_STAY_NIGHTS
-}) {
-  if (!isValidIsoDate(from ?? "")) return { status: "cleared" };
-  const checkIn = from < minCheckIn ? minCheckIn : from;
-  if (!isValidIsoDate(to3 ?? "")) return { status: "pending", checkIn };
-  const checkOut = to3;
-  if (checkOut === checkIn) return { status: "pending", checkIn };
-  if (checkOut < checkIn) return { status: "pending", checkIn };
-  const clampedCheckIn = checkIn < minCheckIn ? minCheckIn : checkIn;
-  const nights = diffNightsBetweenIso(clampedCheckIn, checkOut);
-  if (nights < 1) return { status: "pending", checkIn: clampedCheckIn };
-  if (checkOut > maxCheckOut) return { status: "pending", checkIn: clampedCheckIn };
-  if (nights > maxNights) return { status: "pending", checkIn: clampedCheckIn };
-  return { status: "complete", checkIn: clampedCheckIn, checkOut, nights };
-}
-var ISO_DATE_PATTERN, DEFAULT_STAY_NIGHTS, DEFAULT_MAX_STAY_NIGHTS, DEFAULT_BOOKING_HORIZON_DAYS, MIN_MAX_STAY_NIGHTS, MAX_MAX_STAY_NIGHTS;
-var init_stayRange = __esm({
-  "../shared/utils/stayRange.ts"() {
-    "use strict";
-    ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-    DEFAULT_STAY_NIGHTS = 1;
-    DEFAULT_MAX_STAY_NIGHTS = 30;
-    DEFAULT_BOOKING_HORIZON_DAYS = 365;
-    MIN_MAX_STAY_NIGHTS = 1;
-    MAX_MAX_STAY_NIGHTS = DEFAULT_BOOKING_HORIZON_DAYS;
-  }
-});
-
-// ../shared/utils/bookingDiscounts.ts
-function calculatePercentDiscount(base, pct) {
-  return (Number(base) || 0) * ((Number(pct) || 0) / 100);
-}
-function calculateVoucherBase(subtotal, deduction) {
-  return Math.max(
-    (Number(subtotal) || 0) - (Number(deduction) || 0),
-    0
-  );
-}
-function normalizeDiscountScope(scope) {
-  if (!scope) return BROAD_DISCOUNT_SCOPE;
-  const fill = (cls) => ({
-    room: cls?.room !== false,
-    breakfast: cls?.breakfast !== false,
-    extraBed: cls?.extraBed !== false
-  });
-  return {
-    senior: fill(scope.senior),
-    voucher: fill(scope.voucher),
-    member: fill(scope.member)
-  };
-}
-function calculateDiscountChain(input) {
-  const roomTotal = Number(input.roomTotal) || 0;
-  const breakfastTotal = Number(input.breakfastTotal) || 0;
-  const extraBedTotal = Number(input.extraBedTotal) || 0;
-  const subtotal = roomTotal + breakfastTotal + extraBedTotal;
-  const scope = normalizeDiscountScope(input.scope);
-  const scopeBase = (cls) => (cls.room ? roomTotal : 0) + (cls.breakfast ? breakfastTotal : 0) + (cls.extraBed ? extraBedTotal : 0);
-  const seniorBase = scopeBase(scope.senior);
-  const seniorRaw = seniorBase * ((Number(input.seniorPct) || 0) / 100);
-  const seniorDeduction = input.round ? Math.round(seniorRaw) : seniorRaw;
-  const voucherBase = Math.max(0, scopeBase(scope.voucher) - seniorDeduction);
-  const voucherAmount = Number(input.voucherAmount) || 0;
-  const voucherDeduction = Math.min(Math.max(0, voucherAmount), voucherBase);
-  const memberBase = Math.max(
-    0,
-    scopeBase(scope.member) - seniorDeduction - voucherDeduction
-  );
-  const memberRaw = memberBase * ((Number(input.memberPct) || 0) / 100);
-  const memberDeduction = input.round ? Math.round(memberRaw) : memberRaw;
-  const total = Math.max(0, subtotal - seniorDeduction - voucherDeduction - memberDeduction);
-  return { seniorDeduction, voucherDeduction, memberDeduction, total };
-}
-var BROAD_DISCOUNT_SCOPE;
-var init_bookingDiscounts = __esm({
-  "../shared/utils/bookingDiscounts.ts"() {
-    "use strict";
-    BROAD_DISCOUNT_SCOPE = {
-      senior: { room: true, breakfast: true, extraBed: true },
-      voucher: { room: true, breakfast: true, extraBed: true },
-      member: { room: true, breakfast: true, extraBed: true }
-    };
-  }
-});
-
-// ../shared/utils/bookingFolio.ts
-function computeBookingFolio(input) {
-  const { booking, storeOrders } = input;
-  const folioBookingIds = new Set(
-    input.folioBookingIds?.length ? input.folioBookingIds : [booking.id]
-  );
-  const storeCharges = storeOrders.filter(
-    (o2) => typeof o2.bookingId === "string" && folioBookingIds.has(o2.bookingId) && o2.paymentMethod === "add-to-bill" && o2.status === "delivered" && o2.isBilled === true
-  );
-  const storeTotal = storeCharges.reduce(
-    (sum, o2) => sum + (Number(o2.totalAmount) || 0),
-    0
-  );
-  const charges = input.selectedBookingCharges ?? [];
-  const chargesTotal = charges.reduce(
-    (sum, c2) => sum + (Number(c2.amount) || 0),
-    0
-  );
-  const payments = input.selectedBookingPayments ? input.selectedBookingPayments : input.persistedPayments || [];
-  const paymentsTotal = payments.reduce(
-    (sum, p) => sum + (Number(p.amount) || 0),
-    0
-  );
-  const totalPrice = Number(booking.totalPrice) || 0;
-  const otherAddOnTotal = Math.max(0, Number(booking.otherAddOnTotal) || 0);
-  const grandTotal = totalPrice + otherAddOnTotal + storeTotal + chargesTotal;
-  const balance = grandTotal - paymentsTotal;
-  return {
-    storeCharges,
-    storeTotal,
-    charges,
-    chargesTotal,
-    paymentsTotal,
-    otherAddOnTotal,
-    grandTotal,
-    balance
-  };
-}
-function computeServerFolioTotals(input) {
-  const totalPrice = Number(input.totalPrice) || 0;
-  const incidentalTotal = Number(input.incidentalTotal) || 0;
-  const addToBillTotal = Number(input.addToBillTotal) || 0;
-  const collectedTotal = Number(input.collectedTotal) || 0;
-  const otherAddOnTotal = Math.max(0, Number(input.otherAddOnTotal) || 0);
-  const folioTotal = totalPrice + otherAddOnTotal + incidentalTotal + addToBillTotal;
-  const computedBalance = Math.max(folioTotal - collectedTotal, 0);
-  return { folioTotal, computedBalance };
-}
-function getReservationFolioSummary(input) {
-  const reservationTotal = Number(input.reservationTotal) || 0;
-  const otherAddOnTotal = Math.max(0, Number(input.otherAddOnTotal) || 0);
-  const refunds = input.refunds ?? [];
-  const paymentsTotal = input.payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) + refunds.reduce((sum, r3) => sum + (Number(r3.amount) || 0), 0);
-  const chargesTotal = input.charges.reduce(
-    (sum, c2) => sum + (Number(c2.amount) || 0),
-    0
-  );
-  const balance = reservationTotal + otherAddOnTotal + chargesTotal - paymentsTotal;
-  return {
-    reservationId: input.reservationId,
-    reservationTotal,
-    otherAddOnTotal,
-    chargesTotal,
-    paymentsTotal,
-    balance,
-    source: input.source
-  };
-}
-function mapBookingStatusToReservationPaymentStatus(bookingStatus) {
-  switch (bookingStatus) {
-    case "pending":
-      return "awaiting-payment";
-    case "checked-in":
-      return "in-house";
-    case "checked-out":
-      return "completed";
-    // The 4 pass-through values: return the input as-is so
-    // the return type is assignable to `ReservationPaymentStatus`
-    // (TS narrows the literal type to the union member).
-    case "payment-uploaded":
-    case "payment-confirmed":
-    case "confirmed":
-    case "cancelled":
-      return bookingStatus;
-    // Unknown status: pass through unchanged (the field type
-    // is the runtime guard; the assignment site will reject an
-    // out-of-union value with a TS error). This is the
-    // defensive-coercion path — a malformed input never
-    // throws, it just doesn't get a relabel.
-    default:
-      return bookingStatus;
-  }
-}
-function computeReservationAggregatePaymentStatus(childStatuses) {
-  const activeStatuses = childStatuses.filter((s4) => s4 !== "cancelled");
-  if (activeStatuses.length === 0) {
-    return "cancelled";
-  }
-  const hasPreConfirmation = activeStatuses.some(
-    (s4) => s4 === "pending" || s4 === "payment-uploaded"
-  );
-  if (hasPreConfirmation) {
-    return "awaiting-payment";
-  }
-  const allConfirmed = activeStatuses.every(
-    (s4) => s4 === "payment-confirmed" || s4 === "confirmed"
-  );
-  if (allConfirmed) {
-    return "confirmed";
-  }
-  const hasCheckedOut = activeStatuses.some((s4) => s4 === "checked-out");
-  if (hasCheckedOut) {
-    return "completed";
-  }
-  return "in-house";
-}
-function deriveReservationCounters(children) {
-  const roomCount = children.length;
-  let cancelledRoomCount = 0;
-  let checkedInRoomCount = 0;
-  let checkedOutRoomCount = 0;
-  for (const child of children) {
-    const status = child.status;
-    if (status === "cancelled") {
-      cancelledRoomCount++;
-    } else if (status === "checked-in" || status === "in-house") {
-      checkedInRoomCount++;
-    } else if (status === "checked-out" || status === "completed") {
-      checkedOutRoomCount++;
-    }
-  }
-  return {
-    roomCount,
-    activeRoomCount: Math.max(roomCount - cancelledRoomCount, 0),
-    cancelledRoomCount,
-    checkedInRoomCount,
-    checkedOutRoomCount
-  };
-}
-function round2(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return 0;
-  return Math.round(numeric * 100) / 100;
-}
-function assertBookingRevenueAllocationInvariant(allocation, totalPrice) {
-  const computed = round2(
-    round2(allocation.roomNet) + round2(allocation.breakfastNet) + round2(allocation.addOnNet) - round2(allocation.deductionNet)
-  );
-  const expected = round2(totalPrice);
-  const allocationTotal = round2(allocation.totalNet);
-  if (Math.abs(allocationTotal - expected) > 0.05) {
-    throw new Error(
-      `[MRB-11] revenue allocation total mismatch: allocation.totalNet(${allocation.totalNet}) != booking.totalPrice(${expected}). This is a server-side bug \u2014 the allocation snapshot and the billed total were computed from different figures.`
-    );
-  }
-  if (Math.abs(computed - expected) > 0.05) {
-    throw new Error(
-      `[MRB-11] revenue allocation invariant violation: roomNet(${allocation.roomNet}) + breakfastNet(${allocation.breakfastNet}) + addOnNet(${allocation.addOnNet}) - deductionNet(${allocation.deductionNet}) = ${computed}, expected totalNet(${expected}). This is a server-side bug \u2014 the pricing chain returned an inconsistent allocation.`
-    );
-  }
-  return allocation;
-}
-function getBookingRevenueStreams(booking) {
-  if (booking.revenueAllocation) {
-    return { ...booking.revenueAllocation, allocation: "stored" };
-  }
-  const total = round2(Number(booking.totalPrice) || 0);
-  const roomSubtotalRaw = Number(booking.rateBreakdown?.roomSubtotal);
-  const roomSubtotal = Number.isFinite(roomSubtotalRaw) && roomSubtotalRaw > 0 ? roomSubtotalRaw : round2(Number(booking.ratePerNight) || 0) * Math.max(0, Number(booking.numNights) || 0);
-  const nights = Math.max(0, Number(booking.numNights) || 0);
-  const breakfastGross = round2(Math.max(0, Number(booking.breakfastTotal) || 0));
-  let room = total;
-  let breakfast = 0;
-  if (total > 0 && breakfastGross > 0 && roomSubtotal > 0) {
-    const grossTotal = roomSubtotal + breakfastGross;
-    breakfast = round2(total * breakfastGross / grossTotal);
-    room = round2(total - breakfast);
-  }
-  return {
-    roomNet: room,
-    breakfastNet: breakfast,
-    addOnNet: 0,
-    deductionNet: 0,
-    totalNet: total,
-    allocation: "legacy-heuristic"
-  };
-}
-function getReservationRevenueStreams(reservation, children) {
-  if (reservation.aggregateRevenueAllocation) {
-    return { ...reservation.aggregateRevenueAllocation, allocation: "stored" };
-  }
-  let roomNet = 0;
-  let breakfastNet = 0;
-  let addOnNet = 0;
-  let deductionNet = 0;
-  let totalNet = 0;
-  let anyChildLegacy = false;
-  let anyChild = false;
-  for (const child of children) {
-    anyChild = true;
-    const streams = getBookingRevenueStreams(child);
-    roomNet = round2(roomNet + streams.roomNet);
-    breakfastNet = round2(breakfastNet + streams.breakfastNet);
-    addOnNet = round2(addOnNet + streams.addOnNet);
-    deductionNet = round2(deductionNet + streams.deductionNet);
-    totalNet = round2(totalNet + streams.totalNet);
-    if (streams.allocation !== "stored") {
-      anyChildLegacy = true;
-    }
-  }
-  const allocation = !anyChild || anyChildLegacy ? "legacy-heuristic" : "stored";
-  return {
-    roomNet,
-    breakfastNet,
-    addOnNet,
-    deductionNet,
-    totalNet,
-    allocation
-  };
-}
-function computeBookingRevenueAllocation(input) {
-  const ratePerNight = Number(input.ratePerNight) || 0;
-  const numNights = Math.max(0, Number(input.numNights) || 0);
-  const roomTotal = round2(ratePerNight * numNights);
-  const breakfastTotal = round2(Math.max(0, Number(input.breakfastTotal) || 0));
-  const extraBedTotal = round2(Number(input.extraBedTotal) || 0);
-  const chain2 = calculateDiscountChain({
-    roomTotal,
-    breakfastTotal,
-    extraBedTotal,
-    seniorPct: input.discountPct,
-    voucherAmount: input.voucherDiscount,
-    memberPct: input.memberDiscountPct,
-    scope: input.discountScope,
-    round: true
-  });
-  const deductionNet = round2(
-    chain2.seniorDeduction + chain2.voucherDeduction + chain2.memberDeduction
-  );
-  const roomNet = roomTotal;
-  const breakfastNet = breakfastTotal;
-  const addOnNet = extraBedTotal;
-  const totalNet = round2(Number(input.totalPrice) || 0);
-  return assertBookingRevenueAllocationInvariant(
-    { roomNet, breakfastNet, addOnNet, deductionNet, totalNet },
-    totalNet
-  );
-}
-function rebuildBookingRevenueAllocation(input) {
-  const existing = input.existingAllocation;
-  const grossSubtotal = round2(Math.max(0, Number(input.grossSubtotal) || 0));
-  const totalPrice = round2(Number(input.totalPrice) || 0);
-  let roomNet = existing ? round2(existing.roomNet) : grossSubtotal;
-  const breakfastNet = existing ? round2(existing.breakfastNet) : 0;
-  const addOnNet = existing ? round2(existing.addOnNet) : 0;
-  const shortfall = Math.max(
-    0,
-    totalPrice - round2(roomNet + breakfastNet + addOnNet)
-  );
-  roomNet = round2(roomNet + shortfall);
-  const deductionNet = round2(
-    Math.max(0, round2(roomNet + breakfastNet + addOnNet) - totalPrice)
-  );
-  return assertBookingRevenueAllocationInvariant(
-    { roomNet, breakfastNet, addOnNet, deductionNet, totalNet: totalPrice },
-    totalPrice
-  );
-}
-function computeReservationActualDateRange(headerCheckIn, headerCheckOut, children) {
-  if (children.length === 0) return null;
-  const headerIn = new Date(headerCheckIn).getTime();
-  const headerOut = new Date(headerCheckOut).getTime();
-  if (!Number.isFinite(headerIn) || !Number.isFinite(headerOut)) return null;
-  let earliest = new Date(headerIn);
-  let latest = new Date(headerOut);
-  let isDivergent = false;
-  for (const child of children) {
-    const childIn = new Date(child.checkIn).getTime();
-    const childOut = new Date(child.checkOut).getTime();
-    if (!Number.isFinite(childIn) || !Number.isFinite(childOut)) continue;
-    if (childIn < earliest.getTime()) earliest = new Date(childIn);
-    if (childOut > latest.getTime()) latest = new Date(childOut);
-    if (childIn !== headerIn || childOut !== headerOut) {
-      isDivergent = true;
-    }
-  }
-  return { earliestCheckIn: earliest, latestCheckOut: latest, isDivergent };
-}
-var init_bookingFolio = __esm({
-  "../shared/utils/bookingFolio.ts"() {
-    "use strict";
-    init_bookingDiscounts();
-  }
-});
-
-// ../shared/utils/breakfastTotal.ts
-function isBreakfastRateLine(label) {
-  const text = String(label ?? "");
-  return text === BREAKFAST_RATE_LINE_LABEL || text.startsWith(BREAKFAST_RATE_LINE_PREFIX);
-}
-function sumBreakfastRateLines(breakdown) {
-  if (!breakdown || !Array.isArray(breakdown.addOns)) return null;
-  let total = 0;
-  for (const line of breakdown.addOns) {
-    if (!line || !isBreakfastRateLine(line.label)) continue;
-    const amount = Number(line.amount);
-    if (!Number.isFinite(amount) || amount <= 0) continue;
-    total += amount;
-  }
-  return Math.round(total * 100) / 100;
-}
-function computeBreakfastAdjustedTotalPrice(input) {
-  const totalPrice = Number(input.totalPrice) || 0;
-  const breakfastTotal = Number(input.breakfastTotal) || 0;
-  const anchor = input.breakfastInTotalPrice;
-  if (anchor === null || anchor === void 0 || !Number.isFinite(anchor)) {
-    return totalPrice;
-  }
-  return totalPrice - anchor + breakfastTotal;
-}
-function recomputeBreakfastTotal(selections) {
-  if (!selections) return 0;
-  let total = 0;
-  for (const key in selections) {
-    if (!Object.prototype.hasOwnProperty.call(selections, key)) continue;
-    const entry = selections[key];
-    if (!entry) continue;
-    if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
-    const price = entry.price;
-    if (typeof price !== "number") continue;
-    if (!Number.isFinite(price)) continue;
-    if (price < 0) continue;
-    total += price;
-  }
-  return Math.round(total * 100) / 100;
-}
-function buildBreakfastRateBreakdownLines(selections) {
-  if (!selections) return [];
-  const byDate = /* @__PURE__ */ new Map();
-  for (const key of Object.keys(selections)) {
-    const entry = selections[key];
-    if (!entry) continue;
-    if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
-    if (typeof entry.price !== "number" || !Number.isFinite(entry.price) || entry.price < 0) continue;
-    const match = /^(\d{4}-\d{2}-\d{2})-/.exec(key);
-    if (!match) continue;
-    const date = match[1];
-    const existing = byDate.get(date) ?? { count: 0, total: 0 };
-    existing.count += 1;
-    existing.total = Math.round((existing.total + entry.price) * 100) / 100;
-    byDate.set(date, existing);
-  }
-  const sortedDates = Array.from(byDate.keys()).sort();
-  return sortedDates.map((date) => {
-    const { count, total } = byDate.get(date);
-    let dateLabel = date;
-    try {
-      const parsed = /* @__PURE__ */ new Date(`${date}T00:00:00Z`);
-      if (!Number.isNaN(parsed.getTime())) {
-        const month = parsed.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
-        const day = parsed.getUTCDate();
-        dateLabel = `${month} ${day}`;
-      }
-    } catch {
-      dateLabel = date;
-    }
-    return {
-      label: `${BREAKFAST_RATE_LINE_PREFIX}${dateLabel}, ${count} meal${count === 1 ? "" : "s"})`,
-      amount: total
-    };
-  });
-}
-var BREAKFAST_RATE_LINE_LABEL, BREAKFAST_RATE_LINE_PREFIX;
-var init_breakfastTotal = __esm({
-  "../shared/utils/breakfastTotal.ts"() {
-    "use strict";
-    BREAKFAST_RATE_LINE_LABEL = "Breakfast add-on";
-    BREAKFAST_RATE_LINE_PREFIX = "Breakfast (";
-  }
-});
-
-// ../shared/utils/bookingAddOns.ts
-function calculateExtraBedAddOn(input) {
-  const count = Number(input.extraBedCount) || 0;
-  const rate = Number(input.extraBedRate) || 0;
-  const nights = Number(input.numNights) || 0;
-  if (count === 0 || rate === 0 || nights === 0) return 0;
-  return count * rate * nights;
-}
-function calculateBreakfastMealsTotal(selections) {
-  return recomputeBreakfastTotal(selections);
-}
-var init_bookingAddOns = __esm({
-  "../shared/utils/bookingAddOns.ts"() {
-    "use strict";
-    init_breakfastTotal();
-  }
-});
-
-// ../shared/utils/bookingOccupancy.ts
-function isBookingOccupyingRoom(booking, now = /* @__PURE__ */ new Date()) {
-  if (!booking || !booking.status) return false;
-  if (!BOOKING_OCCUPYING_STATUSES.includes(booking.status)) {
-    return false;
-  }
-  if (booking.status === "payment-uploaded") {
-    return true;
-  }
-  if (booking.status === "pending") {
-    const deadline = booking.holdExpiresAt;
-    if (!deadline) return true;
-    const expiresAt = deadline instanceof Date ? deadline : new Date(deadline);
-    if (isNaN(expiresAt.getTime())) return true;
-    return expiresAt.getTime() > now.getTime();
-  }
-  return true;
-}
-function computeHoldExpiresAt(windowHours, now = /* @__PURE__ */ new Date()) {
-  if (!windowHours || windowHours <= 0 || !Number.isFinite(windowHours)) return null;
-  const expires = new Date(now.getTime() + windowHours * 60 * 60 * 1e3);
-  return expires;
-}
-function normalizePaymentHoldWindowHours(raw) {
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value <= 0) return DEFAULT_PAYMENT_HOLD_WINDOW_HOURS;
-  const clamped = Math.min(MAX_PAYMENT_HOLD_WINDOW_HOURS, Math.max(MIN_PAYMENT_HOLD_WINDOW_HOURS, Math.floor(value)));
-  return clamped;
-}
-var BOOKING_OCCUPYING_STATUSES, DEFAULT_PAYMENT_HOLD_WINDOW_HOURS, MIN_PAYMENT_HOLD_WINDOW_HOURS, MAX_PAYMENT_HOLD_WINDOW_HOURS, EXPIRED_HOLD_CANCELLATION_REASON, PAYMENT_REJECTED_FRESH_DEADLINE_FROM, CANCELLATION_SOURCES, GUEST_CANCELLABLE_STATUSES, STAFF_CANCELLABLE_STATUSES, TERMINAL_CANCELLATION_STATUSES;
-var init_bookingOccupancy = __esm({
-  "../shared/utils/bookingOccupancy.ts"() {
-    "use strict";
-    BOOKING_OCCUPYING_STATUSES = [
-      "pending",
-      "payment-uploaded",
-      "payment-confirmed",
-      "confirmed",
-      "checked-in"
-    ];
-    DEFAULT_PAYMENT_HOLD_WINDOW_HOURS = 24;
-    MIN_PAYMENT_HOLD_WINDOW_HOURS = 1;
-    MAX_PAYMENT_HOLD_WINDOW_HOURS = 72;
-    EXPIRED_HOLD_CANCELLATION_REASON = "payment-hold-expired";
-    PAYMENT_REJECTED_FRESH_DEADLINE_FROM = "paymentRejectedAt";
-    CANCELLATION_SOURCES = ["guest", "staff", "system"];
-    GUEST_CANCELLABLE_STATUSES = [
-      "pending",
-      "payment-uploaded",
-      "payment-confirmed",
-      "confirmed"
-    ];
-    STAFF_CANCELLABLE_STATUSES = [
-      "pending",
-      "payment-uploaded",
-      "payment-confirmed",
-      "confirmed"
-    ];
-    TERMINAL_CANCELLATION_STATUSES = [
-      "checked-in",
-      "cancelled"
-    ];
-  }
-});
-
-// ../shared/utils/extraBedInventory.ts
-function countExtraBedsInUse(bookings, rangeStart, rangeEnd, excludeBookingId, now = /* @__PURE__ */ new Date()) {
-  let total = 0;
-  for (const b3 of bookings) {
-    if (excludeBookingId && b3.id === excludeBookingId) continue;
-    if (!isBookingOccupyingRoom(
-      { status: b3.status, holdExpiresAt: b3.holdExpiresAt },
-      now
-    )) continue;
-    if (!b3.checkIn || !b3.checkOut) continue;
-    const existingStart = b3.checkIn instanceof Date ? b3.checkIn : new Date(b3.checkIn);
-    const existingEnd = b3.checkOut instanceof Date ? b3.checkOut : new Date(b3.checkOut);
-    if (isNaN(existingStart.getTime()) || isNaN(existingEnd.getTime())) continue;
-    if (existingEnd.getTime() <= rangeStart.getTime()) continue;
-    if (existingStart.getTime() >= rangeEnd.getTime()) continue;
-    total += Number(b3.extraBedCount) || 0;
-  }
-  return total;
-}
-function checkExtraBedInventory(inventory, inUse, requestedCount) {
-  const safeInventory = Math.max(0, Math.floor(Number(inventory) || 0));
-  const safeInUse = Math.max(0, Math.floor(Number(inUse) || 0));
-  const safeRequested = Math.max(0, Math.floor(Number(requestedCount) || 0));
-  if (safeInventory <= 0) {
-    return { inUse: safeInUse, available: Number.POSITIVE_INFINITY, ok: true };
-  }
-  const available = Math.max(0, safeInventory - safeInUse);
-  return {
-    inUse: safeInUse,
-    available,
-    ok: safeRequested <= available
-  };
-}
-var init_extraBedInventory = __esm({
-  "../shared/utils/extraBedInventory.ts"() {
-    "use strict";
-    init_bookingOccupancy();
-  }
-});
-
-// ../shared/utils/bookingVat.ts
-function calculateVatBreakdown(input) {
-  const vatRate = input.vatRate == null ? 0.12 : Number(input.vatRate) || 0;
-  const totalPrice = Math.max(0, Number(input.totalPrice) || 0);
-  const seniorDiscountAmount = Math.max(0, Number(input.seniorDiscountAmount) || 0);
-  const vatExclusiveSales = vatRate > 0 ? totalPrice / (1 + vatRate) : totalPrice;
-  const vatExemptSales = seniorDiscountAmount;
-  const vatAmount = vatExclusiveSales * vatRate;
-  return {
-    vatRate,
-    vatExclusiveSales,
-    vatExemptSales,
-    vatAmount
-  };
-}
-function getBookingVatBreakdown(booking) {
-  const totalPrice = Math.max(0, Number(booking.totalPrice) || 0);
-  const discountPct = Math.max(0, Number(booking.discountPct) || 0);
-  const isSenior = !booking.discountRejected && (booking.discountType === "senior" || booking.discountType === "pwd") && discountPct > 0;
-  const seniorDiscount = isSenior ? Math.max(0, Math.round(calculatePercentDiscount(
-    Math.max(0, Number(booking.originalTotalPrice) || 0),
-    discountPct
-  ))) : 0;
-  return calculateVatBreakdown({
-    totalPrice,
-    seniorDiscountAmount: seniorDiscount,
-    vatRate: booking.vatRate
-  });
-}
-function isVatEnabled(vatConfig) {
-  if (!vatConfig || typeof vatConfig.enabled !== "boolean") return DEFAULT_VAT_CONFIG.enabled;
-  return vatConfig.enabled;
-}
-function getEffectiveVatRate(vatConfig) {
-  if (!isVatEnabled(vatConfig)) return 0;
-  return 0.12;
-}
-function normalizeVatConfig(raw) {
-  if (raw && typeof raw === "object" && raw.enabled === false) {
-    return { enabled: false };
-  }
-  return { ...DEFAULT_VAT_CONFIG };
-}
-var DEFAULT_VAT_CONFIG;
-var init_bookingVat = __esm({
-  "../shared/utils/bookingVat.ts"() {
-    "use strict";
-    init_bookingDiscounts();
-    DEFAULT_VAT_CONFIG = {
-      enabled: true
-    };
-  }
-});
-
-// ../shared/utils/cache.ts
-function storageNotAvailable() {
-  if (typeof window === "undefined") return true;
-  if (typeof window.localStorage === "undefined") return true;
-  return false;
-}
-function readCacheWithTtl(key, ttlMs, now = Date.now()) {
-  if (storageNotAvailable()) return null;
-  let raw = null;
-  try {
-    raw = window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-  if (!raw) return null;
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== "object") return null;
-  const envelope = parsed;
-  if (typeof envelope.fetchedAt !== "number") return null;
-  if (now - envelope.fetchedAt > ttlMs) return null;
-  return envelope.value ?? null;
-}
-function writeCache(key, value, now = Date.now()) {
-  if (storageNotAvailable()) return;
-  const envelope = { fetchedAt: now, value };
-  try {
-    window.localStorage.setItem(key, JSON.stringify(envelope));
-  } catch {
-  }
-}
-function clearCache(key) {
-  if (storageNotAvailable()) return;
-  try {
-    window.localStorage.removeItem(key);
-  } catch {
-  }
-}
-var init_cache = __esm({
-  "../shared/utils/cache.ts"() {
-    "use strict";
-  }
-});
-
-// ../shared/utils/calendar.ts
-function toDate(value) {
-  if (value instanceof Date) return new Date(value.getTime());
-  return new Date(value);
-}
-function formatUtcBasic(date) {
-  const pad2 = (n2) => String(n2).padStart(2, "0");
-  return `${date.getUTCFullYear()}${pad2(date.getUTCMonth() + 1)}${pad2(date.getUTCDate())}T${pad2(date.getUTCHours())}${pad2(date.getUTCMinutes())}${pad2(date.getUTCSeconds())}Z`;
-}
-function formatDateOnly(value) {
-  const date = toDate(value);
-  const pad2 = (n2) => String(n2).padStart(2, "0");
-  return `${date.getUTCFullYear()}${pad2(date.getUTCMonth() + 1)}${pad2(date.getUTCDate())}`;
-}
-function escapeIcsText(value) {
-  return value.replace(/\\/g, "\\\\").replace(/\r\n|\r|\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;");
-}
-function foldLine(line) {
-  if (line.length <= 75) return line;
-  const chunks = [];
-  let remaining = line;
-  chunks.push(remaining.slice(0, 75));
-  remaining = remaining.slice(75);
-  while (remaining.length > 0) {
-    chunks.push(` ${remaining.slice(0, 74)}`);
-    remaining = remaining.slice(74);
-  }
-  return chunks.join("\r\n");
-}
-function buildIcsContent(input) {
-  const {
-    uid,
-    title,
-    description,
-    location,
-    start,
-    end,
-    allDay = false,
-    brand = "spark-inn"
-  } = input;
-  const stamp = formatUtcBasic(/* @__PURE__ */ new Date());
-  const lines = [
-    "BEGIN:VCALENDAR",
-    "VERSION:2.0",
-    `PRODID:-//${brand}//Booking//EN`,
-    "CALSCALE:GREGORIAN",
-    "METHOD:PUBLISH",
-    "BEGIN:VEVENT",
-    `UID:${uid}`,
-    `DTSTAMP:${stamp}`
-  ];
-  if (allDay) {
-    lines.push(`DTSTART;VALUE=DATE:${formatDateOnly(start)}`);
-    lines.push(`DTEND;VALUE=DATE:${formatDateOnly(end)}`);
-  } else {
-    lines.push(`DTSTART:${formatUtcBasic(toDate(start))}`);
-    lines.push(`DTEND:${formatUtcBasic(toDate(end))}`);
-  }
-  lines.push(`SUMMARY:${escapeIcsText(title)}`);
-  if (description) lines.push(`DESCRIPTION:${escapeIcsText(description)}`);
-  if (location) lines.push(`LOCATION:${escapeIcsText(location)}`);
-  lines.push("END:VEVENT");
-  lines.push("END:VCALENDAR");
-  return lines.map(foldLine).join("\r\n") + "\r\n";
-}
-function buildGoogleCalendarUrl(input) {
-  const { title, description, location, start, end, allDay = false } = input;
-  const params = new URLSearchParams();
-  params.set("action", "TEMPLATE");
-  params.set("text", title);
-  if (description) params.set("details", description);
-  if (location) params.set("location", location);
-  if (allDay) {
-    const startStr = formatDateOnly(start);
-    const endStr = formatDateOnly(toDate(end));
-    params.set("dates", `${startStr}/${endStr}`);
-  } else {
-    params.set("dates", `${formatUtcBasic(toDate(start))}/${formatUtcBasic(toDate(end))}`);
-  }
-  return `https://calendar.google.com/calendar/render?${params.toString()}`;
-}
-function downloadIcsFile(filename, content) {
-  if (typeof window === "undefined" || typeof document === "undefined") return;
-  const blob = new Blob([content], { type: "text/calendar;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename.endsWith(".ics") ? filename : `${filename}.ics`;
-  link.rel = "noopener";
-  link.style.display = "none";
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  setTimeout(() => URL.revokeObjectURL(url), 1e3);
-}
-var init_calendar = __esm({
-  "../shared/utils/calendar.ts"() {
-    "use strict";
-  }
-});
-
-// ../shared/utils/checkin.ts
-function hasValue(value) {
-  return typeof value === "string" && value.trim().length > 0;
-}
-function getCheckInReadiness(input) {
-  const missingItems = [];
-  if (!CHECK_IN_ELIGIBLE_STATUSES.includes(input.status)) {
-    missingItems.push("Booking status must be confirmed or payment-confirmed");
-  }
-  if (!hasValue(input.guestIdPhotoUrl)) {
-    missingItems.push("Guest ID photo");
-  }
-  const registration = input.guestRegistration || {};
-  for (const field of REQUIRED_REGISTRATION_FIELDS) {
-    if (!hasValue(registration[field.key])) {
-      missingItems.push(field.label);
-    }
-  }
-  if (typeof registration.purposeOfStay === "string" && registration.purposeOfStay.trim().toLowerCase() === "other" && !hasValue(registration.otherPurpose)) {
-    missingItems.push("Purpose of stay (Other \u2014 reason required)");
-  }
-  if (registration.signatureStatus !== "signed") {
-    missingItems.push("Guest signature marked signed");
-  }
-  return {
-    ready: missingItems.length === 0,
-    missingItems
-  };
-}
-var CHECK_IN_ELIGIBLE_STATUSES, REQUIRED_REGISTRATION_FIELDS;
-var init_checkin = __esm({
-  "../shared/utils/checkin.ts"() {
-    "use strict";
-    CHECK_IN_ELIGIBLE_STATUSES = ["confirmed", "payment-confirmed"];
-    REQUIRED_REGISTRATION_FIELDS = [
-      { key: "nationality", label: "Nationality" },
-      { key: "address", label: "Residential address" },
-      { key: "dateOfBirth", label: "Date of birth" },
-      { key: "gender", label: "Gender" },
-      { key: "purposeOfStay", label: "Purpose of stay" },
-      { key: "idType", label: "ID type" },
-      { key: "idNumber", label: "ID number" },
-      { key: "emergencyContact", label: "Emergency contact" }
-    ];
-  }
-});
-
-// ../shared/utils/dates.ts
-function toDate2(value) {
-  return value instanceof Date ? new Date(value) : new Date(value);
-}
-function startOfDayUtc(value) {
-  const date = toDate2(value);
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-}
-function getNumNights(checkIn, checkOut) {
-  const start = startOfDayUtc(checkIn).getTime();
-  const end = startOfDayUtc(checkOut).getTime();
-  return Math.max(Math.round((end - start) / 864e5), 0);
-}
-function datesOverlap(firstCheckIn, firstCheckOut, secondCheckIn, secondCheckOut) {
-  return toDate2(firstCheckIn) < toDate2(secondCheckOut) && toDate2(firstCheckOut) > toDate2(secondCheckIn);
-}
-function eachStayNight(checkIn, checkOut) {
-  const nights = getNumNights(checkIn, checkOut);
-  const cursor = startOfDayUtc(checkIn);
-  return Array.from({ length: nights }, (_2, index) => {
-    const date = new Date(cursor);
-    date.setUTCDate(cursor.getUTCDate() + index);
-    return date;
-  });
-}
-function isWeekendNight(value) {
-  const day = startOfDayUtc(value).getUTCDay();
-  return day === 0 || day === 6;
-}
-function getWeekendNightCount(checkIn, checkOut) {
-  return eachStayNight(checkIn, checkOut).filter(isWeekendNight).length;
-}
-var init_dates = __esm({
-  "../shared/utils/dates.ts"() {
-    "use strict";
-  }
-});
-
-// ../shared/utils/images.ts
-function canvasToBlob(canvas, mimeType, quality) {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (blob) resolve(blob);
-        else reject(new Error("Unable to compress image."));
-      },
-      mimeType,
-      quality
-    );
-  });
-}
-function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    if (reader.onerror) {
-      reader.onerror = () => reject(reader.error ?? new Error("Unable to read compressed image."));
-    }
-    reader.readAsDataURL(blob);
-  });
-}
-async function compressImageFile(file, options = {}) {
-  if (!file.type.startsWith("image/")) {
-    throw new Error("Please choose an image file.");
-  }
-  const settings = { ...defaultImageOptions, ...options };
-  try {
-    const imageBitmap = await createImageBitmap(file);
-    const scale = Math.min(settings.maxWidth / imageBitmap.width, settings.maxHeight / imageBitmap.height, 1);
-    const width = Math.max(1, Math.round(imageBitmap.width * scale));
-    const height = Math.max(1, Math.round(imageBitmap.height * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const context2 = canvas.getContext("2d");
-    if (!context2) {
-      imageBitmap.close();
-      throw new Error("Unable to prepare image compression.");
-    }
-    const outputSupportsAlpha = settings.mimeType !== "image/jpeg";
-    if (!outputSupportsAlpha) {
-      context2.fillStyle = "#ffffff";
-      context2.fillRect(0, 0, width, height);
-    }
-    context2.drawImage(imageBitmap, 0, 0, width, height);
-    imageBitmap.close();
-    const blob = await canvasToBlob(canvas, settings.mimeType, settings.quality);
-    const ext = MIME_TO_EXTENSION[settings.mimeType];
-    const baseName = file.name.replace(/\.[^.]+$/, "");
-    const compressedFile = new File([blob], `${baseName}.${ext}`, {
-      type: settings.mimeType,
-      lastModified: Date.now()
-    });
-    const dataUrl = await blobToDataUrl(blob);
-    return {
-      file: compressedFile,
-      dataUrl,
-      width,
-      height,
-      originalSize: file.size,
-      compressedSize: compressedFile.size
-    };
-  } catch (error) {
-    console.warn("Image compression failed, falling back to original file:", error);
-    try {
-      const dataUrl = await blobToDataUrl(file);
-      return {
-        file,
-        dataUrl,
-        width: 0,
-        height: 0,
-        originalSize: file.size,
-        compressedSize: file.size
-      };
-    } catch (fallbackError) {
-      throw new Error("Unable to process or read the selected image file.");
-    }
-  }
-}
-var defaultImageOptions, MIME_TO_EXTENSION;
-var init_images = __esm({
-  "../shared/utils/images.ts"() {
-    "use strict";
-    defaultImageOptions = {
-      maxWidth: 1600,
-      maxHeight: 1600,
-      quality: 0.82,
-      mimeType: "image/jpeg"
-    };
-    MIME_TO_EXTENSION = {
-      "image/jpeg": "jpg",
-      "image/webp": "webp",
-      "image/png": "png"
-    };
-  }
-});
-
-// ../shared/utils/points.ts
-function calculatePointsRedemptionValue(points, pointsRedemptionRate) {
-  return Math.max(points / 100 * pointsRedemptionRate, 0);
-}
-function validatePointsRedemption(pointsToRedeem, availablePoints, pointsRedemptionRate) {
-  if (pointsToRedeem <= 0) {
-    return { valid: false, value: 0, error: "Points to redeem must be greater than zero." };
-  }
-  if (pointsToRedeem > availablePoints) {
-    return { valid: false, value: 0, error: "Insufficient points balance." };
-  }
-  return {
-    valid: true,
-    value: calculatePointsRedemptionValue(pointsToRedeem, pointsRedemptionRate),
-    error: ""
-  };
-}
-function resolveCurrentLevel(levels, completedStays) {
-  if (!levels || levels.length === 0) return null;
-  if (!Number.isFinite(completedStays) || completedStays < 0) return null;
-  const sorted = [...levels].filter((l3) => Number.isFinite(l3.fromStays) && l3.fromStays >= 0).sort((a, b3) => a.fromStays - b3.fromStays);
-  let current = null;
-  for (const level of sorted) {
-    if (level.fromStays <= completedStays) current = level;
-    else break;
-  }
-  return current;
-}
-function calculatePointsWithMultiplier(basePoints, multiplier) {
-  if (!Number.isFinite(basePoints) || basePoints <= 0) return 0;
-  const m2 = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
-  return Math.max(0, Math.round(basePoints * m2));
-}
-var init_points = __esm({
-  "../shared/utils/points.ts"() {
-    "use strict";
-  }
-});
-
-// ../shared/utils/paymentMethodLabel.ts
-function resolvePaymentMethodLabel(methodKey, paymentMethods) {
-  if (typeof methodKey !== "string" || methodKey.length === 0) {
-    return "";
-  }
-  if (Array.isArray(paymentMethods)) {
-    const match = paymentMethods.find(
-      (m2) => m2 && typeof m2.method === "string" && m2.method === methodKey
-    );
-    if (match && typeof match.label === "string" && match.label.length > 0) {
-      return match.label;
-    }
-  }
-  if (Object.prototype.hasOwnProperty.call(LEGACY_PAYMENT_METHOD_LABELS, methodKey)) {
-    return LEGACY_PAYMENT_METHOD_LABELS[methodKey];
-  }
-  return methodKey;
-}
-var LEGACY_PAYMENT_METHOD_LABELS;
-var init_paymentMethodLabel = __esm({
-  "../shared/utils/paymentMethodLabel.ts"() {
-    "use strict";
-    LEGACY_PAYMENT_METHOD_LABELS = {
-      gcash: "Digital Wallet (GCash/Maya)",
-      bank: "Bank Transfer (Direct Deposit)",
-      "pay-at-hotel": "Pay at Hotel"
-    };
-  }
-});
-
-// ../shared/utils/paymentReference.ts
-function getLatestPaymentReference(booking) {
-  const payments = booking?.onsitePayments;
-  if (!Array.isArray(payments) || payments.length === 0) return null;
-  for (let i2 = payments.length - 1; i2 >= 0; i2 -= 1) {
-    const ref = payments[i2]?.transactionReference;
-    if (typeof ref === "string" && ref.trim().length > 0) return ref;
-  }
-  return null;
-}
-var init_paymentReference = __esm({
-  "../shared/utils/paymentReference.ts"() {
-    "use strict";
-  }
-});
-
-// ../shared/utils/paymentVerification.ts
-function isPaymentVerified(booking) {
-  if (!booking) return false;
-  if (booking.status === "payment-confirmed") return true;
-  const stamp = booking.paymentConfirmedAt;
-  if (stamp === null || stamp === void 0) return false;
-  if (typeof stamp === "string") return stamp.trim().length > 0;
-  if (stamp instanceof Date) return !Number.isNaN(stamp.getTime());
-  return false;
-}
-var init_paymentVerification = __esm({
-  "../shared/utils/paymentVerification.ts"() {
-    "use strict";
-  }
-});
-
-// ../shared/utils/pricing.ts
-function calculateBookingTotal(input) {
-  const roomTotal = input.roomTotal ?? input.ratePerNight * input.numNights;
-  const breakfastTotal = Number(input.breakfastTotal) || 0;
-  const extraBedTotal = Number(input.extraBedTotal) || 0;
-  const { total } = calculateDiscountChain({
-    roomTotal,
-    breakfastTotal,
-    extraBedTotal,
-    seniorPct: input.discountPct,
-    voucherAmount: input.voucherDiscount,
-    memberPct: input.memberDiscountPct,
-    scope: input.discountScope,
-    round: false
-  });
-  return total;
-}
-function getLockedManualNightlyRate(breakdown) {
-  const manualLine = breakdown?.roomLines?.find((line) => line.source === "manual");
-  if (!manualLine) return null;
-  const nights = Number(manualLine.nights);
-  const subtotal = Number(manualLine.subtotal);
-  if (Number.isFinite(nights) && nights > 0 && Number.isFinite(subtotal) && subtotal >= 0) {
-    return subtotal / nights;
-  }
-  const nightlyRate = Number(manualLine.nightlyRate);
-  return Number.isFinite(nightlyRate) && nightlyRate >= 0 ? nightlyRate : null;
-}
-var init_pricing = __esm({
-  "../shared/utils/pricing.ts"() {
-    "use strict";
-    init_bookingDiscounts();
-  }
-});
-
-// ../shared/utils/publicSiteCache.ts
-function bustPublicSiteContentCache(now = Date.now()) {
-  if (typeof window === "undefined" || typeof window.localStorage === "undefined") return;
-  try {
-    window.localStorage.setItem(PUBLIC_SITE_CONTENT_CACHE_BUST_KEY, String(now));
-  } catch {
-  }
-}
-function readPublicSiteContentBustTimestamp() {
-  if (typeof window === "undefined" || typeof window.localStorage === "undefined") return 0;
-  try {
-    const raw = window.localStorage.getItem(PUBLIC_SITE_CONTENT_CACHE_BUST_KEY);
-    if (!raw) return 0;
-    const parsed = Number.parseInt(raw, 10);
-    return Number.isFinite(parsed) ? parsed : 0;
-  } catch {
-    return 0;
-  }
-}
-function subscribeToPublicSiteContentBust(onBust) {
-  if (typeof window === "undefined") return () => {
-  };
-  function handler2(e3) {
-    if (e3.key !== PUBLIC_SITE_CONTENT_CACHE_BUST_KEY) return;
-    const ts2 = e3.newValue ? Number.parseInt(e3.newValue, 10) : 0;
-    clearCache(PUBLIC_SITE_CONTENT_CACHE_KEY);
-    onBust(Number.isFinite(ts2) ? ts2 : Date.now());
-  }
-  window.addEventListener("storage", handler2);
-  return () => window.removeEventListener("storage", handler2);
-}
-var init_publicSiteCache = __esm({
-  "../shared/utils/publicSiteCache.ts"() {
-    "use strict";
-    init_constants();
-    init_cache();
-  }
-});
-
-// ../shared/utils/reservationFingerprint.ts
-function defaultHasher() {
-  const { createHash } = require("node:crypto");
-  return (input) => createHash("sha256").update(input).digest("hex");
-}
-function normalizeRoomLine(line) {
-  const selections = Array.isArray(line.breakfastSelections) ? line.breakfastSelections.map((s4) => ({
-    key: String(s4.key || "").trim(),
-    mealId: String(s4.mealId || "").trim(),
-    price: Math.max(0, Number(s4.price) || 0)
-  })).sort((a, b3) => {
-    const aKey = `${a.key}|${a.mealId}|${a.price}`;
-    const bKey = `${b3.key}|${b3.mealId}|${b3.price}`;
-    return aKey < bKey ? -1 : aKey > bKey ? 1 : 0;
-  }) : [];
-  return {
-    type: String(line.type || "").trim(),
-    quantity: Math.max(0, Math.floor(Number(line.quantity) || 0)),
-    adults: Math.max(0, Math.floor(Number(line.adults) || 0)),
-    children: Math.max(0, Math.floor(Number(line.children) || 0)),
-    extraBeds: Math.max(0, Math.floor(Number(line.extraBeds) || 0)),
-    breakfastSelections: selections
-  };
-}
-function normalizeDiscountScope2(scope) {
-  const empty = {
-    senior: { room: false, breakfast: false, extraBed: false },
-    voucher: { room: false, breakfast: false, extraBed: false },
-    member: { room: false, breakfast: false, extraBed: false }
-  };
-  if (!scope) return empty;
-  return {
-    senior: {
-      room: Boolean(scope.senior?.room),
-      breakfast: Boolean(scope.senior?.breakfast),
-      extraBed: Boolean(scope.senior?.extraBed)
-    },
-    voucher: {
-      room: Boolean(scope.voucher?.room),
-      breakfast: Boolean(scope.voucher?.breakfast),
-      extraBed: Boolean(scope.voucher?.extraBed)
-    },
-    member: {
-      room: Boolean(scope.member?.room),
-      breakfast: Boolean(scope.member?.breakfast),
-      extraBed: Boolean(scope.member?.extraBed)
-    }
-  };
-}
-function buildCanonicalPayload(req) {
-  const roomLines = (Array.isArray(req.roomLines) ? req.roomLines : []).map(normalizeRoomLine).sort((a, b3) => {
-    const aKey = JSON.stringify(a);
-    const bKey = JSON.stringify(b3);
-    return aKey < bKey ? -1 : aKey > bKey ? 1 : 0;
-  });
-  const payload = {
-    reservationId: String(req.reservationId || "").trim(),
-    roomLines,
-    checkIn: String(req.checkIn || "").trim(),
-    checkOut: String(req.checkOut || "").trim(),
-    leadGuestName: String(req.leadGuestName || "").trim(),
-    leadGuestEmail: String(req.leadGuestEmail || "").trim().toLowerCase(),
-    leadGuestPhone: String(req.leadGuestPhone || "").trim(),
-    source: String(req.source || "").trim(),
-    isCorporate: Boolean(req.isCorporate),
-    corporateCode: String(req.corporateCode || "").trim().toUpperCase(),
-    companyName: String(req.companyName || "").trim(),
-    voucherCode: String(req.voucherCode || "").trim().toUpperCase(),
-    memberDiscountPct: Math.max(0, Number(req.memberDiscountPct) || 0),
-    discountScope: normalizeDiscountScope2(req.discountScope),
-    termsVersion: String(req.termsVersion || "").trim(),
-    privacyVersion: String(req.privacyVersion || "").trim()
-  };
-  return JSON.stringify(payload);
-}
-function computeRequestFingerprint(req, hasher = defaultHasher()) {
-  const canonical = buildCanonicalPayload(req);
-  return hasher(canonical);
-}
-var __test__;
-var init_reservationFingerprint = __esm({
-  "../shared/utils/reservationFingerprint.ts"() {
-    "use strict";
-    __test__ = { buildCanonicalPayload, normalizeRoomLine, normalizeDiscountScope: normalizeDiscountScope2 };
-  }
-});
-
-// ../shared/utils/roomTypes.ts
-function normalizeMaxChildren(raw, maxCapacity) {
-  const value = Number(raw);
-  if (Number.isFinite(value) && value >= 0) {
-    return Math.floor(value);
-  }
-  const cap = Number(maxCapacity);
-  if (Number.isFinite(cap) && cap > 0 && DEFAULT_MAX_CHILDREN_BY_ADULT_CAPACITY[cap] !== void 0) {
-    return DEFAULT_MAX_CHILDREN_BY_ADULT_CAPACITY[cap];
-  }
-  return FALLBACK_MAX_CHILDREN;
-}
-function requiredExtraBedsFor(input) {
-  const adults = Math.max(0, Math.floor(Number(input.numAdults) || 0));
-  const children = Math.max(0, Math.floor(Number(input.numChildren) || 0));
-  const maxCapacity = Math.max(0, Math.floor(Number(input.maxCapacity) || 0));
-  const maxChildren = Math.max(0, Math.floor(Number(input.maxChildren) || 0));
-  const overflowAdults = Math.max(0, adults - maxCapacity);
-  const overflowChildren = Math.max(0, children - maxChildren);
-  return {
-    overflowAdults,
-    overflowChildren,
-    requiredExtraBeds: overflowAdults + overflowChildren
-  };
-}
-function applyRoomTypeDefaults(raw) {
-  if (!raw || typeof raw !== "object") {
-    return {
-      value: "",
-      label: "",
-      shortLabel: "",
-      imageUrls: [],
-      bedDefinition: "",
-      description: "",
-      amenities: [],
-      maxCapacity: 0,
-      maxChildren: 0,
-      pricePerNight: 0,
-      weekendRate: 0,
-      corporateRate: 0,
-      maxExtraBeds: 0,
-      extraBedRate: 0
-    };
-  }
-  const r3 = raw;
-  const maxCapacity = Number(r3.maxCapacity) || 0;
-  return {
-    value: String(r3.value || ""),
-    label: String(r3.label || r3.value || ""),
-    shortLabel: String(r3.shortLabel || r3.label || r3.value || ""),
-    imageUrls: Array.isArray(r3.imageUrls) ? r3.imageUrls.slice() : [],
-    bedDefinition: String(r3.bedDefinition || ""),
-    description: String(r3.description || ""),
-    amenities: Array.isArray(r3.amenities) ? r3.amenities.slice() : [],
-    maxCapacity,
-    maxChildren: normalizeMaxChildren(r3.maxChildren, maxCapacity),
-    pricePerNight: Number(r3.pricePerNight) || 0,
-    weekendRate: Number(r3.weekendRate) || 0,
-    corporateRate: Number(r3.corporateRate) || 0,
-    maxExtraBeds: Number(r3.maxExtraBeds) || 0,
-    extraBedRate: Number(r3.extraBedRate) || 0,
-    // Per SR-01..05 (2026-10-12): the per-type bed-set-up
-    // subset. Same permissive "absent → empty" pattern
-    // used for the EXB-01 + CHD-02 surface flags above.
-    bedSetupValues: Array.isArray(r3.bedSetupValues) ? r3.bedSetupValues.filter((v6) => typeof v6 === "string").slice() : []
-  };
-}
-function deriveRoomTypeCapacityFit(input) {
-  const maxCapacity = Math.max(0, Math.floor(Number(input.type.maxCapacity) || 0));
-  const maxChildren = Math.max(0, Math.floor(Number(input.type.maxChildren) || 0));
-  const maxExtraBeds = Math.max(0, Math.floor(Number(input.type.maxExtraBeds) || 0));
-  const numAdults = Math.max(0, Math.floor(Number(input.numAdults) || 0));
-  const numChildren = Math.max(0, Math.floor(Number(input.numChildren) || 0));
-  const currentCartCount = Math.max(0, Math.floor(Number(input.currentCartCount) || 0));
-  const safeAdultCap = Math.max(1, maxCapacity);
-  const safeChildrenCap = Math.max(1, maxChildren);
-  const roomsNeeded = Math.max(
-    1,
-    Math.ceil(numAdults / safeAdultCap),
-    Math.ceil(numChildren / safeChildrenCap)
-  );
-  const basis = input.basis === "type" ? "type" : "cart";
-  const evaluatedCartCount = basis === "type" ? Math.max(currentCartCount, roomsNeeded) : currentCartCount;
-  const totalAdultCap = evaluatedCartCount * maxCapacity;
-  const totalChildrenCap = evaluatedCartCount * maxChildren;
-  const totalExtraBeds = evaluatedCartCount * maxExtraBeds;
-  const overflowAdults = Math.max(0, numAdults - totalAdultCap);
-  const overflowChildren = Math.max(0, numChildren - totalChildrenCap);
-  const totalOverflow = overflowAdults + overflowChildren;
-  let state;
-  if (numAdults === 0 && numChildren === 0) {
-    state = "fits";
-  } else if (totalOverflow > totalExtraBeds) {
-    state = "doesnt-fit";
-  } else if (totalOverflow === 0) {
-    const adultsAtCap = numAdults === totalAdultCap;
-    const childrenAtCap = numChildren === totalChildrenCap;
-    state = adultsAtCap && childrenAtCap ? "tight" : "fits";
-  } else {
-    state = "tight";
-  }
-  const extraBedsNeeded = totalOverflow > 0 && totalOverflow <= totalExtraBeds ? totalOverflow : 0;
-  return { state, roomsNeeded, extraBedsNeeded };
-}
-var DEFAULT_MAX_CHILDREN_BY_ADULT_CAPACITY, FALLBACK_MAX_CHILDREN;
-var init_roomTypes = __esm({
-  "../shared/utils/roomTypes.ts"() {
-    "use strict";
-    DEFAULT_MAX_CHILDREN_BY_ADULT_CAPACITY = {
-      1: 0,
-      2: 1,
-      3: 2,
-      4: 2,
-      5: 2,
-      6: 2
-    };
-    FALLBACK_MAX_CHILDREN = 2;
-  }
-});
-
-// ../shared/utils/seasonalRates.ts
-function dateKey(value) {
-  return startOfDayUtc(value).toISOString().slice(0, 10);
-}
-function appliesToRoomType(override, roomType) {
-  return override.roomTypeValues.length === 0 || override.roomTypeValues.includes(roomType);
-}
-function normalizeSeasonalRateOverride(raw) {
-  if (!raw || typeof raw !== "object") return null;
-  const entry = raw;
-  const id = String(entry.id ?? "").trim();
-  const name2 = String(entry.name ?? "").trim();
-  const startDate = String(entry.startDate ?? "").trim();
-  const endDate = String(entry.endDate ?? "").trim();
-  const rate = Number(entry.rate);
-  if (!id || !name2 || !startDate || !endDate || !Number.isFinite(rate) || rate < 0) return null;
-  return {
-    id,
-    name: name2,
-    startDate,
-    endDate,
-    rate,
-    roomTypeValues: Array.isArray(entry.roomTypeValues) ? entry.roomTypeValues.filter((value) => typeof value === "string" && value.trim().length > 0) : [],
-    isActive: entry.isActive !== false
-  };
-}
-function normalizeSeasonalRateOverrides(raw) {
-  if (!Array.isArray(raw)) return [];
-  return raw.map(normalizeSeasonalRateOverride).filter((entry) => Boolean(entry));
-}
-function getSeasonalRateForNight(night, roomType, overrides) {
-  const key = dateKey(night);
-  const matches = overrides.filter(
-    (override) => override.isActive && key >= override.startDate && key <= override.endDate && appliesToRoomType(override, roomType)
-  );
-  if (matches.length === 0) return null;
-  return matches.sort((a, b3) => {
-    const specificity = Number(b3.roomTypeValues.length > 0) - Number(a.roomTypeValues.length > 0);
-    if (specificity !== 0) return specificity;
-    if (a.startDate !== b3.startDate) return b3.startDate.localeCompare(a.startDate);
-    return b3.id.localeCompare(a.id);
-  })[0];
-}
-function calculateSeasonalAwareRoomTotal(input) {
-  return calculateSeasonalAwareRoomBreakdown(input).roomSubtotal;
-}
-function calculateSeasonalAwareRoomBreakdown(input) {
-  const baseRate = Math.max(0, Number(input.baseRate) || 0);
-  const weekendRate = Math.max(0, Number(input.weekendRate) || 0);
-  const overrides = input.seasonalRateOverrides ?? [];
-  const lines = [];
-  for (const night of eachStayNight(input.checkIn, input.checkOut)) {
-    const date = dateKey(night);
-    const seasonal = getSeasonalRateForNight(night, input.roomType, overrides);
-    const line = seasonal ? { source: "seasonal", label: seasonal.name, nightlyRate: seasonal.rate } : isWeekendNight(night) && weekendRate ? { source: "weekend", label: "Weekend nights", nightlyRate: weekendRate } : { source: "regular", label: "Regular nights", nightlyRate: baseRate };
-    const previous = lines[lines.length - 1];
-    if (previous && previous.source === line.source && previous.label === line.label && previous.nightlyRate === line.nightlyRate) {
-      previous.endDate = date;
-      previous.nights += 1;
-      previous.subtotal += line.nightlyRate;
-    } else {
-      lines.push({
-        source: line.source,
-        label: line.label,
-        startDate: date,
-        endDate: date,
-        nights: 1,
-        nightlyRate: line.nightlyRate,
-        subtotal: line.nightlyRate
-      });
-    }
-  }
-  return {
-    roomSubtotal: lines.reduce((total, line) => total + line.subtotal, 0),
-    roomLines: lines
-  };
-}
-var init_seasonalRates = __esm({
-  "../shared/utils/seasonalRates.ts"() {
-    "use strict";
-    init_dates();
-  }
-});
-
-// ../shared/utils/storageJanitor.ts
-async function sweepBookingsStorage(options) {
-  const {
-    bucket,
-    db,
-    prefix = DEFAULT_PREFIX,
-    maxItems = DEFAULT_MAX_ITEMS,
-    dryRun = false,
-    pageToken,
-    now = Date.now
-  } = options;
-  const startedAt = now();
-  const errors = [];
-  const [files, nextPageToken] = await bucket.getFiles({
-    prefix,
-    delimiter: "/",
-    autoPaginate: false,
-    maxResults: maxItems,
-    pageToken
-  });
-  const subfolderIds = files.map((f5) => f5.name).filter((name2) => name2.startsWith(prefix) && name2.endsWith("/")).map((name2) => name2.slice(prefix.length, -1)).filter((id) => id.length > 0);
-  let deleted = 0;
-  let kept = 0;
-  for (const id of subfolderIds) {
-    try {
-      const snap = await db.collection("bookings").doc(id).get();
-      if (snap.exists) {
-        kept += 1;
-        continue;
-      }
-      if (!dryRun) {
-        await bucket.deleteFiles({ prefix: `${prefix}${id}/`, force: true });
-      }
-      deleted += 1;
-    } catch (err) {
-      errors.push({
-        id,
-        error: err instanceof Error ? err.message : String(err)
-      });
-    }
-  }
-  return {
-    scanned: subfolderIds.length,
-    deleted,
-    kept,
-    errors,
-    nextPageToken: nextPageToken ?? null,
-    dryRun,
-    durationMs: now() - startedAt
-  };
-}
-function recordSweepResult(result) {
-  sweepHistory.unshift({ ...result, at: Date.now() });
-  if (sweepHistory.length > MAX_HISTORY) {
-    sweepHistory.length = MAX_HISTORY;
-  }
-}
-function getSweepHistory() {
-  return sweepHistory;
-}
-function clearSweepHistory() {
-  sweepHistory.length = 0;
-}
-async function runBackfill(options) {
-  const {
-    collection,
-    needsUpdate,
-    buildPatch,
-    batchSize = 500,
-    onUpdate
-  } = options;
-  const startedAt = Date.now();
-  const afterId = null;
-  const docs = await collection.query(afterId, batchSize);
-  let scanned = 0;
-  let updated = 0;
-  let skipped = 0;
-  for (const doc of docs) {
-    scanned += 1;
-    if (!needsUpdate(doc)) {
-      skipped += 1;
-      continue;
-    }
-    const patch = buildPatch(doc);
-    await collection.update(doc.id, patch);
-    updated += 1;
-    if (onUpdate) onUpdate(doc.id);
-  }
-  const exhausted = docs.length < batchSize;
-  return {
-    scanned,
-    updated,
-    skipped,
-    nextCursor: exhausted ? null : docs[docs.length - 1]?.id ?? null,
-    exhausted,
-    durationMs: Date.now() - startedAt
-  };
-}
-var DEFAULT_PREFIX, DEFAULT_MAX_ITEMS, MAX_HISTORY, sweepHistory;
-var init_storageJanitor = __esm({
-  "../shared/utils/storageJanitor.ts"() {
-    "use strict";
-    DEFAULT_PREFIX = "bookings/";
-    DEFAULT_MAX_ITEMS = 500;
-    MAX_HISTORY = 50;
-    sweepHistory = [];
-  }
-});
-
-// ../shared/utils/storePaymentMethods.ts
-function getEffectiveStorePaymentMethods(paymentMethods) {
-  const safePaymentMethods = Array.isArray(paymentMethods) ? paymentMethods : [];
-  const isVisibleInStore = (m2) => m2.showInStore !== false;
-  return safePaymentMethods.filter(
-    (m2) => m2 && typeof m2.method === "string" && m2.method !== "pay-at-hotel" && isVisibleInStore(m2)
-  ).map((m2) => ({
-    method: m2.method,
-    label: m2.label || m2.method,
-    isEnabled: true,
-    source: "payment",
-    qrUrl: m2.qrUrl,
-    accountInfo: m2.accountInfo,
-    accountName: m2.accountName,
-    accountNumber: m2.accountNumber
-  }));
-}
-var init_storePaymentMethods = __esm({
-  "../shared/utils/storePaymentMethods.ts"() {
-    "use strict";
-  }
-});
-
-// ../shared/utils/vouchers.ts
-function validateVoucher(voucher, roomType, now = /* @__PURE__ */ new Date()) {
-  if (!voucher.isActive) {
-    return { valid: false, error: "Voucher is inactive." };
-  }
-  if (voucher.expiresAt && voucher.expiresAt < now) {
-    return { valid: false, error: "Voucher has expired." };
-  }
-  if (voucher.usageCap !== null && voucher.usageCount >= voucher.usageCap) {
-    return { valid: false, error: "Voucher usage limit reached." };
-  }
-  if (voucher.applicableRoomTypes.length > 0 && !voucher.applicableRoomTypes.includes(roomType)) {
-    return { valid: false, error: "Voucher does not apply to this room type." };
-  }
-  return { valid: true, error: "" };
-}
-function calculateVoucherDiscount(voucher, subtotal) {
-  const discount = voucher.discountType === "percent" ? subtotal * (voucher.discountValue / 100) : voucher.discountValue;
-  return Math.min(Math.max(discount, 0), subtotal);
-}
-function applyVoucherDiscount(voucher, subtotal) {
-  return Math.max(subtotal - calculateVoucherDiscount(voucher, subtotal), 0);
-}
-function isRewardVoucher(voucher) {
-  return voucher.kind === "reward";
-}
-function isFreeNightVoucher(voucher) {
-  return voucher.kind === "reward" && voucher.valueType === "free-night";
-}
-function generateFreeNightVoucherCode(memberNumber, completedStays) {
-  const safeMember = String(memberNumber || "MEMBER").replace(/[^A-Z0-9_-]/gi, "");
-  const safeStays = Math.max(0, Math.floor(Number(completedStays) || 0));
-  return `FREENIGHT-${safeMember}-${safeStays}`;
-}
-var init_vouchers = __esm({
-  "../shared/utils/vouchers.ts"() {
-    "use strict";
-  }
-});
-
-// ../shared/utils/corporate-codes.ts
-function validateCorporateCode(code, now = /* @__PURE__ */ new Date(), options = {}) {
-  let effectiveNow;
-  let requestedUses;
-  if (now instanceof Date) {
-    effectiveNow = now;
-    requestedUses = options.requestedUses ?? 1;
-  } else {
-    effectiveNow = /* @__PURE__ */ new Date();
-    requestedUses = now?.requestedUses ?? 1;
-  }
-  if (Number.isNaN(effectiveNow.getTime())) {
-    effectiveNow = /* @__PURE__ */ new Date();
-  }
-  if (!Number.isFinite(requestedUses) || requestedUses < 1) {
-    requestedUses = 1;
-  }
-  if (!code.isActive) {
-    return { valid: false, error: "Corporate code is inactive." };
-  }
-  if (code.expiresAt && code.expiresAt < effectiveNow) {
-    return { valid: false, error: "Corporate code has expired." };
-  }
-  if (code.usageCap !== null && code.usageCount + requestedUses > code.usageCap) {
-    return {
-      valid: false,
-      error: requestedUses > 1 ? `Corporate code usage limit reached: this code allows ${code.usageCap} use(s) and ${code.usageCount} are already recorded; the requested ${requestedUses}-room reservation would exceed the cap.` : "Corporate code usage limit reached."
-    };
-  }
-  return { valid: true, error: "" };
-}
-var init_corporate_codes = __esm({
-  "../shared/utils/corporate-codes.ts"() {
-    "use strict";
-  }
-});
-
-// ../shared/utils/failureBackoff.ts
-function createFailureBackoffState() {
-  const cache = /* @__PURE__ */ new Map();
-  const clock = (now) => now ?? Date.now();
-  return {
-    get: (ip) => cache.get(ip) ?? null,
-    record: (ip, windowMs, now) => {
-      const t3 = clock(now);
-      const existing = cache.get(ip);
-      if (!existing || t3 > existing.resetTime) {
-        const next = { count: 1, resetTime: t3 + windowMs };
-        cache.set(ip, next);
-        return next.count;
-      }
-      existing.count += 1;
-      return existing.count;
-    },
-    clear: (ip) => {
-      cache.delete(ip);
-    },
-    isInBackoff: (ip, threshold, now) => {
-      const t3 = clock(now);
-      const existing = cache.get(ip);
-      if (!existing) return false;
-      if (t3 > existing.resetTime) {
-        cache.delete(ip);
-        return false;
-      }
-      return existing.count >= threshold;
-    }
-  };
-}
-var init_failureBackoff = __esm({
-  "../shared/utils/failureBackoff.ts"() {
-    "use strict";
-  }
-});
-
-// ../shared/utils/financeInvariants.ts
-function assertFiniteAmount(value, label) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new Error(`Finance invariant failed: ${label} must be a finite number.`);
-  }
-}
-function assertMoneyEqual(actual, expected, label) {
-  if (Math.abs(actual - expected) >= CENTS_TOLERANCE) {
-    throw new Error(
-      `Finance invariant failed: ${label} (${actual.toFixed(2)}) does not reconcile to ${expected.toFixed(2)}.`
-    );
-  }
-}
-function assertBookingFinanceInvariant(snapshot) {
-  assertFiniteAmount(snapshot.totalPrice, "booking.totalPrice");
-  const breakdown = snapshot.rateBreakdown;
-  if (!breakdown) {
-    throw new Error("Finance invariant failed: booking.rateBreakdown is required.");
-  }
-  assertFiniteAmount(breakdown.roomSubtotal, "rateBreakdown.roomSubtotal");
-  assertFiniteAmount(breakdown.finalTotal, "rateBreakdown.finalTotal");
-  const roomLinesTotal = breakdown.roomLines.reduce((sum, line, index) => {
-    assertFiniteAmount(line.nightlyRate, `rateBreakdown.roomLines[${index}].nightlyRate`);
-    assertFiniteAmount(line.subtotal, `rateBreakdown.roomLines[${index}].subtotal`);
-    return sum + line.subtotal;
-  }, 0);
-  assertMoneyEqual(roomLinesTotal, breakdown.roomSubtotal, "room line total");
-  const addOnTotal = breakdown.addOns.reduce((sum, line, index) => {
-    assertFiniteAmount(line.amount, `rateBreakdown.addOns[${index}].amount`);
-    return sum + line.amount;
-  }, 0);
-  const deductionTotal = breakdown.deductions.reduce((sum, line, index) => {
-    assertFiniteAmount(line.amount, `rateBreakdown.deductions[${index}].amount`);
-    return sum + line.amount;
-  }, 0);
-  const visibleTotal = breakdown.roomSubtotal + addOnTotal - deductionTotal;
-  assertMoneyEqual(breakdown.finalTotal, visibleTotal, "rateBreakdown.finalTotal");
-  assertMoneyEqual(snapshot.totalPrice, breakdown.finalTotal, "booking.totalPrice");
-}
-function assertRevenueFinanceInvariant(snapshot) {
-  const revenueFields = [
-    ["roomRevenue", snapshot.roomRevenue],
-    ["breakfastRevenue", snapshot.breakfastRevenue],
-    ["storeRevenue", snapshot.storeRevenue],
-    ["incidentalRevenue", snapshot.incidentalRevenue],
-    ["totalRevenue", snapshot.totalRevenue]
-  ];
-  revenueFields.forEach(([label, value]) => assertFiniteAmount(value, label));
-  const componentTotal = snapshot.roomRevenue + snapshot.breakfastRevenue + snapshot.storeRevenue + snapshot.incidentalRevenue;
-  assertMoneyEqual(snapshot.totalRevenue, componentTotal, "totalRevenue");
-  const ownerByEntryId = /* @__PURE__ */ new Map();
-  for (const [stream, entryIds] of Object.entries(snapshot.streamEntryIds)) {
-    for (const entryId of entryIds) {
-      if (!entryId) throw new Error(`Finance invariant failed: ${stream} contains an empty entry ID.`);
-      const existingOwner = ownerByEntryId.get(entryId);
-      if (existingOwner) {
-        throw new Error(
-          `Finance invariant failed: ledger entry ${entryId} appears in both ${existingOwner} and ${stream}.`
-        );
-      }
-      ownerByEntryId.set(entryId, stream);
-    }
-  }
-}
-var CENTS_TOLERANCE;
-var init_financeInvariants = __esm({
-  "../shared/utils/financeInvariants.ts"() {
-    "use strict";
-    CENTS_TOLERANCE = 5e-3;
-  }
-});
-
-// ../shared/utils/cancellation.ts
-function parseCheckInTime(timeStr) {
-  const normalized = timeStr.trim().toLowerCase();
-  let match = normalized.match(/^(\d{1,2}):(\d{2})\s*(am|pm)?$/);
-  if (match) {
-    let hours = parseInt(match[1]);
-    const minutes = parseInt(match[2]);
-    const ampm = match[3];
-    if (ampm === "pm" && hours < 12) {
-      hours += 12;
-    } else if (ampm === "am" && hours === 12) {
-      hours = 0;
-    }
-    return { hours, minutes };
-  }
-  match = normalized.match(/^(\d{1,2})\s*(am|pm)$/);
-  if (match) {
-    let hours = parseInt(match[1]);
-    const ampm = match[2];
-    if (ampm === "pm" && hours < 12) {
-      hours += 12;
-    } else if (ampm === "am" && hours === 12) {
-      hours = 0;
-    }
-    return { hours, minutes: 0 };
-  }
-  return { hours: 14, minutes: 0 };
-}
-function timeZoneOffsetMs(date, timeZone) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23"
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  const representedAsUtc = Date.UTC(
-    Number(values.year),
-    Number(values.month) - 1,
-    Number(values.day),
-    Number(values.hour),
-    Number(values.minute),
-    Number(values.second)
-  );
-  const instantWithoutMilliseconds = Math.floor(date.getTime() / 1e3) * 1e3;
-  return representedAsUtc - instantWithoutMilliseconds;
-}
-function getCheckInInstant(dateKey2, timeStr, timeZone) {
-  const [year, month, day] = dateKey2.split("-").map(Number);
-  const { hours, minutes } = parseCheckInTime(timeStr);
-  const targetWallClock = Date.UTC(year, month - 1, day, hours, minutes, 0, 0);
-  let instant = targetWallClock;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const offset = timeZoneOffsetMs(new Date(instant), timeZone);
-    const next = targetWallClock - offset;
-    if (next === instant) break;
-    instant = next;
-  }
-  return new Date(instant);
-}
-function getLegacyCancellationPolicy() {
-  return "Cancellations made 48 hours or more before check-in are eligible for a full refund. Cancellations within 48 hours of check-in are non-refundable. No-shows will be charged the full booking amount.";
-}
-function evaluateCancellation(cancellationTime, snapshot, fallbackContext) {
-  const cancellationMs = typeof cancellationTime === "number" ? cancellationTime : cancellationTime.getTime();
-  const cutoffHours = snapshot?.cutoffHours ?? 48;
-  const refundPctBefore = snapshot?.refundPctBefore ?? 100;
-  const refundPctAfter = snapshot?.refundPctAfter ?? 0;
-  const policySource = snapshot?.source ?? "legacy-fallback";
-  let checkInMs;
-  if (snapshot?.scheduledCheckInTime) {
-    checkInMs = new Date(snapshot.scheduledCheckInTime).getTime();
-  } else if (fallbackContext?.checkInDateKey) {
-    checkInMs = getCheckInInstant(
-      fallbackContext.checkInDateKey,
-      fallbackContext.checkInTime || "14:00",
-      fallbackContext.timeZone || "Asia/Manila"
-    ).getTime();
-  } else {
-    checkInMs = Date.now();
-  }
-  const hoursRemaining = (checkInMs - cancellationMs) / (1e3 * 60 * 60);
-  const isBeforeCutoff = hoursRemaining >= cutoffHours;
-  const cutoffTimeMs = checkInMs - cutoffHours * 60 * 60 * 1e3;
-  const refundPct = isBeforeCutoff ? refundPctBefore : refundPctAfter;
-  return {
-    refundPct,
-    isBeforeCutoff,
-    cutoffTimeMs,
-    hoursRemaining,
-    policySource
-  };
-}
-function createCancellationPolicySnapshot(params) {
-  const tz = params.hotelConfig.timezone || "Asia/Manila";
-  const stdCheckInTime = params.hotelConfig.checkInTime || "14:00";
-  const checkInInstant = getCheckInInstant(params.checkInDateKey, stdCheckInTime, tz);
-  let cutoffHours = typeof params.websiteContent.cancellationCutoffHours === "number" ? params.websiteContent.cancellationCutoffHours : 48;
-  let refundPctBefore = typeof params.websiteContent.cancellationRefundPctBefore === "number" ? params.websiteContent.cancellationRefundPctBefore : 100;
-  let refundPctAfter = typeof params.websiteContent.cancellationRefundPctAfter === "number" ? params.websiteContent.cancellationRefundPctAfter : 0;
-  let policyText = params.websiteContent.cancellationPolicy || getLegacyCancellationPolicy();
-  let source = params.websiteContent.cancellationPolicy ? "settings" : "legacy-fallback";
-  if (params.corporateCodeData) {
-    let hasOverride = false;
-    const corp = params.corporateCodeData;
-    if (typeof corp.cancellationCutoffHours === "number") {
-      cutoffHours = corp.cancellationCutoffHours;
-      hasOverride = true;
-    }
-    if (typeof corp.cancellationRefundPctBefore === "number") {
-      refundPctBefore = corp.cancellationRefundPctBefore;
-      hasOverride = true;
-    }
-    if (typeof corp.cancellationRefundPctAfter === "number") {
-      refundPctAfter = corp.cancellationRefundPctAfter;
-      hasOverride = true;
-    }
-    if (typeof corp.cancellationPolicyText === "string" && corp.cancellationPolicyText.trim()) {
-      policyText = corp.cancellationPolicyText.trim();
-      hasOverride = true;
-    }
-    if (hasOverride) {
-      source = "corporate-override";
-    }
-  }
-  return {
-    cutoffHours,
-    refundPctBefore,
-    refundPctAfter,
-    policyText,
-    scheduledCheckInTime: checkInInstant.toISOString(),
-    source
-  };
-}
-function evaluateCancelPreview(input) {
-  const evalRoom = (child) => {
-    const evaluation = evaluateCancellation(
-      input.now,
-      child.cancellationPolicySnapshot,
-      // The fallback `fallbackContext` is unused when
-      // the snapshot is present; we still pass it for
-      // the legacy null-snapshot case so a child without
-      // a snapshotted policy (pre-CRL-05) still evaluates
-      // against the standard 48h / 100% / 0% rules.
-      {
-        checkInDateKey: "",
-        checkInTime: "14:00",
-        timeZone: "Asia/Manila"
-      }
-    );
-    const subtotal = Math.max(Number(child.totalPrice) || 0, 0);
-    return {
-      child,
-      evaluation,
-      subtotal
-    };
-  };
-  const children = input.scope === "room" ? [input.lookedUpBooking] : input.cancellableChildren;
-  const roomRows = children.map(evalRoom);
-  const cancellableSubtotal = roomRows.reduce((sum, r3) => sum + r3.subtotal, 0);
-  const allocationSubtotal = Math.max(
-    Number(input.allocationSubtotal) || cancellableSubtotal,
-    cancellableSubtotal
-  );
-  const availableNetCollected = Math.max(Number(input.reservationNetCollected) || 0, 0);
-  const netCollectedByRoom = roomRows.map((r3) => {
-    if (allocationSubtotal === 0) return 0;
-    return Math.round(
-      r3.subtotal / allocationSubtotal * availableNetCollected * 100
-    ) / 100;
-  });
-  const perRoom = roomRows.map((r3, idx) => {
-    const netCollected = netCollectedByRoom[idx];
-    const policyRefund = Math.round(netCollected * (r3.evaluation.refundPct / 100) * 100) / 100;
-    const retainedAmount = Math.round((netCollected - policyRefund) * 100) / 100;
-    return {
-      bookingId: r3.child.id,
-      bookingRef: r3.child.bookingRef,
-      position: r3.child.reservationPosition ?? null,
-      roomType: r3.child.roomType,
-      status: r3.child.status,
-      subtotal: r3.subtotal,
-      netCollected,
-      policyRefund,
-      retainedAmount,
-      refundPct: r3.evaluation.refundPct,
-      isBeforeCutoff: r3.evaluation.isBeforeCutoff,
-      hoursRemaining: r3.evaluation.hoursRemaining
-    };
-  });
-  const aggregateSubtotal = cancellableSubtotal;
-  const aggregateNetCollected = Math.round(
-    netCollectedByRoom.reduce((sum, n2) => sum + n2, 0) * 100
-  ) / 100;
-  const aggregatePolicyRefund = perRoom.reduce((sum, r3) => sum + r3.policyRefund, 0);
-  const aggregateRetained = Math.round((aggregateNetCollected - aggregatePolicyRefund) * 100) / 100;
-  const aggregateRefundPct = perRoom.length > 0 ? Math.min(...perRoom.map((r3) => r3.refundPct)) : 0;
-  const representativeEvaluation = roomRows[0]?.evaluation;
-  const staffProcessingRequired = aggregateNetCollected > 0 && aggregatePolicyRefund > 0;
-  const isReservation = input.scope === "reservation" && input.reservation !== null;
-  return {
-    kind: isReservation ? "reservation" : "single",
-    scope: input.scope,
-    bookingRef: input.lookedUpBooking.bookingRef,
-    reservationRef: input.reservation?.reservationRef ?? null,
-    room: isReservation ? null : perRoom[0] ?? null,
-    rooms: isReservation ? perRoom : null,
-    subtotal: Math.round(aggregateSubtotal * 100) / 100,
-    netCollected: aggregateNetCollected,
-    policyRefund: Math.round(aggregatePolicyRefund * 100) / 100,
-    retainedAmount: aggregateRetained,
-    staffProcessingRequired,
-    cutoffHours: representativeEvaluation?.refundPct !== void 0 ? representativeEvaluation.cutoffTimeMs && input.lookedUpBooking.cancellationPolicySnapshot ? input.lookedUpBooking.cancellationPolicySnapshot.cutoffHours : 48 : 48,
-    cutoffTimeMs: representativeEvaluation?.cutoffTimeMs ?? 0,
-    hoursRemaining: representativeEvaluation?.hoursRemaining ?? 0,
-    isBeforeCutoff: representativeEvaluation?.isBeforeCutoff ?? false,
-    refundPct: aggregateRefundPct,
-    policyText: input.lookedUpBooking.cancellationPolicySnapshot?.policyText ?? getLegacyCancellationPolicy(),
-    policySource: representativeEvaluation?.policySource ?? "legacy-fallback"
-  };
-}
-function computeCancellationLiabilityState(input) {
-  if (!input.liability) {
-    return {
-      state: "not-required",
-      liability: null,
-      processedAmount: 0,
-      outstandingAmount: 0,
-      retentionAmount: 0,
-      stateLabel: "No refund owed"
-    };
-  }
-  const policyRefund = Math.max(Number(input.liability.policyResult?.policyRefund) || 0, 0);
-  const approvedAmount = Math.max(Math.min(
-    Number(input.liability.approvedAmount) || 0,
-    // The exception can only reduce, never increase. A
-    // writer bug that stamped `approvedAmount >
-    // policyRefund` is clamped to the policy result.
-    policyRefund
-  ), 0);
-  const processedAmount = Math.max(Number(input.processedAmount) || 0, 0);
-  const outstandingAmount = Math.max(approvedAmount - processedAmount, 0);
-  const retentionAmount = Math.max(policyRefund - approvedAmount, 0);
-  let state;
-  let stateLabel;
-  if (policyRefund === 0) {
-    state = "not-required";
-    stateLabel = "No refund owed";
-  } else if (approvedAmount < policyRefund) {
-    state = "retained";
-    stateLabel = processedAmount >= approvedAmount ? "Exception applied \xB7 fully refunded" : "Exception applied \xB7 refund in progress";
-  } else if (processedAmount === 0) {
-    state = "pending-processing";
-    stateLabel = "Pending refund";
-  } else if (processedAmount < approvedAmount) {
-    state = "partially-processed";
-    stateLabel = "Partially refunded";
-  } else {
-    state = "processed";
-    stateLabel = "Refunded";
-  }
-  return {
-    state,
-    liability: input.liability,
-    processedAmount,
-    outstandingAmount,
-    retentionAmount,
-    stateLabel
-  };
-}
-function buildCancellationLiabilitySnapshot(input) {
-  const policyRefund = Math.round(Math.max(Number(input.policyRefund) || 0, 0) * 100) / 100;
-  const netCollected = Math.round(Math.max(Number(input.netCollected) || 0, 0) * 100) / 100;
-  const retainedAmount = Math.round(Math.max(Number(input.retainedAmount) || 0, 0) * 100) / 100;
-  const policyResult = {
-    refundPct: Math.max(Number(input.refundPct) || 0, 0),
-    policyRefund,
-    netCollected,
-    retainedAmount,
-    cutoffHours: Math.max(Number(input.cutoffHours) || 0, 0),
-    source: input.source,
-    snapshottedAt: input.now
-  };
-  return {
-    policyResult,
-    // `approvedAmount` defaults to the policy result. An
-    // exception is a separate admin-only mutation (the
-    // new `handleRecordCancellationException` endpoint)
-    // that reduces this value. The destructive cancel
-    // never auto-mutates `approvedAmount` beyond the
-    // default — CRL-04's "never auto-refund" rule.
-    approvedAmount: policyRefund,
-    exception: null
-  };
-}
-var init_cancellation = __esm({
-  "../shared/utils/cancellation.ts"() {
-    "use strict";
-  }
-});
-
-// ../shared/utils/uploads.ts
-async function raceUploadWithTimeout(uploadPromise, timeoutMs, label = "Upload") {
-  let timeoutHandle;
-  const timeoutPromise = new Promise((_2, reject) => {
-    timeoutHandle = setTimeout(() => {
-      reject(
-        new Error(
-          `${label} timed out after ${Math.round(timeoutMs / 1e3)}s. Please check your connection and retry.`
-        )
-      );
-    }, timeoutMs);
-  });
-  try {
-    return await Promise.race([uploadPromise, timeoutPromise]);
-  } finally {
-    if (timeoutHandle !== void 0) clearTimeout(timeoutHandle);
-  }
-}
-var DEFAULT_UPLOAD_TIMEOUT_MS;
-var init_uploads = __esm({
-  "../shared/utils/uploads.ts"() {
-    "use strict";
-    DEFAULT_UPLOAD_TIMEOUT_MS = 9e4;
-  }
-});
-
-// ../shared/utils/bookingPreferences.ts
-function resolveBookingPreferenceValues(raw) {
-  const values = [];
-  if (Array.isArray(raw)) {
-    for (const entry of raw) {
-      if (!entry || typeof entry !== "object") continue;
-      const value = entry.value;
-      if (typeof value === "string" && value) values.push(value);
-    }
-  }
-  return values.length > 0 ? values : DEFAULT_BOOKING_PREFERENCES.map((option2) => option2.value);
-}
-function parseCheckInTimeToPair(timeStr) {
-  const normalized = timeStr.trim().toLowerCase();
-  if (!normalized) return { hours: 14, minutes: 0 };
-  const ampm = normalized.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/);
-  if (ampm) {
-    let hours = Number(ampm[1]);
-    const minutes = Number(ampm[2] ?? "0");
-    const isPm = ampm[3] === "pm";
-    if (hours === 12) hours = isPm ? 12 : 0;
-    else if (isPm) hours += 12;
-    return { hours, minutes };
-  }
-  const h24 = normalized.match(/^(\d{1,2}):(\d{2})$/);
-  if (h24) {
-    const hours = Number(h24[1]);
-    const minutes = Number(h24[2]);
-    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
-      return { hours, minutes };
-    }
-  }
-  return { hours: 14, minutes: 0 };
-}
-function buildArrivalTimeOptions(checkInTimeStr, locale = "en-US") {
-  const base = parseCheckInTimeToPair(checkInTimeStr);
-  const options = [
-    { value: null, label: "I don't know" }
-  ];
-  for (let i2 = 0; i2 < ARRIVAL_WINDOW_HOURS; i2 += 1) {
-    const totalMinutes = base.minutes + (base.hours + i2) * 60;
-    const hours24 = Math.floor(totalMinutes / 60) % 24;
-    const minutes = totalMinutes % 60;
-    options.push({
-      value: formatHHMM(hours24, minutes),
-      label: format12hLabel(hours24, minutes, locale)
-    });
-  }
-  return options;
-}
-function formatHHMM(hours, minutes) {
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-}
-function format12hLabel(hours, minutes, locale) {
-  const safeHours = (hours % 24 + 24) % 24;
-  const safeMinutes = Math.max(0, Math.min(59, minutes));
-  const utcHours = (safeHours - HOTEL_TZ_OFFSET_HOURS + 24) % 24;
-  const reference = new Date(Date.UTC(1970, 0, 1, utcHours, safeMinutes, 0));
-  return new Intl.DateTimeFormat(locale, {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-    timeZone: HOTEL_TZ_IANA
-  }).format(reference);
-}
-var HOTEL_TZ_OFFSET_HOURS, HOTEL_TZ_IANA;
-var init_bookingPreferences = __esm({
-  "../shared/utils/bookingPreferences.ts"() {
-    "use strict";
-    init_constants();
-    HOTEL_TZ_OFFSET_HOURS = 8;
-    HOTEL_TZ_IANA = "Asia/Manila";
-  }
-});
-
-// ../shared/utils/breakfastCutoff.ts
-function parseServiceDateUtc(value) {
-  if (typeof value !== "string") return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const [yearStr, monthStr, dayStr] = value.split("-");
-  const year = Number(yearStr);
-  const month = Number(monthStr);
-  const day = Number(dayStr);
-  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
-  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
-  const candidate = new Date(Date.UTC(year, month - 1, day));
-  if (candidate.getUTCFullYear() !== year || candidate.getUTCMonth() !== month - 1 || candidate.getUTCDate() !== day) {
-    return null;
-  }
-  return candidate;
-}
-function parseCutoffTime(value) {
-  if (typeof value !== "string") return null;
-  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value);
-  if (!match) return null;
-  return { hour: Number(match[1]), minute: Number(match[2]) };
-}
-function isValidTimezone(timezone) {
-  if (typeof timezone !== "string" || timezone.length === 0) return false;
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: timezone });
-    return true;
-  } catch {
-    return false;
-  }
-}
-function zonedWallClockToUtc(dateUtc, hour, minute, timezone) {
-  const naiveUtcMs = Date.UTC(
-    dateUtc.getUTCFullYear(),
-    dateUtc.getUTCMonth(),
-    dateUtc.getUTCDate(),
-    hour,
-    minute,
-    0,
-    0
-  );
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false
-  });
-  const parts = formatter.formatToParts(new Date(naiveUtcMs));
-  const get2 = (type) => {
-    const found = parts.find((p) => p.type === type);
-    if (!found) throw new Error(`Missing Intl part: ${type}`);
-    return Number(found.value);
-  };
-  const tzAsUtcMs = Date.UTC(
-    get2("year"),
-    get2("month") - 1,
-    get2("day"),
-    get2("hour") === 24 ? 0 : get2("hour"),
-    get2("minute"),
-    get2("second")
-  );
-  const offsetMs = tzAsUtcMs - naiveUtcMs;
-  return new Date(naiveUtcMs - offsetMs);
-}
-function computeBreakfastCutoffState(input) {
-  const safeReturn = (reason) => {
-    console.error(
-      `[breakfastCutoff] ${reason}; returning locked state for serviceDate=${input?.serviceDate}`
-    );
-    return {
-      isLocked: true,
-      minutesUntilCutoff: 0,
-      cutoffAt: input?.now instanceof Date ? input.now.toISOString() : (/* @__PURE__ */ new Date(0)).toISOString(),
-      serviceDate: typeof input?.serviceDate === "string" ? input.serviceDate : ""
-    };
-  };
-  if (!input || !(input.now instanceof Date)) {
-    return safeReturn("invalid `now` argument");
-  }
-  const serviceDateUtc = parseServiceDateUtc(input.serviceDate);
-  if (!serviceDateUtc) {
-    return safeReturn(`invalid serviceDate (${input.serviceDate})`);
-  }
-  const cutoff = parseCutoffTime(input.cutoffTime);
-  if (!cutoff) {
-    return safeReturn(`invalid cutoffTime (${input.cutoffTime})`);
-  }
-  if (!isValidTimezone(input.timezone)) {
-    return safeReturn(`invalid timezone (${input.timezone})`);
-  }
-  const previousDayUtc = new Date(serviceDateUtc);
-  previousDayUtc.setUTCDate(previousDayUtc.getUTCDate() - 1);
-  const cutoffAt = zonedWallClockToUtc(
-    previousDayUtc,
-    cutoff.hour,
-    cutoff.minute,
-    input.timezone
-  );
-  const nowMs = input.now.getTime();
-  const cutoffMs = cutoffAt.getTime();
-  const isLocked = nowMs >= cutoffMs;
-  const minutesUntilCutoff = Math.floor((cutoffMs - nowMs) / 6e4);
-  if (input.cutoffsEnabled === false) {
-    return {
-      isLocked: false,
-      // The countdown is meaningless when cut-offs are off,
-      // but expose a large sentinel so any client renderer
-      // accidentally feeding `minutesUntilCutoff` into a
-      // "minutes remaining" line shows "always open" instead
-      // of a negative countdown.
-      minutesUntilCutoff: Number.MAX_SAFE_INTEGER,
-      cutoffAt: cutoffAt.toISOString(),
-      serviceDate: input.serviceDate,
-      reasonOrCutoff: "cutoffs-disabled"
-    };
-  }
-  return {
-    isLocked,
-    minutesUntilCutoff,
-    cutoffAt: cutoffAt.toISOString(),
-    serviceDate: input.serviceDate
-  };
-}
-var init_breakfastCutoff = __esm({
-  "../shared/utils/breakfastCutoff.ts"() {
-    "use strict";
-  }
-});
-
-// ../shared/utils/breakfastSlotKey.ts
-function buildBreakfastSlotId(guestIndex) {
-  return `guest-${guestIndex}`;
-}
-function buildBreakfastSlotKey(serviceDate, guestIndex) {
-  return `${serviceDate}-${buildBreakfastSlotId(guestIndex)}`;
-}
-function buildBreakfastSlotKeyForBase(serviceDate, guestIndex, base) {
-  return base === "one-based" ? `${serviceDate}-guest-${guestIndex + 1}` : buildBreakfastSlotKey(serviceDate, guestIndex);
-}
-function parseBreakfastSlotKey(slotKey) {
-  if (typeof slotKey !== "string") return null;
-  const match = /^(\d{4}-\d{2}-\d{2})-(?:(guest-)?(\d+))$/.exec(slotKey);
-  if (!match) return null;
-  const rawIndex = Number(match[3]);
-  if (!Number.isFinite(rawIndex)) return null;
-  return {
-    serviceDate: match[1],
-    rawIndex,
-    form: match[2] ? "canonical" : "bare"
-  };
-}
-function detectBreakfastSlotIndexBase(selections, numGuests) {
-  if (!selections || typeof selections !== "object") return "zero-based";
-  let highestCanonicalIndex = -1;
-  let sawIndexZero = false;
-  for (const key of Object.keys(selections)) {
-    const parsed = parseBreakfastSlotKey(key);
-    if (!parsed || parsed.form !== "canonical") continue;
-    if (parsed.rawIndex === 0) sawIndexZero = true;
-    if (parsed.rawIndex > highestCanonicalIndex) highestCanonicalIndex = parsed.rawIndex;
-  }
-  if (sawIndexZero) return "zero-based";
-  const total = Number(numGuests);
-  if (Number.isFinite(total) && total > 0 && highestCanonicalIndex >= total) {
-    return "one-based";
-  }
-  return "zero-based";
-}
-function resolveBreakfastSlotGuestIndex(slotKey, base = "zero-based") {
-  const parsed = parseBreakfastSlotKey(slotKey);
-  if (!parsed) return null;
-  const index = parsed.form === "bare" ? parsed.rawIndex : base === "one-based" ? parsed.rawIndex - 1 : parsed.rawIndex;
-  if (index < 0) return null;
-  return index;
-}
-function normalizeBreakfastSelections(selections, numGuests) {
-  const base = detectBreakfastSlotIndexBase(
-    selections,
-    numGuests
-  );
-  const slots = /* @__PURE__ */ new Map();
-  if (!selections || typeof selections !== "object") return { base, slots };
-  for (const storedKey of Object.keys(selections)) {
-    const parsed = parseBreakfastSlotKey(storedKey);
-    if (!parsed) continue;
-    const guestIndex = resolveBreakfastSlotGuestIndex(storedKey, base);
-    if (guestIndex === null) continue;
-    const canonicalKey = buildBreakfastSlotKey(parsed.serviceDate, guestIndex);
-    const existing = slots.get(canonicalKey);
-    if (existing) {
-      const existingIsBare = parseBreakfastSlotKey(existing.storedKey)?.form === "bare";
-      if (existingIsBare && parsed.form === "canonical") {
-        slots.set(canonicalKey, {
-          canonicalKey,
-          storedKey,
-          guestIndex,
-          serviceDate: parsed.serviceDate,
-          entry: selections[storedKey]
-        });
-      }
-      continue;
-    }
-    slots.set(canonicalKey, {
-      canonicalKey,
-      storedKey,
-      guestIndex,
-      serviceDate: parsed.serviceDate,
-      entry: selections[storedKey]
-    });
-  }
-  return { base, slots };
-}
-var init_breakfastSlotKey = __esm({
-  "../shared/utils/breakfastSlotKey.ts"() {
-    "use strict";
-  }
-});
-
-// ../shared/utils/money.ts
-function roundToTwoDecimals(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return 0;
-  return Math.round(numeric * 100) / 100;
-}
-var init_money = __esm({
-  "../shared/utils/money.ts"() {
-    "use strict";
-  }
-});
-
-// ../shared/utils/otherAddOnTotal.ts
-function recomputeOtherAddOnTotal(selections) {
-  if (!selections) return 0;
-  let total = 0;
-  for (const dateKey2 of Object.keys(selections)) {
-    const items = selections[dateKey2];
-    if (!Array.isArray(items)) continue;
-    for (const entry of items) {
-      if (!entry) continue;
-      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
-      const price = Math.max(0, Number(entry.priceSnapshot) || 0);
-      const qty = Math.max(0, Math.floor(Number(entry.quantity) || 0));
-      total += price * qty;
-    }
-  }
-  return roundToTwoDecimals(total);
-}
-function otherAddOnBreakdownByDate(selections) {
-  if (!selections) return [];
-  const rows = [];
-  const dates = Object.keys(selections).sort();
-  for (const date of dates) {
-    const items = selections[date];
-    if (!Array.isArray(items) || items.length === 0) continue;
-    let s4 = 0;
-    let n2 = 0;
-    for (const entry of items) {
-      if (!entry) continue;
-      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
-      const price = Math.max(0, Number(entry.priceSnapshot) || 0);
-      const qty = Math.max(0, Math.floor(Number(entry.quantity) || 0));
-      if (qty > 0) {
-        s4 += price * qty;
-        n2 += 1;
-      }
-    }
-    if (n2 > 0) {
-      rows.push({ date, subtotal: roundToTwoDecimals(s4), itemCount: n2 });
-    }
-  }
-  return rows;
-}
-function hasAnyOtherAddOns(selections) {
-  if (!selections) return false;
-  for (const date of Object.keys(selections)) {
-    const items = selections[date];
-    if (!Array.isArray(items)) continue;
-    for (const entry of items) {
-      if (!entry) continue;
-      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
-      if (Math.max(0, Math.floor(Number(entry.quantity) || 0)) > 0) return true;
-    }
-  }
-  return false;
-}
-function buildOtherAddOnSelectionKey(date, addOnId) {
-  return `${date}-${String(addOnId).trim()}`;
-}
-function parseOtherAddOnSelectionKey(key) {
-  const trimmed = String(key || "").trim();
-  if (!trimmed) return null;
-  if (trimmed.length < 14) return null;
-  const date = trimmed.slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-  const addOnId = trimmed.slice(11);
-  if (!addOnId) return null;
-  return { date, addOnId };
-}
-var init_otherAddOnTotal = __esm({
-  "../shared/utils/otherAddOnTotal.ts"() {
-    "use strict";
-    init_money();
-  }
-});
-
-// ../shared/utils/bookingAddOnReschedule.ts
-function enumerateStayServiceDates(window2) {
-  const dates = [];
-  const startMs = Date.parse(`${window2.checkIn}T00:00:00Z`);
-  const endMs = Date.parse(`${window2.checkOut}T00:00:00Z`);
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return dates;
-  const maxDays = 60;
-  for (let ms2 = startMs, i2 = 0; ms2 < endMs && i2 < maxDays; ms2 += 864e5, i2 += 1) {
-    const d = new Date(ms2);
-    const yyyy = d.getUTCFullYear();
-    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-    const dd = String(d.getUTCDate()).padStart(2, "0");
-    dates.push(`${yyyy}-${mm}-${dd}`);
-  }
-  return dates;
-}
-function isDateInStayWindow(serviceDate, window2) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(serviceDate)) return false;
-  return serviceDate >= window2.checkIn && serviceDate < window2.checkOut;
-}
-function serviceDateFromSlotKey(slotKey) {
-  if (typeof slotKey !== "string") return null;
-  const match = /^(\d{4}-\d{2}-\d{2})-/.exec(slotKey);
-  return match ? match[1] : null;
-}
-function shouldAutoCancelSelection(mode, serviceDate, window2, today) {
-  if (!serviceDate) return false;
-  if (mode === "cancel") {
-    return serviceDate >= today;
-  }
-  return !isDateInStayWindow(serviceDate, window2);
-}
-function redateBreakfastSelections(input) {
-  const { mode, window: window2, today, paidAmount } = input;
-  const source = input.selections || {};
-  const next = {};
-  const removed = [];
-  let remainingPaid = Math.max(0, Number(paidAmount) || 0);
-  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
-  for (const key of Object.keys(source)) {
-    const entry = source[key];
-    if (!entry) {
-      next[key] = entry;
-      continue;
-    }
-    if (entry.removedAt !== null && entry.removedAt !== void 0) {
-      next[key] = entry;
-      continue;
-    }
-    const serviceDate = serviceDateFromSlotKey(key);
-    if (!shouldAutoCancelSelection(mode, serviceDate, window2, today)) {
-      next[key] = entry;
-      continue;
-    }
-    const amount = Math.max(0, Number(entry.price) || 0);
-    const wasPaid = amount > 0 && remainingPaid >= amount;
-    if (wasPaid) remainingPaid -= amount;
-    removed.push({
-      key,
-      serviceDate: serviceDate || "",
-      entry,
-      amount,
-      wasPaid
-    });
-    next[key] = {
-      ...entry,
-      removedAt: nowIso,
-      removedBy: "system",
-      lastModifiedAt: nowIso,
-      lastModifiedBy: "system"
-    };
-  }
-  return {
-    selections: next,
-    removed,
-    paidRemoved: removed.filter((r3) => r3.wasPaid),
-    total: recomputeBreakfastTotal(next)
-  };
-}
-function redateOtherAddOnSelections(input) {
-  const { mode, window: window2, today, paidAmount } = input;
-  const source = input.selections || {};
-  const next = {};
-  const removed = [];
-  let remainingPaid = Math.max(0, Number(paidAmount) || 0);
-  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
-  for (const date of Object.keys(source)) {
-    const entries = source[date];
-    if (!Array.isArray(entries)) {
-      next[date] = [];
-      continue;
-    }
-    const kept = [];
-    for (const entry of entries) {
-      if (!entry) continue;
-      if (entry.removedAt !== null && entry.removedAt !== void 0) {
-        kept.push(entry);
-        continue;
-      }
-      if (!shouldAutoCancelSelection(mode, date, window2, today)) {
-        kept.push(entry);
-        continue;
-      }
-      const quantity = Math.max(0, Math.floor(Number(entry.quantity) || 0));
-      const amount = roundToTwoDecimals(Math.max(0, Number(entry.priceSnapshot) || 0) * quantity);
-      const wasPaid = amount > 0 && remainingPaid >= amount;
-      if (wasPaid) remainingPaid -= amount;
-      removed.push({
-        date,
-        addOnId: String(entry.addOnId || ""),
-        selectionKey: `${date}-${String(entry.addOnId || "")}`,
-        entry,
-        amount,
-        wasPaid
-      });
-      kept.push({
-        ...entry,
-        removedAt: nowIso,
-        removedBy: "system",
-        lastModifiedAt: nowIso,
-        lastModifiedBy: "system"
-      });
-    }
-    next[date] = kept;
-  }
-  return {
-    selections: next,
-    removed,
-    paidRemoved: removed.filter((r3) => r3.wasPaid),
-    total: recomputeOtherAddOnTotal(next)
-  };
-}
-var init_bookingAddOnReschedule = __esm({
-  "../shared/utils/bookingAddOnReschedule.ts"() {
-    "use strict";
-    init_breakfastTotal();
-    init_otherAddOnTotal();
-    init_money();
-  }
-});
-
-// ../shared/utils/bookingPaidAmount.ts
-function sumLedgerEntryAmounts(entries) {
-  let sum = 0;
-  for (const entry of entries || []) {
-    if (!entry) continue;
-    const amount = Number(entry.amount || 0);
-    if (!Number.isFinite(amount)) continue;
-    sum += amount;
-  }
-  return roundToTwoDecimals(sum);
-}
-function sumAttributedLedgerEntryAmounts(entries, bookingId) {
-  const target = String(bookingId || "").trim();
-  if (!target) return 0;
-  const attributed = (entries || []).filter((entry) => {
-    if (!entry) return false;
-    return String(entry.bookingId || "").trim() === target;
-  });
-  return sumLedgerEntryAmounts(attributed);
-}
-function computeNextBookingPaidAmount(params) {
-  const current = Number(params.currentPaidAmount);
-  const recorded = Number(params.recordedAmount);
-  const legacy = Number(params.legacyCollectedAmount);
-  const base = Number.isFinite(current) ? current : Number.isFinite(legacy) ? legacy : 0;
-  const increment = Number.isFinite(recorded) ? recorded : 0;
-  return roundToTwoDecimals(base + increment);
-}
-var init_bookingPaidAmount = __esm({
-  "../shared/utils/bookingPaidAmount.ts"() {
-    "use strict";
-    init_money();
-  }
-});
-
-// ../shared/utils/firestorePayload.ts
-function stripUndefinedValues(value) {
-  return stripValue(value);
-}
-function stripValue(value) {
-  if (Array.isArray(value)) {
-    return value.map((item) => stripValue(item));
-  }
-  if (isPlainObject(value)) {
-    const out = {};
-    for (const [key, item] of Object.entries(value)) {
-      if (item === void 0) continue;
-      out[key] = stripValue(item);
-    }
-    return out;
-  }
-  return value;
-}
-function isPlainObject(value) {
-  if (value === null || typeof value !== "object") return false;
-  if (Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
-var init_firestorePayload = __esm({
-  "../shared/utils/firestorePayload.ts"() {
-    "use strict";
-  }
-});
-
-// ../shared/utils/breakfastConfig.ts
-function nonNegativeFinite(value) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? Math.max(numeric, 0) : 0;
-}
-function safeString(value, fallback) {
-  return typeof value === "string" && value.length > 0 ? value : fallback;
-}
-function safeBool(value, fallback) {
-  return typeof value === "boolean" ? value : fallback;
-}
-function safeImageUrl(value) {
-  if (typeof value !== "string" || value.length === 0) return void 0;
-  try {
-    const parsed = new URL(value);
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return void 0;
-    return value;
-  } catch {
-    return void 0;
-  }
-}
-function safeMeals(meals) {
-  if (!Array.isArray(meals)) return [];
-  return meals.filter((entry) => Boolean(entry) && typeof entry === "object").filter((entry) => entry.isActive === true).map((entry) => ({
-    id: safeString(entry.id, ""),
-    name: safeString(entry.name, "Unnamed meal"),
-    description: safeString(entry.description, ""),
-    price: nonNegativeFinite(entry.price),
-    displayOrder: nonNegativeFinite(entry.displayOrder),
-    // `undefined` keys are dropped by JSON.stringify on the wire, so
-    // a meal without an image costs nothing in the public payload.
-    ...safeImageUrl(entry.imageUrl) ? { imageUrl: safeImageUrl(entry.imageUrl) } : {}
-  })).filter((entry) => entry.id.length > 0).sort((a, b3) => a.displayOrder - b3.displayOrder || a.name.localeCompare(b3.name));
-}
-function normalizeBreakfastConfig(source) {
-  const raw = source && typeof source === "object" ? source : {};
-  void ADMIN_ONLY_FIELDS;
-  return {
-    isEnabled: safeBool(raw.isEnabled, false),
-    // Per BR-10 (decision #244 reserved, 2026-10-14 — Phase 14):
-    // legacy / pre-BR-10 settings docs may not have a
-    // `cutoffsEnabled` field. Default to `true` (the
-    // pre-BR-10 behaviour — cut-offs always enforced).
-    // New writers always pass this explicitly.
-    cutoffsEnabled: safeBool(raw.cutoffsEnabled, true),
-    cutoffTime: safeString(raw.cutoffTime, "20:00"),
-    cutoffTimezone: safeString(raw.cutoffTimezone, "Asia/Manila"),
-    defaultMealInstructions: safeString(raw.defaultMealInstructions, ""),
-    meals: safeMeals(raw.meals)
-  };
-}
-var ADMIN_ONLY_FIELDS;
-var init_breakfastConfig = __esm({
-  "../shared/utils/breakfastConfig.ts"() {
-    "use strict";
-    ADMIN_ONLY_FIELDS = /* @__PURE__ */ new Set([
-      "frontDeskOverrideEnabled",
-      "servedGraceMinutes",
-      "updatedBy",
-      "updatedAt"
-    ]);
-  }
-});
-
-// ../shared/utils/otherAddOnCutoff.ts
-function computeOtherAddOnCutoffState(input) {
-  const { checkInDate, addOn, now = /* @__PURE__ */ new Date() } = input;
-  const checkInMs = Date.parse(`${checkInDate}T00:00:00Z`);
-  if (!Number.isFinite(checkInMs)) {
-    return {
-      isLocked: false,
-      cutoffAt: now.toISOString(),
-      minutesUntilCutoff: Number.MAX_SAFE_INTEGER
-    };
-  }
-  const leadHours = Math.min(168, Math.max(0, Number(addOn.cutoffHoursBeforeCheckIn) || 24));
-  const cutoffMs = checkInMs - leadHours * 36e5;
-  const cutoffAt = new Date(cutoffMs).toISOString();
-  const minutesUntilCutoff = Math.floor((cutoffMs - now.getTime()) / 6e4);
-  if (addOn.isEnabled === false) {
-    return {
-      isLocked: true,
-      cutoffAt,
-      minutesUntilCutoff: Number.MAX_SAFE_INTEGER,
-      reasonOrCutoff: "addons-disabled"
-    };
-  }
-  if (now.getTime() >= cutoffMs) {
-    return {
-      isLocked: true,
-      cutoffAt,
-      minutesUntilCutoff,
-      reasonOrCutoff: "cutoff-passed"
-    };
-  }
-  return { isLocked: false, cutoffAt, minutesUntilCutoff };
-}
-var init_otherAddOnCutoff = __esm({
-  "../shared/utils/otherAddOnCutoff.ts"() {
-    "use strict";
-  }
-});
-
-// ../shared/utils/otherAddOnDrafts.ts
-function otherAddOnDraftKey(date, addOnId) {
-  return `${date}-${String(addOnId).trim()}`;
-}
-function clampOtherAddOnQuantity(quantity, guestCount) {
-  const max = Math.max(0, Math.floor(Number(guestCount) || 0));
-  const raw = Math.floor(Number(quantity) || 0);
-  if (raw <= 0) return 0;
-  return Math.min(raw, max);
-}
-function buildOtherAddOnDraftSelections(input) {
-  const now = input.now ?? /* @__PURE__ */ new Date();
-  const stamp = now.toISOString();
-  const catalogById = /* @__PURE__ */ new Map();
-  for (const row2 of input.catalog || []) {
-    if (row2 && row2.id) catalogById.set(row2.id, row2);
-  }
-  const out = {};
-  for (const date of input.dates || []) {
-    const rows = [];
-    for (const addOn of catalogById.values()) {
-      const raw = input.quantities?.[otherAddOnDraftKey(date, addOn.id)];
-      const quantity = clampOtherAddOnQuantity(raw, input.guestCount);
-      if (quantity <= 0) continue;
-      rows.push({
-        addOnId: addOn.id,
-        nameSnapshot: addOn.name,
-        priceSnapshot: Math.max(0, Number(addOn.price) || 0),
-        quantity,
-        unitSnapshot: addOn.unit === "per-stay" ? "per-stay" : "per-person",
-        addedAt: stamp,
-        addedBy: "guest",
-        lastModifiedAt: stamp,
-        lastModifiedBy: "guest",
-        removedAt: null,
-        removedBy: null,
-        cutoffHoursBeforeCheckInSnapshot: Math.max(
-          0,
-          Math.min(168, Math.floor(Number(addOn.cutoffHoursBeforeCheckIn) || 24))
-        )
-      });
-    }
-    if (rows.length > 0) out[date] = rows;
-  }
-  return out;
-}
-function countOtherAddOnDraftSelections(selections) {
-  if (!selections) return 0;
-  let count = 0;
-  for (const date of Object.keys(selections)) {
-    const rows = selections[date];
-    if (!Array.isArray(rows)) continue;
-    for (const entry of rows) {
-      if (!entry) continue;
-      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
-      if (Math.max(0, Math.floor(Number(entry.quantity) || 0)) > 0) count += 1;
-    }
-  }
-  return count;
-}
-var init_otherAddOnDrafts = __esm({
-  "../shared/utils/otherAddOnDrafts.ts"() {
-    "use strict";
-  }
-});
-
-// ../shared/utils/addOns.ts
-function normalizeAddOn(raw, fallbackId) {
-  if (!raw || typeof raw !== "object") return null;
-  const obj = raw;
-  const id = String(obj.id || fallbackId || "").trim();
-  const name2 = String(obj.name || "").trim();
-  if (!id || !name2) return null;
-  const price = Math.max(0, Number(obj.price) || 0);
-  const unit = obj.unit === "per-stay" ? "per-stay" : "per-person";
-  const cutoffHoursBeforeCheckIn = Math.max(
-    0,
-    Math.min(168, Math.floor(Number(obj.cutoffHoursBeforeCheckIn) || 24))
-  );
-  return {
-    id,
-    name: name2,
-    description: String(obj.description || "").trim().slice(0, 500),
-    price,
-    unit,
-    isEnabled: obj.isEnabled !== false,
-    cutoffHoursBeforeCheckIn,
-    displayOrder: Math.floor(Number(obj.displayOrder) || 0),
-    updatedAt: obj.updatedAt || (/* @__PURE__ */ new Date()).toISOString(),
-    updatedBy: String(obj.updatedBy || "")
-  };
-}
-function normalizeOtherAddOnsEnabled(raw) {
-  if (raw === false) return false;
-  if (raw === true) return true;
-  if (typeof raw === "string") {
-    const normalized = raw.trim().toLowerCase();
-    if (normalized === "false") return false;
-    if (normalized === "true") return true;
-  }
-  return OTHER_ADD_ONS_ENABLED_DEFAULT;
-}
-function getEnabledAddOnsByHotel(addOns, hotelEnabled) {
-  if (!Array.isArray(addOns)) return [];
-  if (hotelEnabled === false) return [];
-  return addOns.filter((a) => a && a.isEnabled === true).slice().sort((a, b3) => {
-    const da3 = Math.floor(Number(a.displayOrder) || 0);
-    const db = Math.floor(Number(b3.displayOrder) || 0);
-    if (da3 !== db) return da3 - db;
-    return String(a.name || "").localeCompare(String(b3.name || ""));
-  });
-}
-function buildPublicAddOnsCatalog(input) {
-  const enabled = getEnabledAddOnsByHotel(input.rows, input.hotelEnabled !== false);
-  return {
-    success: true,
-    addOns: enabled.map((a) => ({
-      id: a.id,
-      name: a.name,
-      description: a.description,
-      price: a.price,
-      unit: a.unit,
-      cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn,
-      displayOrder: a.displayOrder
-    })),
-    otherAddOnsEnabled: input.hotelEnabled !== false,
-    preSeeded: input.usedFallback === true
-  };
-}
-function sortAddOnsByDisplayOrder(addOns) {
-  if (!Array.isArray(addOns)) return [];
-  return addOns.slice().sort((a, b3) => {
-    const da3 = Math.floor(Number(a.displayOrder) || 0);
-    const db = Math.floor(Number(b3.displayOrder) || 0);
-    if (da3 !== db) return da3 - db;
-    return String(a.name || "").localeCompare(String(b3.name || ""));
-  });
-}
-function isOtherAddOnBookingMutable(status) {
-  const normalized = String(status ?? "").trim().toLowerCase();
-  return normalized !== "checked-out" && normalized !== "cancelled";
-}
-var AIRPORT_TRANSFER_PRESEED, OTHER_ADD_ONS_ENABLED_DEFAULT, OTHER_ADD_ON_READ_ONLY_ERROR;
-var init_addOns = __esm({
-  "../shared/utils/addOns.ts"() {
-    "use strict";
-    AIRPORT_TRANSFER_PRESEED = {
-      name: "Airport transfer",
-      description: "One-way airport pickup or drop-off at Panglao International Airport (TAG). Driver meets you at arrivals with a name board. Price is per guest.",
-      price: 500,
-      unit: "per-person",
-      isEnabled: true,
-      cutoffHoursBeforeCheckIn: 24,
-      displayOrder: 10
-    };
-    OTHER_ADD_ONS_ENABLED_DEFAULT = true;
-    OTHER_ADD_ON_READ_ONLY_ERROR = "Booking is read-only.";
-  }
-});
-
-// ../shared/schemas/rewardsConfig.ts
-var LevelDefSchema, RewardsConfigSchema;
-var init_rewardsConfig = __esm({
-  "../shared/schemas/rewardsConfig.ts"() {
-    "use strict";
-    init_zod();
-    LevelDefSchema = external_exports.object({
-      id: external_exports.string().min(1).max(64),
-      name: external_exports.string().trim().min(1, "Tier name is required").max(24, "Tier name must be 24 characters or fewer"),
-      fromStays: external_exports.number().int("Threshold must be a whole number of stays").min(0, "Threshold cannot be negative"),
-      discountPct: external_exports.number().min(0, "Discount cannot be negative").max(100, "Discount cannot exceed 100%"),
-      pointsMultiplier: external_exports.number().min(0.01, "Multiplier must be greater than zero"),
-      perks: external_exports.string().trim().max(280, "Perks blurb must be 280 characters or fewer")
-    });
-    RewardsConfigSchema = external_exports.object({
-      // Phase 1 fields (required, matching seed defaults):
-      pointsEnabled: external_exports.boolean(),
-      earningMode: external_exports.enum(["per-booking", "per-spend"]),
-      pointsPerBooking: external_exports.number().int().min(0),
-      pointsPerHundred: external_exports.number().int().min(0),
-      memberDiscountEnabled: external_exports.boolean(),
-      memberDiscountPct: external_exports.number().min(0).max(100),
-      pointsRedemptionRate: external_exports.number().int().min(1, "Redemption rate must be at least 1"),
-      earlyCheckInEnabled: external_exports.boolean().optional(),
-      updatedAt: external_exports.unknown().optional(),
-      // Phase 2 fields (all optional, "off" by default):
-      welcomePoints: external_exports.number().int().min(0).max(1e5).optional(),
-      minPointsToRedeem: external_exports.number().int().min(0).max(1e6).optional(),
-      pointsCanPayUpToBillPct: external_exports.number().min(0, "Bill cap cannot be negative").max(100, "Bill cap cannot exceed 100%").optional(),
-      freeNightEvery: external_exports.number().int().min(0, "Free-night-every cannot be negative").max(365).optional(),
-      levels: external_exports.array(LevelDefSchema).optional(),
-      // Per PR #9 (2026-10-13): admin opt-in toggle for member
-      // self-service points redemption at booking checkout. Defaults
-      // to `false` so existing deployments preserve the front-desk-
-      // mediated redemption model. When `true`, the booking Step 3
-      // panel exposes an "Apply my points" input (member-authenticated
-      // endpoint). The server still owns all 7 redemption guards
-      // (min-redeem, bill cap, balance, one-per-booking, status
-      // pre-checkin, member match, booking exists) — the toggle only
-      // changes WHO clicks Apply, not WHICH guards run.
-      allowMemberPointsRedemption: external_exports.boolean().optional()
-    }).superRefine((value, ctx) => {
-      const levels = value.levels;
-      if (!levels || levels.length === 0) {
-        return;
-      }
-      const seen = /* @__PURE__ */ new Map();
-      levels.forEach((level, index) => {
-        const prior = seen.get(level.fromStays);
-        if (prior !== void 0) {
-          ctx.addIssue({
-            code: external_exports.ZodIssueCode.custom,
-            path: ["levels", index, "fromStays"],
-            message: `Duplicate threshold \u2014 also used on tier #${prior + 1}`
-          });
-        }
-        seen.set(level.fromStays, index);
-      });
-      const hasBase = levels.some((l3) => l3.fromStays === 0);
-      if (!hasBase) {
-        ctx.addIssue({
-          code: external_exports.ZodIssueCode.custom,
-          path: ["levels"],
-          message: "At least one tier must have a 0-stay threshold (the base tier)"
-        });
-      }
-    });
-  }
-});
-
-// ../shared/index.ts
-var shared_exports = {};
-__export(shared_exports, {
-  ACTIVE_BOOKING_STATUSES: () => ACTIVE_BOOKING_STATUSES,
-  ADDITIONAL_REQUEST_MAX_LENGTH: () => ADDITIONAL_REQUEST_MAX_LENGTH,
-  AIRPORT_TRANSFER_PRESEED: () => AIRPORT_TRANSFER_PRESEED,
-  ARRIVAL_WINDOW_HOURS: () => ARRIVAL_WINDOW_HOURS,
-  AboutContentSchema: () => AboutContentSchema,
-  AddOnCatalogAuditLogSchema: () => AddOnCatalogAuditLogSchema,
-  AddOnSchema: () => AddOnSchema,
-  AddRoomBookingSchema: () => AddRoomBookingSchema,
-  BOOKING_OCCUPYING_STATUSES: () => BOOKING_OCCUPYING_STATUSES,
-  BOOKING_REF_REGEX: () => BOOKING_REF_REGEX,
-  BOOKING_SOURCES: () => BOOKING_SOURCES,
-  BOOKING_STATUSES: () => BOOKING_STATUSES,
-  BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES: () => BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES,
-  BREAKFAST_RATE_LINE_LABEL: () => BREAKFAST_RATE_LINE_LABEL,
-  BREAKFAST_RATE_LINE_PREFIX: () => BREAKFAST_RATE_LINE_PREFIX,
-  BROAD_DISCOUNT_SCOPE: () => BROAD_DISCOUNT_SCOPE,
-  BookingDatesSchema: () => BookingDatesSchema,
-  BookingRevenueAllocationSchema: () => BookingRevenueAllocationSchema,
-  BrandingConfigSchema: () => BrandingConfigSchema,
-  BreakfastAuditEntrySchema: () => BreakfastAuditEntrySchema,
-  BreakfastConfigSchema: () => BreakfastConfigSchema,
-  BreakfastMealSchema: () => BreakfastMealSchema,
-  BreakfastRefundContextSchema: () => BreakfastRefundContextSchema,
-  BreakfastSelectionEntrySchema: () => BreakfastSelectionEntrySchema,
-  BreakfastServedEntrySchema: () => BreakfastServedEntrySchema,
-  CANCELLATION_SOURCES: () => CANCELLATION_SOURCES,
-  CHECK_IN_ELIGIBLE_STATUSES: () => CHECK_IN_ELIGIBLE_STATUSES,
-  CorporateContentSchema: () => CorporateContentSchema,
-  CreateRoomSchema: () => CreateRoomSchema,
-  DEFAULT_BED_SETUPS: () => DEFAULT_BED_SETUPS,
-  DEFAULT_BOOKING_HORIZON_DAYS: () => DEFAULT_BOOKING_HORIZON_DAYS,
-  DEFAULT_BOOKING_PREFERENCES: () => DEFAULT_BOOKING_PREFERENCES,
-  DEFAULT_BOOKING_SOURCES: () => DEFAULT_BOOKING_SOURCES,
-  DEFAULT_BREAKFAST_CUTOFF_TIME: () => DEFAULT_BREAKFAST_CUTOFF_TIME,
-  DEFAULT_BREAKFAST_CUTOFF_TIMEZONE: () => DEFAULT_BREAKFAST_CUTOFF_TIMEZONE,
-  DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES: () => DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES,
-  DEFAULT_CORPORATE_PAGE_CONTENT: () => DEFAULT_CORPORATE_PAGE_CONTENT,
-  DEFAULT_CORPORATE_PERKS: () => DEFAULT_CORPORATE_PERKS,
-  DEFAULT_IN_FLOW_HOLD_MINUTES: () => DEFAULT_IN_FLOW_HOLD_MINUTES,
-  DEFAULT_MAX_STAY_NIGHTS: () => DEFAULT_MAX_STAY_NIGHTS,
-  DEFAULT_PAYMENT_HOLD_WINDOW_HOURS: () => DEFAULT_PAYMENT_HOLD_WINDOW_HOURS,
-  DEFAULT_ROOM_TYPES: () => DEFAULT_ROOM_TYPES,
-  DEFAULT_STAY_NIGHTS: () => DEFAULT_STAY_NIGHTS,
-  DEFAULT_TERMS_VERSION: () => DEFAULT_TERMS_VERSION,
-  DEFAULT_UPLOAD_TIMEOUT_MS: () => DEFAULT_UPLOAD_TIMEOUT_MS,
-  DEFAULT_VAT_CONFIG: () => DEFAULT_VAT_CONFIG,
-  EXPIRED_HOLD_CANCELLATION_REASON: () => EXPIRED_HOLD_CANCELLATION_REASON,
-  ExtendBookingHoldSchema: () => ExtendBookingHoldSchema,
-  GUEST_CANCELLABLE_STATUSES: () => GUEST_CANCELLABLE_STATUSES,
-  GuestDetailsSchema: () => GuestDetailsSchema,
-  HOLD_ID_REGEX: () => HOLD_ID_REGEX,
-  HOUSEKEEPING_STATUSES: () => HOUSEKEEPING_STATUSES,
-  HomepageContentSchema: () => HomepageContentSchema,
-  HousekeepingStatusEnum: () => HousekeepingStatusEnum,
-  IN_FLOW_HOLD_EXTENSION_STATUSES: () => IN_FLOW_HOLD_EXTENSION_STATUSES,
-  IN_FLOW_HOLD_MINUTES: () => IN_FLOW_HOLD_MINUTES,
-  IN_FLOW_HOLD_STATUSES: () => IN_FLOW_HOLD_STATUSES,
-  KNOWN_CONTENT_ICONS: () => KNOWN_CONTENT_ICONS,
-  LEGACY_PAYMENT_METHOD_LABELS: () => LEGACY_PAYMENT_METHOD_LABELS,
-  LegacyPaymentMethodConfigSchema: () => LegacyPaymentMethodConfigSchema,
-  LevelDefSchema: () => LevelDefSchema,
-  MAX_ADVANCE_DAYS: () => MAX_ADVANCE_DAYS,
-  MAX_BREAKFAST_MEAL_IMAGE_BYTES: () => MAX_BREAKFAST_MEAL_IMAGE_BYTES,
-  MAX_FEATURED_ROOMS: () => MAX_FEATURED_ROOMS,
-  MAX_FEATURED_TYPES: () => MAX_FEATURED_TYPES,
-  MAX_IN_FLOW_HOLD_EXTENSIONS: () => MAX_IN_FLOW_HOLD_EXTENSIONS,
-  MAX_IN_FLOW_HOLD_MINUTES: () => MAX_IN_FLOW_HOLD_MINUTES,
-  MAX_MAX_STAY_NIGHTS: () => MAX_MAX_STAY_NIGHTS,
-  MAX_PAYMENT_HOLD_WINDOW_HOURS: () => MAX_PAYMENT_HOLD_WINDOW_HOURS,
-  MAX_PAYMENT_METHOD_QR_BYTES: () => MAX_PAYMENT_METHOD_QR_BYTES,
-  MAX_ROOM_TYPE_PHOTOS: () => MAX_ROOM_TYPE_PHOTOS,
-  MAX_STAY_NIGHTS: () => MAX_STAY_NIGHTS,
-  MIN_BREAKFAST_OVERRIDE_REASON_LENGTH: () => MIN_BREAKFAST_OVERRIDE_REASON_LENGTH,
-  MIN_IN_FLOW_HOLD_MINUTES: () => MIN_IN_FLOW_HOLD_MINUTES,
-  MIN_MAX_STAY_NIGHTS: () => MIN_MAX_STAY_NIGHTS,
-  MIN_PAYMENT_HOLD_WINDOW_HOURS: () => MIN_PAYMENT_HOLD_WINDOW_HOURS,
-  OTHER_ADD_ONS_ENABLED_DEFAULT: () => OTHER_ADD_ONS_ENABLED_DEFAULT,
-  OTHER_ADD_ON_READ_ONLY_ERROR: () => OTHER_ADD_ON_READ_ONLY_ERROR,
-  OtherAddOnAuditEntrySchema: () => OtherAddOnAuditEntrySchema,
-  OtherAddOnMarkRefundPaidSchema: () => OtherAddOnMarkRefundPaidSchema,
-  OtherAddOnMarkServedSchema: () => OtherAddOnMarkServedSchema,
-  OtherAddOnRefundContextSchema: () => OtherAddOnRefundContextSchema,
-  OtherAddOnSelectionEntrySchema: () => OtherAddOnSelectionEntrySchema,
-  OtherAddOnUpdateSchema: () => OtherAddOnUpdateSchema,
-  PAYMENT_REJECTED_FRESH_DEADLINE_FROM: () => PAYMENT_REJECTED_FRESH_DEADLINE_FROM,
-  PROTECTED_BOOKING_SOURCES: () => PROTECTED_BOOKING_SOURCES,
-  PROTECTED_PAYMENT_METHODS: () => PROTECTED_PAYMENT_METHODS,
-  PUBLIC_SITE_CONTENT_CACHE_BUST_KEY: () => PUBLIC_SITE_CONTENT_CACHE_BUST_KEY,
-  PUBLIC_SITE_CONTENT_CACHE_KEY: () => PUBLIC_SITE_CONTENT_CACHE_KEY,
-  PUBLIC_SITE_CONTENT_CACHE_TTL_MS: () => PUBLIC_SITE_CONTENT_CACHE_TTL_MS,
-  PaymentMethodConfigSchema: () => PaymentMethodConfigSchema,
-  PaymentMethodsArraySchema: () => PaymentMethodsArraySchema,
-  PaymentReviewSchema: () => PaymentReviewSchema,
-  PublicHeroSchema: () => PublicHeroSchema,
-  RESERVATION_ID_REGEX: () => RESERVATION_ID_REGEX,
-  RESERVATION_REF_REGEX: () => RESERVATION_REF_REGEX,
-  ROOM_STATUSES: () => ROOM_STATUSES,
-  RescheduleBookingSchema: () => RescheduleBookingSchema,
-  RewardsConfigSchema: () => RewardsConfigSchema,
-  RewardsContentSchema: () => RewardsContentSchema,
-  RoomStatusEnum: () => RoomStatusEnum,
-  STAFF_CANCELLABLE_STATUSES: () => STAFF_CANCELLABLE_STATUSES,
-  SUPPORTED_PAYMENT_METHODS: () => SUPPORTED_PAYMENT_METHODS,
-  SeoPublishSchema: () => SeoPublishSchema,
-  SetLouReceivedSchema: () => SetLouReceivedSchema,
-  StaffOtherAddOnUpdateSchema: () => StaffOtherAddOnUpdateSchema,
-  StartBookingHoldSchema: () => StartBookingHoldSchema,
-  TERMINAL_CANCELLATION_STATUSES: () => TERMINAL_CANCELLATION_STATUSES,
-  TERMS_BODY_MAX_LENGTH: () => TERMS_BODY_MAX_LENGTH,
-  UNSUPPORTED_PAYMENT_METHODS: () => UNSUPPORTED_PAYMENT_METHODS,
-  VERSION: () => VERSION2,
-  WalkinBookingSchema: () => WalkinBookingSchema,
-  WalkinGuestDetailsSchema: () => WalkinGuestDetailsSchema,
-  WalkinRoomLineSchema: () => WalkinRoomLineSchema,
-  WebsiteContentSchema: () => WebsiteContentSchema,
-  __test__: () => __test__,
-  addDaysToIsoDate: () => addDaysToIsoDate,
-  applyRoomTypeDefaults: () => applyRoomTypeDefaults,
-  applyVoucherDiscount: () => applyVoucherDiscount,
-  assertBookingFinanceInvariant: () => assertBookingFinanceInvariant,
-  assertBookingRevenueAllocationInvariant: () => assertBookingRevenueAllocationInvariant,
-  assertRevenueFinanceInvariant: () => assertRevenueFinanceInvariant,
-  buildArrivalTimeOptions: () => buildArrivalTimeOptions,
-  buildBreakfastRateBreakdownLines: () => buildBreakfastRateBreakdownLines,
-  buildBreakfastSlotId: () => buildBreakfastSlotId,
-  buildBreakfastSlotKey: () => buildBreakfastSlotKey,
-  buildBreakfastSlotKeyForBase: () => buildBreakfastSlotKeyForBase,
-  buildCancellationLiabilitySnapshot: () => buildCancellationLiabilitySnapshot,
-  buildGoogleCalendarUrl: () => buildGoogleCalendarUrl,
-  buildIcsContent: () => buildIcsContent,
-  buildOtherAddOnDraftSelections: () => buildOtherAddOnDraftSelections,
-  buildOtherAddOnSelectionKey: () => buildOtherAddOnSelectionKey,
-  buildPublicAddOnsCatalog: () => buildPublicAddOnsCatalog,
-  bustPublicSiteContentCache: () => bustPublicSiteContentCache,
-  calculateBookingTotal: () => calculateBookingTotal,
-  calculateBreakfastMealsTotal: () => calculateBreakfastMealsTotal,
-  calculateDiscountChain: () => calculateDiscountChain,
-  calculateExtraBedAddOn: () => calculateExtraBedAddOn,
-  calculatePercentDiscount: () => calculatePercentDiscount,
-  calculatePointsRedemptionValue: () => calculatePointsRedemptionValue,
-  calculatePointsWithMultiplier: () => calculatePointsWithMultiplier,
-  calculateSeasonalAwareRoomBreakdown: () => calculateSeasonalAwareRoomBreakdown,
-  calculateSeasonalAwareRoomTotal: () => calculateSeasonalAwareRoomTotal,
-  calculateVatBreakdown: () => calculateVatBreakdown,
-  calculateVoucherBase: () => calculateVoucherBase,
-  calculateVoucherDiscount: () => calculateVoucherDiscount,
-  canExtendInFlowHold: () => canExtendInFlowHold,
-  checkExtraBedInventory: () => checkExtraBedInventory,
-  clampIntegerInRange: () => clampIntegerInRange,
-  clampOtherAddOnQuantity: () => clampOtherAddOnQuantity,
-  clearCache: () => clearCache,
-  clearSweepHistory: () => clearSweepHistory,
-  compressImageFile: () => compressImageFile,
-  computeBookingFolio: () => computeBookingFolio,
-  computeBookingRevenueAllocation: () => computeBookingRevenueAllocation,
-  computeBreakfastAdjustedTotalPrice: () => computeBreakfastAdjustedTotalPrice,
-  computeBreakfastCutoffState: () => computeBreakfastCutoffState,
-  computeCancellationLiabilityState: () => computeCancellationLiabilityState,
-  computeExtendedInFlowHoldExpiresAt: () => computeExtendedInFlowHoldExpiresAt,
-  computeHoldExpiresAt: () => computeHoldExpiresAt,
-  computeInFlowHoldExpiresAt: () => computeInFlowHoldExpiresAt,
-  computeNextBookingPaidAmount: () => computeNextBookingPaidAmount,
-  computeOtherAddOnCutoffState: () => computeOtherAddOnCutoffState,
-  computeRequestFingerprint: () => computeRequestFingerprint,
-  computeReservationActualDateRange: () => computeReservationActualDateRange,
-  computeReservationAggregatePaymentStatus: () => computeReservationAggregatePaymentStatus,
-  computeServerFolioTotals: () => computeServerFolioTotals,
-  countExtraBedsInUse: () => countExtraBedsInUse,
-  countOtherAddOnDraftSelections: () => countOtherAddOnDraftSelections,
-  createCancellationPolicySnapshot: () => createCancellationPolicySnapshot,
-  createFailureBackoffState: () => createFailureBackoffState,
-  datesOverlap: () => datesOverlap,
-  deriveReservationCounters: () => deriveReservationCounters,
-  deriveRoomTypeCapacityFit: () => deriveRoomTypeCapacityFit,
-  describeMaxStayNights: () => describeMaxStayNights,
-  detectBreakfastSlotIndexBase: () => detectBreakfastSlotIndexBase,
-  diffNightsBetweenIso: () => diffNightsBetweenIso,
-  downloadIcsFile: () => downloadIcsFile,
-  eachStayNight: () => eachStayNight,
-  enumerateStayServiceDates: () => enumerateStayServiceDates,
-  evaluateCancelPreview: () => evaluateCancelPreview,
-  evaluateCancellation: () => evaluateCancellation,
-  fadeIn: () => fadeIn,
-  fadeUp: () => fadeUp,
-  generateBookingRef: () => generateBookingRef,
-  generateFreeNightVoucherCode: () => generateFreeNightVoucherCode,
-  generateHoldId: () => generateHoldId,
-  generateLookupToken: () => generateLookupToken,
-  generateMemberNumber: () => generateMemberNumber,
-  generateReservationId: () => generateReservationId,
-  generateStoreOrderRef: () => generateStoreOrderRef,
-  getBookingRevenueStreams: () => getBookingRevenueStreams,
-  getBookingVatBreakdown: () => getBookingVatBreakdown,
-  getCheckInInstant: () => getCheckInInstant,
-  getCheckInReadiness: () => getCheckInReadiness,
-  getDateKeyInTimezone: () => getDateKeyInTimezone,
-  getEffectiveStorePaymentMethods: () => getEffectiveStorePaymentMethods,
-  getEffectiveVatRate: () => getEffectiveVatRate,
-  getEnabledAddOnsByHotel: () => getEnabledAddOnsByHotel,
-  getLatestPaymentReference: () => getLatestPaymentReference,
-  getLegacyCancellationPolicy: () => getLegacyCancellationPolicy,
-  getLockedManualNightlyRate: () => getLockedManualNightlyRate,
-  getManilaDateInfo: () => getManilaDateInfo,
-  getNumNights: () => getNumNights,
-  getReservationFolioSummary: () => getReservationFolioSummary,
-  getReservationRevenueStreams: () => getReservationRevenueStreams,
-  getSeasonalRateForNight: () => getSeasonalRateForNight,
-  getSweepHistory: () => getSweepHistory,
-  getWeekendNightCount: () => getWeekendNightCount,
-  hasAnyOtherAddOns: () => hasAnyOtherAddOns,
-  inFlowHoldStayMatches: () => inFlowHoldStayMatches,
-  isBookingOccupyingRoom: () => isBookingOccupyingRoom,
-  isBreakfastRateLine: () => isBreakfastRateLine,
-  isDateInStayWindow: () => isDateInStayWindow,
-  isFreeNightVoucher: () => isFreeNightVoucher,
-  isInFlowHoldActive: () => isInFlowHoldActive,
-  isOtherAddOnBookingMutable: () => isOtherAddOnBookingMutable,
-  isPaymentVerified: () => isPaymentVerified,
-  isRewardVoucher: () => isRewardVoucher,
-  isUnlimitedStay: () => isUnlimitedStay,
-  isValidBookingRef: () => isValidBookingRef,
-  isValidIsoDate: () => isValidIsoDate,
-  isValidLookupToken: () => isValidLookupToken,
-  isValidReservationId: () => isValidReservationId,
-  isValidReservationRef: () => isValidReservationRef,
-  isValidStayRange: () => isValidStayRange,
-  isVatEnabled: () => isVatEnabled,
-  isWeekendNight: () => isWeekendNight,
-  mapBookingStatusToReservationPaymentStatus: () => mapBookingStatusToReservationPaymentStatus,
-  nextSequence: () => nextSequence,
-  normalizeAddOn: () => normalizeAddOn,
-  normalizeBreakfastConfig: () => normalizeBreakfastConfig,
-  normalizeBreakfastSelections: () => normalizeBreakfastSelections,
-  normalizeDiscountScope: () => normalizeDiscountScope,
-  normalizeInFlowHoldMinutes: () => normalizeInFlowHoldMinutes,
-  normalizeMaxChildren: () => normalizeMaxChildren,
-  normalizeOtherAddOnsEnabled: () => normalizeOtherAddOnsEnabled,
-  normalizePaymentHoldWindowHours: () => normalizePaymentHoldWindowHours,
-  normalizeSeasonalRateOverride: () => normalizeSeasonalRateOverride,
-  normalizeSeasonalRateOverrides: () => normalizeSeasonalRateOverrides,
-  normalizeStayRange: () => normalizeStayRange,
-  normalizeVatConfig: () => normalizeVatConfig,
-  otherAddOnBreakdownByDate: () => otherAddOnBreakdownByDate,
-  otherAddOnDraftKey: () => otherAddOnDraftKey,
-  parseBreakfastSlotKey: () => parseBreakfastSlotKey,
-  parseCheckInTime: () => parseCheckInTime,
-  parseCheckInTimeToPair: () => parseCheckInTimeToPair,
-  parseOtherAddOnSelectionKey: () => parseOtherAddOnSelectionKey,
-  raceUploadWithTimeout: () => raceUploadWithTimeout,
-  readCacheWithTtl: () => readCacheWithTtl,
-  readPublicSiteContentBustTimestamp: () => readPublicSiteContentBustTimestamp,
-  rebuildBookingRevenueAllocation: () => rebuildBookingRevenueAllocation,
-  recomputeBreakfastTotal: () => recomputeBreakfastTotal,
-  recomputeOtherAddOnTotal: () => recomputeOtherAddOnTotal,
-  recordSweepResult: () => recordSweepResult,
-  redateBreakfastSelections: () => redateBreakfastSelections,
-  redateOtherAddOnSelections: () => redateOtherAddOnSelections,
-  requiredExtraBedsFor: () => requiredExtraBedsFor,
-  resolveBookingPreferenceValues: () => resolveBookingPreferenceValues,
-  resolveBreakfastSlotGuestIndex: () => resolveBreakfastSlotGuestIndex,
-  resolveCurrentLevel: () => resolveCurrentLevel,
-  resolveMaxStayNights: () => resolveMaxStayNights,
-  resolvePaymentMethodLabel: () => resolvePaymentMethodLabel,
-  resolveRangeSelection: () => resolveRangeSelection,
-  roundToTwoDecimals: () => roundToTwoDecimals,
-  runBackfill: () => runBackfill,
-  scaleIn: () => scaleIn,
-  serviceDateFromSlotKey: () => serviceDateFromSlotKey,
-  shouldAutoCancelSelection: () => shouldAutoCancelSelection,
-  slideInBottom: () => slideInBottom,
-  slideInLeft: () => slideInLeft,
-  slideInRight: () => slideInRight,
-  sortAddOnsByDisplayOrder: () => sortAddOnsByDisplayOrder,
-  staggerChild: () => staggerChild,
-  staggerContainer: () => staggerContainer,
-  startOfDayUtc: () => startOfDayUtc,
-  stripUndefinedValues: () => stripUndefinedValues,
-  subscribeToPublicSiteContentBust: () => subscribeToPublicSiteContentBust,
-  sumAttributedLedgerEntryAmounts: () => sumAttributedLedgerEntryAmounts,
-  sumBreakfastRateLines: () => sumBreakfastRateLines,
-  sumLedgerEntryAmounts: () => sumLedgerEntryAmounts,
-  sweepBookingsStorage: () => sweepBookingsStorage,
-  toDateOrNow: () => toDateOrNow,
-  toDateOrNull: () => toDateOrNull,
-  toUtcDateKey: () => toUtcDateKey,
-  validateCorporateCode: () => validateCorporateCode,
-  validatePointsRedemption: () => validatePointsRedemption,
-  validateVoucher: () => validateVoucher,
-  writeCache: () => writeCache
-});
-var init_shared = __esm({
-  "../shared/index.ts"() {
-    "use strict";
-    init_VERSION();
-    init_animations();
-    init_constants();
-    init_booking();
-    init_paymentMethod();
-    init_room();
-    init_websiteContent();
-    init_seo();
-    init_types3();
-    init_bookingDates();
-    init_stayRange();
-    init_bookingFolio();
-    init_bookingAddOns();
-    init_bookingDiscounts();
-    init_bookingOccupancy();
-    init_bookingInFlowHold();
-    init_extraBedInventory();
-    init_bookingVat();
-    init_cache();
-    init_calendar();
-    init_checkin();
-    init_dates();
-    init_images();
-    init_points();
-    init_paymentMethodLabel();
-    init_paymentReference();
-    init_paymentVerification();
-    init_pricing();
-    init_publicSiteCache();
-    init_references();
-    init_reservationFingerprint();
-    init_roomTypes();
-    init_seasonalRates();
-    init_storageJanitor();
-    init_storePaymentMethods();
-    init_vouchers();
-    init_corporate_codes();
-    init_failureBackoff();
-    init_financeInvariants();
-    init_cancellation();
-    init_uploads();
-    init_bookingPreferences();
-    init_breakfastCutoff();
-    init_breakfastTotal();
-    init_breakfastSlotKey();
-    init_bookingAddOnReschedule();
-    init_bookingPaidAmount();
-    init_firestorePayload();
-    init_breakfastConfig();
-    init_otherAddOnCutoff();
-    init_otherAddOnTotal();
-    init_otherAddOnDrafts();
-    init_addOns();
-    init_money();
-    init_rewardsConfig();
-  }
-});
-
 // server/lib/notifications.ts
 var notifications_exports = {};
 __export(notifications_exports, {
@@ -229837,10 +229885,55 @@ var init_email = __esm({
 // server/apiRouter.ts
 var apiRouter_exports = {};
 __export(apiRouter_exports, {
-  default: () => handler
+  default: () => handler,
+  enforceBotGate: () => enforceBotGate
 });
 module.exports = __toCommonJS(apiRouter_exports);
 init_firebase_admin();
+
+// server/lib/botProtection-settings.ts
+init_firebase_admin();
+init_shared();
+var CACHE_TTL_MS = 1e4;
+var cachedMode = null;
+var cachedAt = 0;
+var lastLoggedMode = null;
+async function loadBotProtectionMode() {
+  const now = Date.now();
+  if (cachedMode !== null && now - cachedAt < CACHE_TTL_MS) {
+    return cachedMode;
+  }
+  let mode = BOT_PROTECTION_MODE_DEFAULT;
+  try {
+    const snap = await adminDb.collection("settings").doc("hotelConfig").get();
+    if (snap.exists) {
+      mode = normalizeBotProtectionMode(snap.data()?.botProtectionMode);
+    }
+  } catch (err) {
+    console.error(
+      "Failed to read settings/hotelConfig.botProtectionMode; keeping bot protection enabled:",
+      err
+    );
+    mode = BOT_PROTECTION_MODE_DEFAULT;
+  }
+  cachedMode = mode;
+  cachedAt = Date.now();
+  logModeOnce(mode);
+  return mode;
+}
+function logModeOnce(mode) {
+  if (lastLoggedMode === mode) return;
+  lastLoggedMode = mode;
+  if (mode === "disabled") {
+    console.warn(
+      "[bot-protection] Bot protection is DISABLED for this hotel \u2014 every public guest write endpoint is accepting requests without a Turnstile token."
+    );
+  } else {
+    console.log("[bot-protection] Bot protection mode: turnstile.");
+  }
+}
+
+// server/apiRouter.ts
 init_email();
 init_notifications();
 
@@ -230413,7 +230506,7 @@ function trimOrNull(input, maxLen) {
 function computeRefundPaidAmountDelta(currentPaidAmount, refundAmountPositive) {
   const safe = Number.isFinite(currentPaidAmount) ? currentPaidAmount : 0;
   const safeRefund = Number.isFinite(refundAmountPositive) ? refundAmountPositive : 0;
-  return safe - Math.max(0, safeRefund);
+  return Math.max(0, safe - Math.max(0, safeRefund));
 }
 function resolveRefundDocParent(db, bookingId, category, reservationId) {
   const bookingRef2 = db.collection("bookings").doc(bookingId);
@@ -231362,6 +231455,16 @@ function isExpectedBookingUploadPath(path, bookingId, folder) {
 function sumLedgerAmounts(snapshot) {
   return snapshot.docs.reduce((sum, docSnap) => sum + Number(docSnap.data()?.amount || 0), 0);
 }
+function sumRefundAmounts(snapshot) {
+  return snapshot.docs.reduce((sum, docSnap) => {
+    const data = docSnap.data() || {};
+    const amount = Number(data.amount || 0);
+    const isRefund = data.type === "refund" || amount < 0;
+    const status = typeof data.status === "string" ? data.status.trim().toLowerCase() : "";
+    const isPendingRefund = isRefund && status !== "paid" && status !== "processed";
+    return isPendingRefund ? sum : sum + amount;
+  }, 0);
+}
 function deriveSourceNote(source) {
   switch (source) {
     case "walk-in":
@@ -231466,7 +231569,7 @@ async function readTransactionalFolioSnapshot(input) {
     (sum, snapshots) => sum + sumBilledAddToBillOrders(snapshots.storeOrdersSnapshot),
     0
   );
-  const collectedTotal = sumLedgerAmounts(reservationPaymentsSnapshot) + sumLedgerAmounts(reservationRefundsSnapshot) + transitionalCollectedTotal;
+  const collectedTotal = sumLedgerAmounts(reservationPaymentsSnapshot) + sumRefundAmounts(reservationRefundsSnapshot) + transitionalCollectedTotal;
   const incidentalTotal = sumLedgerAmounts(reservationChargesSnapshot) + transitionalIncidentalTotal;
   const totalPrice = Number(reservationDoc.data()?.totalPrice) || 0;
   const otherAddOnTotal = childBookingsSnapshot.docs.reduce(
@@ -231490,6 +231593,18 @@ async function readTransactionalFolioSnapshot(input) {
     ...totals,
     source: "reservation-subcollection"
   };
+}
+async function resolvePaidAmountForLiability(input) {
+  const { transaction, bookingId, bookingData } = input;
+  const seeded = Number(bookingData?.paidAmount);
+  if (Number.isFinite(seeded) && seeded > 0) return seeded;
+  const folioSnapshot = await readTransactionalFolioSnapshot({
+    transaction,
+    bookingRef: adminDb.collection("bookings").doc(String(bookingId)),
+    bookingId,
+    bookingData
+  });
+  return Math.max(0, Number(folioSnapshot.collectedTotal) || 0);
 }
 function calculateCheckoutPoints(totalPrice, rewardsConfig) {
   if (!rewardsConfig || rewardsConfig.pointsEnabled === false) return 0;
@@ -233356,7 +233471,7 @@ async function handleCreateBooking(req, res) {
             addOnNet: childPricing.reduce(
               (sum, pricing) => sum + (Number(pricing.extraBedTotal) || 0),
               0
-            ),
+            ) + validatedOtherAddOnTotal,
             deductionNet: allocatedDeductions.reduce(
               (sum, deduction) => sum + deduction.amounts.reduce(
                 (deductionSum, amount) => deductionSum + (Number(amount) || 0),
@@ -233364,9 +233479,15 @@ async function handleCreateBooking(req, res) {
               ),
               0
             ) + (Number(selfRedeemedValue) || 0),
-            totalNet: finalTotalPrice
+            // Per MRB-11b (QA pass 2026-10-25): the BR-12 other
+            // add-ons sit on top of the room bill (OCT-FOL-01), so the
+            // aggregate's total is the reservation's WHOLE bill. Before
+            // this the allocation described only the room bill and every
+            // revenue stream that read it under-reported by exactly this
+            // amount.
+            totalNet: round2(finalTotalPrice + validatedOtherAddOnTotal)
           },
-          finalTotalPrice
+          round2(finalTotalPrice + validatedOtherAddOnTotal)
         ),
         source: corporateDetails.isCorporate ? "corporate" : "online",
         isCorporate: corporateDetails.isCorporate,
@@ -233527,14 +233648,20 @@ async function handleCreateBooking(req, res) {
               {
                 roomNet: pricingForRoom.roomTotal,
                 breakfastNet: pricingForRoom.breakfastTotal,
-                addOnNet: pricingForRoom.extraBedTotal,
+                // Per MRB-11b (QA pass 2026-10-25): the BR-12 other
+                // add-ons join the add-on stream. They are attributed
+                // to the FIRST child only — the create path spreads
+                // them onto every child doc, so attributing them to
+                // each would multiply them in the reservation
+                // aggregate.
+                addOnNet: round2(pricingForRoom.extraBedTotal) + (bookingIdx === 0 ? validatedOtherAddOnTotal : 0),
                 deductionNet: allocatedDeductions.reduce(
                   (sum, deduction) => sum + (Number(deduction.amounts[bookingIdx]) || 0),
                   0
                 ),
-                totalNet: pricingForRoom.totalPrice
+                totalNet: round2(pricingForRoom.totalPrice) + (bookingIdx === 0 ? validatedOtherAddOnTotal : 0)
               },
-              pricingForRoom.totalPrice
+              round2(pricingForRoom.totalPrice) + (bookingIdx === 0 ? validatedOtherAddOnTotal : 0)
             ),
             reservationPosition: bookingIdx + 1,
             reservationRoomCount: assignedRooms.length,
@@ -234469,11 +234596,15 @@ async function handleCreateWalkin(req, res) {
             {
               roomNet: hasManualOverride ? linePricingSubtotal : line.roomTotal,
               breakfastNet: hasManualOverride ? 0 : line.breakfastTotal,
-              addOnNet: hasManualOverride ? 0 : line.extraBedTotal,
+              // Per MRB-11b (QA pass 2026-10-25): the BR-12 other
+              // add-ons join the add-on stream — attributed to the
+              // FIRST line only, so the walk-in aggregate counts them
+              // once.
+              addOnNet: (hasManualOverride ? 0 : line.extraBedTotal) + (lineIdx === 0 ? walkinOtherAddOnTotal : 0),
               deductionNet: lineChainResult.seniorDeduction + lineChainResult.voucherDeduction,
-              totalNet: lineTotal
+              totalNet: round2(lineTotal) + (lineIdx === 0 ? walkinOtherAddOnTotal : 0)
             },
-            lineTotal
+            round2(lineTotal) + (lineIdx === 0 ? walkinOtherAddOnTotal : 0)
           ),
           rateBreakdown: buildRateBreakdown({
             roomLines: hasManualOverride ? [{
@@ -234747,9 +234878,9 @@ async function handleCreateWalkin(req, res) {
               (sum, line) => sum + (Number(line.revenueAllocation?.deductionNet) || 0),
               0
             ),
-            totalNet: finalTotalPrice
+            totalNet: round2(finalTotalPrice + walkinOtherAddOnTotal)
           },
-          finalTotalPrice
+          round2(finalTotalPrice + walkinOtherAddOnTotal)
         ),
         source: "walk-in",
         isCorporate: false,
@@ -235066,7 +235197,13 @@ async function handleApplyBookingDiscount(req, res) {
         revenueAllocation: rebuildBookingRevenueAllocation({
           existingAllocation: booking.revenueAllocation,
           grossSubtotal: subtotal,
-          totalPrice
+          totalPrice,
+          // Per MRB-11b (QA pass 2026-10-25): the BR-12 other add-ons
+          // sit on top of the room bill, so the allocation's total is
+          // the booking's WHOLE bill. This path does not touch the
+          // add-ons, so the previous amount is the same one.
+          otherAddOnTotal: Number(booking.otherAddOnTotal) || 0,
+          previousOtherAddOnTotal: Number(booking.otherAddOnTotal) || 0
         }),
         updatedAt: /* @__PURE__ */ new Date()
       };
@@ -235219,7 +235356,12 @@ async function handleApplyReservationDiscount(req, res) {
           revenueAllocation: rebuildBookingRevenueAllocation({
             existingAllocation: booking.revenueAllocation,
             grossSubtotal: subtotal,
-            totalPrice
+            totalPrice,
+            // Per MRB-11b (QA pass 2026-10-25) — the BR-12 other
+            // add-ons sit on top of the room bill. This path does not
+            // touch the add-ons, so the previous amount is the same one.
+            otherAddOnTotal: Number(booking.otherAddOnTotal) || 0,
+            previousOtherAddOnTotal: Number(booking.otherAddOnTotal) || 0
           }),
           updatedAt: /* @__PURE__ */ new Date()
         };
@@ -235333,7 +235475,12 @@ async function handleRemoveVoucher(req, res) {
         revenueAllocation: rebuildBookingRevenueAllocation({
           existingAllocation: bookingData.revenueAllocation,
           grossSubtotal: Number(originalTotalPrice) || 0,
-          totalPrice: restoredTotalPrice
+          totalPrice: restoredTotalPrice,
+          // Per MRB-11b (QA pass 2026-10-25) — the BR-12 other
+          // add-ons sit on top of the room bill. This path does not
+          // touch the add-ons, so the previous amount is the same one.
+          otherAddOnTotal: Number(bookingData.otherAddOnTotal) || 0,
+          previousOtherAddOnTotal: Number(bookingData.otherAddOnTotal) || 0
         }),
         updatedAt: /* @__PURE__ */ new Date()
       };
@@ -235415,7 +235562,12 @@ async function handleRejectDiscount(req, res) {
       revenueAllocation: rebuildBookingRevenueAllocation({
         existingAllocation: bookingData.revenueAllocation,
         grossSubtotal: Number(originalTotalPrice) || 0,
-        totalPrice: restoredTotalPrice
+        totalPrice: restoredTotalPrice,
+        // Per MRB-11b (QA pass 2026-10-25) — the BR-12 other add-ons
+        // sit on top of the room bill. This path does not touch the
+        // add-ons, so the previous amount is the same one.
+        otherAddOnTotal: Number(bookingData.otherAddOnTotal) || 0,
+        previousOtherAddOnTotal: Number(bookingData.otherAddOnTotal) || 0
       }),
       updatedAt: /* @__PURE__ */ new Date()
     };
@@ -235650,9 +235802,13 @@ async function handleRejectPayment(req, res) {
     return res.status(500).json({ success: false, error: message });
   }
 }
-function redateAddOnsForCancel(input) {
+async function redateAddOnsForCancel(input) {
   const { transaction, bookingId, bookingRef: bookingRef2, booking, today, actorUid, actorRole } = input;
-  const paidAmount = Number(booking.paidAmount) || 0;
+  const paidAmount = await resolvePaidAmountForLiability({
+    transaction,
+    bookingId,
+    bookingData: booking
+  });
   const redatedBreakfast = redateBreakfastSelections({
     mode: "cancel",
     window: { checkIn: String(booking.checkIn || ""), checkOut: String(booking.checkOut || "") },
@@ -235968,7 +236124,7 @@ async function handleCancelBooking(req, res) {
         );
         for (const child of children) {
           if (!cancellableIds.has(child.id)) continue;
-          const redated = redateAddOnsForCancel({
+          const redated = await redateAddOnsForCancel({
             transaction,
             bookingId: child.id,
             bookingRef: String(child.data.bookingRef || ""),
@@ -236132,7 +236288,7 @@ async function handleCancelBooking(req, res) {
         const perChildCancelPolicyRefunded = Boolean(
           liabilitySnapshot && Number(liabilitySnapshot.policyResult?.policyRefund) > 0
         );
-        const perChildRedated = redateAddOnsForCancel({
+        const perChildRedated = await redateAddOnsForCancel({
           transaction,
           bookingId: bookingDocumentRef.id,
           bookingRef: String(freshBooking.bookingRef || ""),
@@ -238550,14 +238706,25 @@ async function handleRescheduleBooking(req, res) {
         window: { checkIn, checkOut },
         today: todayKey,
         selections: booking.breakfastSelections,
-        paidAmount: Number(booking.paidAmount) || 0
+        // Per FIN-PAID-AMOUNT-SOURCE (QA pass 2026-10-24) — the
+        // denormalized field can be negative or absent; fall back to the
+        // ledger so a PAID removal still opens its refund liability.
+        paidAmount: await resolvePaidAmountForLiability({
+          transaction,
+          bookingId,
+          bookingData: booking
+        })
       });
       const redatedOtherAddOns = redateOtherAddOnSelections({
         mode: "reschedule",
         window: { checkIn, checkOut },
         today: todayKey,
         selections: booking.otherAddOnSelections,
-        paidAmount: Number(booking.paidAmount) || 0
+        paidAmount: await resolvePaidAmountForLiability({
+          transaction,
+          bookingId,
+          bookingData: booking
+        })
       });
       const preservedExtraBedCount = Number(booking.extraBedCount) || 0;
       const preservedExtraBedRate = Number(booking.extraBedRate) || 0;
@@ -238696,11 +238863,15 @@ async function handleRescheduleBooking(req, res) {
           {
             roomNet: roomTotal,
             breakfastNet: breakfastTotal,
-            addOnNet: extraBedTotal,
+            // Per MRB-11b (QA pass 2026-10-25): the BR-12 other
+            // add-ons join the add-on stream — they sit on top of the
+            // room bill (OCT-FOL-01), so the allocation's total is the
+            // booking's WHOLE bill.
+            addOnNet: round2(extraBedTotal) + redatedOtherAddOns.total,
             deductionNet: rescheduleChain.seniorDeduction + rescheduleChain.voucherDeduction + rescheduleChain.memberDeduction + (Number(booking.pointsRedeemedValue) || 0),
-            totalNet: finalTotalPrice
+            totalNet: round2(finalTotalPrice) + redatedOtherAddOns.total
           },
-          finalTotalPrice
+          round2(finalTotalPrice) + redatedOtherAddOns.total
         ),
         rescheduleHistory: [...Array.isArray(booking.rescheduleHistory) ? booking.rescheduleHistory : [], rescheduleEntry],
         // Per OCT-H8 (2026-10-20, decision #288): the re-dated
@@ -239438,10 +239609,12 @@ async function handleAddRoomToReservation(req, res) {
         const baseRoomNet = existingAlloc ? Number(existingAlloc.roomNet || 0) : Number(reservation.totalPrice || 0);
         const baseBreakfastNet = existingAlloc ? Number(existingAlloc.breakfastNet || 0) : 0;
         const baseAddOnNet = existingAlloc ? Number(existingAlloc.addOnNet || 0) : 0;
+        const baseTotalNet = existingAlloc ? Number(existingAlloc.totalNet || 0) : Number(reservation.totalPrice || 0);
         const roomNet = baseRoomNet + newChildRevenueAllocation.roomNet;
         const breakfastNet = baseBreakfastNet + newChildRevenueAllocation.breakfastNet;
         const addOnNet = baseAddOnNet + newChildRevenueAllocation.addOnNet;
         const grossTotal = roomNet + breakfastNet + addOnNet;
+        const totalNet = baseTotalNet + newChildRevenueAllocation.totalNet;
         return assertBookingRevenueAllocationInvariant(
           {
             roomNet,
@@ -239452,10 +239625,10 @@ async function handleAddRoomToReservation(req, res) {
             // sum always ties to the total the header persists
             // (in the normal case this is byte-identical to
             // `existing.deductionNet + newChild.deductionNet`).
-            deductionNet: grossTotal - newTotalPrice,
-            totalNet: newTotalPrice
+            deductionNet: grossTotal - totalNet,
+            totalNet
           },
-          newTotalPrice
+          totalNet
         );
       })();
       const newChildrenDates = [
@@ -245132,10 +245305,21 @@ async function handleUpdateAddOns(req, res) {
       }
       newTotal = recomputeOtherAddOnTotal(next);
       newHasAny = hasAnyOtherAddOns(next);
+      const previousOtherAddOnTotal = recomputeOtherAddOnTotal(
+        liveBooking.otherAddOnSelections || {}
+      );
+      const revenueAllocation = rebuildBookingRevenueAllocation({
+        existingAllocation: liveBooking.revenueAllocation,
+        grossSubtotal: Number(liveBooking.originalTotalPrice) || 0,
+        totalPrice: Number(liveBooking.totalPrice) || 0,
+        otherAddOnTotal: newTotal,
+        previousOtherAddOnTotal
+      });
       transaction.update(bookingRefInTx, {
         otherAddOnSelections: next,
         otherAddOnTotal: newTotal,
         hasAnyOtherAddOns: newHasAny,
+        revenueAllocation,
         updatedAt: Timestamp.now()
       });
       for (const r3 of refundWrites) {
@@ -245482,10 +245666,19 @@ async function handleStaffUpdateAddOns(req, res) {
       }
       newTotal = recomputeOtherAddOnTotal(next);
       newHasAny = hasAnyOtherAddOns(next);
+      const previousOtherAddOnTotal = recomputeOtherAddOnTotal(liveSelections);
+      const revenueAllocation = rebuildBookingRevenueAllocation({
+        existingAllocation: liveBooking.revenueAllocation,
+        grossSubtotal: Number(liveBooking.originalTotalPrice) || 0,
+        totalPrice: Number(liveBooking.totalPrice) || 0,
+        otherAddOnTotal: newTotal,
+        previousOtherAddOnTotal
+      });
       transaction.update(bookingRef2, {
         otherAddOnSelections: next,
         otherAddOnTotal: newTotal,
         hasAnyOtherAddOns: newHasAny,
+        revenueAllocation,
         updatedAt: Timestamp.now()
       });
       for (const r3 of refundWrites) {
@@ -245795,13 +245988,13 @@ var acknowledgeBodySchema = external_exports.object({
   // to be future-proof.
   auditId: external_exports.string().trim().min(8).max(80)
 }).passthrough();
-var CACHE_TTL_MS = 3e4;
+var CACHE_TTL_MS2 = 3e4;
 var CACHE_MAX_ENTRIES = 64;
 var responseCache = /* @__PURE__ */ new Map();
 function cacheGet(date) {
   const entry = responseCache.get(date);
   if (!entry) return null;
-  if (Date.now() - entry.cachedAt > CACHE_TTL_MS) {
+  if (Date.now() - entry.cachedAt > CACHE_TTL_MS2) {
     responseCache.delete(date);
     return null;
   }
@@ -246817,7 +247010,7 @@ var staffOnlyEmailActions = /* @__PURE__ */ new Set([
   // server-triggered from authenticated mutations; the public
   // /api/email/* endpoint only re-sends for guest-driven actions.
   // voucher-issued + store-order-* + staff-* are not in
-  // publicEmailActions below — they bypass the endpoint and are
+  // publicEmailActions below â€” they bypass the endpoint and are
   // fired directly from the handler.
   "voucher-issued",
   "store-order-placed",
@@ -247039,6 +247232,10 @@ async function verifyTurnstile(token2, req) {
   if (process.env.NODE_ENV === "test") {
     return { success: true };
   }
+  const botProtectionMode = await loadBotProtectionMode();
+  if (botProtectionMode === "disabled") {
+    return { success: true };
+  }
   if (!token2) {
     return { success: false, error: "Bot verification token is missing." };
   }
@@ -247078,6 +247275,12 @@ async function verifyTurnstile(token2, req) {
     console.error("Turnstile verification error:", err);
     return { success: false, error: "Turnstile connection failed. Please try again." };
   }
+}
+async function enforceBotGate(req, res) {
+  if (req.staff) return null;
+  const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+  if (verification.success) return null;
+  return res.status(400).json({ success: false, error: verification.error });
 }
 async function handler(req, res) {
   const existingStatus = res.status;
@@ -247228,7 +247431,7 @@ async function handler(req, res) {
       try {
         await writeNotification({
           type: "payment",
-          title: `Payment proof rejected \u2014 ${preRejectSnapshot.bookingRef || bookingId} (Room ${preRejectSnapshot.roomNumber || ""})`.trim(),
+          title: `Payment proof rejected \xE2\u20AC\u201D ${preRejectSnapshot.bookingRef || bookingId} (Room ${preRejectSnapshot.roomNumber || ""})`.trim(),
           entityType: "booking",
           entityId: bookingId,
           roomNumber: preRejectSnapshot.roomNumber || null,
@@ -247502,10 +247705,8 @@ async function handler(req, res) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     req.staff = authResult;
-    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
-    if (!verification.success) {
-      return res.status(400).json({ success: false, error: verification.error });
-    }
+    const denied = await enforceBotGate(req, res);
+    if (denied) return denied;
     return await handleStaffUpdateBreakfast(req, res);
   }
   if (domain === "bookings" && action === "breakfast" && pathSegments[2] === "mark-served" && req.method === "POST") {
@@ -247517,10 +247718,8 @@ async function handler(req, res) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     req.staff = authResult;
-    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
-    if (!verification.success) {
-      return res.status(400).json({ success: false, error: verification.error });
-    }
+    const denied = await enforceBotGate(req, res);
+    if (denied) return denied;
     return await handleMarkServed(req, res);
   }
   if (domain === "bookings" && action === "breakfast" && pathSegments[2] === "mark-refund-paid" && req.method === "POST") {
@@ -247532,10 +247731,8 @@ async function handler(req, res) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     req.staff = authResult;
-    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
-    if (!verification.success) {
-      return res.status(400).json({ success: false, error: verification.error });
-    }
+    const denied = await enforceBotGate(req, res);
+    if (denied) return denied;
     return await handleMarkRefundPaid(req, res);
   }
   if (domain === "refunds" && action === "mark-paid" && req.method === "POST") {
@@ -247602,10 +247799,8 @@ async function handler(req, res) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     req.staff = authResult;
-    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
-    if (!verification.success) {
-      return res.status(400).json({ success: false, error: verification.error });
-    }
+    const denied = await enforceBotGate(req, res);
+    if (denied) return denied;
     return await handleStaffUpdateAddOns(req, res);
   }
   if (domain === "bookings" && action === "addons" && pathSegments[2] === "mark-served" && req.method === "POST") {
@@ -247617,10 +247812,8 @@ async function handler(req, res) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     req.staff = authResult;
-    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
-    if (!verification.success) {
-      return res.status(400).json({ success: false, error: verification.error });
-    }
+    const denied = await enforceBotGate(req, res);
+    if (denied) return denied;
     return await handleMarkServedAddOns(req, res);
   }
   if (domain === "bookings" && action === "addons" && pathSegments[2] === "mark-refund-paid" && req.method === "POST") {
@@ -247632,10 +247825,8 @@ async function handler(req, res) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     req.staff = authResult;
-    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
-    if (!verification.success) {
-      return res.status(400).json({ success: false, error: verification.error });
-    }
+    const denied = await enforceBotGate(req, res);
+    if (denied) return denied;
     return await handleMarkRefundPaidAddOns(req, res);
   }
   if (domain === "bookings" && action === "addons" && (pathSegments[2] === void 0 || pathSegments[2] === "config") && req.method === "GET") {
@@ -248187,6 +248378,10 @@ async function handler(req, res) {
   }
   return res.status(404).json({ success: false, error: `Endpoint /api/${domain}/${action} not found.` });
 }
+// Annotate the CommonJS export names for ESM import in node:
+0 && (module.exports = {
+  enforceBotGate
+});
 /*! Bundled license information:
 
 web-streams-polyfill/dist/ponyfill.es2018.js:

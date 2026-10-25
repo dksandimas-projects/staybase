@@ -197,7 +197,11 @@ describe("computeBookingFolio — the historical 8-call-site shape (the bug-clas
     ];
     const livePayments: FolioLivePayments = [
       { amount: 2000 },
-      { amount: -200 } // refund
+      // Per FIN-REFUND-LIABILITY (2026-10-24): a refund carries its
+      // lifecycle status. A SETTLED refund (the money has left the
+      // till) nets against the collected total; a PENDING one is a
+      // liability and does not.
+      { amount: -200, status: "paid" } // refund
     ];
     const folio = computeBookingFolio({
       booking,
@@ -436,7 +440,10 @@ describe("getReservationFolioSummary — the balance invariant (MRB-04)", () => 
     const summary = getReservationFolioSummary({
       reservationId: "res_test_4",
       reservationTotal: 5000,
-      payments: [{ amount: 5000 }, { amount: -1000 }],
+      // Per FIN-REFUND-LIABILITY (2026-10-24) the refund is SETTLED, so
+      // it still nets against the collected money. A pending refund
+      // would NOT net — it is money the hotel still owes back.
+      payments: [{ amount: 5000 }, { amount: -1000, status: "paid" }],
       charges: [],
       source: "reservation-subcollection"
     });
@@ -516,9 +523,14 @@ describe("getReservationFolioSummary — the balance invariant (MRB-04)", () => 
       const reservationTotal = Math.floor(Math.random() * 100000) - 10000;
       const numPayments = Math.floor(Math.random() * 5);
       const numCharges = Math.floor(Math.random() * 5);
-      const payments = Array.from({ length: numPayments }, () => ({
-        amount: Math.floor(Math.random() * 20000) - 5000
-      }));
+      const payments = Array.from({ length: numPayments }, () => {
+        const amount = Math.floor(Math.random() * 20000) - 5000;
+        // Per FIN-REFUND-LIABILITY (2026-10-24) a negative entry is a
+        // refund, and only a SETTLED one nets against the collected
+        // money — so mark it paid and the plain sum stays the expected
+        // one.
+        return amount < 0 ? { amount, status: "paid" } : { amount };
+      });
       const charges = Array.from({ length: numCharges }, () => ({
         amount: Math.floor(Math.random() * 10000) - 2000
       }));
@@ -598,7 +610,8 @@ describe("getReservationFolioSummary — the balance invariant (MRB-04)", () => 
       reservationId: "res_phase2x_refunds",
       reservationTotal: 5000,
       payments: [{ amount: 5000 }],
-      refunds: [{ amount: -1000 }],
+      // Per FIN-REFUND-LIABILITY (2026-10-24) — a SETTLED refund nets.
+      refunds: [{ amount: -1000, status: "paid" }],
       charges: [],
       source: "reservation-subcollection"
     });
@@ -619,8 +632,8 @@ describe("getReservationFolioSummary — the balance invariant (MRB-04)", () => 
     const summary = getReservationFolioSummary({
       reservationId: "res_phase2x_dual",
       reservationTotal: 4000,
-      payments: [{ amount: 3000 }, { amount: -1000 }],
-      refunds: [{ amount: -500 }],
+      payments: [{ amount: 3000 }, { amount: -1000, status: "paid" }],
+      refunds: [{ amount: -500, status: "paid" }],
       charges: [],
       source: "reservation-subcollection"
     });
@@ -642,7 +655,7 @@ describe("getReservationFolioSummary — the balance invariant (MRB-04)", () => 
       reservationId: "res_phase2x_invariant",
       reservationTotal: 2000,
       payments: [{ amount: 1000 }],
-      refunds: [{ amount: -300 }],
+      refunds: [{ amount: -300, status: "paid" }],
       charges: [{ amount: 500 }],
       source: "reservation-subcollection"
     });
@@ -664,7 +677,7 @@ describe("getReservationFolioSummary — the balance invariant (MRB-04)", () => 
     const summary = getReservationFolioSummary({
       reservationId: "res_legacy_refunds",
       reservationTotal: 5000,
-      payments: [{ amount: 5000 }, { amount: -1000 }],
+      payments: [{ amount: 5000 }, { amount: -1000, status: "paid" }],
       refunds: [],
       charges: [],
       source: "booking-subcollection-legacy"
@@ -689,7 +702,9 @@ describe("getReservationFolioSummary — the balance invariant (MRB-04)", () => 
       refunds: [
         { amount: NaN },
         { amount: undefined as any },
-        { amount: -500 },
+        // Per FIN-REFUND-LIABILITY (2026-10-24) the -500 entry is a
+        // SETTLED refund, so it nets; a pending one would not.
+        { amount: -500, status: "paid" },
         { amount: "garbage" as any }
       ],
       charges: [{ amount: 500 }],

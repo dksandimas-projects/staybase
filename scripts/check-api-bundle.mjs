@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,38 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const guestRoot = join(repoRoot, "guest-app");
 const committedBundle = join(guestRoot, "api", "[...route].js");
 const forceCheck = process.argv.includes("--all");
+
+/**
+ * Resolve the `esbuild` launcher and the way to run it.
+ *
+ * npm installs the shim as `node_modules/.bin/esbuild` (a POSIX shell
+ * script) PLUS `node_modules/.bin/esbuild.cmd` on Windows. Spawning the
+ * extensionless one on Windows fails with ENOENT — and since Node 22 a
+ * `.cmd` needs a shell to start at all (`shell: false` is refused for
+ * batch files).
+ *
+ * Without this, the pre-commit gate could not run on Windows: it died
+ * with a spawn error instead of reporting the real problem (a stale
+ * API bundle).
+ */
+function resolveEsbuild() {
+  const binDir = join(repoRoot, "node_modules", ".bin");
+  if (process.platform === "win32") {
+    const cmd = join(binDir, "esbuild.cmd");
+    if (existsSync(cmd)) return { file: cmd, shell: true };
+    // Fall back to the extensionless shim (a WSL/Git-Bash install).
+    const plain = join(binDir, "esbuild");
+    if (existsSync(plain)) return { file: plain, shell: true };
+  } else {
+    const plain = join(binDir, "esbuild");
+    if (existsSync(plain)) return { file: plain, shell: false };
+  }
+  // Nothing on disk — let the caller surface a clear error.
+  return { file: "esbuild", shell: false };
+}
+
+const esbuild = resolveEsbuild();
+
 const stagedFiles = execFileSync("git", ["diff", "--cached", "--name-only"], {
   cwd: repoRoot,
   encoding: "utf8"
@@ -38,13 +70,13 @@ const temporaryDirectory = mkdtempSync(join(tmpdir(), "spark-inn-api-bundle-"));
 const generatedBundle = join(temporaryDirectory, "route.js");
 
 try {
-  execFileSync(resolve(repoRoot, "node_modules", ".bin", "esbuild"), [
+  execFileSync(esbuild.file, [
     "server/apiRouter.ts",
     "--bundle",
     "--platform=node",
     "--target=node18",
     `--outfile=${generatedBundle}`
-  ], { cwd: guestRoot, stdio: "pipe" });
+  ], { cwd: guestRoot, stdio: "pipe", shell: esbuild.shell });
 
   const generated = readFileSync(generatedBundle);
   const bundleIsStaged = stagedFiles.includes("guest-app/api/[...route].js");

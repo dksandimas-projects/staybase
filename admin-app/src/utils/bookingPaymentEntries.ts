@@ -87,6 +87,16 @@ export interface PaymentLedgerDoc {
   type: "payment" | "refund";
   /** Signed amount. Refunds are negative (CRL-01 convention). */
   amount: number;
+  /**
+   * The refund's lifecycle status (`"pending"`, `"paid"`, …), or `null`
+   * when the doc carries none.
+   *
+   * Per FIN-REFUND-LIABILITY (QA pass 2026-10-24): this is what
+   * separates a refund the hotel still OWES from one it has already
+   * paid out. It used to be dropped, which is what made a settled
+   * guest read as a debtor.
+   */
+  status: string | null;
   method: string;
   note: string;
   transactionReference: string | null;
@@ -112,6 +122,15 @@ export interface LedgerPayment {
   amount: number;
   method: string;
   note: string;
+  /**
+   * Per FIN-REFUND-LIABILITY (QA pass 2026-10-24): the refund's
+   * lifecycle status. `"pending"` = approved but NOT paid out (a
+   * liability); `"paid"` = the money has left the till.
+   *
+   * Optional so this type stays mutually assignable with the admin
+   * app's `OnsitePayment` interface, which declares it optional.
+   */
+  status?: string | null;
   /**
    * Optional (not required) so this type stays mutually assignable
    * with the admin app's `OnsitePayment` interface, which declares
@@ -176,12 +195,22 @@ export function normalizeLedgerDoc(
   const type =
     data.type === "refund" || amount < 0 ? ("refund" as const) : ("payment" as const);
 
+  // Per FIN-REFUND-LIABILITY (QA pass 2026-10-24): keep the refund's
+  // lifecycle `status`. It was DROPPED here, which made a refund the
+  // hotel had approved but not yet paid indistinguishable from one that
+  // had been paid out — and both were netted into `paymentsTotal`, so a
+  // fully settled guest read as a debtor. `null` means "no status",
+  // which the folio treats as PENDING (the same convention the
+  // dashboard's pending-refunds counter uses).
+  const status = typeof data.status === "string" && data.status.trim() ? data.status.trim() : null;
+
   return {
     path,
     bookingId,
     reservationId,
     type,
     amount,
+    status,
     method: typeof data.method === "string" ? data.method : "",
     note: typeof data.note === "string" ? data.note : "",
     transactionReference:
@@ -227,6 +256,9 @@ export function buildBookingPaymentIndex(
       amount: doc.amount,
       method: doc.method,
       note: doc.note,
+      // Per FIN-REFUND-LIABILITY (2026-10-24) — carried so the folio
+      // can tell a pending refund from a paid one.
+      status: doc.status ?? null,
       transactionReference: doc.transactionReference,
       reason: doc.reason,
       approvedBy: doc.approvedBy,

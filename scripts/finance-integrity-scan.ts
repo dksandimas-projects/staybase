@@ -114,23 +114,30 @@ export function scanBookingRecord(bookingId: string, data: Record<string, any>):
   // Per MRB-11 (decision #177): the stored per-stream revenue
   // allocation is the snapshot the Reports revenue streams read.
   // The allocation's own `totalNet` MUST be the booking's billed
-  // `totalPrice` — when a discount is applied, removed or rejected
+  // total — when a discount is applied, removed or rejected
   // AFTER the create write, a stale allocation keeps the old
   // figure and the Reports revenue no longer matches the bill.
   // The guard at the write boundary (`assertBookingRevenueAllocation
   // Invariant`) now enforces this, so a booking that trips it is a
   // doc written before the guard was tightened (or by a path that
   // never re-snapshots the allocation).
+  //
+  // Per MRB-11b (QA pass 2026-10-25): the billed total is the room
+  // bill PLUS the BR-12 other add-ons — per OCT-FOL-01 they are NOT
+  // inside `totalPrice`, they sit on top of it for the balance. The
+  // allocation describes the WHOLE bill.
   const allocation = data.revenueAllocation;
   if (allocation && typeof allocation === "object") {
+    const otherAddOnTotal = finiteNumber(data.otherAddOnTotal) ?? 0;
+    const billedTotal = totalPrice + otherAddOnTotal;
     const allocationTotal = finiteNumber(allocation.totalNet);
-    if (allocationTotal === null || Math.abs(allocationTotal - totalPrice) >= 0.01) {
+    if (allocationTotal === null || Math.abs(allocationTotal - billedTotal) >= 0.01) {
       return [{
         findingId: `${entityPath}:allocation-total-mismatch`,
         cohort: "pricing-drift",
         entityPath,
-        issue: "revenueAllocation.totalNet does not match totalPrice (MRB-11 revenue identity).",
-        observedValue: money(totalPrice),
+        issue: "revenueAllocation.totalNet does not match the billed total (MRB-11 revenue identity).",
+        observedValue: money(billedTotal),
         expectedValue: allocationTotal === null ? "finite allocation total required" : money(allocationTotal),
         proposedAction: "manual-review",
         proposedValue: "",

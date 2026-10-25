@@ -2,6 +2,7 @@ import { LogIn, LogOut, BedDouble, Settings, Bell, type LucideIcon } from "lucid
 import { useLocation, useNavigate } from "react-router-dom";
 import { cn } from "../utils/cn";
 import { useBreakpoint } from "../utils/useBreakpoint";
+import { useAdmin } from "../context/AdminContext";
 
 interface TabSpec {
   id: string;
@@ -26,12 +27,17 @@ interface BottomTabBarProps {
 
 export function BottomTabBar({ variant = "bookings", unreadAlertCount = 0 }: BottomTabBarProps) {
   const { isMobile } = useBreakpoint();
+  const { currentUser } = useAdmin();
   const location = useLocation();
   const navigate = useNavigate();
 
   if (!isMobile) return null;
 
-  const lastTab = variant === "settings" ? SETTINGS_TAB : ALERTS_TAB;
+  // QA-2026-10-23 §3.11: /settings is admin-only — the route guard
+  // answers "ACCESS DENIED" for front-desk staff — so front desk
+  // must not be offered the Settings tab either.
+  const isAdmin = currentUser?.role === "admin";
+  const lastTab = variant === "settings" && isAdmin ? SETTINGS_TAB : ALERTS_TAB;
   const tabs = [...BASE_TABS, lastTab];
 
   const isActive = (tab: TabSpec) => {

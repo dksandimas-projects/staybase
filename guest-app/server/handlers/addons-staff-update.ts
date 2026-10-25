@@ -37,6 +37,10 @@ import {
   // Per OCT-L3 (2026-10-20, decision #299): the shared 2dp money
   // rule — the refund liability must match the billed total.
   roundToTwoDecimals,
+  // Per MRB-11b (QA pass 2026-10-25): the BR-12 other add-ons sit on
+  // top of the room bill (OCT-FOL-01), so the MRB-11 revenue
+  // allocation has to be re-derived when they change.
+  rebuildBookingRevenueAllocation,
   type AddOn,
   type OtherAddOnSelectionEntry
 } from "@spark-inn/shared";
@@ -386,10 +390,26 @@ export async function handleStaffUpdateAddOns(req: VercelRequest, res: VercelRes
       newTotal = recomputeOtherAddOnTotal(next);
       newHasAny = hasAnyOtherAddOns(next);
 
+      // Per MRB-11b (QA pass 2026-10-25): the BR-12 other add-ons sit
+      // on top of the room bill (OCT-FOL-01), so the MRB-11 revenue
+      // allocation has to be RE-DERIVED when they change. This path
+      // used to write only `otherAddOnTotal`, leaving the stored
+      // allocation describing the OLD bill — so every revenue stream
+      // that reads it under-reported by exactly this amount.
+      const previousOtherAddOnTotal = recomputeOtherAddOnTotal(liveSelections);
+      const revenueAllocation = rebuildBookingRevenueAllocation({
+        existingAllocation: liveBooking.revenueAllocation,
+        grossSubtotal: Number(liveBooking.originalTotalPrice) || 0,
+        totalPrice: Number(liveBooking.totalPrice) || 0,
+        otherAddOnTotal: newTotal,
+        previousOtherAddOnTotal
+      });
+
       transaction.update(bookingRef, {
         otherAddOnSelections: next,
         otherAddOnTotal: newTotal,
         hasAnyOtherAddOns: newHasAny,
+        revenueAllocation,
         updatedAt: Timestamp.now()
       });
 

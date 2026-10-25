@@ -79,7 +79,7 @@ describe("VOU-02 — handleRemoveVoucher: source-text contract", () => {
     // `voucherAmount: 0` (we just removed the voucher, so the
     // chain sees no voucher discount).
     expect(handlers).toMatch(
-      /handleRemoveVoucher[\s\S]{0,3000}?calculateDiscountChain\(\{[\s\S]*?voucherAmount:\s*0/
+      /handleRemoveVoucher[\s\S]{0,12000}?calculateDiscountChain\(\{[\s\S]*?voucherAmount:\s*0/
     );
   });
 
@@ -89,7 +89,7 @@ describe("VOU-02 — handleRemoveVoucher: source-text contract", () => {
     // `Math.max((Number(vData.usageCount) || 0) - 1, 0)` — match
     // that exact shape so the two decrement paths stay in sync.
     expect(handlers).toMatch(
-      /handleRemoveVoucher[\s\S]{0,6000}?usageCount:\s*Math\.max\(\(?Number\(voucherData\.usageCount\)\s*\|\|\s*0\)?\s*-\s*1\s*,\s*0\)/
+      /handleRemoveVoucher[\s\S]{0,12000}?usageCount:\s*Math\.max\(\(?Number\(voucherData\.usageCount\)\s*\|\|\s*0\)?\s*-\s*1\s*,\s*0\)/
     );
   });
 
@@ -112,9 +112,9 @@ describe("VOU-02 — handleRemoveVoucher: source-text contract", () => {
     // voucherDiscount: 0 + totalPrice) and the
     // transaction.update(bookingRef, updates) call.
     expect(handlers).toMatch(
-      /handleRemoveVoucher[\s\S]{0,5000}?voucherCode:\s*["']["'][\s\S]{0,200}?voucherDiscount:\s*0/
+      /handleRemoveVoucher[\s\S]{0,12000}?voucherCode:\s*["']["'][\s\S]{0,200}?voucherDiscount:\s*0/
     );
-    expect(handlers).toMatch(/handleRemoveVoucher[\s\S]{0,6000}?transaction\.update\(bookingRef,\s*updates\)/);
+    expect(handlers).toMatch(/handleRemoveVoucher[\s\S]{0,12000}?transaction\.update\(bookingRef,\s*updates\)/);
   });
 });
 

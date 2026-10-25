@@ -115,6 +115,13 @@ export * from "./utils/otherAddOnTotal";
 export * from "./utils/otherAddOnDrafts";
 export * from "./utils/addOns";
 
+// Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide
+// bot-protection mode normalizer. Shared so the admin Settings
+// toggle and the guest-app server gate can never disagree about
+// what "off" means. FAIL CLOSED — only the exact string
+// "disabled" opens the gate.
+export * from "./utils/botProtection";
+
 // Per OCT-L3 (2026-10-20, decision #299): the single shared
 // money-rounding rule (`roundToTwoDecimals`). Lives in its own module
 // so the other-add-on path, the refund liability and the breakfast

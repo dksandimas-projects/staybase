@@ -575,7 +575,26 @@ describe("PAY-01 — the `paidAmount` write sites are pinned", () => {
     expect(refundsSrc).toMatch(/computeRefundPaidAmountDelta/);
   });
 
-  it("the cancel path's refund-liability gate still reads `booking.paidAmount`", () => {
-    expect(bookingsSrc).toMatch(/const paidAmount = Number\(booking\.paidAmount\) \|\| 0;/);
+  it("the cancel path's refund-liability gate still reads the booking's paid amount", () => {
+    // Per FIN-PAID-AMOUNT-SOURCE (QA pass 2026-10-24) the gate no
+    // longer reads the raw denormalized field: `paidAmount` can be
+    // negative (`SI-20261021-00011` read −₱1,000) or absent (14
+    // legacy bookings), and both read as "nothing was paid" — which
+    // silently suppressed the refund liability for a PAID breakfast
+    // removed on those bookings.
+    //
+    // It now goes through `resolvePaidAmountForLiability`, which uses
+    // the denormalized field when it is a POSITIVE number and
+    // otherwise falls back to the ledger.
+    expect(bookingsSrc).toMatch(/async function resolvePaidAmountForLiability\(/);
+    expect(bookingsSrc).toMatch(
+      /const paidAmount = await resolvePaidAmountForLiability\(\{/
+    );
+    // The helper must prefer a positive seeded field…
+    expect(bookingsSrc).toMatch(
+      /if \(Number\.isFinite\(seeded\) && seeded > 0\) return seeded;/
+    );
+    // …and fall back to the ledger otherwise.
+    expect(bookingsSrc).toMatch(/readTransactionalFolioSnapshot\(\{/);
   });
 });

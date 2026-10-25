@@ -97,8 +97,11 @@ describe("DSC-04 — handleApplyReservationDiscount (atomic reservation-scope ap
   });
 
   test("writes discount to every child in the same transaction", () => {
+    // The window is generous because the handler carries the MRB-11b
+    // revenue-allocation re-derive (MRB-11b, 2026-10-25), which adds
+    // lines between the handler's head and the per-child write.
     expect(handlers).toMatch(
-      /handleApplyReservationDiscount[\s\S]{0,6500}?for \(const child of eligible\)[\s\S]{0,3500}?transaction\.update\(child\.ref, updates\)/
+      /handleApplyReservationDiscount[\s\S]{0,9000}?for \(const child of eligible\)[\s\S]{0,5000}?transaction\.update\(child\.ref, updates\)/
     );
   });
 

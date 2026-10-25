@@ -44,16 +44,16 @@ describe("MRB-11 — post-create money paths re-snapshot the revenue allocation"
   it("handleApplyBookingDiscount re-snapshots the allocation it moves the bill with", () => {
     const body = handlerBody("handleApplyBookingDiscount");
     expect(body).toMatch(
-      /revenueAllocation:\s*rebuildBookingRevenueAllocation\(\{[\s\S]{0,300}?totalPrice[\s\S]{0,40}?\}\)/
+      /revenueAllocation:\s*rebuildBookingRevenueAllocation\(\{[\s\S]{0,300}?totalPrice[\s\S]{0,900}?\}\)/
     );
     // The helper is fed the SAME total the booking doc persists.
-    expect(body).toMatch(/revenueAllocation:[\s\S]{0,300}?totalPrice[\s\S]{0,40}?\}\)/);
+    expect(body).toMatch(/revenueAllocation:[\s\S]{0,300}?totalPrice[\s\S]{0,900}?\}\)/);
   });
 
   it("handleApplyReservationDiscount re-snapshots the allocation for every eligible child", () => {
     const body = handlerBody("handleApplyReservationDiscount");
     expect(body).toMatch(
-      /revenueAllocation:\s*rebuildBookingRevenueAllocation\(\{[\s\S]{0,300}?totalPrice[\s\S]{0,40}?\}\)/
+      /revenueAllocation:\s*rebuildBookingRevenueAllocation\(\{[\s\S]{0,300}?totalPrice[\s\S]{0,900}?\}\)/
     );
   });
 
@@ -105,7 +105,7 @@ describe("MRB-11 — the walk-in create path keeps the bill and the allocation i
       /revenueAllocation:\s*lineFinancials\.revenueAllocation,/
     );
     expect(handlerSrc).toMatch(
-      /revenueAllocation:\s*assertBookingRevenueAllocationInvariant\([\s\S]{0,600}?totalNet:\s*lineTotal[\s\S]{0,200}?\}\s*,\s*\n\s*lineTotal/
+      /revenueAllocation:\s*assertBookingRevenueAllocationInvariant\([\s\S]{0,900}?totalNet:[\s\S]{0,200}?lineTotal[\s\S]{0,400}?\}\s*,\s*\n\s*round2\(lineTotal\)/
     );
   });
 

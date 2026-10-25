@@ -194,6 +194,10 @@ import {
   evaluateCancelPreview,
   buildCancellationLiabilitySnapshot,
   assertBookingRevenueAllocationInvariant,
+  // Per MRB-11b (QA pass 2026-10-25): the shared 2dp money rule, so
+  // the BR-12 other add-ons are folded into the allocation's add-on
+  // stream and total with the same rounding the shared helper uses.
+  round2,
   // Per the P1 revenue-reporting audit (2026-10-22): the shared
   // helper that REBUILDS a booking's revenue allocation after a
   // post-create money change (a discount / voucher applied, a
@@ -741,6 +745,34 @@ function sumLedgerAmounts(snapshot: any): number {
   return snapshot.docs.reduce((sum: number, docSnap: any) => sum + Number(docSnap.data()?.amount || 0), 0);
 }
 
+/**
+ * Per FIN-REFUND-LIABILITY (QA pass 2026-10-24): sum a REFUND
+ * subcollection, EXCLUDING refunds that have been approved but not paid
+ * out.
+ *
+ * A pending refund is money the hotel still holds and owes back — a
+ * LIABILITY, not collected money. Netting it into `collectedTotal` made
+ * a fully settled guest read as a debtor:
+ *
+ *   SI-20261021-00058  collected ₱2,800 · bill ₱2,800 · refund ₱100 PENDING
+ *     before: collected ₱2,700 · balance ₱100   ← the guest owes nothing
+ *     after:  collected ₱2,800 · balance ₱0     ← and the hotel owes ₱100
+ *
+ * A refund with NO `status` counts as pending — the same convention the
+ * dashboard's pending-refunds counter uses (`data.status || "pending"`)
+ * and the same one `isUnpaidRefund` in `@spark-inn/shared` applies.
+ */
+function sumRefundAmounts(snapshot: any): number {
+  return snapshot.docs.reduce((sum: number, docSnap: any) => {
+    const data = docSnap.data() || {};
+    const amount = Number(data.amount || 0);
+    const isRefund = data.type === "refund" || amount < 0;
+    const status = typeof data.status === "string" ? data.status.trim().toLowerCase() : "";
+    const isPendingRefund = isRefund && status !== "paid" && status !== "processed";
+    return isPendingRefund ? sum : sum + amount;
+  }, 0);
+}
+
 // Per NBS-02 (2026-07-31): derive a short, source-accurate note for
 // walk-in bookings. The historical shape was the hardcoded
 // "Created on-site at Front Desk." which was wrong for any
@@ -907,7 +939,7 @@ async function readTransactionalFolioSnapshot(input: {
   );
   const collectedTotal =
     sumLedgerAmounts(reservationPaymentsSnapshot)
-    + sumLedgerAmounts(reservationRefundsSnapshot)
+    + sumRefundAmounts(reservationRefundsSnapshot)
     + transitionalCollectedTotal;
   const incidentalTotal =
     sumLedgerAmounts(reservationChargesSnapshot)
@@ -943,6 +975,45 @@ async function readTransactionalFolioSnapshot(input: {
     ...totals,
     source: "reservation-subcollection"
   };
+}
+
+/**
+ * Per FIN-PAID-AMOUNT-SOURCE (QA pass 2026-10-24): resolve the amount
+ * the guest has actually PAID, for the "was this meal paid for?" test.
+ *
+ * `booking.paidAmount` is a denormalized field and it is NOT reliable:
+ *
+ *   * `SI-20261021-00011` carries **₱−1,000** — the refund path
+ *     decremented it from a base that was never seeded (the write path
+ *     is fixed by `computeRefundPaidAmountDelta`);
+ *   * 14 further production bookings carry ledger entries but NO
+ *     `paidAmount` field at all (legacy rows).
+ *
+ * A negative or absent base reads as "nothing was paid", so a PAID
+ * breakfast removed on those bookings opened NO refund liability — a
+ * guest who had paid was not owed the money back.
+ *
+ * So: use the denormalized field when it is a positive number, and
+ * otherwise fall back to the LEDGER — the same source the folio and the
+ * admin's paid column read, and the same source that excludes pending
+ * refunds (FIN-REFUND-LIABILITY).
+ */
+async function resolvePaidAmountForLiability(input: {
+  transaction: any;
+  bookingId: string;
+  bookingData: any;
+}): Promise<number> {
+  const { transaction, bookingId, bookingData } = input;
+  const seeded = Number(bookingData?.paidAmount);
+  if (Number.isFinite(seeded) && seeded > 0) return seeded;
+
+  const folioSnapshot = await readTransactionalFolioSnapshot({
+    transaction,
+    bookingRef: adminDb.collection("bookings").doc(String(bookingId)),
+    bookingId,
+    bookingData
+  });
+  return Math.max(0, Number(folioSnapshot.collectedTotal) || 0);
 }
 
 function calculateCheckoutPoints(totalPrice: number, rewardsConfig: any): number {
@@ -4091,7 +4162,7 @@ export async function handleCreateBooking(req: any, res: any) {
             addOnNet: childPricing.reduce(
               (sum, pricing) => sum + (Number(pricing.extraBedTotal) || 0),
               0
-            ),
+            ) + validatedOtherAddOnTotal,
             deductionNet: allocatedDeductions.reduce(
               (sum, deduction) =>
                 sum +
@@ -4101,9 +4172,15 @@ export async function handleCreateBooking(req: any, res: any) {
                 ),
               0
             ) + (Number(selfRedeemedValue) || 0),
-            totalNet: finalTotalPrice
+            // Per MRB-11b (QA pass 2026-10-25): the BR-12 other
+            // add-ons sit on top of the room bill (OCT-FOL-01), so the
+            // aggregate's total is the reservation's WHOLE bill. Before
+            // this the allocation described only the room bill and every
+            // revenue stream that read it under-reported by exactly this
+            // amount.
+            totalNet: round2(finalTotalPrice + validatedOtherAddOnTotal)
           },
-          finalTotalPrice
+          round2(finalTotalPrice + validatedOtherAddOnTotal)
         ),
         source: corporateDetails.isCorporate ? "corporate" : "online",
         isCorporate: corporateDetails.isCorporate,
@@ -4295,14 +4372,25 @@ export async function handleCreateBooking(req: any, res: any) {
               {
                 roomNet: pricingForRoom.roomTotal,
                 breakfastNet: pricingForRoom.breakfastTotal,
-                addOnNet: pricingForRoom.extraBedTotal,
+                // Per MRB-11b (QA pass 2026-10-25): the BR-12 other
+                // add-ons join the add-on stream. They are attributed
+                // to the FIRST child only — the create path spreads
+                // them onto every child doc, so attributing them to
+                // each would multiply them in the reservation
+                // aggregate.
+                addOnNet:
+                  round2(pricingForRoom.extraBedTotal) +
+                  (bookingIdx === 0 ? validatedOtherAddOnTotal : 0),
                 deductionNet: allocatedDeductions.reduce(
                   (sum, deduction) => sum + (Number(deduction.amounts[bookingIdx]) || 0),
                   0
                 ),
-                totalNet: pricingForRoom.totalPrice
+                totalNet:
+                  round2(pricingForRoom.totalPrice) +
+                  (bookingIdx === 0 ? validatedOtherAddOnTotal : 0)
               },
-              pricingForRoom.totalPrice
+              round2(pricingForRoom.totalPrice) +
+                (bookingIdx === 0 ? validatedOtherAddOnTotal : 0)
             ),
             reservationPosition: bookingIdx + 1,
             reservationRoomCount: assignedRooms.length,
@@ -5843,11 +5931,18 @@ export async function handleCreateWalkin(req: any, res: any) {
             {
               roomNet: hasManualOverride ? linePricingSubtotal : line.roomTotal,
               breakfastNet: hasManualOverride ? 0 : line.breakfastTotal,
-              addOnNet: hasManualOverride ? 0 : line.extraBedTotal,
+              // Per MRB-11b (QA pass 2026-10-25): the BR-12 other
+              // add-ons join the add-on stream — attributed to the
+              // FIRST line only, so the walk-in aggregate counts them
+              // once.
+              addOnNet:
+                (hasManualOverride ? 0 : line.extraBedTotal) +
+                (lineIdx === 0 ? walkinOtherAddOnTotal : 0),
               deductionNet: lineChainResult.seniorDeduction + lineChainResult.voucherDeduction,
-              totalNet: lineTotal
+              totalNet:
+                round2(lineTotal) + (lineIdx === 0 ? walkinOtherAddOnTotal : 0)
             },
-            lineTotal
+            round2(lineTotal) + (lineIdx === 0 ? walkinOtherAddOnTotal : 0)
           ),
           rateBreakdown: buildRateBreakdown({
             roomLines: hasManualOverride
@@ -6185,9 +6280,9 @@ export async function handleCreateWalkin(req: any, res: any) {
                 (Number((line.revenueAllocation as any)?.deductionNet) || 0),
               0
             ),
-            totalNet: finalTotalPrice
+            totalNet: round2(finalTotalPrice + walkinOtherAddOnTotal)
           },
-          finalTotalPrice
+          round2(finalTotalPrice + walkinOtherAddOnTotal)
         ),
         source: "walk-in",
         isCorporate: false,
@@ -6590,7 +6685,13 @@ export async function handleApplyBookingDiscount(req: any, res: any) {
         revenueAllocation: rebuildBookingRevenueAllocation({
           existingAllocation: booking.revenueAllocation,
           grossSubtotal: subtotal,
-          totalPrice
+          totalPrice,
+          // Per MRB-11b (QA pass 2026-10-25): the BR-12 other add-ons
+          // sit on top of the room bill, so the allocation's total is
+          // the booking's WHOLE bill. This path does not touch the
+          // add-ons, so the previous amount is the same one.
+          otherAddOnTotal: Number(booking.otherAddOnTotal) || 0,
+          previousOtherAddOnTotal: Number(booking.otherAddOnTotal) || 0
         }),
         updatedAt: new Date()
       };
@@ -6843,7 +6944,12 @@ export async function handleApplyReservationDiscount(req: any, res: any) {
           revenueAllocation: rebuildBookingRevenueAllocation({
             existingAllocation: booking.revenueAllocation,
             grossSubtotal: subtotal,
-            totalPrice
+            totalPrice,
+            // Per MRB-11b (QA pass 2026-10-25) — the BR-12 other
+            // add-ons sit on top of the room bill. This path does not
+            // touch the add-ons, so the previous amount is the same one.
+            otherAddOnTotal: Number(booking.otherAddOnTotal) || 0,
+            previousOtherAddOnTotal: Number(booking.otherAddOnTotal) || 0
           }),
           updatedAt: new Date()
         };
@@ -7036,7 +7142,12 @@ export async function handleRemoveVoucher(req: any, res: any) {
         revenueAllocation: rebuildBookingRevenueAllocation({
           existingAllocation: bookingData.revenueAllocation,
           grossSubtotal: Number(originalTotalPrice) || 0,
-          totalPrice: restoredTotalPrice
+          totalPrice: restoredTotalPrice,
+          // Per MRB-11b (QA pass 2026-10-25) — the BR-12 other
+          // add-ons sit on top of the room bill. This path does not
+          // touch the add-ons, so the previous amount is the same one.
+          otherAddOnTotal: Number(bookingData.otherAddOnTotal) || 0,
+          previousOtherAddOnTotal: Number(bookingData.otherAddOnTotal) || 0
         }),
         updatedAt: new Date()
       };
@@ -7158,7 +7269,12 @@ export async function handleRejectDiscount(req: any, res: any) {
       revenueAllocation: rebuildBookingRevenueAllocation({
         existingAllocation: bookingData.revenueAllocation,
         grossSubtotal: Number(originalTotalPrice) || 0,
-        totalPrice: restoredTotalPrice
+        totalPrice: restoredTotalPrice,
+        // Per MRB-11b (QA pass 2026-10-25) — the BR-12 other add-ons
+        // sit on top of the room bill. This path does not touch the
+        // add-ons, so the previous amount is the same one.
+        otherAddOnTotal: Number(bookingData.otherAddOnTotal) || 0,
+        previousOtherAddOnTotal: Number(bookingData.otherAddOnTotal) || 0
       }),
       updatedAt: new Date()
     };
@@ -7648,7 +7764,7 @@ export async function handleRejectPayment(req: any, res: any) {
 //
 // The `paidAmount` test ("was this meal paid for?") is the same
 // heuristic the BR-04 / BR-05 / BR-12 remove paths use.
-function redateAddOnsForCancel(input: {
+async function redateAddOnsForCancel(input: {
   transaction: FirebaseFirestore.Transaction;
   bookingId: string;
   bookingRef: string;
@@ -7667,7 +7783,15 @@ function redateAddOnsForCancel(input: {
   hasAnyOtherAddOns: boolean;
 } {
   const { transaction, bookingId, bookingRef, booking, today, actorUid, actorRole } = input;
-  const paidAmount = Number(booking.paidAmount) || 0;
+  // Per FIN-PAID-AMOUNT-SOURCE (QA pass 2026-10-24): the denormalized
+  // `paidAmount` can be negative or absent, which reads as "nothing was
+  // paid" and silently suppresses the refund liability. Fall back to
+  // the ledger when it is not a positive number.
+  const paidAmount = await resolvePaidAmountForLiability({
+    transaction,
+    bookingId,
+    bookingData: booking
+  });
 
   const redatedBreakfast = redateBreakfastSelections({
     mode: "cancel",
@@ -8258,7 +8382,7 @@ export async function handleCancelBooking(req: any, res: any) {
         );
         for (const child of children) {
           if (!cancellableIds.has(child.id)) continue;
-          const redated = redateAddOnsForCancel({
+          const redated = await redateAddOnsForCancel({
             transaction,
             bookingId: child.id,
             bookingRef: String(child.data.bookingRef || ""),
@@ -8525,7 +8649,7 @@ export async function handleCancelBooking(req: any, res: any) {
       const perChildCancelPolicyRefunded = Boolean(
         liabilitySnapshot && Number(liabilitySnapshot.policyResult?.policyRefund) > 0
       );
-      const perChildRedated = redateAddOnsForCancel({
+      const perChildRedated = await redateAddOnsForCancel({
         transaction,
         bookingId: bookingDocumentRef.id,
         bookingRef: String(freshBooking.bookingRef || ""),
@@ -13267,14 +13391,25 @@ export async function handleRescheduleBooking(req: any, res: any) {
         window: { checkIn, checkOut },
         today: todayKey,
         selections: booking.breakfastSelections as Record<string, BreakfastSelectionEntry>,
-        paidAmount: Number(booking.paidAmount) || 0
+        // Per FIN-PAID-AMOUNT-SOURCE (QA pass 2026-10-24) — the
+        // denormalized field can be negative or absent; fall back to the
+        // ledger so a PAID removal still opens its refund liability.
+        paidAmount: await resolvePaidAmountForLiability({
+          transaction,
+          bookingId,
+          bookingData: booking
+        })
       });
       const redatedOtherAddOns = redateOtherAddOnSelections({
         mode: "reschedule",
         window: { checkIn, checkOut },
         today: todayKey,
         selections: booking.otherAddOnSelections as Record<string, OtherAddOnSelectionEntry[]>,
-        paidAmount: Number(booking.paidAmount) || 0
+        paidAmount: await resolvePaidAmountForLiability({
+          transaction,
+          bookingId,
+          bookingData: booking
+        })
       });
 
       // Per BR-08 (decision #238, 2026-10-14 — close-out):
@@ -13470,15 +13605,19 @@ export async function handleRescheduleBooking(req: any, res: any) {
           {
             roomNet: roomTotal,
             breakfastNet: breakfastTotal,
-            addOnNet: extraBedTotal,
+            // Per MRB-11b (QA pass 2026-10-25): the BR-12 other
+            // add-ons join the add-on stream — they sit on top of the
+            // room bill (OCT-FOL-01), so the allocation's total is the
+            // booking's WHOLE bill.
+            addOnNet: round2(extraBedTotal) + redatedOtherAddOns.total,
             deductionNet:
               rescheduleChain.seniorDeduction +
               rescheduleChain.voucherDeduction +
               rescheduleChain.memberDeduction +
               (Number(booking.pointsRedeemedValue) || 0),
-            totalNet: finalTotalPrice
+            totalNet: round2(finalTotalPrice) + redatedOtherAddOns.total
           },
-          finalTotalPrice
+          round2(finalTotalPrice) + redatedOtherAddOns.total
         ),
         rescheduleHistory: [...(Array.isArray(booking.rescheduleHistory) ? booking.rescheduleHistory : []), rescheduleEntry],
         // Per OCT-H8 (2026-10-20, decision #288): the re-dated
@@ -14580,10 +14719,21 @@ export async function handleAddRoomToReservation(req: any, res: any) {
         const baseAddOnNet = existingAlloc
           ? Number(existingAlloc.addOnNet || 0)
           : 0;
+        // Per MRB-11b (QA pass 2026-10-25): the existing children's
+        // allocations already carry the BR-12 other add-ons (they sit on
+        // top of the room bill), so the reservation's aggregate total is
+        // the SUM of the children's totals — not the header's room-bill
+        // `totalPrice`. Using the header's figure here would have
+        // absorbed the other add-ons into `deductionNet` as if they were
+        // a discount.
+        const baseTotalNet = existingAlloc
+          ? Number(existingAlloc.totalNet || 0)
+          : Number(reservation.totalPrice || 0);
         const roomNet = baseRoomNet + newChildRevenueAllocation.roomNet;
         const breakfastNet = baseBreakfastNet + newChildRevenueAllocation.breakfastNet;
         const addOnNet = baseAddOnNet + newChildRevenueAllocation.addOnNet;
         const grossTotal = roomNet + breakfastNet + addOnNet;
+        const totalNet = baseTotalNet + newChildRevenueAllocation.totalNet;
         return assertBookingRevenueAllocationInvariant(
           {
             roomNet,
@@ -14594,10 +14744,10 @@ export async function handleAddRoomToReservation(req: any, res: any) {
             // sum always ties to the total the header persists
             // (in the normal case this is byte-identical to
             // `existing.deductionNet + newChild.deductionNet`).
-            deductionNet: grossTotal - newTotalPrice,
-            totalNet: newTotalPrice
+            deductionNet: grossTotal - totalNet,
+            totalNet
           },
-          newTotalPrice
+          totalNet
         );
       })();
       const newChildrenDates = [
