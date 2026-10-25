@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAdmin } from "../context/AdminContext";
 import { getLatestPaymentReference, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, getBookingRevenueStreams, isVatEnabled, getEffectiveVatRate, normalizeBreakfastSelections } from "@spark-inn/shared";
 import {
@@ -44,6 +45,40 @@ import { LiabilityTab } from "../components/LiabilityTab";
 
 type ReportTab = "performance" | "sales" | "daily-close" | "liability";
 type SalesSubTab = "bookings" | "breakfast" | "addons" | "store" | "charges";
+
+// The tab ids a `?tab=` deep link may name. Kept next to the
+// `ReportTab` union so the two can't drift apart.
+const REPORT_TAB_IDS: readonly ReportTab[] = ["performance", "sales", "daily-close", "liability"];
+
+/**
+ * QA-2026-10-23 §3.12 — resolve the `?tab=` deep link.
+ *
+ * The dashboard's "Pending refunds" card navigates to
+ * `/reports?tab=liability`; the Reports page used to drop that
+ * parameter (its `activeTab` was initialised from the role alone),
+ * so the desk's only shortcut to the money-to-process queue opened
+ * the Performance tab instead.
+ *
+ * This resolver is the single place that decides which tab a
+ * `?tab=` value may open:
+ *   - the value must be one of the four known tab ids;
+ *   - front-desk staff may only ever land on Daily Close (RPT-04
+ *     keeps Performance / Sales / Liability admin-only), so an
+ *     admin-only tab id in the URL is ignored for them instead of
+ *     exposing a tab their role may not see;
+ *   - anything else returns `null` so the caller falls back to the
+ *     role-based default (admin → Performance, front desk → Daily
+ *     Close) rather than landing on a broken / unknown tab.
+ */
+export function resolveReportTab(
+  tabParam: string | null | undefined,
+  role: string | null | undefined
+): ReportTab | null {
+  if (!tabParam) return null;
+  if (!(REPORT_TAB_IDS as readonly string[]).includes(tabParam)) return null;
+  if (role !== "admin" && tabParam !== "daily-close") return null;
+  return tabParam as ReportTab;
+}
 
 interface ReportCharge {
   id: string;
@@ -236,9 +271,28 @@ export function ReportsPage() {
   // page, which is the end-of-shift cash reconciliation they
   // own. Default the active tab accordingly so a front-desk
   // user lands on the only available tab.
+  //
+  // Per QA-2026-10-23 §3.12: a `?tab=` deep link now wins over
+  // that default — the dashboard's "Pending refunds" card links to
+  // `/reports?tab=liability`. The parameter is validated (see
+  // `resolveReportTab`): an unknown or role-forbidden value falls
+  // back to the role-based default instead of breaking the page.
+  const [searchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
   const [activeTab, setActiveTab] = useState<ReportTab>(
-    currentUser?.role === "admin" ? "performance" : "daily-close"
+    () =>
+      resolveReportTab(requestedTab, currentUser?.role) ??
+      (currentUser?.role === "admin" ? "performance" : "daily-close")
   );
+  // React Router keeps the page mounted when only the query string
+  // changes, so re-apply the deep link when the parameter itself
+  // changes (e.g. the dashboard card is clicked while /reports is
+  // already open). A manual tab click does not change the URL, so
+  // it is never overridden here.
+  useEffect(() => {
+    const resolvedTab = resolveReportTab(requestedTab, currentUser?.role);
+    if (resolvedTab) setActiveTab(resolvedTab);
+  }, [requestedTab, currentUser?.role]);
   const [dateRange, setDateRange] = useState("30");
   const [customStartDate, setCustomStartDate] = useState(() => {
     return shiftDateKey(dateKeyInTimeZone(new Date(), config.timezone), -29);

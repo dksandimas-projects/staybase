@@ -43,6 +43,26 @@ const navItems = [
   { label: "Settings", to: "/settings", icon: Settings }
 ];
 
+type NavItem = (typeof navItems)[number];
+
+// Admin-only destinations. These mirror the route guard in
+// `AdminLayout.tsx` (`restrictedPaths`): a front-desk account gets
+// "ACCESS DENIED — administrative clearance required" on every one
+// of them, so the nav must not advertise them (QA-2026-10-23
+// §3.11 — the desk was shown three links that were dead ends).
+const ADMIN_ONLY_NAV_PATHS = ["/rates", "/members", "/settings"];
+
+/**
+ * QA-2026-10-23 §3.11 — the nav destinations a staff role may
+ * actually use. Admin keeps the full list (unchanged); front-desk
+ * staff lose the admin-only destinations their route guard
+ * refuses anyway.
+ */
+export function visibleNavItemsForRole(role: string | null | undefined): NavItem[] {
+  if (role === "admin") return navItems;
+  return navItems.filter((item) => !ADMIN_ONLY_NAV_PATHS.includes(item.to));
+}
+
 interface SidebarProps {
   isOpen?: boolean;
   onClose?: () => void;
@@ -53,9 +73,10 @@ interface NavContentProps {
   onClose?: () => void;
   showCloseButton: boolean;
   compact: boolean;
+  items: NavItem[];
 }
 
-function NavContent({ unreadIntercomCount, onClose, showCloseButton, compact }: NavContentProps) {
+function NavContent({ unreadIntercomCount, onClose, showCloseButton, compact, items }: NavContentProps) {
   return (
     <>
       <div className={cn("flex items-center", compact ? "justify-center" : "justify-start")}>
@@ -77,7 +98,7 @@ function NavContent({ unreadIntercomCount, onClose, showCloseButton, compact }: 
       </div>
 
       <nav className={cn("mt-8 grid gap-1", compact && "mt-6")}>
-        {navItems.map((item) => {
+        {items.map((item) => {
           const Icon = item.icon;
           return (
             <NavLink
@@ -115,12 +136,20 @@ function NavContent({ unreadIntercomCount, onClose, showCloseButton, compact }: 
 }
 
 export function Sidebar({ isOpen = false, onClose }: SidebarProps = {}) {
-  const { intercoms } = useAdmin();
+  const { intercoms, currentUser } = useAdmin();
   const { isMobile, isTablet } = useBreakpoint();
   const location = useLocation();
   const prefersReducedMotion = !!useReducedMotion();
   const prevPathnameRef = useRef(location.pathname);
   const trapRef = useFocusTrap<HTMLElement>(isOpen, () => onClose?.());
+
+  // QA-2026-10-23 §3.11: front-desk staff must not be shown the
+  // admin-only destinations — every one of them answers "ACCESS
+  // DENIED" for that role.
+  const visibleNavItems = useMemo(
+    () => visibleNavItemsForRole(currentUser?.role),
+    [currentUser?.role]
+  );
 
   const unreadIntercomCount = useMemo(
     () => Object.values(intercoms)
@@ -185,6 +214,7 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps = {}) {
                 onClose={onClose}
                 showCloseButton
                 compact={false}
+                items={visibleNavItems}
               />
             </motion.aside>
           </>
@@ -205,6 +235,7 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps = {}) {
           onClose={onClose}
           showCloseButton={false}
           compact
+          items={visibleNavItems}
         />
       </aside>
     );
@@ -221,6 +252,7 @@ export function Sidebar({ isOpen = false, onClose }: SidebarProps = {}) {
         onClose={onClose}
         showCloseButton={false}
         compact={false}
+        items={visibleNavItems}
       />
     </aside>
   );

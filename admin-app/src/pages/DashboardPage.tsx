@@ -149,7 +149,7 @@ type PendingPaymentItem = {
 export function DashboardPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount, hotelConfig, corporateInquiries, verifyAndRecordPayment, rejectPayment, resolveEarlyCheckin, reservations, reservationPaidAmount } = useAdmin();
+  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount, hotelConfig, corporateInquiries, verifyAndRecordPayment, rejectPayment, resolveEarlyCheckin, reservations, reservationPaidAmount, currentUser } = useAdmin();
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
   const [clockTick, setClockTick] = useState(() => Date.now());
   const [showRevenue, setShowRevenue] = useState(false);
@@ -1063,7 +1063,14 @@ export function DashboardPage() {
               ? `${cancellationPendingRefunds} cancellation + ${breakfastPendingRefunds} breakfast`
               : "No refunds pending"
           }
-          onClick={() => navigate("/reports?tab=liability")}
+          onClick={
+            // Per RPT-04 the Liability tab is admin-only, and the
+            // front desk's Reports default is "daily-close". Clicking
+            // through would land them on a tab they did not ask for,
+            // so the shortcut is offered to admins only — the same rule
+            // the admin navigation now follows (see `Sidebar.tsx`).
+            currentUser?.role === "admin" ? () => navigate("/reports?tab=liability") : undefined
+          }
           icon={<Wallet size={18} />}
           tone={pendingRefundsTotal > 0 ? "warning" : "neutral"}
           data-testid="dashboard-pending-refunds-card"
