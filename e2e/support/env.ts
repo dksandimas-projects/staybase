@@ -42,6 +42,15 @@ function env(name: string): string | undefined {
   return v && v.length > 0 ? v : undefined;
 }
 
+/**
+ * Read one QA environment value (process env first, then the gitignored
+ * local file). Exported so a support module can read a value the same way
+ * the identities are read — never from a hardcoded literal.
+ */
+export function qaEnv(name: string): string | undefined {
+  return env(name);
+}
+
 export type Identity = { email: string; password: string };
 
 export function identity(kind: "admin" | "frontdesk" | "member" | "memberB"): Identity | null {
