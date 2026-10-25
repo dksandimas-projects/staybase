@@ -2921,6 +2921,52 @@ export function SettingsPage() {
     return [];
   });
 
+  // Per BR-08 (AI-BROWSER-QA pass 2026-10-25, §3.17): the whole tab was
+  // hydrated ONCE, at mount, from the AdminContext DEFAULT state — and
+  // never re-hydrated when the live `settings/breakfastConfig` snapshot
+  // arrived. The operator therefore saw the SEEDED catalogue (three rows
+  // `sl-1..sl-3` at a flat rate) instead of the hotel's live menu (six
+  // meals at their own prices), and "Save Dining Settings" wrote those
+  // seeds over the live menu: three meals vanished from the guest's
+  // booking Step 2 and the surviving three were re-priced.
+  //
+  // The live snapshot now wins, and stops winning the moment the
+  // operator edits a field — their edit is then authoritative (the same
+  // "absent → seed default, then follow the snapshot" pattern the
+  // Booking Preferences catalogue already uses).
+  const [breakfastEdited, setBreakfastEdited] = useState(false);
+  useEffect(() => {
+    if (breakfastEdited) return;
+    const live = (breakfastConfig || {}) as Record<string, any>;
+    if (typeof live.isEnabled === "boolean") setBreakfastEnabled(live.isEnabled);
+    if (typeof live.cutoffTime === "string" && live.cutoffTime) setBreakfastCutoffTime(live.cutoffTime);
+    if (typeof live.cutoffsEnabled === "boolean") setBreakfastCutoffsEnabled(live.cutoffsEnabled);
+    if (typeof live.frontDeskOverrideEnabled === "boolean") {
+      setBreakfastFrontDeskOverrideEnabled(live.frontDeskOverrideEnabled);
+    }
+    if (typeof live.defaultMealInstructions === "string") {
+      setBreakfastDefaultMealInstructions(live.defaultMealInstructions);
+    }
+    if (typeof live.servedGraceMinutes === "number") {
+      setBreakfastServedGraceMinutes(String(live.servedGraceMinutes));
+    }
+    if (Array.isArray(live.meals) && live.meals.length > 0) {
+      const now = new Date().toISOString();
+      setBreakfastMeals(
+        live.meals.map((meal: any, index: number) => ({
+          id: String(meal.id || `meal-${index}`),
+          name: String(meal.name || ""),
+          description: typeof meal.description === "string" ? meal.description : "",
+          price: Number.isFinite(Number(meal.price)) ? Number(meal.price) : 0,
+          displayOrder: Number.isFinite(Number(meal.displayOrder)) ? Number(meal.displayOrder) : index,
+          isActive: meal.isActive !== false,
+          createdAt: typeof meal.createdAt === "string" ? meal.createdAt : now,
+          updatedAt: typeof meal.updatedAt === "string" ? meal.updatedAt : now
+        }))
+      );
+    }
+  }, [breakfastConfig, breakfastEdited]);
+
   // 4b. Other Add-Ons catalog states (BR-12.1, 2026-10-15, decision #247
   //     reserved). The catalog is the `addOns/{addOnId}` collection
   //     (BR-12) and the tab CRUDs it directly through Firestore. The
@@ -4752,6 +4798,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
   // `breakfastMeals` in place; the next Save click writes the
   // full array to Firestore.
   const handleAddBreakfastMeal = () => {
+    setBreakfastEdited(true);
     const maxOrder = breakfastMeals.reduce(
       (max, meal) => (meal.displayOrder > max ? meal.displayOrder : max),
       -1
@@ -4909,14 +4956,17 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
     id: string,
     patch: Partial<Omit<BreakfastMeal, "id" | "createdAt">>
   ) => {
+    setBreakfastEdited(true);
     setBreakfastMeals((prev) => applyBreakfastMealPatch(prev, id, patch));
   };
 
   const handleDeleteBreakfastMeal = (id: string) => {
+    setBreakfastEdited(true);
     setBreakfastMeals((prev) => prev.filter((meal) => meal.id !== id));
   };
 
   const handleMoveBreakfastMeal = (id: string, direction: -1 | 1) => {
+    setBreakfastEdited(true);
     setBreakfastMeals((prev) => {
       const sorted = [...prev].sort((a, b) => a.displayOrder - b.displayOrder);
       const idx = sorted.findIndex((meal) => meal.id === id);
@@ -6796,7 +6846,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                 <label className="flex items-center gap-3 cursor-pointer text-xs font-bold text-gray-800">
                   <button
                     type="button"
-                    onClick={() => setBreakfastEnabled(!breakfastEnabled)}
+                    onClick={() => { setBreakfastEdited(true); setBreakfastEnabled(!breakfastEnabled); }}
                     className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
                       breakfastEnabled ? "bg-primary" : "bg-gray-200"
                     }`}
@@ -6833,7 +6883,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                       type="time"
                       data-testid="breakfast-cutoff-time"
                       value={breakfastCutoffTime}
-                      onChange={(e) => setBreakfastCutoffTime(e.target.value)}
+                      onChange={(e) => { setBreakfastEdited(true); setBreakfastCutoffTime(e.target.value); }}
                       disabled={!breakfastEnabled}
                       className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed"
                     />
@@ -6861,7 +6911,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                 <label className="flex items-center gap-3 text-xs font-semibold text-gray-700 cursor-pointer">
                   <button
                     type="button"
-                    onClick={() => setBreakfastFrontDeskOverrideEnabled(!breakfastFrontDeskOverrideEnabled)}
+                    onClick={() => { setBreakfastEdited(true); setBreakfastFrontDeskOverrideEnabled(!breakfastFrontDeskOverrideEnabled); }}
                     disabled={!breakfastEnabled}
                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition disabled:opacity-50 disabled:cursor-not-allowed ${
                       breakfastFrontDeskOverrideEnabled ? "bg-primary" : "bg-gray-300"
@@ -6889,7 +6939,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                 <label className="flex items-center gap-3 text-xs font-semibold text-gray-700 cursor-pointer">
                   <button
                     type="button"
-                    onClick={() => setBreakfastCutoffsEnabled(!breakfastCutoffsEnabled)}
+                    onClick={() => { setBreakfastEdited(true); setBreakfastCutoffsEnabled(!breakfastCutoffsEnabled); }}
                     disabled={!breakfastEnabled}
                     data-testid="breakfast-cutoffs-enabled-toggle"
                     className={`relative inline-flex h-6 w-11 items-center rounded-full transition disabled:opacity-50 disabled:cursor-not-allowed ${
@@ -6920,7 +6970,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                   <textarea
                     data-testid="breakfast-default-meal-instructions"
                     value={breakfastDefaultMealInstructions}
-                    onChange={(e) => setBreakfastDefaultMealInstructions(e.target.value.slice(0, 2000))}
+                    onChange={(e) => { setBreakfastEdited(true); setBreakfastDefaultMealInstructions(e.target.value.slice(0, 2000)); }}
                     disabled={!breakfastEnabled}
                     maxLength={2000}
                     rows={3}
@@ -6938,7 +6988,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                     max={60}
                     step={1}
                     value={breakfastServedGraceMinutes}
-                    onChange={(e) => setBreakfastServedGraceMinutes(e.target.value)}
+                    onChange={(e) => { setBreakfastEdited(true); setBreakfastServedGraceMinutes(e.target.value); }}
                     disabled={!breakfastEnabled}
                     className="min-h-[44px] w-full rounded border border-gray-250 bg-gray-50/50 px-3 text-sm font-medium focus:bg-white disabled:cursor-not-allowed"
                   />

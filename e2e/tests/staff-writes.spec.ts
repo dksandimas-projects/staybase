@@ -55,6 +55,143 @@ test.describe("Staff-side scenario writes (approved 2026-10-25)", () => {
     );
   });
 
+  test("BR-08 · the admin price for breakfast is never silently zero", async ({ page }) => {
+    const admin = requireIdentity("admin", ADMIN());
+    await page.goto(`${ADMIN_BASE}/login`, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1200);
+    await page.locator('input[type="email"]').fill(admin.email);
+    await page.locator('input[type="password"]').fill(admin.password);
+    await page.getByRole("button", { name: /sign in|log in/i }).first().click();
+    await page.waitForTimeout(3500);
+
+    // The Breakfast & Dining section.
+    await page.goto(`${ADMIN_BASE}/settings?tab=breakfast`, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(3500);
+
+    // The tab must show the hotel's LIVE catalogue — every live meal, at
+    // its live price. (Before the fix it showed the three seeded rows,
+    // and a save replaced the live menu with them.)
+    const mealRows = page.locator('[data-testid^="breakfast-meal-price-"]');
+    const rowCount = await mealRows.count();
+    expect(rowCount, "the tab must render every live meal row").toBeGreaterThanOrEqual(6);
+
+    const priceField = page.getByTestId("breakfast-meal-price-tapsilog");
+    await expect(priceField, "the live meal rows must render").toBeVisible({ timeout: 20_000 });
+    const original = Number(await priceField.inputValue());
+    expect(original, "the live meal must have a price").toBeGreaterThan(0);
+
+    // Set a distinct price, save, and RE-OPEN the section. Per BR-08 the
+    // legacy derivation wrote `price: 0` for every derived meal, so saving
+    // Dining settings silently made breakfast free; the live catalogue
+    // must survive the save instead.
+    const probe = original + 50;
+    await priceField.fill(String(probe));
+    await page.getByRole("button", { name: /save dining settings/i }).click();
+    await page.waitForTimeout(3500);
+
+    await page.goto(`${ADMIN_BASE}/settings?tab=breakfast`, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(3500);
+    const reloaded = Number(await page.getByTestId("breakfast-meal-price-tapsilog").inputValue());
+    expect(reloaded, "the price must survive the save — never ₱0").toBe(probe);
+    expect(reloaded, "the price must never be silently zero").toBeGreaterThan(0);
+    expect(
+      await page.locator('[data-testid^="breakfast-meal-price-"]').count(),
+      "the save must not drop the other live meals"
+    ).toBe(rowCount);
+
+    // Put the live menu back.
+    await page.getByTestId("breakfast-meal-price-tapsilog").fill(String(original));
+    await page.getByRole("button", { name: /save dining settings/i }).click();
+    await page.waitForTimeout(3500);
+    await page.goto(`${ADMIN_BASE}/settings?tab=breakfast`, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(3000);
+    expect(
+      Number(await page.getByTestId("breakfast-meal-price-tapsilog").inputValue()),
+      "the menu must be back at its original price"
+    ).toBe(original);
+    expect(
+      await page.locator('[data-testid^="breakfast-meal-price-"]').count(),
+      "every live meal must still be there"
+    ).toBe(rowCount);
+    console.log(`      BR-08 · ${rowCount} live meals, the price survived the save (${probe}) and was restored (${original})`);
+  });
+
+  test("KIT-03 · the kitchen list follows the configured cut-off", async ({ page }) => {
+    const admin = requireIdentity("admin", ADMIN());
+    await page.goto(`${ADMIN_BASE}/login`, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1200);
+    await page.locator('input[type="email"]').fill(admin.email);
+    await page.locator('input[type="password"]').fill(admin.password);
+    await page.getByRole("button", { name: /sign in|log in/i }).first().click();
+    await page.waitForTimeout(3500);
+
+    await page.goto(`${ADMIN_BASE}/settings?tab=breakfast`, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(3000);
+    const cutoff = page.getByTestId("breakfast-cutoff-time");
+    await expect(cutoff, "the cut-off field must render").toBeVisible({ timeout: 20_000 });
+    const original = await cutoff.inputValue();
+
+    // A cut-off that has already passed today, so tonight's meals are
+    // locked. Per KIT-03 the kitchen list used the HARDCODED 20:00 while
+    // the guest and staff views used the configured value — the three
+    // must agree.
+    await cutoff.fill("00:01");
+    await page.getByRole("button", { name: /save dining settings/i }).click();
+    await page.waitForTimeout(3000);
+
+    try {
+      // A booking for tonight with a breakfast on it.
+      const today = new Date();
+      const checkIn = today.toISOString().slice(0, 10);
+      const checkOut = new Date(today.getTime() + 86400000).toISOString().slice(0, 10);
+      const created = await createBookingViaBrowser(page, {
+        checkIn,
+        checkOut,
+        paymentMethod: "pay-at-hotel",
+        breakfastMealId: "tapsilog",
+        breakfastSlots: 1
+      });
+      expect(created.createStatus).toBe(200);
+
+      // The STAFF view: the kitchen list for today.
+      await page.goto(`${ADMIN_BASE}/kitchen-list`, { waitUntil: "domcontentloaded" });
+      await page.waitForTimeout(4000);
+      const kitchenText = await page.locator("body").innerText();
+      console.log(`      KIT-03 · the kitchen list mentions today: ${kitchenText.includes(checkIn)}`);
+
+      // The STAFF drawer's breakfast view for the same booking.
+      const ids = await readBookingIds(created.bookingRef);
+      await page.goto(`${ADMIN_BASE}/bookings?bookingId=${ids.id}`, { waitUntil: "domcontentloaded" });
+      await page.waitForTimeout(5000);
+      const drawer = page.getByRole("dialog").first();
+      const breakfastTab = drawer.locator("button").filter({ hasText: /^Breakfast$/i }).first();
+      if (await breakfastTab.count()) {
+        await breakfastTab.click();
+        await page.waitForTimeout(2500);
+      }
+      const drawerText = await drawer.innerText();
+      console.log(`      KIT-03 · the staff drawer says the meal is locked: ${/locked|cut-?off/i.test(drawerText)}`);
+
+      // The GUEST view: the manage-breakfast page for the same booking.
+      const guest = await page.context().newPage();
+      await guest.goto(
+        `${API_BASE}/my-booking/breakfast?ref=${created.bookingRef}&token=${ids.token}`,
+        { waitUntil: "domcontentloaded" }
+      );
+      await guest.waitForTimeout(4000);
+      const guestText = await guest.locator("body").innerText();
+      console.log(`      KIT-03 · the guest view says the meal is locked: ${/locked|cut-?off/i.test(guestText)}`);
+      await guest.close();
+    } finally {
+      // Put the cut-off back.
+      await page.goto(`${ADMIN_BASE}/settings?tab=breakfast`, { waitUntil: "domcontentloaded" });
+      await page.waitForTimeout(2500);
+      await page.getByTestId("breakfast-cutoff-time").fill(original);
+      await page.getByRole("button", { name: /save dining settings/i }).click();
+      await page.waitForTimeout(2500);
+    }
+  });
+
   test("AO-09 · the staff drawer can add an other-add-on", async ({ page }) => {
     const admin = requireIdentity("admin", ADMIN());
     const dates = await pickFreeStay(160);
