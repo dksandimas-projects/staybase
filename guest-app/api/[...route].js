@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.18.21";
+    VERSION2 = "2.19.2";
   }
 });
 
@@ -246742,6 +246742,7 @@ async function handleGetPrivateStorageUrl(req, res) {
 init_firebase_admin();
 
 // server/lib/publicHotelConfig.ts
+init_shared();
 init_firebase_admin();
 var DEFAULT_VAT_ENABLED = true;
 function asRecord(value) {
@@ -246893,6 +246894,11 @@ function buildPublicHotelConfig(source, options) {
     // Per OCT-M1 (decision #295): only an explicit `false` disables
     // the add-ons category.
     otherAddOnsEnabled: asBoolean(config2.otherAddOnsEnabled, true),
+    // Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide
+    // bot-protection mode. Normalised with the SHARED normaliser so a
+    // malformed / missing value projects as "turnstile" — the gate
+    // stays ON (fail closed) on both sides.
+    botProtectionMode: normalizeBotProtectionMode(config2.botProtectionMode),
     roomTypes: buildRoomTypes(config2.roomTypes),
     seasonalRateOverrides: buildSeasonalRateOverrides(config2.seasonalRateOverrides),
     bedSetups: buildBedSetups(config2.bedSetups),

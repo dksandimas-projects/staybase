@@ -23,18 +23,30 @@
 // there is exactly one place to audit.
 
 import { useEffect, useState } from "react";
-import type { PublicHotelConfig } from "@spark-inn/shared";
+import type { BotProtectionMode, PublicHotelConfig } from "@spark-inn/shared";
 import { subscribeToPublicSiteContentBust } from "@spark-inn/shared";
 
 const ENDPOINT = "/api/public/hotel-config";
 
-let cachedPromise: Promise<PublicHotelConfig | null> | null = null;
+/**
+ * The public projection + the hotel-wide bot-protection mode.
+ *
+ * Per QA-2026-10-23 §3.2 (2026-10-25): the raw
+ * `settings/hotelConfig` document is not readable by an anonymous
+ * client, so the mode travels in the PUBLIC projection. The field is
+ * OPTIONAL on the client because the client must FAIL CLOSED when it
+ * is missing: the mode is always read through the shared
+ * `normalizeBotProtectionMode`, never trusted raw.
+ */
+export type PublicHotelConfigWithBotProtection = PublicHotelConfig;
+
+let cachedPromise: Promise<PublicHotelConfigWithBotProtection | null> | null = null;
 
 /**
  * Fetch the public hotel configuration. The promise is module-scoped
  * so several components mounting in the same tick share ONE request.
  */
-export function fetchPublicHotelConfig(): Promise<PublicHotelConfig | null> {
+export function fetchPublicHotelConfig(): Promise<PublicHotelConfigWithBotProtection | null> {
   if (cachedPromise) return cachedPromise;
   cachedPromise = (async () => {
     try {
@@ -45,7 +57,7 @@ export function fetchPublicHotelConfig(): Promise<PublicHotelConfig | null> {
       if (!response.ok) return null;
       const json = await response.json();
       if (!json?.success || !json?.data) return null;
-      return json.data as PublicHotelConfig;
+      return json.data as PublicHotelConfigWithBotProtection;
     } catch {
       return null;
     }
@@ -59,7 +71,7 @@ export function resetPublicHotelConfigCache(): void {
 }
 
 export interface UsePublicHotelConfigResult {
-  config: PublicHotelConfig | null;
+  config: PublicHotelConfigWithBotProtection | null;
   isLoading: boolean;
   error: string | null;
 }
@@ -70,7 +82,7 @@ export interface UsePublicHotelConfigResult {
  * `settings/hotelConfig` from Settings → Hotel Info).
  */
 export function usePublicHotelConfig(): UsePublicHotelConfigResult {
-  const [config, setConfig] = useState<PublicHotelConfig | null>(null);
+  const [config, setConfig] = useState<PublicHotelConfigWithBotProtection | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 

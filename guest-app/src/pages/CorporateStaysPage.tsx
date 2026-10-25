@@ -33,6 +33,10 @@ import { cn } from "../utils/cn";
 import { fadeUp, staggerContainer, staggerChild, DEFAULT_CORPORATE_PAGE_CONTENT, type RoomTypeEntry } from "@spark-inn/shared";
 import { addDaysToIsoDate, getDateKeyInTimezone } from "@spark-inn/shared";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
+// Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide bot-protection
+// mode. When the hotel's mode is "disabled" the Turnstile token is
+// NOT required and the widget does not mount at all.
+import { useBotProtectionMode } from "../hooks/useBotProtectionMode";
 import type { ContentItem } from "@spark-inn/shared";
 import { HeroImage } from "../components/HeroImage";
 import { HeroSkeleton } from "../components/HeroSkeleton";
@@ -162,8 +166,18 @@ export function CorporateStaysPage() {
   const turnstileContainerRef = useRef<HTMLDivElement>(null);
   const turnstileWidgetIdRef = useRef<string | null>(null);
 
+  // Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide bot-protection
+  // mode. The server skips the Turnstile gate when the mode is
+  // "disabled", so the client must skip the SAME requirement — and
+  // must not mount a challenge there is nothing to solve. The hook
+  // FAILS CLOSED: until the mode is known it reports "turnstile".
+  const { isBotProtectionDisabled } = useBotProtectionMode();
+
   useEffect(() => {
     if (isSubmitted) return;
+    // Per QA-2026-10-23 §3.2 (2026-10-25): no widget, no token, no
+    // gate — when the hotel's bot protection is off.
+    if (isBotProtectionDisabled) return;
 
     const container = turnstileContainerRef.current;
     if (!container) return;
@@ -229,7 +243,7 @@ export function CorporateStaysPage() {
       }
       turnstileWidgetIdRef.current = null;
     };
-  }, [isSubmitted]);
+  }, [isSubmitted, isBotProtectionDisabled]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -258,7 +272,10 @@ export function CorporateStaysPage() {
     // Per BI-02 (booking-intercom audit 2026-07-06): the endpoint
     // is Turnstile-gated for real now — don't burn a request that
     // will 400 while the widget is still resolving.
-    if (!turnstileToken) {
+    // Per QA-2026-10-23 §3.2 (2026-10-25): the token is required
+    // UNLESS the hotel's bot-protection mode is "disabled" (the server
+    // does not ask for one in that mode either).
+    if (!isBotProtectionDisabled && !turnstileToken) {
       setFormError("The security check hasn't finished yet. Please wait a moment and try again.");
       return;
     }

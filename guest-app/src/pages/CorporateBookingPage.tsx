@@ -95,6 +95,10 @@ import { BookingStickyFooter } from "../components/BookingStickyFooter";
 import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { useTurnstileToken } from "../hooks/useTurnstileToken";
+// Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide bot-protection
+// mode. When the hotel's mode is "disabled" the Turnstile token is
+// NOT required and neither widget mounts at all.
+import { useBotProtectionMode } from "../hooks/useBotProtectionMode";
 // Per SR-01..05 (2026-10-12): the corporate Step 2 special-requests
 // block. Same shape as the public `/book` flow.
 import { SpecialRequestsBlock } from "../components/SpecialRequestsBlock";
@@ -223,8 +227,18 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
   // `"mock_token"` and the create body sent no token at all, so
   // corporate bookings were rejected outside NODE_ENV=test (the
   // Step 3 "Connection Verified" panel was a hardcoded fake).
-  const gateTurnstile = useTurnstileToken({ enabled: currentStepKey === "gate" });
-  const reviewTurnstile = useTurnstileToken({ enabled: currentStepKey === "review" });
+  // Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide bot-protection
+  // mode. The server skips the Turnstile gate when the mode is
+  // "disabled", so the client must skip the SAME requirement — and
+  // must not mount a challenge there is nothing to solve. The hook
+  // FAILS CLOSED: until the mode is known it reports "turnstile".
+  const { isBotProtectionDisabled } = useBotProtectionMode();
+  const gateTurnstile = useTurnstileToken({
+    enabled: currentStepKey === "gate" && !isBotProtectionDisabled
+  });
+  const reviewTurnstile = useTurnstileToken({
+    enabled: currentStepKey === "review" && !isBotProtectionDisabled
+  });
 
   // Corporate validation state (persisted in sessionStorage)
   const [accessCode, setAccessCode] = useState("");
@@ -1165,7 +1179,10 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
     // The widget on this gate auto-resolves for most visitors;
     // if the token hasn't arrived yet, ask for a retry instead
     // of burning a request that will 400.
-    if (!gateTurnstile.token) {
+    // Per QA-2026-10-23 §3.2 (2026-10-25): the token is required
+    // UNLESS the hotel's bot-protection mode is "disabled" (the server
+    // does not ask for one in that mode either).
+    if (!isBotProtectionDisabled && !gateTurnstile.token) {
       setCodeError("The security check hasn't finished yet. Please wait a moment and try again.");
       return;
     }
@@ -2796,10 +2813,13 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
     // Per BI-05: personal pay requires the uploaded receipt before
     // Confirm unlocks. Per BI-01: Confirm also waits for the
     // Turnstile token — submitting without one is a guaranteed 400.
+    // Per QA-2026-10-23 §3.2 (2026-10-25): the token is required
+    // UNLESS the hotel's bot-protection mode is "disabled" (the server
+    // does not ask for one in that mode either).
     const canConfirm =
       termsConsent &&
       Boolean(selectedTypeEntry) &&
-      Boolean(reviewTurnstile.token) &&
+      (isBotProtectionDisabled || Boolean(reviewTurnstile.token)) &&
       !uploadingProof &&
       (!isPersonalPay || Boolean(proofUpload));
 
@@ -3085,7 +3105,7 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
               ? "Payment receipt upload required"
               : !termsConsent
               ? "Agree to the terms to continue"
-              : !reviewTurnstile.token
+              : !isBotProtectionDisabled && !reviewTurnstile.token
               ? "Running a quick security check..."
               : isPersonalPay
               ? "Payment receipt uploaded"

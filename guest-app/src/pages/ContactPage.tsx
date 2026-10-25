@@ -9,6 +9,10 @@ import { PrimaryButton } from "../components/PrimaryButton";
 import { fadeUp } from "@spark-inn/shared";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 import { useTurnstileToken } from "../hooks/useTurnstileToken";
+// Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide bot-protection
+// mode. When the hotel's mode is "disabled" the Turnstile token is
+// NOT required and the widget does not mount at all.
+import { useBotProtectionMode } from "../hooks/useBotProtectionMode";
 
 export function ContactPage() {
   const shouldReduceMotion = useReducedMotion();
@@ -35,11 +39,20 @@ export function ContactPage() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [honeypot, setHoneypot] = useState("");
-  const turnstile = useTurnstileToken();
+  // Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide bot-protection
+  // mode. The server skips the Turnstile gate when the mode is
+  // "disabled", so the client must skip the SAME requirement — and
+  // must not mount a challenge there is nothing to solve. The hook
+  // FAILS CLOSED: until the mode is known it reports "turnstile".
+  const { isBotProtectionDisabled } = useBotProtectionMode();
+  const turnstile = useTurnstileToken({ enabled: !isBotProtectionDisabled });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!turnstile.token) {
+    // Per QA-2026-10-23 §3.2 (2026-10-25): the token is required
+    // UNLESS the hotel's bot-protection mode is "disabled" (the server
+    // does not ask for one in that mode either).
+    if (!isBotProtectionDisabled && !turnstile.token) {
       setSubmitError("Please complete the verification check, then send your message again.");
       return;
     }
@@ -310,7 +323,7 @@ export function ContactPage() {
                     <div className="pt-2">
                       <PrimaryButton 
                         type="submit" 
-                        disabled={isSubmitting || !turnstile.token}
+                        disabled={isSubmitting || (!isBotProtectionDisabled && !turnstile.token)}
                         className="w-full sm:w-auto min-w-[150px]"
                       >
                         {isSubmitting ? "Sending message..." : "Send Message"}

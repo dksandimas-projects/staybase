@@ -24,6 +24,11 @@
 // field to `settings/hotelConfig` cannot leak it by accident.
 
 import type { SeasonalRateOverride } from "./index";
+// Per QA-2026-10-23 §3.2 (2026-10-25): the shared bot-protection mode
+// type + its normaliser live in `shared/utils/botProtection.ts` — the
+// server and the guest client both use them, so the two sides can never
+// disagree about what "off" means.
+import type { BotProtectionMode } from "../utils/botProtection";
 
 /**
  * A room type as the public site sees it.
@@ -113,6 +118,19 @@ export interface PublicHotelConfig {
   maxStayNights: number | null;
   /** Per OCT-M1 (decision #295): the hotel-wide add-ons master switch. */
   otherAddOnsEnabled: boolean;
+  /**
+   * Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide bot-protection
+   * mode, projected so the GUEST CLIENT can honour the same switch the
+   * server honours.
+   *
+   * "turnstile" = the Cloudflare Turnstile gate applies (the default);
+   * "disabled" = the gate is off for a testing window. The value is
+   * normalised with `normalizeBotProtectionMode` — it is never a
+   * client-controlled value, and anything unrecognised (including
+   * `undefined` — an older server that does not project it) resolves to
+   * "turnstile", so the gate stays ON.
+   */
+  botProtectionMode?: BotProtectionMode;
   roomTypes: PublicRoomType[];
   seasonalRateOverrides: SeasonalRateOverride[];
   bedSetups: PublicBedSetupOption[];

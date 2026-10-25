@@ -21,9 +21,13 @@ describe("BookingPage.tsx — voucher application", () => {
   });
 
   it("does not submit voucher validation before Turnstile is ready", () => {
-    expect(src).toMatch(/if \(!turnstileToken\)\s*\{/);
+    // Per QA-2026-10-23 §3.2 (2026-10-25): the token requirement is
+    // conditional on the hotel-wide bot-protection mode — it still
+    // applies in the default mode, and it is skipped only when the
+    // mode is "disabled" (the server does not ask for a token then).
+    expect(src).toMatch(/if \(!isBotProtectionDisabled && !turnstileToken\)\s*\{/);
     expect(src).toMatch(/Security check is still loading/);
-    expect(src).toMatch(/disabled=\{isValidatingVoucher \|\| !voucherCode\.trim\(\) \|\| !turnstileToken\}/);
+    expect(src).toMatch(/disabled=\{isValidatingVoucher \|\| !voucherCode\.trim\(\) \|\| \(!isBotProtectionDisabled && !turnstileToken\)\}/);
   });
 
   it("clears an applied voucher when the code text changes", () => {

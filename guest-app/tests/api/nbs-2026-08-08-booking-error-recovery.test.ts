@@ -139,8 +139,13 @@ describe("NBS-2026-08-08 — guest /book error recovery + consent wiring + auto-
       // comment asked for: the duplicate checkbox is deleted and
       // `guestDetails.consent` is the single source of truth. The
       // AND is therefore gone — and so is `termsConsent`.
+      //
+      // Per QA-2026-10-23 §3.2 (2026-10-25): the last term is the
+      // Turnstile token, and it is required UNLESS the hotel's
+      // bot-protection mode is "disabled" (the server does not ask for
+      // a token in that mode either).
       const gateMatch = bookingPageSrc.match(
-        /const canConfirm = guestDetails\.consent && !isIdUploadRequired && !isPaymentProofRequired && cartIsReady && Boolean\(turnstileToken\)/
+        /const canConfirm = guestDetails\.consent && !isIdUploadRequired && !isPaymentProofRequired && cartIsReady && \(isBotProtectionDisabled \|\| Boolean\(turnstileToken\)\)/
       );
       expect(gateMatch).not.toBeNull();
       expect(bookingPageSrc).not.toMatch(/termsConsent/);

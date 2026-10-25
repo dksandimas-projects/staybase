@@ -30,6 +30,7 @@ import type {
   PublicVatConfig,
   SeasonalRateOverride
 } from "@spark-inn/shared";
+import { normalizeBotProtectionMode, type BotProtectionMode } from "@spark-inn/shared";
 import { adminDb } from "./firebase-admin";
 
 const DEFAULT_VAT_ENABLED = true;
@@ -176,6 +177,26 @@ function buildVatConfig(raw: unknown): PublicVatConfig {
 }
 
 /**
+ * The public projection of `settings/hotelConfig` + the hotel-wide
+ * bot-protection mode.
+ *
+ * Per QA-2026-10-23 §3.2 (2026-10-25): the guest client has to honour
+ * the SAME switch the server honours, and the raw
+ * `settings/hotelConfig` document is not readable by an anonymous
+ * client — so the mode travels in the public projection.
+ *
+ * The mode is NORMALISED here with the shared normaliser, so the
+ * server and the client can never disagree about what "off" means: a
+ * malformed value projects as "turnstile" (the gate stays ON), never as
+ * "disabled".
+ *
+ * The field itself is declared on the SHARED `PublicHotelConfig` type
+ * (`shared/types/publicHotelConfig.ts`), so the server's projection and
+ * the guest client's reader are the same shape.
+ */
+export type PublicHotelConfigProjection = PublicHotelConfig;
+
+/**
  * Build the public projection of a raw `settings/hotelConfig`
  * payload. Pure — no Firestore, no clock, no env.
  *
@@ -186,7 +207,7 @@ function buildVatConfig(raw: unknown): PublicVatConfig {
 export function buildPublicHotelConfig(
   source: unknown,
   options?: { storeEnabled?: boolean }
-): PublicHotelConfig {
+): PublicHotelConfigProjection {
   const config = asRecord(source);
   const rawMaxStayNights = config.maxStayNights;
   return {
@@ -214,6 +235,11 @@ export function buildPublicHotelConfig(
     // Per OCT-M1 (decision #295): only an explicit `false` disables
     // the add-ons category.
     otherAddOnsEnabled: asBoolean(config.otherAddOnsEnabled, true),
+    // Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide
+    // bot-protection mode. Normalised with the SHARED normaliser so a
+    // malformed / missing value projects as "turnstile" — the gate
+    // stays ON (fail closed) on both sides.
+    botProtectionMode: normalizeBotProtectionMode(config.botProtectionMode),
     roomTypes: buildRoomTypes(config.roomTypes),
     seasonalRateOverrides: buildSeasonalRateOverrides(config.seasonalRateOverrides),
     bedSetups: buildBedSetups(config.bedSetups),
@@ -231,7 +257,7 @@ export function buildPublicHotelConfig(
  * now keep the raw documents away from unauthenticated clients, and
  * this server-side read is what serves the public slice of them.
  */
-export async function loadPublicHotelConfig(): Promise<PublicHotelConfig> {
+export async function loadPublicHotelConfig(): Promise<PublicHotelConfigProjection> {
   const [hotelSnapshot, storeSnapshot] = await Promise.all([
     adminDb.collection("settings").doc("hotelConfig").get(),
     adminDb.collection("settings").doc("storeConfig").get()

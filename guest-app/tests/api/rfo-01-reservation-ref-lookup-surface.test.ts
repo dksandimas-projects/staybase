@@ -102,7 +102,7 @@ describe("RFO-01 — BookingLookupPage auto-lookup reads ?reservationRef=", () =
     // path wins. The signature guard keys off the
     // active ref to dedupe the auto-lookup.
     const effect = lookupPageSrc.match(
-      /useEffect\(\(\) => \{[\s\S]*?\}, \[searchParams, turnstileToken\]\);/
+      /useEffect\(\(\) => \{[\s\S]*?\}, \[searchParams, turnstileToken, isBotProtectionDisabled\]\);/
     );
     expect(effect, "expected the auto-lookup useEffect").toBeTruthy();
     expect(effect![0]).toMatch(/const reservationRef = searchParams\.get\("reservationRef"\)/);
@@ -118,7 +118,7 @@ describe("RFO-01 — BookingLookupPage auto-lookup reads ?reservationRef=", () =
     // and the guest can fill in the missing
     // piece. Mirrors the server's 400 reply.
     const effect = lookupPageSrc.match(
-      /useEffect\(\(\) => \{[\s\S]*?\}, \[searchParams, turnstileToken\]\);/
+      /useEffect\(\(\) => \{[\s\S]*?\}, \[searchParams, turnstileToken, isBotProtectionDisabled\]\);/
     );
     expect(effect).toBeTruthy();
     expect(effect![0]).toMatch(
@@ -128,7 +128,7 @@ describe("RFO-01 — BookingLookupPage auto-lookup reads ?reservationRef=", () =
 
   it("the prefill uses the reservationRef when present, the legacy ref otherwise", () => {
     const effect = lookupPageSrc.match(
-      /useEffect\(\(\) => \{[\s\S]*?\}, \[searchParams, turnstileToken\]\);/
+      /useEffect\(\(\) => \{[\s\S]*?\}, \[searchParams, turnstileToken, isBotProtectionDisabled\]\);/
     );
     expect(effect).toBeTruthy();
     expect(effect![0]).toMatch(/if \(reservationRef\) \{[\s\S]*?setRefInput\(reservationRef\)/);

@@ -139,6 +139,10 @@ import {
 import { useRooms } from "../hooks/useRooms";
 import { getRoomTypeImages, getRoomTypeRates, useRoomTypes } from "../hooks/useRoomTypes";
 import { useTurnstileToken } from "../hooks/useTurnstileToken";
+// Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide bot-protection
+// mode. When the hotel's mode is "disabled" the Turnstile token is
+// NOT required and the widget does not mount at all.
+import { useBotProtectionMode } from "../hooks/useBotProtectionMode";
 // In-flow hold (Steps 2 + 3 countdown banner). The
 // banner is a thin wrapper around `useInFlowHold` that
 // renders the live MM:SS countdown + the "Hold
@@ -806,12 +810,19 @@ export function BookingPage() {
   // render is always the loading skeleton or Step 1, so the widget
   // never mounted and every submit fell back to `"mock_token"`
   // (which the server no longer accepts — see BI-02).
+  // Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide bot-protection
+  // mode. The server skips the Turnstile gate when the mode is
+  // "disabled", so the client must skip the SAME requirement — and
+  // must not mount a challenge there is nothing to solve. The hook
+  // FAILS CLOSED: until the mode is known it reports "turnstile", so
+  // the widget mounts and the gates hold.
+  const { isBotProtectionDisabled } = useBotProtectionMode();
   const {
     token: turnstileToken,
     containerRef: turnstileContainerRef,
     reset: resetTurnstile
   } = useTurnstileToken({
-    enabled: isReviewStep
+    enabled: isReviewStep && !isBotProtectionDisabled
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
@@ -1775,7 +1786,10 @@ export function BookingPage() {
       setVoucherError("Please enter a code.");
       return;
     }
-    if (!turnstileToken) {
+    // Per BI-02/BI-03: the endpoint needs a real Turnstile token —
+    // unless the hotel's bot-protection mode is "disabled", in which
+    // case the server does not ask for one either.
+    if (!isBotProtectionDisabled && !turnstileToken) {
       setVoucherError("Security check is still loading. Please wait a moment, then apply the voucher again.");
       return;
     }
@@ -3465,7 +3479,10 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
     // The lesson generalises: whenever the client gates on a value
     // the server does not validate, the gate is decorative. There is
     // now exactly one consent value and the server reads the same one.
-    const canConfirm = guestDetails.consent && !isIdUploadRequired && !isPaymentProofRequired && cartIsReady && Boolean(turnstileToken);
+    // Per QA-2026-10-23 §3.2 (2026-10-25): the token is required
+    // UNLESS the hotel's bot-protection mode is "disabled" (the server
+    // does not ask for one in that mode either).
+    const canConfirm = guestDetails.consent && !isIdUploadRequired && !isPaymentProofRequired && cartIsReady && (isBotProtectionDisabled || Boolean(turnstileToken));
 
     // Per MBUX-07 (decision #259): which optional savings are ACTUALLY
     // applied, so the collapsed disclosure can state them.
@@ -3620,7 +3637,7 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
                 ) : (
                   <button
                     type="submit"
-                    disabled={isValidatingVoucher || !voucherCode.trim() || !turnstileToken}
+                    disabled={isValidatingVoucher || !voucherCode.trim() || (!isBotProtectionDisabled && !turnstileToken)}
                     className="min-h-11 rounded-lg border border-primary px-6 text-sm font-semibold text-primary transition hover:bg-primary-light focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
                   >
                     {isValidatingVoucher ? "Applying..." : "Apply"}
@@ -4281,7 +4298,7 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
                   ? "Please upload your Senior/PWD ID"
                   : isPaymentProofRequired
                   ? "Please upload proof of payment"
-                  : !turnstileToken
+                  : !isBotProtectionDisabled && !turnstileToken
                   ? "Running a quick security check..."
                   : `Ready to confirm · ${formatPrice(displayTotal)}`}
               </p>

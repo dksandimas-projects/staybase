@@ -17,6 +17,10 @@ import { formatPrice } from "../utils/format";
 import { cn } from "../utils/cn";
 import { useTurnstileToken } from "../hooks/useTurnstileToken";
 import { fetchPublicHotelConfig } from "../hooks/usePublicHotelConfig";
+// Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide bot-protection
+// mode. When the hotel's mode is "disabled" the Turnstile token is
+// NOT required and the widget does not mount at all.
+import { useBotProtectionMode } from "../hooks/useBotProtectionMode";
 
 interface BookingData {
   id: string;
@@ -395,11 +399,17 @@ export function BookingLookupPage() {
   // below the submit button on the search form; the cancel
   // modal reuses the same token (still valid within the
   // 2-min expiry window for a typical cancel flow).
+  // Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide bot-protection
+  // mode. The server skips the Turnstile gate when the mode is
+  // "disabled", so the client must skip the SAME requirement — and
+  // must not mount a challenge there is nothing to solve. The hook
+  // FAILS CLOSED: until the mode is known it reports "turnstile".
+  const { isBotProtectionDisabled } = useBotProtectionMode();
   const {
     token: turnstileToken,
     reset: resetTurnstile,
     containerRef: turnstileContainerRef
-  } = useTurnstileToken();
+  } = useTurnstileToken({ enabled: !isBotProtectionDisabled });
 
   useEffect(() => {
     if (resendCooldownUntil === 0) return;
@@ -747,7 +757,10 @@ export function BookingLookupPage() {
     // Turnstile widget to issue a token — the lookup endpoint is
     // gated for real now. The effect re-runs when the token arrives
     // (deps below); the signature guard keeps it single-fire.
-    if (!turnstileToken) return;
+    // Per QA-2026-10-23 §3.2 (2026-10-25): the wait is skipped when
+    // the hotel's bot-protection mode is "disabled" — the server does
+    // not ask for a token in that mode either.
+    if (!isBotProtectionDisabled && !turnstileToken) return;
     const activeRef = reservationRef || ref || "";
     const signature = `${activeRef}::${token || email || ""}`;
     if (lastAutoLookupSignatureRef.current === signature) return;
@@ -773,13 +786,16 @@ export function BookingLookupPage() {
       // so the `?? ""` is purely for the typecheck.
       void performLookup(ref ?? "", email || undefined, token || undefined);
     }
-  }, [searchParams, turnstileToken]);
+  }, [searchParams, turnstileToken, isBotProtectionDisabled]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     // Per BI-02/BI-03: don't burn a request that will 400 — the
     // widget below the form auto-resolves for most visitors.
-    if (!turnstileToken) {
+    // Per QA-2026-10-23 §3.2 (2026-10-25): skipped when the hotel's
+    // bot-protection mode is "disabled" (the server does not ask for
+    // a token in that mode either).
+    if (!isBotProtectionDisabled && !turnstileToken) {
       setSearchError("The security check hasn't finished yet. Please wait a moment and try again.");
       return;
     }
@@ -989,7 +1005,9 @@ export function BookingLookupPage() {
     if (!activeRef) return;
     // Per BI-02: the lookup consumed the previous token and
     // `performLookup` reset the widget — wait for the fresh one.
-    if (!turnstileToken) {
+    // Per QA-2026-10-23 §3.2 (2026-10-25): skipped when the hotel's
+    // bot-protection mode is "disabled".
+    if (!isBotProtectionDisabled && !turnstileToken) {
       setCancelError("The security check hasn't finished yet. Please wait a moment and try again.");
       return;
     }
@@ -1100,7 +1118,9 @@ export function BookingLookupPage() {
     e.preventDefault();
     const activeRef = activeBooking?.bookingRef;
     if (!activeRef || !extendCheckOut) return;
-    if (!turnstileToken) {
+    // Per QA-2026-10-23 §3.2 (2026-10-25): the token is required
+    // UNLESS the hotel's bot-protection mode is "disabled".
+    if (!isBotProtectionDisabled && !turnstileToken) {
       setExtendError("The security check hasn't finished yet. Please wait a moment and try again.");
       return;
     }
