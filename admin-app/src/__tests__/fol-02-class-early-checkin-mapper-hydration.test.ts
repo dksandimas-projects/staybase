@@ -51,7 +51,7 @@ const hydrationEffectStart = adminContextSrc.indexOf(
   "    let active = true;\n    setBookingsLoading(true);\n    const bookingsRef = collection(db, \"bookings\");"
 );
 const hydrationEffectEnd = adminContextSrc.indexOf(
-  "        if (!active) return;\n\n        // Natural sort by createdAt descending"
+  "        // Natural sort by createdAt descending"
 );
 const hydrationEffect =
   hydrationEffectStart >= 0 && hydrationEffectEnd > hydrationEffectStart

@@ -280,8 +280,18 @@ describe("RPT-01 — the AdminContext wiring (tripwire)", () => {
     // The mapper MUST call the resolver. Without it the field stays
     // the booking doc's (always empty) denormalized array and every
     // reading surface stays broken.
+    //
+    // Per RPT-01b (QA pass 2026-10-23) the resolution happens at
+    // COMMIT time — immediately before the rows are written to state —
+    // not inside the per-row mapping loop. Resolving inside the loop
+    // captured the index as it was at SNAPSHOT time; the `await` that
+    // follows (the private storage URLs) is long enough for the
+    // payments listener to land in between, and the mapper then
+    // committed its stale, un-hydrated array over the rows the
+    // re-hydration effect had already repaired. The full pin for the
+    // new structure is `rpt-01b-commit-time-ledger.test.ts`.
     expect(adminContextSrc).toMatch(
-      /mappedBooking\.onsitePayments\s*=\s*resolveBookingOnsitePayments\(/
+      /booking\.onsitePayments\s*=\s*resolveBookingOnsitePayments\(/
     );
   });
 

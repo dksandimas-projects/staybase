@@ -284,6 +284,17 @@ export interface OnsitePayment {
   amount: number;
   method: string;
   note: string;
+  /**
+   * Per FIN-REFUND-LIABILITY (QA pass 2026-10-24): a refund's lifecycle
+   * status. `"pending"` = the hotel has approved the refund but has NOT
+   * paid it out yet — the money is still held and is a LIABILITY, not
+   * collected money. `"paid"` = the money has left the till.
+   *
+   * `null`/absent means "no status on the doc", which the folio treats
+   * as pending (the same convention the dashboard's pending-refunds
+   * counter uses).
+   */
+  status?: string | null;
   transactionReference?: string | null;
   reason: string | null;
   approvedBy: string | null;
@@ -2389,13 +2400,17 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           // The denormalized array is stashed in a ref first so the
           // re-hydration effect can fall back to it later without
           // re-reading the booking doc.
+          //
+          // Per RPT-01b (QA pass 2026-10-23): ONLY the fallback is
+          // captured here. The ledger itself is resolved at COMMIT time
+          // (see below) — resolving it here captured the index as it was
+          // at snapshot time, and the `await` that follows (the private
+          // storage URLs) is long enough for the payments listener to
+          // land in between. The mapper then committed a STALE,
+          // un-hydrated array over the rows the re-hydration effect had
+          // already fixed, and nothing ever re-derived them.
           const mappedBooking = bookingsData[bookingIndex];
           legacyOnsitePaymentsRef.current[docSnap.id] = mappedBooking.onsitePayments ?? [];
-          mappedBooking.onsitePayments = resolveBookingOnsitePayments(
-            docSnap.id,
-            mappedBooking.onsitePayments ?? [],
-            paymentIndexRef.current
-          ) as OnsitePayment[];
         });
 
         await Promise.all(bookingsData.map(async (booking) => {
@@ -2407,6 +2422,35 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           }
         }));
         if (!active) return;
+
+        // Per RPT-01b (QA pass 2026-10-23): resolve the payment ledger
+        // at COMMIT time — after the `await` above, immediately before
+        // the rows are written to state.
+        //
+        // The two listeners are INDEPENDENT, so the ledger index and
+        // the bookings rows can arrive in either order:
+        //
+        //   * rows first → the index is still empty here, the rows
+        //     commit un-hydrated, and the re-hydration effect below
+        //     re-derives them when the index lands.
+        //   * index first → the rows arrive with a populated index and
+        //     commit hydrated.
+        //   * index lands DURING the `await` → resolving here (rather
+        //     than before it) picks the fresh index up. Resolving
+        //     before the await is what shipped the zeroed ledger: the
+        //     mapper committed an un-hydrated array OVER the rows the
+        //     re-hydration effect had already repaired, and nothing
+        //     re-derived them afterwards.
+        //
+        // `paymentIndexRef.current` is the latest index — the
+        // re-hydration effect keeps it in step.
+        bookingsData.forEach((booking) => {
+          booking.onsitePayments = resolveBookingOnsitePayments(
+            booking.id,
+            legacyOnsitePaymentsRef.current[booking.id] ?? booking.onsitePayments ?? [],
+            paymentIndexRef.current
+          ) as OnsitePayment[];
+        });
 
         // Natural sort by createdAt descending
         bookingsData.sort((a, b) => {
@@ -2741,10 +2785,12 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
 
-    // Force-refresh the ID token so the listener attaches with a token
-    // that definitely carries the staff `role` custom claim — the same
-    // handshake the reservations listener above uses (MRB-12).
-    void auth.currentUser?.getIdToken(true).then(() => {
+    // Per SD-4 (QA pass 2026-10-23): the attach is a named function so
+    // it can be RETRIED. A rejected token refresh used to leave the
+    // subscription NEVER created — and an unhandled promise rejection is
+    // not a `console.error`, so it was invisible: the ledger simply
+    // stayed empty and every row read "₱0 paid".
+    const attachPaymentsLedger = () => {
       if (cancelled) return;
 
       // One-shot hydration. `onSnapshot` delivers its first snapshot
@@ -2800,7 +2846,28 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           console.error("Error listening to reservation payments collectionGroup:", error);
         }
       );
-    });
+    };
+
+    // Force-refresh the ID token so the listener attaches with a token
+    // that definitely carries the staff `role` custom claim — the same
+    // handshake the reservations listener above uses (MRB-12).
+    void auth.currentUser?.getIdToken(true)
+      .then(attachPaymentsLedger)
+      .catch((error) => {
+        console.error("Error attaching the reservation payments ledger listener:", error);
+        // Retry with the SDK's CACHED token. The auth handler has
+        // already validated the staff `role` claim on it, so the
+        // listener can still attach — and a ledger that never attaches
+        // is a ledger that reads "₱0 paid" for every booking.
+        void auth.currentUser?.getIdToken(false)
+          .then(attachPaymentsLedger)
+          .catch((retryError) => {
+            console.error(
+              "Error attaching the reservation payments ledger listener (retry):",
+              retryError
+            );
+          });
+      });
 
     return () => {
       cancelled = true;
@@ -2833,7 +2900,11 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
 
-    void auth.currentUser?.getIdToken(true).then(() => {
+    // Per SD-4 (QA pass 2026-10-23): named attach function so a
+    // rejected token refresh can be RETRIED instead of leaving the
+    // subscription never created — silently, because an unhandled
+    // promise rejection is not a `console.error`.
+    const attachRefundsLedger = () => {
       if (cancelled) return;
 
       void getDocs(collectionGroup(db, "refunds"))
@@ -2862,7 +2933,18 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           console.error("Error listening to refunds collectionGroup:", error);
         }
       );
-    });
+    };
+
+    void auth.currentUser?.getIdToken(true)
+      .then(attachRefundsLedger)
+      .catch((error) => {
+        console.error("Error attaching the refunds ledger listener:", error);
+        void auth.currentUser?.getIdToken(false)
+          .then(attachRefundsLedger)
+          .catch((retryError) => {
+            console.error("Error attaching the refunds ledger listener (retry):", retryError);
+          });
+      });
 
     return () => {
       cancelled = true;
@@ -3410,19 +3492,23 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             // that needs the staff's Firebase ID
             // token. The `Bearer` prefix matches the
             // existing `authenticateStaff` reader.
-            "Authorization": token ? `Bearer ${token}` : "",
-            // Per `plan/docs/SECURITY.md`: Cloudflare
-            // Turnstile at the route's public edge
-            // produces a server-validated token that
-            // the client must echo on every mutation.
-            // The apiRouter's `verifyTurnstile` reads
-            // it from `req.body.turnstileToken`.
-            "X-Spark-Inn-Turnstile": "client-echo"
+            //
+            // Per P0-STAFF-TURNSTILE (2026-10-24): NO
+            // Turnstile token is sent. The server
+            // skips the bot gate for an AUTHENTICATED
+            // staff write (`enforceBotGate` in
+            // `guest-app/server/apiRouter.ts`) — the
+            // request already carries a signature-
+            // verified ID token with a staff role
+            // claim. The Turnstile echo header this
+            // used to send was never read by the
+            // server, and the placeholder body field
+            // made every one of these six staff
+            // mutations fail with HTTP 400 "Bot
+            // verification token is missing."
+            "Authorization": token ? `Bearer ${token}` : ""
           },
-          body: JSON.stringify({
-            ...input,
-            turnstileToken: undefined
-          })
+          body: JSON.stringify(input)
         }
       );
       const data = await res.json();
@@ -3555,13 +3641,13 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": token ? `Bearer ${token}` : "",
-            "X-Spark-Inn-Turnstile": "client-echo"
+            // Per P0-STAFF-TURNSTILE (2026-10-24): no Turnstile
+            // token — the server skips the bot gate for an
+            // AUTHENTICATED staff write. See the note on
+            // `staffUpdateBreakfast` above.
+            "Authorization": token ? `Bearer ${token}` : ""
           },
-          body: JSON.stringify({
-            ...input,
-            turnstileToken: undefined
-          })
+          body: JSON.stringify(input)
         }
       );
       const data = await res.json();
