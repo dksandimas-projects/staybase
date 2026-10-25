@@ -313,7 +313,14 @@ describe("RPT-01 — the AdminContext wiring (tripwire)", () => {
   it("the re-hydration effect keeps the row in step with the ledger", () => {
     // A payment recorded AFTER the bookings snapshot must still flip
     // the row to "Paid" — the two listeners are independent.
-    expect(adminContextSrc).toMatch(/\}, \[paymentIndex, currentUser\]\);/);
+    //
+    // Per RPT-01b (QA pass 2026-10-23) the effect must ALSO depend on
+    // the ROWS: if it only watched the index, it could run before the
+    // rows arrived, short-circuit on an empty list, and then never run
+    // again — leaving every row un-hydrated. That is exactly what
+    // shipped, and it is why the production list read "PHP 0 paid" for
+    // all 68 rows.
+    expect(adminContextSrc).toMatch(/\}, \[paymentIndex, currentUser, bookings\]\);/);
     expect(adminContextSrc).toMatch(/sameLedgerPayments\(resolved, booking\.onsitePayments\)/);
   });
 });

@@ -68,6 +68,32 @@ describe("RPT-01b — the ledger is resolved at COMMIT time", () => {
     ).toMatch(/resolveBookingOnsitePayments\([\s\S]{0,240}?paymentIndexRef\.current/);
   });
 
+  it("the re-hydration effect ALSO depends on the rows (the root cause)", () => {
+    // THE ROOT CAUSE of the zeroed ledger in production.
+    //
+    // The effect used to depend on `[paymentIndex, currentUser]` only.
+    // The payments listener and the bookings listener are independent,
+    // so the effect could run BEFORE the rows arrived:
+    //
+    //   1. the index is built -> the effect runs -> `prev.length` is 0
+    //      -> it short-circuits
+    //   2. the rows are committed UNHYDRATED
+    //   3. the index never changes again -> the effect never runs
+    //      again -> nothing re-derives the rows
+    //
+    // Every row then read "PHP 0 paid": the list reported "Balance due
+    // 69 / Needs attention 10" and rendered no "Fully paid" pill on any
+    // of the 68 rows.
+    //
+    // Depending on the ROWS makes the effect order-independent:
+    // whichever arrives last re-derives the rows.
+    expect(
+      contextSrc,
+      "the re-hydration effect must depend on the rows as well as the index — " +
+        "otherwise the hydration is lost the moment the rows arrive after the index"
+    ).toMatch(/\}, \[paymentIndex, currentUser, bookings\]\);/);
+  });
+
   it("the legacy denormalized array is still captured as the fallback", () => {
     expect(
       contextSrc,
