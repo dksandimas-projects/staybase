@@ -49,12 +49,12 @@ const outFile = outIndex === -1 ? "tmp/qa-2026-10-23/flow-tokens.json" : process
 // Every booking this pass created carries the QA guest email.
 const snapshot = await db.collection("bookings").where("guestEmail", "==", FLOW_EMAIL).get();
 
-const tokens: Record<string, string> = {};
+const tokens: Record<string, { id: string; token: string }> = {};
 for (const doc of snapshot.docs) {
   const data = doc.data() as Record<string, any>;
   const ref = String(data.bookingRef || "");
   const token = String(data.lookupToken || "");
-  if (ref && token) tokens[ref] = token;
+  if (ref && token) tokens[ref] = { id: doc.id, token };
 }
 
 mkdirSync(dirname(outFile), { recursive: true });

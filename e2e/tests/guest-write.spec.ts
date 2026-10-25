@@ -167,12 +167,13 @@ test.describe("Guest write paths (browser, bot protection off)", () => {
     await expect(page.getByText("Inquiry Submitted Successfully")).toBeVisible({ timeout: 25_000 });
   });
 
-  test("BP-01 · a guest picks a bed set-up, writes a preference, and still books", async ({ page }) => {
+  test("BP-01 · a guest can tick a preference chip and still book", async ({ page }) => {
     const dates = await stay(60);
     const result = await createBookingViaBrowser(page, {
       ...dates,
       paymentMethod: "pay-at-hotel",
       bedSetup: "large-bed",
+      preferenceChip: "high-floor",
       additionalRequest: "QA browser booking — late arrival around 10pm (scenario BP-01)."
     });
 
@@ -181,9 +182,16 @@ test.describe("Guest write paths (browser, bot protection off)", () => {
     expect(result.bookingRef, "the booking must carry a booking reference").toMatch(/^SI-\d{8}-\d{5}$/);
     expect(result.reservationRef, "the confirmation page must show a reservation reference").toMatch(/^R-\d{8}-\d{5}$/);
 
-    // The guest's own choices must reach the server, not just the DOM.
-    // (The stored values are checked independently by the read-only
-    // side-effects tracker — the create response does not echo them.)
+    // The chip the guest ticked must travel with the booking. The hotel's
+    // `bookingPreferences` catalogue is not configured, so the client
+    // renders the nine shipped defaults and the server falls back to the
+    // same list — the chip is accepted, not rejected.
+    expect(
+      (result.createRequest?.additionalPreferences || []).map(String),
+      "the ticked preference chip must be on the wire"
+    ).toContain("high-floor");
+
+    // The guest's other choices must reach the server too.
     expect(
       String(result.createRequest?.additionalRequest || ""),
       "the guest's written request must be on the wire"
@@ -193,9 +201,10 @@ test.describe("Guest write paths (browser, bot protection off)", () => {
       "the guest's bed set-up must be on the wire"
     ).toBe("large-bed");
 
-    // And the guest can look their own booking up again. The lookup is
-    // rate limited (10/min per IP, shared by the whole suite), so a
-    // refused lookup waits for the window instead of failing the run.
+    // And the guest can look their own booking up again. The lookup
+    // endpoint is rate limited (10/min per IP, shared by the whole
+    // suite), so a refused lookup waits for the window instead of failing
+    // the run.
     let lookupStatus = 0;
     for (let attempt = 1; attempt <= 4; attempt++) {
       const lookup = await page.request.post("/api/bookings/lookup", {

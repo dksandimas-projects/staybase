@@ -7554,6 +7554,16 @@ export async function handleRejectPayment(req: any, res: any) {
   // (no siblings) or for legacy null-`reservationId`
   // bookings.
   let siblingRejectedCount = 0;
+  // Per XCC-05 (AI-BROWSER-QA 2026-10-25): whether THIS transaction
+  // actually flipped a booking out of `payment-uploaded`. The email and
+  // the staff notification are fired from inside the handler, gated on
+  // this flag — the router used to decide from a PRE-READ of the status,
+  // which is a read-then-write race: two rejections of the same proof
+  // (or a retry after a dropped response) both read `payment-uploaded`,
+  // and the losing call still emailed the guest. The provider's log
+  // caught it — two "payment proof rejected" emails for SI-20261021-00046,
+  // 1.25 s apart, for ONE rejection.
+  let transitioned = false;
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
     // Per PEX-04 (2026-08-01, per decision #147): stamping a
@@ -7624,6 +7634,10 @@ export async function handleRejectPayment(req: any, res: any) {
       }
 
       bookingData = data;
+      // The transition flag is read INSIDE the transaction, so it is the
+      // committed truth: a racing second call re-reads the doc after the
+      // first commits, sees `pending`, and does not transition.
+      transitioned = isTargetInPaymentUploaded;
 
       const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
       const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data()! : {};
@@ -7720,6 +7734,36 @@ export async function handleRejectPayment(req: any, res: any) {
       // update was already queued at step 1.
     });
 
+    // Per XCC-05 (AI-BROWSER-QA 2026-10-25): the side effects fire
+    // HERE, gated on the transaction's own transition flag — never on a
+    // pre-read of the status. A racing or retried rejection therefore
+    // cannot email the guest twice. The email view is the pre-update
+    // snapshot with the rejection reason stamped on it, exactly as the
+    // router used to build it.
+    if (transitioned || siblingRejectedCount > 0) {
+      try {
+        await sendBookingTrigger("payment-rejected", {
+          ...bookingData,
+          status: "pending",
+          paymentRejectionReason
+        });
+      } catch (emailErr) {
+        console.error("Failed to send payment-rejected email:", emailErr);
+      }
+      try {
+        await writeNotification({
+          type: "payment",
+          title: `Payment proof rejected — ${bookingData?.bookingRef || bookingId} (Room ${bookingData?.roomNumber || ""})`.trim(),
+          entityType: "booking",
+          entityId: bookingId,
+          roomNumber: bookingData?.roomNumber || null,
+          bookingRef: bookingData?.bookingRef || null
+        });
+      } catch (notifErr) {
+        console.error("Failed to write payment-rejection notification:", notifErr);
+      }
+    }
+
     return res.status(200).json({
       success: true,
       data: {
@@ -7732,7 +7776,10 @@ export async function handleRejectPayment(req: any, res: any) {
         // the sibling-rejection count for symmetry with
         // `handleVerifyAndRecordPayment`. Zero for the
         // N=1 case or when no flippable siblings.
-        siblingRejectedCount
+        siblingRejectedCount,
+        // Per XCC-05: whether this call performed the transition. The
+        // caller (and the test suite) can assert on it.
+        transitioned
       }
     });
   } catch (error: any) {
