@@ -147,6 +147,10 @@ test.describe("Deployment posture", () => {
     // not open it for anyone else. The hotel-wide bot-protection switch
     // (§11.3) is off by default and fails closed, so an anonymous write
     // is still refused.
+    //
+    // The answer is the same in both modes: on a STAFF endpoint the
+    // authorization check is what refuses the anonymous caller (401),
+    // with or without the bot gate in front of it.
     const res = await page.request.post(`${GUEST_BASE}/api/bookings/breakfast/staff-update`, {
       headers: { "Content-Type": "application/json" },
       data: {}

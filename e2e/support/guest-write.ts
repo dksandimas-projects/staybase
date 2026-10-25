@@ -216,6 +216,10 @@ export type BookingOptions = {
   additionalRequest?: string;
   /** The bed set-up radio value (e.g. "large-bed"). */
   bedSetup?: string;
+  /** The breakfast meal id to pick for the first night (e.g. "tapsilog"). */
+  breakfastMealId?: string;
+  /** How many guest slots take that meal. Defaults to the party size (2). */
+  breakfastSlots?: number;
 };
 
 export type BookingResult = {
@@ -276,7 +280,15 @@ export async function createBookingViaBrowser(page: Page, options: BookingOption
   await page.getByRole("link", { name: /continue to add-ons/i }).first().click();
   await page.waitForTimeout(1200);
 
-  // Step 2 — add-ons (none).
+  // Step 2 — add-ons (none, unless the scenario asks for breakfast).
+  if (options.breakfastMealId) {
+    const slots = options.breakfastSlots ?? 2;
+    for (let slot = 0; slot < slots; slot++) {
+      const select = page.getByTestId(`breakfast-select-${options.checkIn}-guest-${slot}`);
+      await expect(select, "the breakfast slot must exist").toHaveCount(1, { timeout: 15_000 });
+      await select.selectOption(options.breakfastMealId);
+    }
+  }
   const toGuestDetails = page.getByTestId("booking-addons-continue-primary");
   await expect(toGuestDetails).toBeVisible({ timeout: 20_000 });
   await toGuestDetails.click();
@@ -342,10 +354,18 @@ export async function createBookingViaBrowser(page: Page, options: BookingOption
   const createStatus = response.status();
   const createBody: any = await response.json().catch(() => null);
 
-  // Step 5 — confirmation.
-  await expect(page.getByTestId("booking-reference"), "the confirmation page must show a reference").toBeVisible({
-    timeout: 30_000
-  });
+  // Step 5 — confirmation. If the server refused the booking, the page
+  // stays on the review step — so the failure says WHAT the server said.
+  try {
+    await expect(page.getByTestId("booking-reference"), "the confirmation page must show a reference").toBeVisible({
+      timeout: 30_000
+    });
+  } catch {
+    throw new Error(
+      `the booking was not confirmed — the server answered HTTP ${createStatus}: ` +
+        `${JSON.stringify(createBody).slice(0, 400)}`
+    );
+  }
   const reservationRef = (await page.locator("#booking-reference-value").innerText()).trim();
   const bookingRef = String(createBody?.data?.bookingRef || "").trim();
   page.off("request", capture);
