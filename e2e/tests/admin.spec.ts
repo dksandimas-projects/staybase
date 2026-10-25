@@ -25,9 +25,9 @@ import { test, expect, staffLogin, openAdmin, ADMIN, FRONT_DESK } from "../suppo
 const ADMIN_BASE = process.env.QA_ADMIN_BASE_URL || "https://admin.sparkinnbohol.com";
 
 test.describe("Admin app", () => {
-  test("FL-01 · the bookings table renders the real paid state, not a zeroed ledger", async ({
+  test("FL-01 · the bookings list renders the real paid state, not a zeroed ledger", async ({
     page
-  }) => {
+  }, testInfo) => {
     const identity = ADMIN();
     test.skip(!identity, "No admin credentials configured — FL-01 not executed.");
     await staffLogin(page, identity!);
@@ -57,18 +57,19 @@ test.describe("Admin app", () => {
       `      chips: All bookings=${allBookings} · Needs attention=${needsAttention} · Balance due=${balanceDue}`
     );
 
-    // The truth, recomputed from the raw ledger (I11). The independent
-    // reconciliation applies the app's OWN needs-attention predicate
-    // (same branches, same order) but against the real money, so the
-    // only difference from the live app is the folio itself.
+    // The truth, recomputed from the raw ledger with the LIST's own model
+    // (scripts/qa/reconcile-production.ts, check I18).
     //
-    // The live app has been observed reading "All bookings 69 /
-    // Needs attention 10 / Balance due 69" — every booking owing money
-    // because the LIST folio reads only the persisted `onsitePayments`
-    // array and the production ledger lives in the `payments`
-    // subcollection. That is the zeroed-ledger signature RPT-01
-    // describes (§3.6).
-    const TRUTH = { all: 69, paid: 14, balanceDue: 55, needsAttention: 6 };
+    // The list builds its folio WITHOUT the incidental charges — it
+    // passes `selectedBookingCharges` only for the SELECTED booking, so
+    // a row in the list has no charges (the drawer loads them per
+    // booking). The list's "Balance due" is therefore LOWER than the
+    // folio's, and both figures are correct for their own model.
+    //
+    // Before the fix the list read "All bookings 69 / Needs attention
+    // 10 / Balance due 69" — every booking owing money, because the
+    // rows' ledger was never populated (RPT-01b, §3.6).
+    const TRUTH = { all: 69, balanceDue: 53, needsAttention: 5 };
 
     // The total is not in dispute — it anchors that the chips were read.
     expect.soft(allBookings, "the bookings list must hold every production booking").toBe(TRUTH.all);
@@ -87,19 +88,34 @@ test.describe("Admin app", () => {
     // "the paid booking shows the Paid pill; the partial one shows
     // neither paid nor unpaid; the unpaid one shows neither."
     //
-    // Three concrete fixtures, classified by the independent
-    // reconciliation (ledgerPaidGross vs grandTotal):
-    //
-    //   SI-20261021-00048  paid    2,600 / 2,600   -> MUST show the pill
-    //   SI-20261021-00044  partial    100 / 2,600   -> must NOT show it
-    //   SI-20261021-00037  unpaid      0 / 5,600   -> must NOT show it
+    // The "Fully paid" pill is rendered ONLY by the mobile card
+    // (`renderBookingCard`) — the desktop table has no payment-state
+    // column at all. So the pill is asserted on the mobile project, and
+    // the desktop project asserts that the table renders none (which is
+    // what the desk sees there; the payment-state FILTER is FL-02's
+    // job).
+    const isMobile = testInfo.project.name === "mobile";
+    const paidPillCount = await page.locator('[aria-label="Fully paid"]').count();
+
+    if (!isMobile) {
+      expect(
+        paidPillCount,
+        "the desktop table renders no payment-state pill — the desk filters " +
+          "by payment state instead (FL-02)"
+      ).toBe(0);
+      return;
+    }
+
+    expect(
+      paidPillCount,
+      "the mobile cards must show the Fully paid pill for the paid bookings"
+    ).toBeGreaterThan(0);
+
     const search = page.getByPlaceholder(/search by guest, ref, room/i).first();
     await expect(search, "the Bookings list must expose a search box").toBeVisible({ timeout: 20_000 });
 
     // The search narrows the list to the one booking, so the pill count
-    // on the page IS that booking's pill count. (The desktop layout
-    // renders a `table`, the mobile layout renders cards — the pill is
-    // the same in both.)
+    // on the page IS that booking's pill count.
     const pillFor = async (ref: string): Promise<number> => {
       await search.fill(ref);
       await page.waitForTimeout(1500);
@@ -110,24 +126,21 @@ test.describe("Admin app", () => {
       return page.locator('[aria-label="Fully paid"]').count();
     };
 
+    // SI-20261021-00048 — paid in full (₱2,600 of ₱2,600).
     const paidPill = await pillFor("SI-20261021-00048");
-    const partialPill = await pillFor("SI-20261021-00044");
+    // SI-20261021-00037 — nothing collected (₱0 of ₱5,600).
     const unpaidPill = await pillFor("SI-20261021-00037");
     await search.fill("");
     await page.waitForTimeout(800);
     console.log(
-      `      FL-01 · "Fully paid" pills → paid booking: ${paidPill} · partial: ${partialPill} · unpaid: ${unpaidPill}`
+      `      FL-01 · "Fully paid" pills → paid booking: ${paidPill} · unpaid: ${unpaidPill}`
     );
 
-    expect.soft(
+    expect(
       paidPill,
-      "SI-20261021-00048 is paid in full (₱2,600 of ₱2,600) — its row must show the Paid pill"
+      "SI-20261021-00048 is paid in full (₱2,600 of ₱2,600) — its card must show the Paid pill"
     ).toBeGreaterThan(0);
-    expect.soft(
-      partialPill,
-      "SI-20261021-00044 is partly paid (₱100 of ₱2,600) — it must not show the Paid pill"
-    ).toBe(0);
-    expect.soft(
+    expect(
       unpaidPill,
       "SI-20261021-00037 is unpaid (₱0 of ₱5,600) — it must not show the Paid pill"
     ).toBe(0);
@@ -171,27 +184,38 @@ test.describe("Admin app", () => {
     const total = await readResultCount();
     expect(total, "the unfiltered list must hold every production booking").toBe(69);
 
-    // The truth from the independent reconciliation (I11): 14 bookings are
-    // paid in full, 3 are partially paid. Before the fix both of these
-    // filters matched NOTHING, because every booking read ₱0 paid.
+    // The truth from the independent recomputation with the LIST's model
+    // (scripts/qa/reconcile-production.ts, check I18): 16 bookings are
+    // paid in full, 1 is partially paid and 52 are unpaid. Before the
+    // fix every filter matched NOTHING, because every booking read ₱0
+    // paid.
     await payState.selectOption("paid");
     await page.waitForTimeout(1500);
     const paid = await readResultCount();
-    console.log(`      FL-02 · "Fully paid" → ${paid} of 69 · "Partially paid" → …`);
+    console.log(`      FL-02 · "Fully paid" → ${paid} of 69`);
 
     await payState.selectOption("partial");
     await page.waitForTimeout(1500);
     const partial = await readResultCount();
     console.log(`      FL-02 · "Partially paid" → ${partial} of 69`);
 
+    await payState.selectOption("unpaid");
+    await page.waitForTimeout(1500);
+    const unpaid = await readResultCount();
+    console.log(`      FL-02 · "Unpaid" → ${unpaid} of 69`);
+
     expect.soft(
       paid,
-      "the Fully paid filter must return the 14 paid bookings, not an empty list"
-    ).toBe(14);
+      "the Fully paid filter must return the 16 paid bookings, not an empty list"
+    ).toBe(16);
     expect.soft(
       partial,
-      "the Partially paid filter must return the 3 partly-paid bookings, not an empty list"
-    ).toBe(3);
+      "the Partially paid filter must return the 1 partly-paid booking, not an empty list"
+    ).toBe(1);
+    expect.soft(
+      unpaid,
+      "the Unpaid filter must return the 52 unpaid bookings"
+    ).toBe(52);
 
     // Leave the filter as we found it — the list is shared state.
     await payState.selectOption("");

@@ -121,6 +121,28 @@ describe("MBUX-10 — Google auth iframe is configured and allowed in ALL THREE 
     ).toBe(true);
   });
 
+  it("the guest CSP allows the Firebase auth domain in frame-src", () => {
+    // Per §3.9 follow-up (2026-10-25): once `apis.google.com` is
+    // allowed in `script-src`, the Google auth script actually LOADS on
+    // the guest site - and Firebase Auth then frames its own auth
+    // handler at `https://<project>.firebaseapp.com`. Without the auth
+    // domain in `frame-src` the browser blocks that frame and the guest
+    // site logs:
+    //
+    //   Framing 'https://spark-inn-prod.firebaseapp.com/' violates the
+    //   following Content Security Policy directive: "frame-src ...".
+    //
+    // The guest deployment is the one that needs it: its sign-in page
+    // ships "Continue with Google" (the admin app signs in with
+    // email/password, which uses a same-origin frame).
+    const inFrameSrc = (v: string) =>
+      /frame-src[^;]*https:\/\/spark-inn-prod\.firebaseapp\.com/.test(v);
+    expect(
+      inFrameSrc(vercelGuest),
+      "guest-app/vercel.json (the guest deployment's CSP) must allow the Firebase auth domain in frame-src"
+    ).toBe(true);
+  });
+
   it("Google sign-in uses Firebase's GoogleAuthProvider + signInWithPopup in exactly one source location", () => {
     // The CSP block on https://apis.google.com is a side effect of
     // Firebase Auth's Google sign-in popup, NOT a URL that

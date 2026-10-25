@@ -1,4 +1,6 @@
 import { test, expect } from "../support/qa";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 /**
  * AI-BROWSER-QA (2026-10-23) — public guest surface.
@@ -42,15 +44,24 @@ test.describe("Public guest surface", () => {
     );
     expect(scripts.length).toBeGreaterThan(0);
 
+    // The version is read from `shared/VERSION.ts` — the source of
+    // truth — rather than hard-coded, so the guard keeps working after
+    // every release instead of failing on the next bump.
+    const sharedVersion = readFileSync(
+      resolve(__dirname, "../../shared/VERSION.ts"),
+      "utf8"
+    ).match(/VERSION\s*=\s*"([^"]+)"/)?.[1];
+    expect(sharedVersion, "shared/VERSION.ts must export a version string").toBeTruthy();
+
     let found = false;
     for (const src of scripts) {
       const body = await (await page.request.get(src)).text();
-      if (/\b2\.18\.20\b/.test(body)) {
+      if (new RegExp(`\\b${sharedVersion!.replace(/\./g, "\\.")}\\b`).test(body)) {
         found = true;
         break;
       }
     }
-    expect(found, "the deployed bundle must contain shared/VERSION (2.18.20)").toBe(true);
+    expect(found, `the deployed bundle must contain shared/VERSION (${sharedVersion})`).toBe(true);
   });
 
   test("RO-01 · the rooms page lists every configured room type", async ({ page, watcher }) => {
@@ -58,8 +69,18 @@ test.describe("Public guest surface", () => {
     expect(res?.status()).toBe(200);
     await expect(page).toHaveTitle(/rooms/i);
 
-    // The room catalogue is loaded from Firestore, so wait for it.
+    // The room catalogue is loaded from Firestore, so wait for it — and
+    // for EVERY configured room type, not just the first card. The cards
+    // render as the catalogue arrives, so a count taken the moment the
+    // first card appears can be short (it flaked once on the mobile
+    // project, where the last card lands a few hundred ms later).
     await expect(page.getByRole("heading", { name: "Our rooms" })).toBeVisible({ timeout: 20_000 });
+    await expect
+      .poll(async () => await page.getByRole("heading", { level: 3 }).count(), {
+        timeout: 20_000,
+        message: "every configured room type must render"
+      })
+      .toBeGreaterThanOrEqual(ROOM_LABELS.length);
 
     const detailButtons = page.getByRole("button", { name: /details/i });
     await expect(detailButtons.first()).toBeVisible();
