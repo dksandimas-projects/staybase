@@ -98,7 +98,7 @@ describe("MRB-11 — server-side revenue allocation snapshot (PR2 wiring)", () =
     // catches any rounding drift before the Firestore
     // write.
     expect(handlerSrc).toMatch(
-      /revenueAllocation: assertBookingRevenueAllocationInvariant[\s\S]{0,500}?roomNet: pricingForRoom\.roomTotal[\s\S]{0,500}?totalNet: pricingForRoom\.totalPrice/s
+      /revenueAllocation: assertBookingRevenueAllocationInvariant[\s\S]{0,900}?roomNet: pricingForRoom\.roomTotal[\s\S]{0,900}?totalNet:[\s\S]{0,160}?pricingForRoom\.totalPrice/s
     );
   });
 
@@ -116,7 +116,7 @@ describe("MRB-11 — server-side revenue allocation snapshot (PR2 wiring)", () =
     // aggregate's deduction line because they are a
     // deduction layer the pricing chain does not see.
     expect(handlerSrc).toMatch(
-      /aggregateRevenueAllocation: assertBookingRevenueAllocationInvariant[\s\S]{0,900}?totalNet: finalTotalPrice/s
+      /aggregateRevenueAllocation: assertBookingRevenueAllocationInvariant[\s\S]{0,1200}?totalNet:[\s\S]{0,160}?finalTotalPrice/s
     );
     expect(handlerSrc).toMatch(
       /aggregateRevenueAllocation: assertBookingRevenueAllocationInvariant[\s\S]{0,900}?deductionNet:[\s\S]{0,400}?selfRedeemedValue/s
@@ -131,7 +131,7 @@ describe("MRB-11 — server-side revenue allocation snapshot (PR2 wiring)", () =
     // `seniorDeduction + voucherDeduction` from the
     // chain result.
     expect(handlerSrc).toMatch(
-      /revenueAllocation: assertBookingRevenueAllocationInvariant[\s\S]{0,500}?lineChainResult\.seniorDeduction \+ lineChainResult\.voucherDeduction/s
+      /revenueAllocation: assertBookingRevenueAllocationInvariant[\s\S]{0,900}?lineChainResult\.seniorDeduction \+ lineChainResult\.voucherDeduction/s
     );
   });
 
@@ -143,7 +143,7 @@ describe("MRB-11 — server-side revenue allocation snapshot (PR2 wiring)", () =
     // snapshotted `pointsRedeemedValue` (a separate
     // deduction layer the chain does not see).
     expect(handlerSrc).toMatch(
-      /revenueAllocation: assertBookingRevenueAllocationInvariant[\s\S]{0,500}?rescheduleChain\.seniorDeduction \+[\s\S]{0,200}?rescheduleChain\.voucherDeduction \+[\s\S]{0,200}?rescheduleChain\.memberDeduction \+[\s\S]{0,200}?booking\.pointsRedeemedValue/s
+      /revenueAllocation: assertBookingRevenueAllocationInvariant[\s\S]{0,900}?rescheduleChain\.seniorDeduction \+[\s\S]{0,300}?rescheduleChain\.voucherDeduction \+[\s\S]{0,300}?rescheduleChain\.memberDeduction \+[\s\S]{0,300}?booking\.pointsRedeemedValue/s
     );
   });
 

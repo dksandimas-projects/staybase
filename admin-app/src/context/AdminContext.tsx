@@ -87,6 +87,14 @@ import {
   // stored value and the value the public catalog endpoint reads can
   // never disagree on what "off" means.
   normalizeOtherAddOnsEnabled,
+  // Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide
+  // bot-protection mode. Shared with the guest-app server gate so the
+  // stored value and the value the server reads can never disagree on
+  // what "off" means. FAIL CLOSED — only the exact string "disabled"
+  // opens the gate.
+  normalizeBotProtectionMode,
+  BOT_PROTECTION_MODE_DEFAULT,
+  type BotProtectionMode,
   // Per MSL-01 (2026-10-15): the stay-length cap. Stored RESOLVED
   // (`Infinity` when the admin chose "no limit"), so every admin
   // read gets a safe number. The Settings editor maps `Infinity` back
@@ -6699,7 +6707,21 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
     //
     // The default is `true` so a legacy settings doc without the
     // field never silently switches a hotel's revenue stream off.
-    otherAddOnsEnabled: true
+    otherAddOnsEnabled: true,
+    // Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide
+    // bot-protection mode. `"turnstile"` (the default) = the bot gate
+    // is ON for every public guest write endpoint. `"disabled"` = the
+    // gate is open (a testing window).
+    //
+    // The default is `"turnstile"` so a legacy settings doc without the
+    // field never silently opens every guest write endpoint.
+    botProtectionMode: BOT_PROTECTION_MODE_DEFAULT,
+    // The audit trail for a disabled gate: WHICH admin turned it off,
+    // WHEN, and WHY. Written by the Settings → Environment Testing tab
+    // and cleared when the gate is switched back on.
+    botProtectionDisabledBy: "",
+    botProtectionDisabledAt: "",
+    botProtectionReason: ""
   });
 
   // Tracks whether the first `settings/websiteContent` snapshot
@@ -7067,7 +7089,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
           const docId = docSnap.id;
           switch (docId) {
             case "hotelConfig":
-              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope), paymentHoldWindowHours: normalizePaymentHoldWindowHours((data as Partial<typeof hotelConfig>)?.paymentHoldWindowHours), inFlowHoldMinutes: normalizeInFlowHoldMinutes((data as Partial<typeof hotelConfig>)?.inFlowHoldMinutes), vatConfig: normalizeVatConfig((data as Partial<typeof hotelConfig>)?.vatConfig), maxStayNights: resolveMaxStayNights((data as Partial<typeof hotelConfig>)?.maxStayNights), otherAddOnsEnabled: normalizeOtherAddOnsEnabled((data as Partial<typeof hotelConfig>)?.otherAddOnsEnabled) })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`. // Per PEX-01 (2026-08-01): always normalize the incoming window so legacy settings (or values outside the admin-allowed 1..72h range) hydrate to the 24h default. The per-booking `holdExpiresAt` is the only field the rest of the system reads; the Settings window is just the input. // Per VAT-01 (2026-10-12): always normalize the incoming `vatConfig` so legacy settings without the field hydrate to the BIR-compliant default (`enabled: true`); the 12% breakdown keeps showing everywhere until the admin opts out via the Settings → Discounts tab Tax card. // Per OCT-M1 (2026-10-20, decision #295): always normalize the incoming `otherAddOnsEnabled` so a legacy doc without the field hydrates to `true` and a hand-edited `"false"` string is read as the boolean it spells.
+              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope), paymentHoldWindowHours: normalizePaymentHoldWindowHours((data as Partial<typeof hotelConfig>)?.paymentHoldWindowHours), inFlowHoldMinutes: normalizeInFlowHoldMinutes((data as Partial<typeof hotelConfig>)?.inFlowHoldMinutes), vatConfig: normalizeVatConfig((data as Partial<typeof hotelConfig>)?.vatConfig), maxStayNights: resolveMaxStayNights((data as Partial<typeof hotelConfig>)?.maxStayNights), otherAddOnsEnabled: normalizeOtherAddOnsEnabled((data as Partial<typeof hotelConfig>)?.otherAddOnsEnabled), botProtectionMode: normalizeBotProtectionMode((data as Partial<typeof hotelConfig>)?.botProtectionMode), botProtectionDisabledBy: String((data as Partial<typeof hotelConfig>)?.botProtectionDisabledBy || ""), botProtectionDisabledAt: String((data as Partial<typeof hotelConfig>)?.botProtectionDisabledAt || ""), botProtectionReason: String((data as Partial<typeof hotelConfig>)?.botProtectionReason || "") })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`. // Per PEX-01 (2026-08-01): always normalize the incoming window so legacy settings (or values outside the admin-allowed 1..72h range) hydrate to the 24h default. The per-booking `holdExpiresAt` is the only field the rest of the system reads; the Settings window is just the input. // Per VAT-01 (2026-10-12): always normalize the incoming `vatConfig` so legacy settings without the field hydrate to the BIR-compliant default (`enabled: true`); the 12% breakdown keeps showing everywhere until the admin opts out via the Settings → Discounts tab Tax card. // Per OCT-M1 (2026-10-20, decision #295): always normalize the incoming `otherAddOnsEnabled` so a legacy doc without the field hydrates to `true` and a hand-edited `"false"` string is read as the boolean it spells. // Per QA-2026-10-23 §3.2 (2026-10-25): always normalize the incoming `botProtectionMode` so a legacy doc without the field hydrates to `"turnstile"` (the bot gate ON) and a hand-edited typo never opens the gate. // The three audit fields are mirrored explicitly so the admin state mirrors the doc exactly — a doc that no longer carries them (the gate was switched back on) hydrates to an EMPTY audit trail instead of keeping the previous window's values.
               break;
             case "websiteContent":
               setWebsiteContent(mergeWebsiteContent(data as Record<string, unknown>));

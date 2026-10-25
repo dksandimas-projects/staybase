@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { adminAuth, adminDb } from "./lib/firebase-admin";
+import { loadBotProtectionMode } from "./lib/botProtection-settings";
 import { sendBookingTrigger } from "./handlers/email";
 import { writeNotification } from "./lib/notifications";
 import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleAddRoomToReservation, handleApplyBookingDiscount, handleApplyReservationDiscount, handleCancelBooking, handleCancelPreview, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleConfirmBookingWithBalance, handleCreateBooking, handleCreateWalkin, handleGetCancellationLiability, handleLookupBooking, handleMarkPaymentConfirmed, handleRecordCancellationException, handleRejectDiscount, handleRejectPayment, handleRemoveVoucher, handleRescheduleBooking, handleResolveEarlyCheckin, handleSetLouReceived, handleSetSpecialRequests, handleVerifyAndRecordPayment, handleExtendStay } from "./handlers/bookings";
@@ -380,6 +381,29 @@ async function verifyTurnstile(token: string | undefined, req?: VercelRequest): 
   // fall through to the Cloudflare always-pass test secret below,
   // which verifies any token the dev-sitekey widget issues.
   if (process.env.NODE_ENV === "test") {
+    return { success: true };
+  }
+
+  // Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide
+  // bot-protection mode, stored on `settings/hotelConfig.botProtectionMode`.
+  //
+  // The Settings → Environment Testing tab can open the gate for a
+  // testing window (the 2026-10-23 QA pass could not execute 21
+  // scenarios because the Cloudflare challenge platform was unreachable
+  // from the QA host, so no token was ever issued).
+  //
+  // This check sits BEFORE the token check on purpose: every gated
+  // path in this router funnels through `verifyTurnstile`, so one
+  // check here honours the mode for booking create / cancel /
+  // extend-stay / lookup, breakfast update, add-ons update, voucher,
+  // corporate code, inquiry and contact alike.
+  //
+  // FAIL CLOSED: `loadBotProtectionMode` returns "disabled" ONLY for an
+  // exact `botProtectionMode: "disabled"` setting. A missing field, an
+  // unrecognised value or a failed read all resolve to "turnstile", so
+  // the gate below still runs.
+  const botProtectionMode = await loadBotProtectionMode();
+  if (botProtectionMode === "disabled") {
     return { success: true };
   }
 

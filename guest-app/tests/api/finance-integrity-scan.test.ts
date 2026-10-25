@@ -146,7 +146,12 @@ describe("FLR-01 finance integrity scanner", () => {
     });
 
     test("flags BR-12 other add-ons that sit on top of totalPrice", () => {
-      const findings = scanBookingRecord("booking_addon", {
+      // Per MRB-11b (QA pass 2026-10-25): the allocation's total is
+      // the booking's WHOLE bill — the room bill PLUS the BR-12 other
+      // add-ons (per OCT-FOL-01 they are not inside `totalPrice`). An
+      // allocation that still describes only the room bill is a REAL
+      // mismatch — it is the defect the scanner was built to catch.
+      const stale = scanBookingRecord("booking_addon", {
         totalPrice: 8100,
         source: "online",
         otherAddOnTotal: 1500,
@@ -160,7 +165,31 @@ describe("FLR-01 finance integrity scanner", () => {
         }
       });
 
-      expect(findings[0]).toMatchObject({
+      expect(stale[0]).toMatchObject({
+        findingId: "bookings/booking_addon:allocation-total-mismatch",
+        cohort: "pricing-drift",
+        observedValue: "9600.00",
+        proposedAction: "manual-review",
+        approved: "NO"
+      });
+
+      // And once the allocation DOES carry the other add-ons, only the
+      // review reminder is left — the scanner stops claiming a mismatch.
+      const correct = scanBookingRecord("booking_addon", {
+        totalPrice: 8100,
+        source: "online",
+        otherAddOnTotal: 1500,
+        hasAnyOtherAddOns: true,
+        revenueAllocation: {
+          roomNet: 8100,
+          breakfastNet: 0,
+          addOnNet: 1500,
+          deductionNet: 0,
+          totalNet: 9600
+        }
+      });
+
+      expect(correct[0]).toMatchObject({
         findingId: "bookings/booking_addon:other-addon-outside-room-bill",
         cohort: "pricing-drift",
         observedValue: "1500.00",

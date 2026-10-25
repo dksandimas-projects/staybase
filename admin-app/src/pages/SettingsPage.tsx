@@ -74,6 +74,15 @@ import {
   // server so the admin's stored value and the value the public
   // catalog endpoint reads can never disagree on what "off" means.
   normalizeOtherAddOnsEnabled,
+  // Per QA-2026-10-23 §3.2 (2026-10-25): the normalizer for the
+  // hotel-wide bot-protection mode
+  // (`settings/hotelConfig.botProtectionMode`). Shared with the
+  // guest-app server gate so the admin's stored value and the value
+  // the server reads can never disagree on what "off" means. FAIL
+  // CLOSED — only the exact string "disabled" opens the gate.
+  normalizeBotProtectionMode,
+  BOT_PROTECTION_MODE_DEFAULT,
+  type BotProtectionMode,
   type AddOn,
   // Per Phase 2 of the Spark Rewards tier system (2026-10-12):
   // Zod schema + inferred types for the settings/rewardsConfig
@@ -116,7 +125,7 @@ import config from "@config";
 import { auth } from "../firebase/auth";
 import { db, storage } from "../firebase/config";
 import { deleteObject, getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
-import { addDoc, collection, deleteDoc, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, deleteField, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc } from "firebase/firestore";
 import { formatPrice } from "../utils/format";
 import { Modal } from "../components/Modal";
 import { ConfirmForm } from "../components/ConfirmForm";
@@ -3840,6 +3849,142 @@ export function SettingsPage() {
         : "Changes saved and are live now."
     );
   };
+
+  // Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide
+  // bot-protection mode, edited from the Settings → Environment Testing
+  // tab. Mirrors the OCT-M1 master switch on the Other Add-Ons tab —
+  // local state, a sync guard, revert-on-failure and a save error
+  // message.
+  //
+  // The sync guard has the same job as `addOnsEnabledSyncRef`: the
+  // `useState` initializer only runs on the FIRST render, which is
+  // BEFORE the Firestore snapshot lands, so the ref records the last
+  // SEEN snapshot value. A snapshot that arrives while the admin is
+  // mid-toggle cannot clobber the in-progress change.
+  const botProtectionSyncRef = useRef<string | null>(null);
+  const [botProtectionMode, setBotProtectionMode] = useState<BotProtectionMode>(
+    BOT_PROTECTION_MODE_DEFAULT
+  );
+  const [botProtectionReason, setBotProtectionReason] = useState("");
+  const [botProtectionSaveError, setBotProtectionSaveError] = useState<string | null>(null);
+  // The audit trail of the CURRENT disabled window: who turned the gate
+  // off, when, and why. Mirrored locally so the banner can show the
+  // reason the moment the write succeeds, before the Firestore
+  // snapshot comes back.
+  const [botProtectionAudit, setBotProtectionAudit] = useState<{
+    by: string;
+    at: string;
+    reason: string;
+  }>({ by: "", at: "", reason: "" });
+
+  // Re-sync the mode + audit trail from the live `settings/hotelConfig`
+  // snapshot. Only a GENUINE change in the SOURCE value lands, so a
+  // snapshot that arrives while the admin is mid-toggle cannot clobber
+  // the in-progress change.
+  useEffect(() => {
+    const nextMode = normalizeBotProtectionMode(hotelConfig.botProtectionMode);
+    const nextAudit = {
+      by: String(hotelConfig.botProtectionDisabledBy || ""),
+      at: String(hotelConfig.botProtectionDisabledAt || ""),
+      reason: String(hotelConfig.botProtectionReason || "")
+    };
+    const signature = `${nextMode}|${nextAudit.by}|${nextAudit.at}|${nextAudit.reason}`;
+    const prev = botProtectionSyncRef.current;
+    botProtectionSyncRef.current = signature;
+    // First run: the snapshot has not landed yet, so this is the
+    // pre-snapshot default the `useState` initializer already used.
+    // Record it WITHOUT touching the state so the real snapshot is
+    // treated as a genuine change.
+    if (prev === null) return;
+    if (prev === signature) return;
+    setBotProtectionMode(nextMode);
+    setBotProtectionAudit(nextAudit);
+  }, [
+    hotelConfig.botProtectionMode,
+    hotelConfig.botProtectionDisabledBy,
+    hotelConfig.botProtectionDisabledAt,
+    hotelConfig.botProtectionReason
+  ]);
+
+  // Per QA-2026-10-23 §3.2 (2026-10-25): switch the hotel-wide bot
+  // protection mode.
+  //
+  // Turning the gate OFF is a deliberate, audited act: it needs a
+  // reason, and it records WHO turned it off and WHEN. Turning it back
+  // ON clears the audit trail — there is no longer a disabled window
+  // to explain.
+  //
+  // The write goes through the same `updateSettings("hotelConfig", …)`
+  // channel every other hotel-wide setting uses, and a failed write is
+  // reverted so the switch never shows a value that is not stored.
+  const handleBotProtectionToggle = async (next: BotProtectionMode) => {
+    setBotProtectionSaveError(null);
+
+    if (next === "disabled") {
+      const reason = botProtectionReason.trim();
+      if (!reason) {
+        setBotProtectionSaveError(
+          "A reason is required before bot protection can be turned off."
+        );
+        return;
+      }
+      const by = currentUser?.uid || "unknown";
+      const at = new Date().toISOString();
+      const saved = await updateSettings("hotelConfig", {
+        botProtectionMode: "disabled",
+        botProtectionDisabledBy: by,
+        botProtectionDisabledAt: at,
+        botProtectionReason: reason
+      });
+      if (!saved) {
+        setBotProtectionSaveError(
+          "Failed to save the bot-protection mode. The previous setting is still in effect."
+        );
+        return;
+      }
+      setBotProtectionMode("disabled");
+      setBotProtectionAudit({ by, at, reason });
+      return;
+    }
+
+    const saved = await updateSettings("hotelConfig", {
+      botProtectionMode: "turnstile",
+      // `deleteField()` REMOVES the audit trail instead of writing an
+      // empty value over it.
+      botProtectionDisabledBy: deleteField(),
+      botProtectionDisabledAt: deleteField(),
+      botProtectionReason: deleteField()
+    });
+    if (!saved) {
+      setBotProtectionSaveError(
+        "Failed to save the bot-protection mode. The previous setting is still in effect."
+      );
+      return;
+    }
+    setBotProtectionMode("turnstile");
+    setBotProtectionAudit({ by: "", at: "", reason: "" });
+    setBotProtectionReason("");
+  };
+
+  // Who turned the gate off? The audit field stores the admin's uid;
+  // the staff list resolves it to a name an admin recognises. Falls
+  // back to the raw uid when that admin is no longer on the list.
+  const botProtectionDisabledByName = useMemo(() => {
+    const uid = botProtectionAudit.by;
+    if (!uid) return "an unknown admin";
+    const member = staff.find((s) => s.uid === uid);
+    if (!member) return uid;
+    return member.fullName || member.email || uid;
+  }, [botProtectionAudit.by, staff]);
+
+  // When was the gate turned off? The audit field stores an ISO string.
+  const botProtectionDisabledAtLabel = useMemo(() => {
+    const at = botProtectionAudit.at;
+    if (!at) return "an unknown time";
+    const parsed = new Date(at);
+    if (Number.isNaN(parsed.getTime())) return at;
+    return parsed.toLocaleString();
+  }, [botProtectionAudit.at]);
 
   const seoDraft = () => ({
     metaDescription: seoMetaDescription.trim(),
@@ -9236,6 +9381,100 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                       </div>
                     </div>
                   )}
+
+                  {/* Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide
+                      bot-protection mode. While the gate is OPEN a loud
+                      banner names WHO turned it off and WHEN — a
+                      testing window must never be forgotten. */}
+                  {botProtectionMode === "disabled" && (
+                    <div
+                      role="alert"
+                      data-testid="bot-protection-disabled-banner"
+                      className="rounded-lg bg-red-50 border border-red-300 p-4 text-xs text-red-900 flex gap-2.5 items-start"
+                    >
+                      <ShieldAlert size={16} className="shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold">Bot protection is OFF</p>
+                        <p className="mt-1 leading-relaxed">
+                          Every public guest write endpoint — booking create / cancel /
+                          extend-stay / lookup, breakfast update, add-ons update,
+                          voucher, corporate code, inquiry and contact — is
+                          accepting requests <strong>without a Turnstile bot token</strong>.
+                        </p>
+                        <p className="mt-1 leading-relaxed">
+                          Turned off by <strong>{botProtectionDisabledByName}</strong>{" "}
+                          on <strong>{botProtectionDisabledAtLabel}</strong>.
+                        </p>
+                        {botProtectionAudit.reason ? (
+                          <p className="mt-1 leading-relaxed">
+                            Reason: {botProtectionAudit.reason}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Bot protection mode. Mirrors the OCT-M1 master
+                      switch on the Other Add-Ons tab: the switch saves
+                      immediately, and a failed write is reverted so the
+                      switch never shows a value that is not stored. */}
+                  <div className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
+                    <label className="flex items-center gap-3 cursor-pointer text-xs font-bold text-gray-800">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleBotProtectionToggle(
+                            botProtectionMode === "disabled" ? "turnstile" : "disabled"
+                          );
+                        }}
+                        data-testid="bot-protection-toggle"
+                        className={`h-6 w-11 rounded-full p-0.5 transition shrink-0 ${
+                          botProtectionMode === "disabled" ? "bg-red-500" : "bg-primary"
+                        }`}
+                        aria-pressed={botProtectionMode !== "disabled"}
+                        aria-label="Enable bot protection"
+                      >
+                        <div
+                          className={`h-5 w-5 rounded-full bg-white transition shadow-sm transform ${
+                            botProtectionMode === "disabled" ? "translate-x-0" : "translate-x-5"
+                          }`}
+                        />
+                      </button>
+                      Bot protection (Cloudflare Turnstile)
+                    </label>
+                    <p className="text-[10px] text-gray-500 leading-relaxed">
+                      While this is <strong>ON</strong>, every public guest write endpoint
+                      requires a Turnstile bot token. Turning it <strong>OFF</strong> opens
+                      all of them — use it only for a short, supervised testing window
+                      (for example when the Cloudflare challenge platform is unreachable
+                      from the QA host), and turn it back on afterwards. The switch
+                      stores the mode, who turned it off and when, and the reason, and
+                      the server falls back to keeping the gate ON if it cannot read
+                      the setting.
+                    </p>
+                    <label className="flex flex-col gap-1.5">
+                      <span className="font-bold text-gray-700">
+                        Reason (required to turn the gate off)
+                      </span>
+                      <textarea
+                        value={botProtectionReason}
+                        onChange={(e) => setBotProtectionReason(e.target.value)}
+                        placeholder="e.g. QA run 2026-10-25 — Cloudflare challenge platform unreachable from the QA host"
+                        rows={2}
+                        data-testid="bot-protection-reason"
+                        className="rounded-lg border border-gray-200 px-3 py-2 text-xs min-h-[44px] focus:border-primary focus:outline-none"
+                      />
+                    </label>
+                    {botProtectionSaveError ? (
+                      <p
+                        role="alert"
+                        data-testid="bot-protection-error"
+                        className="text-[10px] font-semibold text-red-600"
+                      >
+                        {botProtectionSaveError}
+                      </p>
+                    ) : null}
+                  </div>
 
                   {/* Create test run */}
                   <div className="rounded-lg border border-gray-200 p-5 space-y-4">

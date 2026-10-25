@@ -246,6 +246,12 @@ function toLedger(d: { id: string; ref: { path: string }; data: () => Record<str
       : typeof recordedAtRaw === "string"
         ? recordedAtRaw
         : "";
+  // Per FIN-REFUND-LIABILITY (2026-10-25): a refund is PENDING unless
+  // its status says it was actually paid out. A refund with NO status
+  // counts as pending — the same convention the app uses
+  // (`data.status || "pending"`) and the same rule the shared
+  // `isUnpaidRefund` helper applies.
+  const refundStatus = typeof data.status === "string" ? data.status.trim().toLowerCase() : "";
   return {
     path,
     bookingId: stampedBooking ?? pathBooking,
@@ -255,7 +261,7 @@ function toLedger(d: { id: string; ref: { path: string }; data: () => Record<str
     recordedAt,
     method: typeof data.method === "string" ? data.method : "",
     category: typeof data.category === "string" ? data.category : null,
-    pending: data.status === "pending"
+    pending: type === "refund" && refundStatus !== "paid" && refundStatus !== "processed"
   };
 }
 
@@ -392,9 +398,20 @@ for (const b of bookings) {
 
   // Second, independent implementation: the app's own canonical helper,
   // fed the same raw data.
+  //
+  // Per FIN-REFUND-LIABILITY (2026-10-25) the ledger entries carry their
+  // refund `status` — the app's own read path (`normalizeLedgerDoc`)
+  // keeps it, and the shared folio uses it to tell a pending refund
+  // (a liability) from a paid one. Without it here the helper would
+  // treat every refund as pending and the two implementations would
+  // disagree for the wrong reason.
   const appFolio = computeBookingFolio({
     booking: { id: b.id, totalPrice: b.totalPrice, otherAddOnTotal: b.otherAddOnTotal },
-    persistedPayments: entries.map((e) => ({ amount: e.amount })),
+    persistedPayments: entries.map((e) => ({
+      amount: e.amount,
+      type: e.type,
+      status: e.pending ? "pending" : "paid"
+    })),
     selectedBookingCharges: chargeRows.map((c) => ({ amount: c.amount, label: c.label })),
     folioBookingIds: [b.id],
     storeOrders: storeOrders.map((o) => ({
@@ -454,8 +471,14 @@ check(
 );
 
 // ---------------------------------------------------------------------------
-// I02 — MRB-11 allocation identity: totalNet == totalPrice
+// I02 — MRB-11 allocation identity: totalNet == the BILLED total
 // ---------------------------------------------------------------------------
+// Per MRB-11b (2026-10-25) the allocation's total is the booking's
+// WHOLE bill: `totalPrice + otherAddOnTotal`. Per OCT-FOL-01 (decision
+// #298) the BR-12 other add-ons are NOT inside `totalPrice` — they sit
+// on top of the room bill for the balance — so before this the
+// allocation described only part of the bill and every revenue stream
+// that read it under-reported.
 
 {
   const bad: string[] = [];
@@ -466,13 +489,17 @@ check(
       continue;
     }
     const totalNet = num(b.allocation.totalNet);
-    if (r2(totalNet) !== r2(b.totalPrice)) {
-      bad.push(`${b.ref} totalNet=${totalNet} totalPrice=${b.totalPrice} Δ=${r2(totalNet - b.totalPrice)}`);
+    const billed = r2(b.totalPrice + (b.otherAddOnTotal || 0));
+    if (r2(totalNet) !== billed) {
+      bad.push(
+        `${b.ref} totalNet=${totalNet} billed=${billed} ` +
+          `(totalPrice=${b.totalPrice} + otherAddOnTotal=${b.otherAddOnTotal || 0}) Δ=${r2(totalNet - billed)}`
+      );
     }
   }
   check(
     "I02",
-    "MRB-11 identity — revenueAllocation.totalNet == totalPrice (every booking)",
+    "MRB-11 identity — revenueAllocation.totalNet == the billed total (every booking)",
     missing.length === 0 && bad.length === 0 ? "PASS" : bad.length === 0 ? "WARN" : "FAIL",
     `${bookings.length - missing.length}/${bookings.length} bookings carry an allocation · ` +
       `${bad.length} identity violation(s) · ${missing.length} missing allocation`,
@@ -494,15 +521,20 @@ check(
     const addOnNet = num(a.addOnNet);
     const deductionNet = num(a.deductionNet);
     const composed = r2(roomNet + breakfastNet + addOnNet - deductionNet);
-    if (composed !== r2(b.totalPrice)) {
+    // Per MRB-11b (2026-10-25): the identity ties to the BILLED total
+    // (the room bill plus the BR-12 other add-ons), not to `totalPrice`
+    // alone.
+    const billed = r2(b.totalPrice + (b.otherAddOnTotal || 0));
+    if (composed !== billed) {
       bad.push(
-        `${b.ref} ${roomNet}+${breakfastNet}+${addOnNet}-${deductionNet}=${composed} != totalPrice=${b.totalPrice} Δ=${r2(composed - b.totalPrice)}`
+        `${b.ref} ${roomNet}+${breakfastNet}+${addOnNet}-${deductionNet}=${composed} != billed=${billed} ` +
+          `(totalPrice=${b.totalPrice} + otherAddOnTotal=${b.otherAddOnTotal || 0}) Δ=${r2(composed - billed)}`
       );
     }
   }
   check(
     "I03",
-    "MRB-11 components — roomNet + breakfastNet + addOnNet − deductionNet == totalPrice",
+    "MRB-11 components — roomNet + breakfastNet + addOnNet − deductionNet == the billed total",
     bad.length === 0 ? "PASS" : "FAIL",
     `${bad.length} component violation(s) of ${bookings.filter((b) => b.allocation).length} allocations`,
     bad
@@ -519,7 +551,10 @@ check(
     if (!b.allocation) continue;
     const addOnNet = num(b.allocation.addOnNet);
     const otherAddOnTotal = r2(b.otherAddOnTotal);
-    if (otherAddOnTotal > 0 && r2(addOnNet) !== otherAddOnTotal) {
+    // The BR-12 other add-ons must be INSIDE the add-on stream. The
+    // stream also carries the extra beds, so the check is "at least",
+    // not "exactly".
+    if (otherAddOnTotal > 0 && r2(addOnNet) < otherAddOnTotal) {
       bad.push(`${b.ref} otherAddOnTotal=${otherAddOnTotal} addOnNet=${addOnNet}`);
     }
   }
@@ -596,15 +631,18 @@ check(
 }
 
 // ---------------------------------------------------------------------------
-// I06b — pending refund liabilities are netted against collected money
+// I06b — a pending refund must not be netted against collected money
 // ---------------------------------------------------------------------------
 // BREAKFAST.md §Removal semantics: a pending breakfast refund is a
 // LIABILITY, not a debit — "the booking's `paidAmount` is unchanged".
-// The admin's ledger normalizer (`normalizeLedgerDoc` in
-// admin-app/src/utils/bookingPaymentEntries.ts) does not read `status`, so
-// a `status: "pending"` refund is summed into `paymentsTotal` with its
-// negative amount. The drawer therefore reports less collected and more
-// outstanding than the hotel actually has.
+//
+// Per FIN-REFUND-LIABILITY (2026-10-25) the shared folio helper now
+// keeps the refund's `status` (via `normalizeLedgerDoc`) and excludes a
+// pending refund from `paymentsTotal`. This check calls the app's own
+// helper on the real production data and proves it.
+//
+// It FAILS while the deployed admin bundle still carries the old
+// normalizer, and PASSES once the fix is deployed.
 
 {
   const rows: string[] = [];
@@ -616,10 +654,24 @@ check(
     if (pending.length === 0) continue;
     const netted = r2(pending.reduce((s, e) => s + e.amount, 0));
     const grossCollected = f.ledgerGross;
-    rows.push(
-      `${b.ref} (${b.status}) gross collected ${peso(grossCollected)} · pending refund ${peson(netted)} ` +
-        `netted away → admin shows paid ${peso(f.ledgerNet)} and balance ${peso(f.balanceNet)}`
-    );
+    // The app's helper, fed the real ledger entries.
+    const helperFolio = computeBookingFolio({
+      booking: { id: b.id, totalPrice: b.totalPrice, otherAddOnTotal: b.otherAddOnTotal },
+      persistedPayments: (ledgerByBooking.get(b.id) || []).map((e) => ({
+        amount: e.amount,
+        type: e.type,
+        status: (e as LedgerEntry & { pending?: boolean }).pending ? "pending" : "paid"
+      })),
+      selectedBookingCharges: [],
+      folioBookingIds: [b.id],
+      storeOrders: []
+    });
+    if (r2(helperFolio.paymentsTotal) !== r2(grossCollected)) {
+      rows.push(
+        `${b.ref} (${b.status}) gross collected ${peso(grossCollected)} · pending refund ${peson(netted)} ` +
+          `still netted away → the folio reports paid ${peso(helperFolio.paymentsTotal)}`
+      );
+    }
   }
   check(
     "I06b",
@@ -641,9 +693,13 @@ function peson(n: number) {
   const bad: string[] = [];
   for (const b of bookings) {
     const f = folioOf(b);
-    if (r2(f.appGrandTotal) !== r2(f.grandTotal) || r2(f.appBalance) !== r2(f.balanceNet)) {
+    // Per FIN-REFUND-LIABILITY (2026-10-25) the app's helper and the
+    // independent recomputation both use the GROSS model — a pending
+    // refund is a liability, not a debit — so the comparison is against
+    // the gross balance.
+    if (r2(f.appGrandTotal) !== r2(f.grandTotal) || r2(f.appBalance) !== r2(f.balanceGross)) {
       bad.push(
-        `${b.ref} independent ${f.grandTotal}/${f.balanceNet} vs app ${f.appGrandTotal}/${f.appBalance}`
+        `${b.ref} independent ${f.grandTotal}/${f.balanceGross} vs app ${f.appGrandTotal}/${f.appBalance}`
       );
     }
   }

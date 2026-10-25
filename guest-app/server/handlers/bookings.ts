@@ -194,6 +194,10 @@ import {
   evaluateCancelPreview,
   buildCancellationLiabilitySnapshot,
   assertBookingRevenueAllocationInvariant,
+  // Per MRB-11b (QA pass 2026-10-25): the shared 2dp money rule, so
+  // the BR-12 other add-ons are folded into the allocation's add-on
+  // stream and total with the same rounding the shared helper uses.
+  round2,
   // Per the P1 revenue-reporting audit (2026-10-22): the shared
   // helper that REBUILDS a booking's revenue allocation after a
   // post-create money change (a discount / voucher applied, a
@@ -4158,7 +4162,7 @@ export async function handleCreateBooking(req: any, res: any) {
             addOnNet: childPricing.reduce(
               (sum, pricing) => sum + (Number(pricing.extraBedTotal) || 0),
               0
-            ),
+            ) + validatedOtherAddOnTotal,
             deductionNet: allocatedDeductions.reduce(
               (sum, deduction) =>
                 sum +
@@ -4168,9 +4172,15 @@ export async function handleCreateBooking(req: any, res: any) {
                 ),
               0
             ) + (Number(selfRedeemedValue) || 0),
-            totalNet: finalTotalPrice
+            // Per MRB-11b (QA pass 2026-10-25): the BR-12 other
+            // add-ons sit on top of the room bill (OCT-FOL-01), so the
+            // aggregate's total is the reservation's WHOLE bill. Before
+            // this the allocation described only the room bill and every
+            // revenue stream that read it under-reported by exactly this
+            // amount.
+            totalNet: round2(finalTotalPrice + validatedOtherAddOnTotal)
           },
-          finalTotalPrice
+          round2(finalTotalPrice + validatedOtherAddOnTotal)
         ),
         source: corporateDetails.isCorporate ? "corporate" : "online",
         isCorporate: corporateDetails.isCorporate,
@@ -4362,14 +4372,25 @@ export async function handleCreateBooking(req: any, res: any) {
               {
                 roomNet: pricingForRoom.roomTotal,
                 breakfastNet: pricingForRoom.breakfastTotal,
-                addOnNet: pricingForRoom.extraBedTotal,
+                // Per MRB-11b (QA pass 2026-10-25): the BR-12 other
+                // add-ons join the add-on stream. They are attributed
+                // to the FIRST child only — the create path spreads
+                // them onto every child doc, so attributing them to
+                // each would multiply them in the reservation
+                // aggregate.
+                addOnNet:
+                  round2(pricingForRoom.extraBedTotal) +
+                  (bookingIdx === 0 ? validatedOtherAddOnTotal : 0),
                 deductionNet: allocatedDeductions.reduce(
                   (sum, deduction) => sum + (Number(deduction.amounts[bookingIdx]) || 0),
                   0
                 ),
-                totalNet: pricingForRoom.totalPrice
+                totalNet:
+                  round2(pricingForRoom.totalPrice) +
+                  (bookingIdx === 0 ? validatedOtherAddOnTotal : 0)
               },
-              pricingForRoom.totalPrice
+              round2(pricingForRoom.totalPrice) +
+                (bookingIdx === 0 ? validatedOtherAddOnTotal : 0)
             ),
             reservationPosition: bookingIdx + 1,
             reservationRoomCount: assignedRooms.length,
@@ -5910,11 +5931,18 @@ export async function handleCreateWalkin(req: any, res: any) {
             {
               roomNet: hasManualOverride ? linePricingSubtotal : line.roomTotal,
               breakfastNet: hasManualOverride ? 0 : line.breakfastTotal,
-              addOnNet: hasManualOverride ? 0 : line.extraBedTotal,
+              // Per MRB-11b (QA pass 2026-10-25): the BR-12 other
+              // add-ons join the add-on stream — attributed to the
+              // FIRST line only, so the walk-in aggregate counts them
+              // once.
+              addOnNet:
+                (hasManualOverride ? 0 : line.extraBedTotal) +
+                (lineIdx === 0 ? walkinOtherAddOnTotal : 0),
               deductionNet: lineChainResult.seniorDeduction + lineChainResult.voucherDeduction,
-              totalNet: lineTotal
+              totalNet:
+                round2(lineTotal) + (lineIdx === 0 ? walkinOtherAddOnTotal : 0)
             },
-            lineTotal
+            round2(lineTotal) + (lineIdx === 0 ? walkinOtherAddOnTotal : 0)
           ),
           rateBreakdown: buildRateBreakdown({
             roomLines: hasManualOverride
@@ -6252,9 +6280,9 @@ export async function handleCreateWalkin(req: any, res: any) {
                 (Number((line.revenueAllocation as any)?.deductionNet) || 0),
               0
             ),
-            totalNet: finalTotalPrice
+            totalNet: round2(finalTotalPrice + walkinOtherAddOnTotal)
           },
-          finalTotalPrice
+          round2(finalTotalPrice + walkinOtherAddOnTotal)
         ),
         source: "walk-in",
         isCorporate: false,
@@ -6657,7 +6685,13 @@ export async function handleApplyBookingDiscount(req: any, res: any) {
         revenueAllocation: rebuildBookingRevenueAllocation({
           existingAllocation: booking.revenueAllocation,
           grossSubtotal: subtotal,
-          totalPrice
+          totalPrice,
+          // Per MRB-11b (QA pass 2026-10-25): the BR-12 other add-ons
+          // sit on top of the room bill, so the allocation's total is
+          // the booking's WHOLE bill. This path does not touch the
+          // add-ons, so the previous amount is the same one.
+          otherAddOnTotal: Number(booking.otherAddOnTotal) || 0,
+          previousOtherAddOnTotal: Number(booking.otherAddOnTotal) || 0
         }),
         updatedAt: new Date()
       };
@@ -6910,7 +6944,12 @@ export async function handleApplyReservationDiscount(req: any, res: any) {
           revenueAllocation: rebuildBookingRevenueAllocation({
             existingAllocation: booking.revenueAllocation,
             grossSubtotal: subtotal,
-            totalPrice
+            totalPrice,
+            // Per MRB-11b (QA pass 2026-10-25) — the BR-12 other
+            // add-ons sit on top of the room bill. This path does not
+            // touch the add-ons, so the previous amount is the same one.
+            otherAddOnTotal: Number(booking.otherAddOnTotal) || 0,
+            previousOtherAddOnTotal: Number(booking.otherAddOnTotal) || 0
           }),
           updatedAt: new Date()
         };
@@ -7103,7 +7142,12 @@ export async function handleRemoveVoucher(req: any, res: any) {
         revenueAllocation: rebuildBookingRevenueAllocation({
           existingAllocation: bookingData.revenueAllocation,
           grossSubtotal: Number(originalTotalPrice) || 0,
-          totalPrice: restoredTotalPrice
+          totalPrice: restoredTotalPrice,
+          // Per MRB-11b (QA pass 2026-10-25) — the BR-12 other
+          // add-ons sit on top of the room bill. This path does not
+          // touch the add-ons, so the previous amount is the same one.
+          otherAddOnTotal: Number(bookingData.otherAddOnTotal) || 0,
+          previousOtherAddOnTotal: Number(bookingData.otherAddOnTotal) || 0
         }),
         updatedAt: new Date()
       };
@@ -7225,7 +7269,12 @@ export async function handleRejectDiscount(req: any, res: any) {
       revenueAllocation: rebuildBookingRevenueAllocation({
         existingAllocation: bookingData.revenueAllocation,
         grossSubtotal: Number(originalTotalPrice) || 0,
-        totalPrice: restoredTotalPrice
+        totalPrice: restoredTotalPrice,
+        // Per MRB-11b (QA pass 2026-10-25) — the BR-12 other add-ons
+        // sit on top of the room bill. This path does not touch the
+        // add-ons, so the previous amount is the same one.
+        otherAddOnTotal: Number(bookingData.otherAddOnTotal) || 0,
+        previousOtherAddOnTotal: Number(bookingData.otherAddOnTotal) || 0
       }),
       updatedAt: new Date()
     };
@@ -13556,15 +13605,19 @@ export async function handleRescheduleBooking(req: any, res: any) {
           {
             roomNet: roomTotal,
             breakfastNet: breakfastTotal,
-            addOnNet: extraBedTotal,
+            // Per MRB-11b (QA pass 2026-10-25): the BR-12 other
+            // add-ons join the add-on stream — they sit on top of the
+            // room bill (OCT-FOL-01), so the allocation's total is the
+            // booking's WHOLE bill.
+            addOnNet: round2(extraBedTotal) + redatedOtherAddOns.total,
             deductionNet:
               rescheduleChain.seniorDeduction +
               rescheduleChain.voucherDeduction +
               rescheduleChain.memberDeduction +
               (Number(booking.pointsRedeemedValue) || 0),
-            totalNet: finalTotalPrice
+            totalNet: round2(finalTotalPrice) + redatedOtherAddOns.total
           },
-          finalTotalPrice
+          round2(finalTotalPrice) + redatedOtherAddOns.total
         ),
         rescheduleHistory: [...(Array.isArray(booking.rescheduleHistory) ? booking.rescheduleHistory : []), rescheduleEntry],
         // Per OCT-H8 (2026-10-20, decision #288): the re-dated
@@ -14666,10 +14719,21 @@ export async function handleAddRoomToReservation(req: any, res: any) {
         const baseAddOnNet = existingAlloc
           ? Number(existingAlloc.addOnNet || 0)
           : 0;
+        // Per MRB-11b (QA pass 2026-10-25): the existing children's
+        // allocations already carry the BR-12 other add-ons (they sit on
+        // top of the room bill), so the reservation's aggregate total is
+        // the SUM of the children's totals — not the header's room-bill
+        // `totalPrice`. Using the header's figure here would have
+        // absorbed the other add-ons into `deductionNet` as if they were
+        // a discount.
+        const baseTotalNet = existingAlloc
+          ? Number(existingAlloc.totalNet || 0)
+          : Number(reservation.totalPrice || 0);
         const roomNet = baseRoomNet + newChildRevenueAllocation.roomNet;
         const breakfastNet = baseBreakfastNet + newChildRevenueAllocation.breakfastNet;
         const addOnNet = baseAddOnNet + newChildRevenueAllocation.addOnNet;
         const grossTotal = roomNet + breakfastNet + addOnNet;
+        const totalNet = baseTotalNet + newChildRevenueAllocation.totalNet;
         return assertBookingRevenueAllocationInvariant(
           {
             roomNet,
@@ -14680,10 +14744,10 @@ export async function handleAddRoomToReservation(req: any, res: any) {
             // sum always ties to the total the header persists
             // (in the normal case this is byte-identical to
             // `existing.deductionNet + newChild.deductionNet`).
-            deductionNet: grossTotal - newTotalPrice,
-            totalNet: newTotalPrice
+            deductionNet: grossTotal - totalNet,
+            totalNet
           },
-          newTotalPrice
+          totalNet
         );
       })();
       const newChildrenDates = [

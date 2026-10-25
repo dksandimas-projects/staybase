@@ -446,11 +446,20 @@ export interface BookingRevenueAllocation {
   roomNet: number;
   /** Breakfast add-on share the guest pays (breakfastGross − breakfast's pro-rated share of deductions). */
   breakfastNet: number;
-  /** Add-on (extra bed + future add-ons) share the guest pays. */
+  /** Add-on (extra bed + the BR-12 "other add-ons") share the guest pays. */
   addOnNet: number;
   /** Total deductions applied (sum of senior + voucher + member + corporate code adjustments). The per-stream nets above already net this out — this is the headline "discounts given" number for reporting. */
   deductionNet: number;
-  /** The final bill. Equals `booking.totalPrice` by construction. */
+  /**
+   * The final bill.
+   *
+   * Per MRB-11b (QA pass 2026-10-25) this is the WHOLE bill:
+   * `booking.totalPrice + booking.otherAddOnTotal`. Per OCT-FOL-01 the
+   * BR-12 other add-ons are NOT inside `booking.totalPrice` — they sit
+   * on top of the room bill for the balance — so before this the
+   * allocation described only part of the bill and every revenue
+   * stream that read it under-reported by exactly that amount.
+   */
   totalNet: number;
 }
 
@@ -1380,11 +1389,20 @@ export interface BookingRevenueAllocation {
   roomNet: number;
   /** Breakfast add-on share the guest pays (breakfastGross − breakfast's pro-rated share of deductions). */
   breakfastNet: number;
-  /** Add-on (extra bed + future add-ons) share the guest pays. */
+  /** Add-on (extra bed + the BR-12 "other add-ons") share the guest pays. */
   addOnNet: number;
   /** Total deductions applied (sum of senior + voucher + member + corporate code adjustments). The per-stream nets above already net this out — this is the headline "discounts given" number for reporting. */
   deductionNet: number;
-  /** The final bill. Equals `booking.totalPrice` by construction. */
+  /**
+   * The final bill.
+   *
+   * Per MRB-11b (QA pass 2026-10-25) this is the WHOLE bill:
+   * `booking.totalPrice + booking.otherAddOnTotal`. Per OCT-FOL-01 the
+   * BR-12 other add-ons are NOT inside `booking.totalPrice` — they sit
+   * on top of the room bill for the balance — so before this the
+   * allocation described only part of the bill and every revenue
+   * stream that read it under-reported by exactly that amount.
+   */
   totalNet: number;
 }
 

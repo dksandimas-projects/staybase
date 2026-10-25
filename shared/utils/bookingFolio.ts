@@ -885,7 +885,7 @@ export interface BookingRevenueStreams {
  * system; anything beyond 2dp would surface in the
  * export as a false-precision artifact.
  */
-function round2(value: number): number {
+export function round2(value: number): number {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
   return Math.round(numeric * 100) / 100;
@@ -922,7 +922,7 @@ function round2(value: number): number {
  */
 export function assertBookingRevenueAllocationInvariant(
   allocation: BookingRevenueAllocation,
-  totalPrice: number
+  billedTotal: number
 ): BookingRevenueAllocation {
   // The per-stream values are individually rounded to 2dp
   // BEFORE the sum, so each can carry ±0.005 of noise; with
@@ -940,17 +940,22 @@ export function assertBookingRevenueAllocationInvariant(
       round2(allocation.addOnNet) -
       round2(allocation.deductionNet)
   );
-  const expected = round2(totalPrice);
+  const expected = round2(billedTotal);
   // Per the P1 revenue-reporting audit (2026-10-22): the guard
   // above only proved that the four streams add up to the
   // allocation's OWN `totalNet`. It never proved that
-  // `totalNet` is the same number as the booking's persisted
-  // `totalPrice` — so a STALE allocation (one written at create
-  // time and never refreshed when a discount was applied,
-  // removed or rejected afterwards) passed the check while
-  // Reports read a `totalNet` that no longer matched the
-  // billed total. This check closes that hole: the allocation's
-  // total IS the booking's total.
+  // `totalNet` is the same number as the booking's billed total —
+  // so a STALE allocation (one written at create time and never
+  // refreshed when a discount was applied, removed or rejected
+  // afterwards) passed the check while Reports read a `totalNet`
+  // that no longer matched the billed total. This check closes that
+  // hole: the allocation's total IS the billed total.
+  //
+  // Per MRB-11b (QA pass 2026-10-25) the "billed total" is the room
+  // bill PLUS the BR-12 other add-ons that sit on top of it (per
+  // OCT-FOL-01 they are not inside `booking.totalPrice`), so the
+  // allocation now describes the WHOLE bill. Before this, every
+  // revenue stream that read it under-reported by exactly that amount.
   //
   // It runs FIRST so the more actionable message wins: a
   // mismatch here means the snapshot and the bill were computed
@@ -968,7 +973,7 @@ export function assertBookingRevenueAllocationInvariant(
   if (Math.abs(allocationTotal - expected) > 0.05) {
     throw new Error(
       `[MRB-11] revenue allocation total mismatch: ` +
-        `allocation.totalNet(${allocation.totalNet}) != booking.totalPrice(${expected}). ` +
+        `allocation.totalNet(${allocation.totalNet}) != the billed total(${expected}). ` +
         `This is a server-side bug — the allocation snapshot and the billed total were computed from different figures.`
     );
   }
@@ -1118,6 +1123,26 @@ export interface ComputeBookingRevenueAllocationInput {
   breakfastTotal?: number | null;
   /** Per-night extra-bed subtotal (the "add-on" stream). Composed into the chain so the deductions see the full pre-discount subtotal. Default 0. */
   extraBedTotal?: number;
+  /**
+   * Per MRB-11b (QA pass 2026-10-25): the BR-12 "other add-ons" gross
+   * (the airport transfer).
+   *
+   * Per OCT-FOL-01 (decision #298) it is NOT inside `totalPrice` — it
+   * is added ON TOP of the room bill for the balance. The allocation
+   * therefore did not describe the whole bill, and every revenue stream
+   * that read it under-reported by exactly this amount (₱3,950 across
+   * the production book).
+   *
+   * It joins the `addOn` stream — the field is documented as "extra
+   * bed + future add-ons", and an airport transfer IS an add-on — so
+   * the stored shape does not grow a field and the per-stream sum
+   * still ties to the total.
+   *
+   * It is NOT composed into the discount chain: the BR-12 add-ons sit
+   * on top of the discounted room bill, so no discount applies to
+   * them.
+   */
+  otherAddOnTotal?: number | null;
   discountPct?: number | null;
   voucherDiscount?: number | null;
   memberDiscountPct?: number | null;
@@ -1160,6 +1185,10 @@ export function computeBookingRevenueAllocation(
   const roomTotal = round2(ratePerNight * numNights);
   const breakfastTotal = round2(Math.max(0, Number(input.breakfastTotal) || 0));
   const extraBedTotal = round2(Number(input.extraBedTotal) || 0);
+  // Per MRB-11b (QA pass 2026-10-25): the BR-12 other add-ons join the
+  // `addOn` stream. They are deliberately NOT composed into the
+  // discount chain — they sit on top of the discounted room bill.
+  const otherAddOnTotal = round2(Math.max(0, Number(input.otherAddOnTotal) || 0));
 
   const chain = calculateDiscountChain({
     roomTotal,
@@ -1177,8 +1206,12 @@ export function computeBookingRevenueAllocation(
 
   const roomNet = roomTotal;
   const breakfastNet = breakfastTotal;
-  const addOnNet = extraBedTotal;
-  const totalNet = round2(Number(input.totalPrice) || 0);
+  // The `addOn` stream carries the extra beds AND the BR-12 other
+  // add-ons — both are add-on revenue the guest pays for.
+  const addOnNet = round2(extraBedTotal + otherAddOnTotal);
+  // The allocation's total is the WHOLE bill: the room bill
+  // (`totalPrice`) plus the BR-12 other add-ons that sit on top of it.
+  const totalNet = round2(round2(Number(input.totalPrice) || 0) + otherAddOnTotal);
 
   return assertBookingRevenueAllocationInvariant(
     { roomNet, breakfastNet, addOnNet, deductionNet, totalNet },
@@ -1222,8 +1255,26 @@ export interface RebuildBookingRevenueAllocationInput {
    * the booking carries no stored allocation.
    */
   grossSubtotal: number;
-  /** The booking's NEW billed total. The rebuilt allocation's `totalNet` IS this number. */
+  /** The booking's NEW room bill (`booking.totalPrice`). */
   totalPrice: number;
+  /**
+   * Per MRB-11b (QA pass 2026-10-25): the BR-12 other add-ons, which
+   * sit on top of the room bill (OCT-FOL-01) and are carried by the
+   * `addOn` stream. The rebuilt allocation's `totalNet` is
+   * `totalPrice + otherAddOnTotal` — the WHOLE bill.
+   */
+  otherAddOnTotal?: number | null;
+  /**
+   * Per MRB-11b (QA pass 2026-10-25): the BR-12 other add-ons the
+   * booking carried BEFORE this change. The stored `addOn` stream
+   * includes them, so a path that changes the add-on total (the guest
+   * "Manage Other Add-Ons" page and the staff add-on update) has to
+   * swap the old amount out for the new one — otherwise the delta
+   * would be absorbed into `deductionNet` as if it were a discount.
+   *
+   * Default 0 for a path that does not touch the add-ons.
+   */
+  previousOtherAddOnTotal?: number | null;
 }
 
 export function rebuildBookingRevenueAllocation(
@@ -1232,9 +1283,28 @@ export function rebuildBookingRevenueAllocation(
   const existing = input.existingAllocation;
   const grossSubtotal = round2(Math.max(0, Number(input.grossSubtotal) || 0));
   const totalPrice = round2(Number(input.totalPrice) || 0);
+  // Per MRB-11b (QA pass 2026-10-25): the billed total is the room
+  // bill plus the BR-12 other add-ons. The stored `addOn` stream
+  // already carries them, so the deduction is derived against the
+  // WHOLE bill — otherwise the other add-ons would be silently
+  // deducted as if they were a discount.
+  const otherAddOnTotal = round2(Math.max(0, Number(input.otherAddOnTotal) || 0));
+  const previousOtherAddOnTotal = round2(
+    Math.max(0, Number(input.previousOtherAddOnTotal) || 0)
+  );
+  const billedTotal = round2(totalPrice + otherAddOnTotal);
   let roomNet = existing ? round2(existing.roomNet) : grossSubtotal;
   const breakfastNet = existing ? round2(existing.breakfastNet) : 0;
-  const addOnNet = existing ? round2(existing.addOnNet) : 0;
+  // The stored `addOn` stream carries the PREVIOUS other add-ons; swap
+  // them out for the new ones (the extra beds are untouched).
+  const addOnNet = round2(
+    Math.max(
+      0,
+      (existing ? round2(existing.addOnNet) : 0) -
+        previousOtherAddOnTotal +
+        otherAddOnTotal
+    )
+  );
   // Defensive: the bill can never exceed the gross streams, but a
   // legacy booking whose stored gross disagrees with its
   // `originalTotalPrice` must not make the write-boundary guard
@@ -1242,15 +1312,15 @@ export function rebuildBookingRevenueAllocation(
   // on the room stream instead.
   const shortfall = Math.max(
     0,
-    totalPrice - round2(roomNet + breakfastNet + addOnNet)
+    billedTotal - round2(roomNet + breakfastNet + addOnNet)
   );
   roomNet = round2(roomNet + shortfall);
   const deductionNet = round2(
-    Math.max(0, round2(roomNet + breakfastNet + addOnNet) - totalPrice)
+    Math.max(0, round2(roomNet + breakfastNet + addOnNet) - billedTotal)
   );
   return assertBookingRevenueAllocationInvariant(
-    { roomNet, breakfastNet, addOnNet, deductionNet, totalNet: totalPrice },
-    totalPrice
+    { roomNet, breakfastNet, addOnNet, deductionNet, totalNet: billedTotal },
+    billedTotal
   );
 }
 
