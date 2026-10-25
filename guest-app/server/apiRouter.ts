@@ -724,54 +724,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult;
 
-    // Capture the booking snapshot before the handler
-    // bounces the status to `pending` so the post-response
-    // email + notification have the original
-    // `paymentProofUrl` (and any `transactionReference` on
-    // the booking's onsitePayments[] ledger) to surface to
-    // the guest. Per 2026-07-24
-    // (refactor/unify-payment-reference-fields): the previous
-    // top-level `paymentReferenceNumber` is retired.
-    const bookingId = String((req.body || {}).bookingId || "").trim();
-    let preRejectSnapshot: any = null;
-    if (bookingId) {
-      const snap = await adminDb.collection("bookings").doc(bookingId).get();
-      if (snap.exists) preRejectSnapshot = snap.data() || null;
-    }
-
-    // Only fire side effects when the handler actually
-    // bounces the booking (the handler updates the doc
-    // only when the status was `payment-uploaded`).
-    const wasEligible = preRejectSnapshot?.status === "payment-uploaded";
-
-    const result = await handleRejectPayment(req, res);
-
-    if (wasEligible) {
-      try {
-        const emailBooking = {
-          ...preRejectSnapshot,
-          status: "pending",
-          paymentRejectionReason: (req.body || {}).reason
-        };
-        await sendBookingTrigger("payment-rejected", emailBooking);
-      } catch (emailErr) {
-        console.error("Failed to send payment-rejected email:", emailErr);
-      }
-      try {
-        await writeNotification({
-          type: "payment",
-          title: `Payment proof rejected â€” ${preRejectSnapshot.bookingRef || bookingId} (Room ${preRejectSnapshot.roomNumber || ""})`.trim(),
-          entityType: "booking",
-          entityId: bookingId,
-          roomNumber: preRejectSnapshot.roomNumber || null,
-          bookingRef: preRejectSnapshot.bookingRef || null
-        });
-      } catch (notifErr) {
-        console.error("Failed to write payment-rejection notification:", notifErr);
-      }
-    }
-
-    return result;
+    // Per XCC-05 (AI-BROWSER-QA 2026-10-25): the side effects (the
+    // guest email + the staff notification) are fired by the HANDLER,
+    // gated on the transaction's own transition flag. This route used
+    // to decide from a PRE-READ of the status, which is a
+    // read-then-write race: two rejections of the same proof both read
+    // `payment-uploaded`, and the losing call still emailed the guest
+    // (the provider's log caught it: two "payment proof rejected"
+    // emails for SI-20261021-00046, 1.25 s apart, for ONE rejection).
+    return await handleRejectPayment(req, res);
   }
 
   if (domain === "bookings" && action === "apply-discount" && req.method === "POST") {

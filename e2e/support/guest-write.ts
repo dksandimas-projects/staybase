@@ -220,6 +220,14 @@ export type BookingOptions = {
   breakfastMealId?: string;
   /** How many guest slots take that meal. Defaults to the party size (2). */
   breakfastSlots?: number;
+  /** A voucher code to apply on the review step (e.g. "OFFNOW"). */
+  voucherCode?: string;
+  /**
+   * A preference chip to tick in the "Show additional preferences"
+   * accordion (e.g. "high-floor"). The chip's VALUE is the catalogue
+   * key; the label is what the guest reads.
+   */
+  preferenceChip?: string;
 };
 
 export type BookingResult = {
@@ -294,6 +302,12 @@ export async function createBookingViaBrowser(page: Page, options: BookingOption
   await toGuestDetails.click();
   await page.waitForTimeout(1500);
 
+  // Step 3 — guest details. The step must be rendered before the fields
+  // are written, otherwise the fills land on the previous step.
+  await expect(page.locator('input[name="firstName"]'), "the guest-details step must render").toBeVisible({
+    timeout: 20_000
+  });
+
   // Step 3 — guest details. A signed-in member's details are LOCKED to
   // the member profile (the booking-autofill rule), so only an editable
   // field is written.
@@ -314,19 +328,47 @@ export async function createBookingViaBrowser(page: Page, options: BookingOption
     await bedRadio.check({ force: true });
   }
 
-  if (options.additionalRequest) {
+  if (options.additionalRequest || options.preferenceChip) {
     await page.getByRole("button", { name: /show additional preferences/i }).click();
+    await page.waitForTimeout(600);
+  }
+
+  if (options.preferenceChip) {
+    const chip = page.locator(`input[type="checkbox"][value="${options.preferenceChip}"]`);
+    await expect(chip, "the preference chip must be rendered").toHaveCount(1, { timeout: 15_000 });
+    await chip.check({ force: true });
+  }
+
+  if (options.additionalRequest) {
     const requestBox = page.getByPlaceholder("Enter any additional requests");
     await expect(requestBox).toBeVisible({ timeout: 10_000 });
     await requestBox.fill(options.additionalRequest);
   }
 
-  await page.locator("#consentStep2").check({ force: true });
+  // The consent box is CONTROLLED (`checked={guestDetails.consent}`), so a
+  // late re-render of the step can revert it between the click and the
+  // read. Tick it and verify, with a retry.
+  const consent = page.locator("#consentStep2");
+  for (let attempt = 0; attempt < 6; attempt++) {
+    if (await consent.isChecked()) break;
+    await consent.click({ force: true }).catch(() => {});
+    await page.waitForTimeout(300);
+  }
+  await expect(consent, "the consent box must be ticked").toBeChecked({ timeout: 10_000 });
   await page.waitForTimeout(300);
   await page.getByRole("link", { name: /continue to review/i }).first().click();
   await page.waitForTimeout(2000);
 
   // Step 4 — review & pay.
+  if (options.voucherCode) {
+    const codeField = page.locator('input[name="voucherCode"]');
+    await expect(codeField, "the voucher field must be on the review step").toBeVisible({ timeout: 15_000 });
+    await codeField.fill(options.voucherCode);
+    await page.getByRole("button", { name: /^apply$/i }).first().click();
+    // The applied voucher shows up in the price breakdown.
+    await expect(page.getByText(new RegExp(options.voucherCode, "i")).first()).toBeVisible({ timeout: 15_000 });
+  }
+
   if (options.paymentMethod === "pay-at-hotel") {
     await page.getByRole("button", { name: /pay at hotel/i }).first().click();
     await page.waitForTimeout(500);
@@ -374,7 +416,7 @@ export async function createBookingViaBrowser(page: Page, options: BookingOption
 }
 
 /**
- * Read the lookup token for a QA booking.
+ * Read a QA booking's internal id + its lookup token.
  *
  * The guest reaches the add-on manager through the magic link in the
  * confirmation email (`/my-booking/addons?ref=…&token=…`). There is no
@@ -382,7 +424,7 @@ export async function createBookingViaBrowser(page: Page, options: BookingOption
  * admin SDK — exactly the value the email would have carried. It is written
  * to a gitignored file, never to stdout, never into the report.
  */
-export async function readLookupToken(bookingRef: string): Promise<string> {
+export async function readBookingIds(bookingRef: string): Promise<{ id: string; token: string }> {
   const outFile = resolve(REPO_ROOT, "tmp/qa-2026-10-23/flow-tokens.json");
   const script = resolve(REPO_ROOT, "scripts/qa/fetch-flow-tokens.ts");
   const bundle = resolve(REPO_ROOT, "tmp/qa-2026-10-23/fetch-flow-tokens.mjs");
@@ -402,12 +444,17 @@ export async function readLookupToken(bookingRef: string): Promise<string> {
   execFileSync(process.execPath, [bundle, "--out", outFile], { cwd: REPO_ROOT, stdio: "ignore" });
 
   if (!existsSync(outFile)) {
-    throw new Error("The lookup-token read did not produce a file.");
+    throw new Error("The booking-id read did not produce a file.");
   }
-  const map: Record<string, string> = JSON.parse(readFileSync(outFile, "utf8"));
-  const token = map[bookingRef];
-  if (!token) {
-    throw new Error(`No lookup token was found for ${bookingRef}.`);
+  const map: Record<string, { id: string; token: string }> = JSON.parse(readFileSync(outFile, "utf8"));
+  const entry = map[bookingRef];
+  if (!entry) {
+    throw new Error(`No booking id was found for ${bookingRef}.`);
   }
-  return token;
+  return entry;
+}
+
+/** The lookup token alone — the magic-link credential. */
+export async function readLookupToken(bookingRef: string): Promise<string> {
+  return (await readBookingIds(bookingRef)).token;
 }
