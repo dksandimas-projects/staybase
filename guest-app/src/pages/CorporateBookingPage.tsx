@@ -158,7 +158,7 @@ export function CorporateBookingPage() {
   // in we autofill + lock the corporate Step 2 email field to the
   // member's account email so the booking is always filed under the
   // correct identity.
-  const { memberProfile } = useGuestAuth();
+  const { memberProfile, user } = useGuestAuth();
   // Per BR-09 (2026-10-14): the corporate flow uses
 // string step keys (`gate`, `select-room`, `add-ons`,
 // `guest-details`, `review`, `confirm`) plus a legacy
@@ -1581,9 +1581,19 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
         _hp: guestDetails._hp || "",
       };
 
+      // Per W2.2 / decision #90 the server resolves the Spark Rewards
+      // member from this request's ID token and applies the member rate
+      // itself. The corporate flow used to send no Authorization header,
+      // so a signed-in member was quoted the member price and billed the
+      // undiscounted total — the same defect the AI-BROWSER-QA pass found
+      // on the public booking flow (2026-10-25, scenario RW-02).
+      const idToken = user ? await user.getIdToken() : null;
       const response = await fetch("/api/bookings/create", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {})
+        },
         body: JSON.stringify(body),
       });
       const result = await response.json();

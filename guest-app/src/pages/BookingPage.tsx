@@ -402,7 +402,7 @@ export function BookingPage() {
   const shouldReduceMotion = useReducedMotion();
   const { rooms, loading: roomsLoading } = useRooms();
   const { roomTypes, seasonalRateOverrides, bedSetups, bookingPreferences } = useRoomTypes();
-  const { memberProfile } = useGuestAuth();
+  const { memberProfile, user } = useGuestAuth();
   // Per feat/special-requests-redirect (2026-08-21): the
   // redirect card on the booking form reads the per-hotel
   // contact override (Settings → Hotel Info) with the
@@ -1964,9 +1964,25 @@ export function BookingPage() {
       if (!firstRoomSelection || !cartIsReady) {
         throw new Error("Please return to Step 1 and assign every guest to an available room.");
       }
+      // Per W2.2 / decision #90 the SERVER is authoritative for the
+      // Spark Rewards member rate: it resolves the member from this
+      // request's ID token and applies the discount itself.
+      //
+      // The create call used to go out WITHOUT an Authorization header,
+      // so the server never learned who the guest was and charged the
+      // undiscounted total — while the review step showed the guest the
+      // MEMBER price. A signed-in member was quoted 10% off and billed
+      // full price. (Found by the AI-BROWSER-QA pass, 2026-10-25,
+      // scenario RW-02.) The token is attached whenever a guest is
+      // signed in; an anonymous booking sends no header and gets no
+      // member discount, exactly as before.
+      const idToken = user ? await user.getIdToken() : null;
       const response = await fetch("/api/bookings/create", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {})
+        },
         body: JSON.stringify({
           bookingId,
           // Per MRB-02 (2026-08-02, per decision #164): the
