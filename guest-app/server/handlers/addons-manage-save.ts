@@ -500,6 +500,26 @@ export async function handleUpdateAddOns(req: VercelRequest, res: VercelResponse
           opCode = `SERVE_BLOCKED:${op.selectionKey}`;
           return;
         }
+        // Per AI-BROWSER-QA (2026-10-25, scenario AO-08): a CHANGE op
+        // with a quantity of 0 that lands on a selection this batch
+        // ALREADY removed is redundant, not wrong. The removal is the
+        // whole story; failing the batch here answered "Nothing to
+        // change — add the add-on first." for a change that had in
+        // fact been applied. The guest client no longer emits the
+        // redundant op (see `buildOtherAddOnManageOps`), and the server
+        // no longer misreports one that arrives.
+        const changeQuantity = Math.max(0, Math.floor(Number(op.quantity ?? 0) || 0));
+        const existingSelection = (next[parsedKey.date] || []).find(
+          (e) => e && e.addOnId === parsedKey.addOnId
+        );
+        if (
+          changeQuantity === 0 &&
+          existingSelection &&
+          existingSelection.removedAt !== null &&
+          existingSelection.removedAt !== undefined
+        ) {
+          continue;
+        }
         try {
           assertSelectionForChange(next, op.selectionKey);
         } catch (err: any) {

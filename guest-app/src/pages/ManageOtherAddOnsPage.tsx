@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AlertTriangle, ArrowLeft, Calendar, CheckCircle2, Loader2, Wallet } from "lucide-react";
-import { computeOtherAddOnCutoffState, recomputeOtherAddOnTotal, type OtherAddOnSelectionEntry, type AddOn } from "@spark-inn/shared";
+import { computeOtherAddOnCutoffState, recomputeOtherAddOnTotal, buildOtherAddOnManageOps, type OtherAddOnSelectionEntry, type AddOn } from "@spark-inn/shared";
 import { formatPrice } from "../utils/format";
 import { Navbar } from "../components/Navbar";
 import { Footer } from "../components/Footer";
@@ -254,56 +254,28 @@ export default function ManageOtherAddOnsPage() {
     if (!clientBatchRef.current) clientBatchRef.current = generateBatchId();
     const clientBatchId = clientBatchRef.current;
 
-    const addOps: any[] = [];
-    const changeOps: any[] = [];
-    const removeOps: any[] = [];
-
-    const orig = payload.otherAddOnSelections || {};
-    const allDates = new Set([...Object.keys(orig), ...Object.keys(draftSelections)]);
-    for (const date of allDates) {
-      const origList = orig[date] || [];
-      const draftList = draftSelections[date] || [];
-      const draftByKey = new Map(draftList.filter((e) => e).map((e) => [e.addOnId, e]));
-      const origByKey = new Map(origList.filter((e) => e).map((e) => [e.addOnId, e]));
-
-      for (const [addOnId, draftEntry] of draftByKey.entries()) {
-        const liveAddOn = addOnById.get(addOnId);
-        if (!liveAddOn) continue;
-        const origEntry = origByKey.get(addOnId);
-        const key = selectionKey(date, addOnId);
-        if (!origEntry || origEntry.removedAt !== null) {
-          if (draftEntry.quantity > 0 && !draftEntry.removedAt) {
-            addOps.push({
-              selectionKey: key,
-              addOnId,
-              quantity: draftEntry.quantity,
-              priceSnapshot: liveAddOn.price,
-              nameSnapshot: liveAddOn.name,
-              unitSnapshot: liveAddOn.unit,
-              cutoffHoursBeforeCheckInSnapshot: liveAddOn.cutoffHoursBeforeCheckIn
-            });
-          }
-        } else if (draftEntry.quantity !== origEntry.quantity) {
-          changeOps.push({
-            selectionKey: key,
-            addOnId,
-            quantity: draftEntry.quantity,
-            priceSnapshot: liveAddOn.price,
-            nameSnapshot: liveAddOn.name,
-            unitSnapshot: liveAddOn.unit,
-            cutoffHoursBeforeCheckInSnapshot: liveAddOn.cutoffHoursBeforeCheckIn
-          });
-        }
-      }
-      for (const [addOnId, origEntry] of origByKey.entries()) {
-        if (origEntry.removedAt !== null) continue;
-        const draftEntry = draftByKey.get(addOnId);
-        const key = selectionKey(date, addOnId);
-        if (!draftEntry || draftEntry.removedAt !== null || draftEntry.quantity === 0) {
-          removeOps.push({ selectionKey: key, addOnId });
-        }
-      }
-    }
+    // The batch is assembled by the shared helper so the guest page and
+    // the server agree on what a quantity of 0 means: a REMOVAL, never a
+    // change with quantity 0. The old inline assembly emitted BOTH for
+    // the same line, and the server — which processes removals first —
+    // then failed the change op with SELECTION_NOT_ORDERED and answered
+    // "Nothing to change — add the add-on first." even though the
+    // removal HAD been applied. Found by the AI-BROWSER-QA pass
+    // (2026-10-25, scenario AO-08).
+    const ops = buildOtherAddOnManageOps({
+      original: payload.otherAddOnSelections || {},
+      draft: draftSelections,
+      catalog: (payload.addOns || []).map((a) => ({
+        id: a.id,
+        name: a.name,
+        price: a.price,
+        unit: a.unit,
+        cutoffHoursBeforeCheckIn: a.cutoffHoursBeforeCheckIn
+      }))
+    });
+    const addOps: any[] = ops.add;
+    const changeOps: any[] = ops.change;
+    const removeOps: any[] = ops.remove;
 
     try {
       const res = await fetch("/api/bookings/addons/update", {

@@ -20,6 +20,7 @@
 // render a total that matches the bill.
 
 import type { OtherAddOnSelectionEntry } from "../types";
+import { buildOtherAddOnSelectionKey } from "./otherAddOnTotal";
 
 /** The catalog shape the guest grid reads from `GET /api/bookings/addons/config`. */
 export interface OtherAddOnDraftCatalogRow {
@@ -189,4 +190,149 @@ export function countOtherAddOnDraftSelections(
     }
   }
   return count;
+}
+
+/**
+ * One operation of the Manage Other Add-Ons save batch.
+ *
+ * `add` and `change` carry the full snapshot; `remove` only needs the
+ * key + the add-on id.
+ */
+export interface OtherAddOnManageOp {
+  selectionKey: string;
+  addOnId: string;
+  quantity?: number;
+  priceSnapshot?: number;
+  nameSnapshot?: string;
+  unitSnapshot?: "per-person" | "per-stay";
+  cutoffHoursBeforeCheckInSnapshot?: number;
+}
+
+export interface BuildOtherAddOnManageOpsInput {
+  /** What the server currently holds for the booking. */
+  original: Record<string, OtherAddOnSelectionEntry[]> | null | undefined;
+  /** What the guest has edited in the browser. */
+  draft: Record<string, OtherAddOnSelectionEntry[]> | null | undefined;
+  /** The live catalog rows — the ADD op snapshots them. */
+  catalog: OtherAddOnDraftCatalogRow[] | null | undefined;
+}
+
+export interface OtherAddOnManageOps {
+  add: OtherAddOnManageOp[];
+  change: OtherAddOnManageOp[];
+  remove: OtherAddOnManageOp[];
+}
+
+/**
+ * Assemble the Manage Other Add-Ons save batch from what the server holds
+ * and what the guest has edited.
+ *
+ * **A quantity of 0 is a REMOVAL, never a change.** This is the whole
+ * point of the helper. The server processes REMOVEs first and then
+ * CHANGEs, and a CHANGE op that lands on a selection the REMOVE already
+ * took away fails with `SELECTION_NOT_ORDERED` — which the guest sees as
+ * "Nothing to change — add the add-on first." even though the removal
+ * WAS applied. The client used to emit both ops for the same line
+ * (a change with quantity 0 AND a remove), so lowering a quantity to 0
+ * always ended in a false error. (Found by the AI-BROWSER-QA pass,
+ * 2026-10-25 — scenario AO-08.)
+ *
+ * Rules:
+ *   - A line the server does not hold (or holds as removed) and the
+ *     guest now wants → `add`.
+ *   - A line the server holds and the guest still wants at a DIFFERENT
+ *     quantity → `change`.
+ *   - A line the server holds and the guest no longer wants (missing
+ *     from the draft, removed in the draft, or a quantity of 0) →
+ *     `remove`.
+ *   - A line that is unchanged produces no op at all.
+ */
+export function buildOtherAddOnManageOps(input: BuildOtherAddOnManageOpsInput): OtherAddOnManageOps {
+  const original = input.original || {};
+  const draft = input.draft || {};
+  const catalogById = new Map<string, OtherAddOnDraftCatalogRow>();
+  for (const row of input.catalog || []) {
+    if (row && row.id) catalogById.set(row.id, row);
+  }
+
+  const add: OtherAddOnManageOp[] = [];
+  const change: OtherAddOnManageOp[] = [];
+  const remove: OtherAddOnManageOp[] = [];
+
+  const dates = new Set([...Object.keys(original), ...Object.keys(draft)]);
+  for (const date of dates) {
+    const origList = (original[date] || []).filter(Boolean);
+    const draftList = (draft[date] || []).filter(Boolean);
+    const draftByKey = new Map(draftList.map((e) => [e.addOnId, e]));
+    const origByKey = new Map(origList.map((e) => [e.addOnId, e]));
+
+    for (const draftEntry of draftList) {
+      const liveAddOn = catalogById.get(draftEntry.addOnId);
+      if (!liveAddOn) continue;
+      const origEntry = origByKey.get(draftEntry.addOnId);
+      const key = buildOtherAddOnSelectionKey(date, draftEntry.addOnId);
+      const draftQuantity = Math.max(0, Math.floor(Number(draftEntry.quantity) || 0));
+      const draftRemoved = draftEntry.removedAt !== null && draftEntry.removedAt !== undefined;
+
+      if (!origEntry || origEntry.removedAt !== null) {
+        // Not ordered (or ordered and removed) — the guest now wants it.
+        if (draftQuantity > 0 && !draftRemoved) {
+          add.push({
+            selectionKey: key,
+            addOnId: draftEntry.addOnId,
+            quantity: draftQuantity,
+            priceSnapshot: Math.max(0, Number(liveAddOn.price) || 0),
+            nameSnapshot: liveAddOn.name,
+            unitSnapshot: liveAddOn.unit === "per-stay" ? "per-stay" : "per-person",
+            cutoffHoursBeforeCheckInSnapshot: Math.max(
+              0,
+              Math.min(168, Math.floor(Number(liveAddOn.cutoffHoursBeforeCheckIn) || 24))
+            )
+          });
+        }
+        continue;
+      }
+
+      if (draftRemoved || draftQuantity === 0) {
+        // The guest took the line away. The REMOVE op is the whole story —
+        // a CHANGE op with a quantity of 0 would land on a selection the
+        // remove already took and fail the whole batch.
+        remove.push({ selectionKey: key, addOnId: draftEntry.addOnId });
+        continue;
+      }
+
+      const origQuantity = Math.max(0, Math.floor(Number(origEntry.quantity) || 0));
+      if (draftQuantity !== origQuantity) {
+        change.push({
+          selectionKey: key,
+          addOnId: draftEntry.addOnId,
+          quantity: draftQuantity,
+          priceSnapshot: Math.max(0, Number(liveAddOn.price) || 0),
+          nameSnapshot: liveAddOn.name,
+          unitSnapshot: liveAddOn.unit === "per-stay" ? "per-stay" : "per-person",
+          cutoffHoursBeforeCheckInSnapshot: Math.max(
+            0,
+            Math.min(168, Math.floor(Number(liveAddOn.cutoffHoursBeforeCheckIn) || 24))
+          )
+        });
+      }
+    }
+
+    // A line the server holds that the draft dropped entirely.
+    for (const origEntry of origList) {
+      if (origEntry.removedAt !== null && origEntry.removedAt !== undefined) continue;
+      const draftEntry = draftByKey.get(origEntry.addOnId);
+      if (!draftEntry) {
+        remove.push({
+          selectionKey: buildOtherAddOnSelectionKey(date, origEntry.addOnId),
+          addOnId: origEntry.addOnId
+        });
+        continue;
+      }
+      // The draft still lists it, but with a quantity of 0 — the remove
+      // op for that line was already pushed above. Nothing more to do.
+    }
+  }
+
+  return { add, change, remove };
 }

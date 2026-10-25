@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.19.2";
+    VERSION2 = "2.20.0";
   }
 });
 
@@ -152354,9 +152354,84 @@ function countOtherAddOnDraftSelections(selections) {
   }
   return count;
 }
+function buildOtherAddOnManageOps(input) {
+  const original = input.original || {};
+  const draft = input.draft || {};
+  const catalogById = /* @__PURE__ */ new Map();
+  for (const row2 of input.catalog || []) {
+    if (row2 && row2.id) catalogById.set(row2.id, row2);
+  }
+  const add = [];
+  const change = [];
+  const remove = [];
+  const dates = /* @__PURE__ */ new Set([...Object.keys(original), ...Object.keys(draft)]);
+  for (const date of dates) {
+    const origList = (original[date] || []).filter(Boolean);
+    const draftList = (draft[date] || []).filter(Boolean);
+    const draftByKey = new Map(draftList.map((e3) => [e3.addOnId, e3]));
+    const origByKey = new Map(origList.map((e3) => [e3.addOnId, e3]));
+    for (const draftEntry of draftList) {
+      const liveAddOn = catalogById.get(draftEntry.addOnId);
+      if (!liveAddOn) continue;
+      const origEntry = origByKey.get(draftEntry.addOnId);
+      const key = buildOtherAddOnSelectionKey(date, draftEntry.addOnId);
+      const draftQuantity = Math.max(0, Math.floor(Number(draftEntry.quantity) || 0));
+      const draftRemoved = draftEntry.removedAt !== null && draftEntry.removedAt !== void 0;
+      if (!origEntry || origEntry.removedAt !== null) {
+        if (draftQuantity > 0 && !draftRemoved) {
+          add.push({
+            selectionKey: key,
+            addOnId: draftEntry.addOnId,
+            quantity: draftQuantity,
+            priceSnapshot: Math.max(0, Number(liveAddOn.price) || 0),
+            nameSnapshot: liveAddOn.name,
+            unitSnapshot: liveAddOn.unit === "per-stay" ? "per-stay" : "per-person",
+            cutoffHoursBeforeCheckInSnapshot: Math.max(
+              0,
+              Math.min(168, Math.floor(Number(liveAddOn.cutoffHoursBeforeCheckIn) || 24))
+            )
+          });
+        }
+        continue;
+      }
+      if (draftRemoved || draftQuantity === 0) {
+        remove.push({ selectionKey: key, addOnId: draftEntry.addOnId });
+        continue;
+      }
+      const origQuantity = Math.max(0, Math.floor(Number(origEntry.quantity) || 0));
+      if (draftQuantity !== origQuantity) {
+        change.push({
+          selectionKey: key,
+          addOnId: draftEntry.addOnId,
+          quantity: draftQuantity,
+          priceSnapshot: Math.max(0, Number(liveAddOn.price) || 0),
+          nameSnapshot: liveAddOn.name,
+          unitSnapshot: liveAddOn.unit === "per-stay" ? "per-stay" : "per-person",
+          cutoffHoursBeforeCheckInSnapshot: Math.max(
+            0,
+            Math.min(168, Math.floor(Number(liveAddOn.cutoffHoursBeforeCheckIn) || 24))
+          )
+        });
+      }
+    }
+    for (const origEntry of origList) {
+      if (origEntry.removedAt !== null && origEntry.removedAt !== void 0) continue;
+      const draftEntry = draftByKey.get(origEntry.addOnId);
+      if (!draftEntry) {
+        remove.push({
+          selectionKey: buildOtherAddOnSelectionKey(date, origEntry.addOnId),
+          addOnId: origEntry.addOnId
+        });
+        continue;
+      }
+    }
+  }
+  return { add, change, remove };
+}
 var init_otherAddOnDrafts = __esm({
   "../shared/utils/otherAddOnDrafts.ts"() {
     "use strict";
+    init_otherAddOnTotal();
   }
 });
 
@@ -152679,6 +152754,7 @@ __export(shared_exports, {
   buildGoogleCalendarUrl: () => buildGoogleCalendarUrl,
   buildIcsContent: () => buildIcsContent,
   buildOtherAddOnDraftSelections: () => buildOtherAddOnDraftSelections,
+  buildOtherAddOnManageOps: () => buildOtherAddOnManageOps,
   buildOtherAddOnSelectionKey: () => buildOtherAddOnSelectionKey,
   buildPublicAddOnsCatalog: () => buildPublicAddOnsCatalog,
   bustPublicSiteContentCache: () => bustPublicSiteContentCache,
@@ -245257,6 +245333,13 @@ async function handleUpdateAddOns(req, res) {
         if (liveServed[op.selectionKey]) {
           opCode = `SERVE_BLOCKED:${op.selectionKey}`;
           return;
+        }
+        const changeQuantity = Math.max(0, Math.floor(Number(op.quantity ?? 0) || 0));
+        const existingSelection = (next[parsedKey.date] || []).find(
+          (e3) => e3 && e3.addOnId === parsedKey.addOnId
+        );
+        if (changeQuantity === 0 && existingSelection && existingSelection.removedAt !== null && existingSelection.removedAt !== void 0) {
+          continue;
         }
         try {
           assertSelectionForChange(next, op.selectionKey);

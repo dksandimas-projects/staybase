@@ -161,7 +161,22 @@ describe("BP-01 — the client resolves the mode from the public projection", ()
 
   it("the public-config reader carries the mode", () => {
     const src = readFileSync(PUBLIC_CONFIG_HOOK_SRC, "utf8");
-    expect(src).toContain("botProtectionMode");
+    // The reader's payload IS the shared public projection, and the mode
+    // is an OPTIONAL field on that projection — optional on the client so
+    // a missing field fails closed.
+    //
+    // (This assertion used to be a case-sensitive literal scan for
+    // "botProtectionMode" inside the reader. The reader never spells the
+    // field out — it inherits it from the shared type, where the field
+    // name appears in its CANONICAL capitalisation as the type
+    // `BotProtectionMode`. The literal scan therefore never matched and
+    // the guard had been RED since the day it was written. It now pins
+    // the real invariant instead: the reader uses the shared projection,
+    // and the projection declares the optional mode field.)
+    expect(src).toMatch(/PublicHotelConfigWithBotProtection\s*=\s*PublicHotelConfig/);
+
+    const sharedTypeSrc = readFileSync(join(ROOT, "shared", "types", "publicHotelConfig.ts"), "utf8");
+    expect(sharedTypeSrc).toMatch(/botProtectionMode\?\s*:\s*BotProtectionMode/);
   });
 
   it("every gate page resolves the mode through the shared hook", () => {
