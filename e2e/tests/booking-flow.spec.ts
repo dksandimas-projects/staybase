@@ -1,4 +1,5 @@
-import { test, expect, futureStay } from "../support/qa";
+import { test, expect, futureStay, ENV } from "../support/qa";
+import { liveBotMode } from "../support/bot-mode";
 
 /**
  * AI-BROWSER-QA (2026-10-23) — guest booking flow.
@@ -163,6 +164,11 @@ test.describe("Guest booking flow", () => {
   test("BF-01 · a submission without a bot token is refused by the Turnstile gate", async ({
     page
   }) => {
+    // The hotel-wide bot-protection switch decides whether the gate is
+    // applied at all. Both modes are asserted strictly — the spec follows
+    // the DEPLOYED mode, it never relaxes the assertion to make it pass.
+    const mode = await liveBotMode(ENV.guestBaseUrl);
+
     // The server refuses an unverified caller before schema validation.
     const res = await page.request.post("/api/bookings/create", {
       data: {
@@ -179,10 +185,21 @@ test.describe("Guest booking flow", () => {
         }
       }
     });
-    expect(res.status(), "the gate must answer 400").toBe(400);
-    const body = await res.json();
-    expect(body.success).toBe(false);
-    expect(String(body.error)).toMatch(/bot verification|token/i);
+    const body = await res.json().catch(() => ({} as any));
+
+    if (mode === "turnstile") {
+      expect(res.status(), "the gate must answer 400").toBe(400);
+      expect(body.success).toBe(false);
+      expect(String(body.error)).toMatch(/bot verification|token/i);
+    } else {
+      // The switch is OFF, so the gate is not applied. The request is
+      // still rejected — but by the REQUEST, not by the bot gate.
+      expect(res.status(), "the request is still rejected").toBe(400);
+      expect(body.success).toBe(false);
+      expect(String(body.error ?? ""), "the rejection must not come from the bot gate").not.toMatch(
+        /bot verification|turnstile/i
+      );
+    }
   });
 
   test("BF-01 · the client's own confirm gate is token-gated", async ({ page }) => {
@@ -215,14 +232,25 @@ test.describe("Guest booking flow", () => {
 
   test("BF-02 / VC-01 · voucher validation is behind the same gate", async ({ page }) => {
     // OFFNOW is a valid 15% voucher in production. The validation
-    // endpoint must not answer an unverified caller.
+    // endpoint must not answer an unverified caller — unless the hotel
+    // has switched the bot protection off, in which case the endpoint IS
+    // reachable and must answer with the voucher's real terms.
+    const mode = await liveBotMode(ENV.guestBaseUrl);
     const res = await page.request.post("/api/validate/voucher", {
       data: { code: "OFFNOW", checkIn: "2026-11-05", checkOut: "2026-11-06", roomType: "standard-double" }
     });
-    expect(res.status()).toBe(400);
-    const body = await res.json();
-    expect(body.success).toBe(false);
-    expect(String(body.error)).toMatch(/bot verification|token/i);
+    const body = await res.json().catch(() => ({} as any));
+
+    if (mode === "turnstile") {
+      expect(res.status()).toBe(400);
+      expect(body.success).toBe(false);
+      expect(String(body.error)).toMatch(/bot verification|token/i);
+    } else {
+      expect(res.status(), "the gate is off, so the voucher validates").toBe(200);
+      expect(body.success).toBe(true);
+      expect(String(body.data?.discountType ?? "")).toBe("percent");
+      expect(Number(body.data?.discountValue)).toBe(15);
+    }
   });
 
   test("LK-01 · the lookup form demands a reference and an email", async ({ page }) => {
@@ -260,13 +288,26 @@ test.describe("Guest booking flow", () => {
   test("the guest booking pages mount the Turnstile widget where it is needed", async ({
     page
   }) => {
-    // The lookup page always needs a token.
+    // The widget is mounted ONLY when the hotel's bot protection is on.
+    // With the switch off there is nothing to solve, so the client must
+    // not mount a challenge it cannot pass — and the server does not
+    // demand a token. Both modes are asserted strictly.
+    const mode = await liveBotMode(ENV.guestBaseUrl);
+
+    // The lookup page always needs a token (in the default mode).
     await page.goto("/my-booking", { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(2500);
-    expect(
-      await page.locator('input[name="cf-turnstile-response"]').count(),
-      "/my-booking must mount a Turnstile widget"
-    ).toBeGreaterThan(0);
+    if (mode === "turnstile") {
+      expect(
+        await page.locator('input[name="cf-turnstile-response"]').count(),
+        "/my-booking must mount a Turnstile widget"
+      ).toBeGreaterThan(0);
+    } else {
+      expect(
+        await page.locator('input[name="cf-turnstile-response"]').count(),
+        "/my-booking must NOT mount a widget while the gate is off"
+      ).toBe(0);
+    }
 
     // The booking flow mounts it ONLY on the review step — that is the
     // step whose submit needs a token (`useTurnstileToken({ enabled:
@@ -308,9 +349,16 @@ test.describe("Guest booking flow", () => {
     await toReview.click();
     await page.waitForTimeout(2500);
 
-    expect(
-      await page.locator('input[name="cf-turnstile-response"]').count(),
-      "the review step must mount the Turnstile widget"
-    ).toBeGreaterThan(0);
+    if (mode === "turnstile") {
+      expect(
+        await page.locator('input[name="cf-turnstile-response"]').count(),
+        "the review step must mount the Turnstile widget"
+      ).toBeGreaterThan(0);
+    } else {
+      expect(
+        await page.locator('input[name="cf-turnstile-response"]').count(),
+        "the review step must NOT mount a widget while the gate is off"
+      ).toBe(0);
+    }
   });
 });

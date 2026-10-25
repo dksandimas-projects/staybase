@@ -2,7 +2,7 @@
  * AI-BROWSER-QA (2026-10-25) — the guest-WRITE scenarios, driven through
  * the real production guest site with a real browser.
  *
- * Before the hotel-wide bot-protection switch these seven scenarios were
+ * Before the hotel-wide bot-protection switch these scenarios were
  * BLOCKED: every public guest write endpoint is behind Cloudflare Turnstile
  * and no token can be produced from this host. With the switch in
  * `"disabled"` mode the writes are reachable again, and this spec is the
@@ -10,9 +10,11 @@
  *
  * THE SCENARIOS
  *   CT-01  the contact form sends a message
+ *   CT-02  the contact form's own validation is reachable
  *   CO-01  a corporate inquiry is submitted from the guest site
  *   BP-01  a guest picks a bed set-up + writes a preference, and still books
  *   BF-02  a guest uploads a GCash payment proof and the booking goes through
+ *   BF-03  the breakfast price follows the guest count
  *   LK-03  a guest cancels a pending booking from /my-booking
  *   AO-08  a guest adds and then removes an other add-on
  *   RW-02  a signed-in member books (the member rate must be applied)
@@ -33,8 +35,8 @@
  * The create response echoes the reference, the total and the room — it does
  * NOT echo `specialRequests`, `bedSetup`, `paymentProofPath` or
  * `memberDiscountPct`. The persisted values are therefore checked in two
- * places: the public lookup (which does return `specialRequests`) and the
- * read-only side-effects tracker, whose output is recorded in the report.
+ * places: the request the browser actually sent, and the read-only
+ * side-effects tracker, whose output is recorded in the report.
  *
  * THE MOBILE PROJECT
  * Every scenario here WRITES. A second write on the mobile project would
@@ -131,6 +133,20 @@ test.describe("Guest write paths (browser, bot protection off)", () => {
     await expect(page.getByText(/our front desk agent will reach out/i)).toBeVisible();
   });
 
+  test("CT-02 · the contact form's own validation is reachable", async ({ page }) => {
+    // With the bot gate off the request REACHES the handler, so the
+    // field-level validation order is observable for the first time.
+    const res = await page.request.post("/api/contact/inquiry", {
+      data: { name: "", email: "not-an-email", subject: "", message: "" }
+    });
+    expect(res.status(), "an invalid contact message must be refused").toBe(400);
+    const body = await res.json().catch(() => ({} as any));
+    expect(body.success).toBe(false);
+    expect(String(body.error ?? ""), "the refusal must be the request's, not the bot gate's").not.toMatch(
+      /bot verification|turnstile/i
+    );
+  });
+
   test("CO-01 · a corporate inquiry is submitted from the guest site", async ({ page }) => {
     await page.goto("/corporate", { waitUntil: "domcontentloaded" });
 
@@ -208,6 +224,38 @@ test.describe("Guest write paths (browser, bot protection off)", () => {
     const reviewText = await page.locator("body").innerText();
     expect(reviewText, "the review step must not ask for a payment reference number").not.toMatch(
       /reference number/i
+    );
+  });
+
+  test("BF-03 · the breakfast price follows the guest count", async ({ page }) => {
+    const dates = await stay(130);
+    const result = await createBookingViaBrowser(page, {
+      ...dates,
+      paymentMethod: "pay-at-hotel",
+      breakfastMealId: "tapsilog",
+      breakfastSlots: 2
+    });
+
+    expect(result.createStatus, "the booking must be created").toBe(200);
+    expect(result.createBody?.success).toBe(true);
+
+    // One meal slot per guest, per date — the per-guest × per-date map.
+    const sent = result.createRequest?.breakfastSelections || {};
+    const slots = Object.keys(sent).filter((k) => k.startsWith(dates.checkIn));
+    expect(slots, "both guest slots must carry the meal").toHaveLength(2);
+    expect(sent[slots[0]]?.mealId).toBe("tapsilog");
+    expect(sent[slots[1]]?.mealId).toBe("tapsilog");
+
+    // The server charges the PER-GUEST price: two meals, not one.
+    const addOns = result.createBody?.data?.rateBreakdown?.addOns || [];
+    const breakfastLine = addOns.find((l: any) => /breakfast/i.test(String(l.label || "")));
+    expect(breakfastLine, "the charged total must carry a breakfast line").toBeTruthy();
+    const mealPrice = Number(sent[slots[0]]?.price);
+    expect(Number(breakfastLine.amount), "two guests must be charged two meals").toBe(mealPrice * 2);
+
+    // And the guest is quoted what they are charged.
+    expect(result.displayedTotal, "the review step must show the charged total").toBe(
+      Number(result.createBody?.data?.totalPrice)
     );
   });
 
