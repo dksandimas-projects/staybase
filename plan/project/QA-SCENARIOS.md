@@ -34,9 +34,9 @@ Spec: `plan/features/BOOKING-FLOW.md`
 1. Book any room; at Step 3 choose **GCash**.
 2. Confirm the GCash QR/account info displays, and both a **screenshot upload** and a **reference number field** appear (reference field only if the method requires it — check Settings → Payment Methods).
 3. Try to confirm without the screenshot → Confirm must stay disabled.
-4. Upload a screenshot (any image ≤ 5MB), enter a reference number, confirm.
+4. Upload a screenshot (any image ≤ 5MB), enter a reference number **if the method requires one** — none of the production methods does (`requireReferenceNumber: false` on all of them since the reference-number field was retired on 2026-07-24), confirm.
 
-**Expected:** Booking lands as `payment-uploaded`. It appears in the Dashboard's **Pending Payments** alert section. Step 4 shows "payment under review" copy. Payment proof image and reference number visible to staff in the booking drawer — and **never** visible anywhere on the guest site.
+**Expected:** Booking lands as `payment-uploaded`. It appears in the Dashboard's **Pending Payments** alert section. Step 4 shows "payment under review" copy. Payment proof image and reference number visible to staff in the booking drawer — and **never** visible anywhere on the guest site. **Amended 2026-10-25** (AI-BROWSER-QA): step 4 assumed the reference-number field is always present. The field is conditional on the payment method's `requireReferenceNumber`, and no production method requires one, so the scenario's second half is exercised through the screenshot + the staff's proof review.
 
 ### BF-03 — Breakfast add-on changes with guest count
 **Actor:** Guest
@@ -240,10 +240,12 @@ Spec: `plan/features/BOOKING-LOOKUP.md`
 
 **Expected:** Booking card with status timeline matching the Dashboard status exactly.
 
-### LK-02 — Wrong email never leaks a booking
-1. Enter a valid ref with a **different** email.
+### LK-02 — A booking lookup leaks no personal data
+**Amended 2026-10-25** (AI-BROWSER-QA). The original wording — *"Wrong email never leaks a booking → a generic 'couldn't find a booking' message, never confirms the ref exists"* — was **retired by decision #209 (2026-08-10)**: the lookup accepts a reference alone and the reference IS the credential. The current contract is about **what the response carries**, not about whether it answers.
+1. Enter a valid reference with a **different** email.
+2. Read the response the guest receives.
 
-**Expected:** Generic "couldn't find a booking" message — never confirms the ref exists.
+**Expected:** the lookup answers with the booking — that is the decision — and the response still carries **no personal data beyond what the guest must see**: no guest name, a masked email, no payment-proof URL, no discount-ID image, no staff-captured special requests. The defences that keep a reference sweep bounded are the bot gate, the 10/min per-IP limiter and the 3-failure/1-hour backoff — none of them is "the wrong email is refused".
 
 ### LK-03 — Guest cancels a pending booking
 **Setup:** Booking in `pending` or `payment-uploaded`.

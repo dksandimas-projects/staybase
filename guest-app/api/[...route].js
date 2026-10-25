@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.20.1";
+    VERSION2 = "2.20.3";
   }
 });
 
@@ -152978,6 +152978,1639 @@ var init_shared = __esm({
     init_botProtection();
     init_money();
     init_rewardsConfig();
+  }
+});
+
+// server/handlers/test-runs.ts
+function getStaff(req) {
+  return req.staff || {};
+}
+function generateRunId() {
+  return import_node_crypto.default.randomBytes(16).toString("hex");
+}
+function hashToken(token2) {
+  return import_node_crypto.default.createHash("sha256").update(token2).digest("hex");
+}
+async function collectManifest(runId) {
+  const affectedRooms = /* @__PURE__ */ new Set();
+  const affectedStockItems = /* @__PURE__ */ new Set();
+  const bookingsSnap = await adminDb.collection("bookings").where("testRunId", "==", runId).get();
+  const bookingIds = bookingsSnap.docs.map((d) => {
+    affectedRooms.add(d.data().roomNumber || "");
+    return d.id;
+  });
+  const storeSnap = await adminDb.collection("storeOrders").where("testRunId", "==", runId).get();
+  storeSnap.docs.forEach((d) => {
+    const itemIds = (d.data().items || []).map((i2) => i2.itemId);
+    itemIds.forEach((id) => {
+      if (id) affectedStockItems.add(id);
+    });
+  });
+  return {
+    bookings: bookingIds.length,
+    storeOrders: storeSnap.docs.length,
+    affectedRooms: [...affectedRooms].filter(Boolean),
+    affectedStockItems: [...affectedStockItems].filter(Boolean)
+  };
+}
+async function handleCreateTestRun(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff(req);
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can create test runs." });
+  }
+  const parsed = createTestRunSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid test run name, environment, and duration."
+    });
+  }
+  const { name: name2, environment, durationMinutes } = parsed.data;
+  try {
+    if (environment === "production") {
+      const activeRuns = await adminDb.collection("testRuns").where("environment", "==", "production").where("status", "==", "active").get();
+      if (!activeRuns.empty) {
+        return res.status(409).json({
+          success: false,
+          error: "There is already an active production test run. Close it before creating a new one."
+        });
+      }
+    }
+    const now = /* @__PURE__ */ new Date();
+    const runId = generateRunId();
+    const tokenBytes = import_node_crypto.default.randomBytes(24);
+    const token2 = tokenBytes.toString("base64url");
+    const run = {
+      id: runId,
+      name: name2,
+      environment,
+      createdBy: staff.email || "",
+      createdByUid: staff.uid || "",
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + durationMinutes * 6e4),
+      closedAt: null,
+      closedBy: null,
+      status: "active",
+      tokenHash: hashToken(token2)
+    };
+    await adminDb.collection("testRuns").doc(runId).set(run);
+    return res.status(200).json({
+      success: true,
+      data: {
+        id: runId,
+        name: name2,
+        environment,
+        token: token2,
+        expiresAt: run.expiresAt.toISOString(),
+        durationMinutes
+      }
+    });
+  } catch (error) {
+    console.error("Test run creation failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to create test run. Please try again."
+    });
+  }
+}
+async function handleCloseTestRun(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff(req);
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can close test runs." });
+  }
+  const parsed = closeTestRunSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid test run ID."
+    });
+  }
+  const { runId } = parsed.data;
+  try {
+    const runRef = adminDb.collection("testRuns").doc(runId);
+    const runDoc = await runRef.get();
+    if (!runDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "Test run not found."
+      });
+    }
+    const runData = runDoc.data();
+    if (runData.status !== "active") {
+      return res.status(400).json({
+        success: false,
+        error: "This test run is not active and cannot be closed."
+      });
+    }
+    const manifest = await collectManifest(runId);
+    const now = /* @__PURE__ */ new Date();
+    await runRef.set({
+      closedAt: now,
+      closedBy: staff.email || "",
+      status: "closed",
+      manifest
+    }, { merge: true });
+    return res.status(200).json({
+      success: true,
+      data: { runId, closedAt: now.toISOString(), manifest }
+    });
+  } catch (error) {
+    console.error("Test run close failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to close test run. Please try again."
+    });
+  }
+}
+async function deleteTestRunBookingSubcollections(bookingRef2) {
+  for (const subcollection of TEST_RUN_BOOKING_SUBCOLLECTIONS) {
+    const snapshot = await bookingRef2.collection(subcollection).get();
+    await Promise.all(snapshot.docs.map((child) => child.ref.delete()));
+  }
+}
+async function heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount) {
+  await runRef.set({
+    cleanupStartedAt: /* @__PURE__ */ new Date(),
+    cleanupCursor: {
+      bookingsDeleted: bookingCount,
+      storeOrdersDeleted: storeOrderCount
+    }
+  }, { merge: true });
+}
+async function handleDeleteTestRun(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff(req);
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can delete test data." });
+  }
+  const parsed = deleteTestRunSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid test run ID."
+    });
+  }
+  const { runId } = parsed.data;
+  const runRef = adminDb.collection("testRuns").doc(runId);
+  const now = /* @__PURE__ */ new Date();
+  try {
+    await adminDb.runTransaction(async (transaction) => {
+      const runDoc = await transaction.get(runRef);
+      if (!runDoc.exists) {
+        throw new Error("NOT_FOUND");
+      }
+      const runData = runDoc.data();
+      const status = runData.status;
+      if (status === "cleaned") {
+        throw new Error("ALREADY_CLEANED");
+      }
+      if (status === "closed") {
+        transaction.set(runRef, {
+          status: "cleanup-in-progress",
+          cleanupStartedAt: now,
+          cleanupCursor: null
+        }, { merge: true });
+        return;
+      }
+      if (status === "cleanup-in-progress") {
+        const startedAt = runData.cleanupStartedAt?.toDate?.() || runData.cleanupStartedAt;
+        if (startedAt && now.getTime() - new Date(startedAt).getTime() < CLEANUP_TIMEOUT_MS) {
+          throw new Error("CLEANUP_IN_PROGRESS");
+        }
+        transaction.set(runRef, {
+          status: "cleanup-in-progress",
+          cleanupStartedAt: now
+        }, { merge: true });
+        return;
+      }
+      throw new Error("INVALID_STATUS");
+    });
+  } catch (txError) {
+    const msg = txError.message || "";
+    if (msg === "NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Test run not found." });
+    }
+    if (msg === "ALREADY_CLEANED") {
+      return res.status(400).json({ success: false, error: "This test run has already been cleaned up." });
+    }
+    if (msg === "CLEANUP_IN_PROGRESS") {
+      return res.status(409).json({
+        success: false,
+        error: "Cleanup is already in progress. Please wait for it to complete or try again after 30 minutes."
+      });
+    }
+    if (msg === "INVALID_STATUS") {
+      return res.status(400).json({ success: false, error: "Only closed test runs can be cleaned up. Close the run first." });
+    }
+    throw txError;
+  }
+  try {
+    let bookingCount = 0;
+    let storeOrderCount = 0;
+    let failedItems = [];
+    const batchSize = 20;
+    let lastDoc = null;
+    while (true) {
+      let q3 = adminDb.collection("bookings").where("testRunId", "==", runId).limit(batchSize);
+      if (lastDoc) q3 = q3.startAfter(lastDoc);
+      const snap = await q3.get();
+      if (snap.empty) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+      for (const doc of snap.docs) {
+        try {
+          const bookingRef2 = adminDb.collection("bookings").doc(doc.id);
+          await deleteTestRunBookingSubcollections(bookingRef2);
+          await doc.ref.delete();
+          bookingCount++;
+        } catch (err) {
+          failedItems.push(`booking/${doc.id}`);
+        }
+      }
+      await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
+    }
+    lastDoc = null;
+    while (true) {
+      let q3 = adminDb.collection("storeOrders").where("testRunId", "==", runId).limit(batchSize);
+      if (lastDoc) q3 = q3.startAfter(lastDoc);
+      const snap = await q3.get();
+      if (snap.empty) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+      for (const doc of snap.docs) {
+        try {
+          const subSnap = await adminDb.collection("storeOrders").doc(doc.id).collection("tenders").get();
+          await Promise.all(subSnap.docs.map((sd) => sd.ref.delete()));
+          await doc.ref.delete();
+          storeOrderCount++;
+        } catch (err) {
+          failedItems.push(`storeOrder/${doc.id}`);
+        }
+      }
+      await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
+    }
+    let notifQ = adminDb.collection("notifications").where("testRunId", "==", runId);
+    const notifSnap = await notifQ.get();
+    for (const doc of notifSnap.docs) {
+      try {
+        await doc.ref.delete();
+      } catch {
+        failedItems.push(`notification/${doc.id}`);
+      }
+    }
+    await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
+    let intercomQ = adminDb.collection("intercoms").where("testRunId", "==", runId);
+    const intercomSnap = await intercomQ.get();
+    for (const doc of intercomSnap.docs) {
+      try {
+        const msgSnap = await adminDb.collection("intercoms").doc(doc.id).collection("messages").get();
+        await Promise.all(msgSnap.docs.map((md) => md.ref.delete()));
+        await doc.ref.delete();
+      } catch {
+        failedItems.push(`intercom/${doc.id}`);
+      }
+    }
+    await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
+    const auditResult = {
+      type: "test-run-cleanup",
+      runId,
+      bookingsDeleted: bookingCount,
+      storeOrdersDeleted: storeOrderCount,
+      failedItems,
+      completedAt: now,
+      completedBy: staff.email || ""
+    };
+    await adminDb.collection("janitor").doc("cleanups").collection("history").add(auditResult);
+    const runDoc = await runRef.get();
+    const runData = runDoc.data();
+    const affectedRooms = runData.manifest?.affectedRooms || [];
+    for (const roomNumber of affectedRooms) {
+      if (!roomNumber) continue;
+      const roomsSnap = await adminDb.collection("rooms").where("roomNumber", "==", roomNumber).get();
+      for (const doc of roomsSnap.docs) {
+        await doc.ref.set({
+          status: "available",
+          housekeepingStatus: "clean"
+        }, { merge: true });
+      }
+      await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
+    }
+    await runRef.set({
+      status: "cleaned",
+      cleanupCompletedAt: now,
+      cleanupCursor: null,
+      cleanupResult: { bookingsDeleted: bookingCount, storeOrdersDeleted: storeOrderCount, failedItems: failedItems.length }
+    }, { merge: true });
+    return res.status(200).json({
+      success: true,
+      data: {
+        runId,
+        bookingsDeleted: bookingCount,
+        storeOrdersDeleted: storeOrderCount,
+        failedItems: failedItems.length,
+        roomsRestored: affectedRooms.length
+      }
+    });
+  } catch (error) {
+    console.error("Test run cleanup failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to clean up test data. Please try again."
+    });
+  }
+}
+function isStagingProject() {
+  const projectId = process.env.FIREBASE_PROJECT_ID || "";
+  const allowlistRaw = process.env.STAGING_ALLOWLIST_PROJECT_IDS || "";
+  const allowlist = allowlistRaw.split(",").map((s4) => s4.trim()).filter(Boolean);
+  return allowlist.includes(projectId);
+}
+async function acquireResetLock(staff, currentProject, previewId) {
+  const lockRef = adminDb.collection("janitor").doc("staging-reset-lock");
+  const now = /* @__PURE__ */ new Date();
+  try {
+    let acquired = false;
+    let message;
+    let resumed = false;
+    let resumePhase = "starting";
+    await adminDb.runTransaction(async (tx) => {
+      const lockDoc = await tx.get(lockRef);
+      if (lockDoc.exists) {
+        const data = lockDoc.data();
+        const startedAt = data.startedAt?.toDate?.() || data.startedAt;
+        if (data.status === "running" && startedAt && now.getTime() - new Date(startedAt).getTime() < LOCK_TIMEOUT_MS) {
+          message = "A staging reset is already in progress. Please wait for it to complete or try again after 30 minutes.";
+          return;
+        }
+        if (data.previewId === previewId && data.status === "complete") {
+          message = "This staging reset job has already completed. Run a new preview for another reset.";
+          return;
+        }
+        if (data.previewId === previewId && (data.status === "failed" || data.status === "incomplete" || data.status === "running")) {
+          resumed = true;
+          resumePhase = data.phase || "starting";
+        }
+      }
+      const lockData = {
+        projectId: currentProject,
+        startedAt: now,
+        status: "running",
+        previewId,
+        phase: resumed ? resumePhase : "starting",
+        startedBy: staff.email || "",
+        resumedAt: resumed ? now : null
+      };
+      if (!resumed) lockData.checkpoint = 0;
+      tx.set(lockRef, lockData, { merge: resumed });
+      acquired = true;
+    });
+    return { acquired, message, resumed, resumePhase };
+  } catch {
+    return { acquired: false, message: "Unable to acquire reset lock. Please try again.", resumed: false, resumePhase: "starting" };
+  }
+}
+async function releaseResetLock(lockRef, status, phase, checkpoint) {
+  try {
+    await lockRef.set({ status, phase, checkpoint, completedAt: /* @__PURE__ */ new Date() }, { merge: true });
+  } catch {
+  }
+}
+async function collectProtectedState() {
+  const [protectedSnapshots, roomsSnapshot] = await Promise.all([
+    Promise.all(PROTECTED_RESET_COLLECTIONS.map(async (name2) => [name2, await adminDb.collection(name2).get()])),
+    adminDb.collection("rooms").get()
+  ]);
+  const collections = Object.fromEntries(protectedSnapshots.map(([name2, snapshot]) => {
+    const documents = snapshot.docs.map((doc) => ({ id: doc.id, data: doc.data() })).sort((a, b3) => a.id.localeCompare(b3.id));
+    return [name2, {
+      count: documents.length,
+      hash: import_node_crypto.default.createHash("sha256").update(JSON.stringify(documents)).digest("hex")
+    }];
+  }));
+  return { collections, roomsCount: roomsSnapshot.docs.length };
+}
+async function collectFullManifest() {
+  const [bookingsSnap, storeSnap, notifSnap, intercomSnap, testRunSnap, callsSnap, dailyCloseSnap, corpInquirySnap, roomBlocksSnap, cleanupSnap] = await Promise.all([
+    adminDb.collection("bookings").get(),
+    adminDb.collection("storeOrders").get(),
+    adminDb.collection("notifications").get(),
+    adminDb.collection("intercoms").get(),
+    adminDb.collection("testRuns").get(),
+    adminDb.collection("calls").get(),
+    adminDb.collection("dailyCloses").get(),
+    adminDb.collection("corporateInquiries").get(),
+    adminDb.collection("roomBlocks").get(),
+    adminDb.collection("janitor").doc("cleanups").collection("history").get()
+  ]);
+  const affectedRooms = /* @__PURE__ */ new Set();
+  bookingsSnap.docs.forEach((d) => {
+    const r3 = d.data().roomNumber;
+    if (r3) affectedRooms.add(r3);
+  });
+  roomBlocksSnap.docs.forEach((d) => {
+    const r3 = d.data().roomNumber;
+    if (r3) affectedRooms.add(r3);
+  });
+  const protectedState = await collectProtectedState();
+  return {
+    bookings: bookingsSnap.docs.length,
+    storeOrders: storeSnap.docs.length,
+    notifications: notifSnap.docs.length,
+    intercomStays: intercomSnap.docs.length,
+    testRuns: testRunSnap.docs.length,
+    calls: callsSnap.docs.length,
+    dailyCloses: dailyCloseSnap.docs.length,
+    corporateInquiries: corpInquirySnap.docs.length,
+    roomBlocks: roomBlocksSnap.docs.length,
+    cleanupHistory: cleanupSnap.docs.length,
+    affectedRooms: [...affectedRooms].filter(Boolean),
+    affectedStockItems: [],
+    protectedState
+  };
+}
+function hashManifest(manifest) {
+  return import_node_crypto.default.createHash("sha256").update(JSON.stringify(manifest)).digest("hex").slice(0, 16);
+}
+async function handleStagingResetPreview(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff(req);
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can preview staging reset." });
+  }
+  if (!isStagingProject()) {
+    return res.status(403).json({
+      success: false,
+      error: "This project is not authorized for operational reset. Staging allowlist check failed."
+    });
+  }
+  try {
+    const projectId = process.env.FIREBASE_PROJECT_ID || "unknown";
+    const manifest = await collectFullManifest();
+    const previewId = hashManifest({ projectId, manifest, ts: Date.now() });
+    await adminDb.collection("janitor").doc("previews").collection("items").doc(previewId).set({
+      projectId,
+      manifest,
+      manifestHash: hashManifest(manifest),
+      createdAt: /* @__PURE__ */ new Date(),
+      createdBy: staff.email || ""
+    });
+    return res.status(200).json({
+      success: true,
+      data: {
+        projectId,
+        isStaging: true,
+        manifest,
+        previewId,
+        confirmedAt: (/* @__PURE__ */ new Date()).toISOString()
+      }
+    });
+  } catch (error) {
+    console.error("Staging reset preview failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to generate staging reset preview."
+    });
+  }
+}
+async function handleStagingResetExecute(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff(req);
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can execute staging reset." });
+  }
+  if (!isStagingProject()) {
+    return res.status(403).json({
+      success: false,
+      error: "This project is not authorized for operational reset. Staging allowlist check failed."
+    });
+  }
+  const parsed = stagingResetConfirmSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Preview ID, typed RESET STAGING, and project name are required."
+    });
+  }
+  const { confirmation, projectName, previewId } = parsed.data;
+  const currentProject = process.env.FIREBASE_PROJECT_ID || "";
+  if (projectName !== currentProject) {
+    return res.status(400).json({
+      success: false,
+      error: `Project name mismatch. Expected "${currentProject}".`
+    });
+  }
+  let validatedPreview;
+  let resumeAllowed = false;
+  try {
+    const previewRef = adminDb.collection("janitor").doc("previews").collection("items").doc(previewId);
+    const previewDoc = await previewRef.get();
+    if (!previewDoc.exists) {
+      return res.status(400).json({ success: false, error: "Preview not found. Please run a new preview." });
+    }
+    const preview = previewDoc.data();
+    validatedPreview = preview;
+    const existingLockDoc = await adminDb.collection("janitor").doc("staging-reset-lock").get();
+    if (existingLockDoc.exists) {
+      const existingLock = existingLockDoc.data();
+      resumeAllowed = existingLock.previewId === previewId && ["running", "failed", "incomplete"].includes(existingLock.status);
+    }
+    const createdAt = preview.createdAt?.toDate?.() || preview.createdAt;
+    if (!resumeAllowed && createdAt && Date.now() - new Date(createdAt).getTime() > PREVIEW_TTL_MS) {
+      return res.status(400).json({ success: false, error: "Preview has expired. Please run a new preview." });
+    }
+    if (preview.projectId !== currentProject) {
+      return res.status(400).json({ success: false, error: "Preview was created for a different project." });
+    }
+    const currentManifest = resumeAllowed ? null : await collectFullManifest();
+    if (currentManifest && hashManifest(currentManifest) !== preview.manifestHash) {
+      return res.status(409).json({
+        success: false,
+        error: "Staging data has changed since preview. Please run a new preview."
+      });
+    }
+  } catch (error) {
+    console.error("Preview validation failed:", error);
+    return res.status(500).json({ success: false, error: "Unable to validate preview." });
+  }
+  const lock = await acquireResetLock(staff, currentProject, previewId);
+  if (!lock.acquired) {
+    const isConflict = lock.message?.includes("already in progress") || lock.message?.includes("already completed");
+    return res.status(isConflict ? 409 : 500).json({
+      success: false,
+      error: lock.message || "Unable to acquire reset lock."
+    });
+  }
+  const lockRef = adminDb.collection("janitor").doc("staging-reset-lock");
+  const startedAt = /* @__PURE__ */ new Date();
+  const failedItems = [];
+  let bookingCount = 0, storeOrderCount = 0, notifCount = 0;
+  let intercomCount = 0, testRunCount = 0, callCount = 0;
+  let dailyCloseCount = 0, corpInquiryCount = 0, roomBlockCount = 0, cleanupCount = 0;
+  let roomRestoreCount = 0;
+  let integrityFailed = false;
+  let manifestBefore;
+  async function deleteCollectionPage(collectionName, subcollections, counter) {
+    let lastDoc = null;
+    while (true) {
+      let q3 = adminDb.collection(collectionName).limit(RESET_BATCH_SIZE);
+      if (lastDoc) q3 = q3.startAfter(lastDoc);
+      const snap = await q3.get();
+      if (snap.empty) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+      const failuresBeforePage = failedItems.length;
+      for (const doc of snap.docs) {
+        try {
+          for (const sub of subcollections) {
+            const subSnap = await adminDb.collection(collectionName).doc(doc.id).collection(sub).get();
+            await Promise.all(subSnap.docs.map((sd) => sd.ref.delete()));
+          }
+          await doc.ref.delete();
+          counter.value++;
+        } catch {
+          failedItems.push(`${collectionName}/${doc.id}`);
+        }
+      }
+      if (failedItems.length > failuresBeforePage) {
+        throw new Error(`Deletion failed in ${collectionName}; retry this reset job to resume.`);
+      }
+    }
+  }
+  async function deleteCollectionGroupPage(groupName) {
+    let lastDoc = null;
+    while (true) {
+      let q3 = adminDb.collectionGroup(groupName).limit(RESET_BATCH_SIZE);
+      if (lastDoc) q3 = q3.startAfter(lastDoc);
+      const snap = await q3.get();
+      if (snap.empty) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+      const failuresBeforePage = failedItems.length;
+      for (const doc of snap.docs) {
+        try {
+          await doc.ref.delete();
+        } catch {
+          failedItems.push(`${groupName}/${doc.id}`);
+        }
+      }
+      if (failedItems.length > failuresBeforePage) {
+        throw new Error(`Deletion failed in collection group ${groupName}; retry this reset job to resume.`);
+      }
+    }
+  }
+  try {
+    manifestBefore = validatedPreview.manifest;
+    const phaseOrder = [
+      "bookings",
+      "storeOrders",
+      "notifications",
+      "intercoms",
+      "testRuns",
+      "calls",
+      "dailyCloses",
+      "corporateInquiries",
+      "roomBlocks",
+      "cleanupHistory",
+      "rooms",
+      "integrity"
+    ];
+    const storedPhaseIndex = lock.resumed ? phaseOrder.indexOf(lock.resumePhase) : 0;
+    const resumePhaseIndex = storedPhaseIndex >= 0 ? storedPhaseIndex : 0;
+    const shouldRunPhase = (phase) => phaseOrder.indexOf(phase) >= resumePhaseIndex;
+    const runDeletionPhase = async (phase, collectionName, subcollections, expectedCount) => {
+      if (!shouldRunPhase(phase)) return expectedCount;
+      await lockRef.set({ phase, checkpoint: 0 }, { merge: true });
+      const counter = { value: 0 };
+      await deleteCollectionPage(collectionName, subcollections, counter);
+      for (const sub of subcollections) {
+        await deleteCollectionGroupPage(sub);
+      }
+      await lockRef.set({ checkpoint: counter.value }, { merge: true });
+      return lock.resumed ? expectedCount : counter.value;
+    };
+    bookingCount = await runDeletionPhase(
+      "bookings",
+      "bookings",
+      ["payments", "charges", "incidentalCharges", "notifications", "audit"],
+      manifestBefore.bookings
+    );
+    storeOrderCount = await runDeletionPhase(
+      "storeOrders",
+      "storeOrders",
+      ["payments", "tenders"],
+      manifestBefore.storeOrders
+    );
+    notifCount = await runDeletionPhase("notifications", "notifications", [], manifestBefore.notifications);
+    intercomCount = await runDeletionPhase("intercoms", "intercoms", ["messages"], manifestBefore.intercomStays);
+    testRunCount = await runDeletionPhase("testRuns", "testRuns", [], manifestBefore.testRuns);
+    callCount = await runDeletionPhase("calls", "calls", ["iceCandidates"], manifestBefore.calls);
+    dailyCloseCount = await runDeletionPhase("dailyCloses", "dailyCloses", [], manifestBefore.dailyCloses);
+    corpInquiryCount = await runDeletionPhase(
+      "corporateInquiries",
+      "corporateInquiries",
+      [],
+      manifestBefore.corporateInquiries
+    );
+    roomBlockCount = await runDeletionPhase("roomBlocks", "roomBlocks", [], manifestBefore.roomBlocks);
+    if (shouldRunPhase("cleanupHistory")) {
+      await lockRef.set({ phase: "cleanupHistory", checkpoint: 0 }, { merge: true });
+      const clCounter = { value: 0 };
+      const cleanupSnap = await adminDb.collection("janitor").doc("cleanups").collection("history").get();
+      for (const doc of cleanupSnap.docs) {
+        try {
+          await doc.ref.delete();
+          clCounter.value++;
+        } catch {
+          failedItems.push(`cleanupHistory/${doc.id}`);
+        }
+      }
+      cleanupCount = lock.resumed ? manifestBefore.cleanupHistory : clCounter.value;
+      await lockRef.set({ checkpoint: cleanupCount }, { merge: true });
+    } else {
+      cleanupCount = manifestBefore.cleanupHistory;
+    }
+    if (failedItems.length > 0) {
+      throw new Error("Cleanup-history deletion was incomplete; retry this reset job to resume.");
+    }
+    if (shouldRunPhase("rooms")) {
+      await lockRef.set({ phase: "rooms", checkpoint: 0 }, { merge: true });
+      for (const roomNumber of manifestBefore.affectedRooms) {
+        if (!roomNumber) continue;
+        const roomsSnap = await adminDb.collection("rooms").where("roomNumber", "==", roomNumber).get();
+        if (roomsSnap.empty) {
+          failedItems.push(`room/${roomNumber} (not found)`);
+          continue;
+        }
+        for (const doc of roomsSnap.docs) {
+          await doc.ref.set({ status: "available", housekeepingStatus: "clean" }, { merge: true });
+          roomRestoreCount++;
+        }
+      }
+      await lockRef.set({ checkpoint: roomRestoreCount }, { merge: true });
+    } else {
+      roomRestoreCount = manifestBefore.affectedRooms.length;
+    }
+    if (failedItems.length > 0) {
+      throw new Error("Room baseline restoration was incomplete; retry this reset job to resume.");
+    }
+    await lockRef.set({ phase: "integrity", checkpoint: roomRestoreCount }, { merge: true });
+    const integrityErrors = [];
+    const verifyCollection = async (name2) => {
+      const snap = await adminDb.collection(name2).limit(1).get();
+      if (!snap.empty) integrityErrors.push(`${name2} still has ${snap.size} document(s)`);
+    };
+    await Promise.all([
+      verifyCollection("bookings"),
+      verifyCollection("storeOrders"),
+      verifyCollection("notifications"),
+      verifyCollection("intercoms"),
+      verifyCollection("testRuns"),
+      verifyCollection("calls"),
+      verifyCollection("dailyCloses"),
+      verifyCollection("corporateInquiries"),
+      verifyCollection("roomBlocks")
+    ]);
+    const verifyCollectionGroup = async (name2) => {
+      const snap = await adminDb.collectionGroup(name2).limit(1).get();
+      if (!snap.empty) integrityErrors.push(`orphaned ${name2} subcollection data remains`);
+    };
+    await Promise.all([
+      verifyCollectionGroup("payments"),
+      verifyCollectionGroup("charges"),
+      verifyCollectionGroup("incidentalCharges"),
+      verifyCollectionGroup("notifications"),
+      verifyCollectionGroup("audit"),
+      verifyCollectionGroup("tenders"),
+      verifyCollectionGroup("messages"),
+      verifyCollectionGroup("iceCandidates")
+    ]);
+    for (const roomNumber of manifestBefore.affectedRooms) {
+      if (!roomNumber) continue;
+      const snap = await adminDb.collection("rooms").where("roomNumber", "==", roomNumber).get();
+      for (const doc of snap.docs) {
+        const d = doc.data();
+        if (d.status !== "available" || d.housekeepingStatus !== "clean") {
+          integrityErrors.push(`room ${roomNumber} is ${d.status}/${d.housekeepingStatus}`);
+        }
+      }
+    }
+    const protectedStateAfter = await collectProtectedState();
+    if (JSON.stringify(protectedStateAfter) !== JSON.stringify(manifestBefore.protectedState)) {
+      integrityErrors.push("protected settings, identity, catalog, counters, or room count changed during reset");
+    }
+    if (integrityErrors.length > 0 || failedItems.length > 0) {
+      integrityFailed = true;
+      failedItems.push(...integrityErrors.map((e3) => `integrity: ${e3}`));
+    }
+    const auditResult = {
+      type: "staging-reset",
+      bookingsDeleted: bookingCount,
+      storeOrdersDeleted: storeOrderCount,
+      notificationsDeleted: notifCount,
+      intercomStaysDeleted: intercomCount,
+      testRunsDeleted: testRunCount,
+      callsDeleted: callCount,
+      dailyClosesDeleted: dailyCloseCount,
+      corporateInquiriesDeleted: corpInquiryCount,
+      roomBlocksDeleted: roomBlockCount,
+      cleanupHistoryDeleted: cleanupCount,
+      roomsRestored: roomRestoreCount,
+      failedItems,
+      integrityErrors: integrityErrors.length > 0 ? integrityErrors : [],
+      manifestBefore: {
+        bookings: manifestBefore.bookings,
+        storeOrders: manifestBefore.storeOrders,
+        notifications: manifestBefore.notifications,
+        intercomStays: manifestBefore.intercomStays,
+        testRuns: manifestBefore.testRuns,
+        calls: manifestBefore.calls,
+        dailyCloses: manifestBefore.dailyCloses,
+        corporateInquiries: manifestBefore.corporateInquiries,
+        roomBlocks: manifestBefore.roomBlocks,
+        cleanupHistory: manifestBefore.cleanupHistory
+      },
+      startedAt,
+      completedAt: /* @__PURE__ */ new Date(),
+      completedBy: staff.email || "",
+      projectId: currentProject,
+      previewId,
+      resumed: lock.resumed,
+      protectedStateVerified: true,
+      terminalStatus: integrityFailed ? "incomplete" : "complete"
+    };
+    await adminDb.collection("janitor").doc("cleanups").collection("history").add(auditResult);
+    if (integrityFailed) {
+      await releaseResetLock(lockRef, "incomplete", "integrity", 0);
+      return res.status(500).json({
+        success: false,
+        error: "Reset completed with integrity errors.",
+        data: {
+          projectId: currentProject,
+          bookingsDeleted: bookingCount,
+          storeOrdersDeleted: storeOrderCount,
+          roomBlocksDeleted: roomBlockCount,
+          failedItems: failedItems.length,
+          integrityErrors,
+          terminalStatus: "incomplete"
+        }
+      });
+    }
+    await releaseResetLock(lockRef, "complete", "done", 0);
+    return res.status(200).json({
+      success: true,
+      data: {
+        projectId: currentProject,
+        bookingsDeleted: bookingCount,
+        storeOrdersDeleted: storeOrderCount,
+        notificationsDeleted: notifCount,
+        intercomStaysDeleted: intercomCount,
+        testRunsDeleted: testRunCount,
+        callsDeleted: callCount,
+        dailyClosesDeleted: dailyCloseCount,
+        corporateInquiriesDeleted: corpInquiryCount,
+        roomBlocksDeleted: roomBlockCount,
+        cleanupHistoryDeleted: cleanupCount,
+        roomsRestored: roomRestoreCount,
+        failedItems: failedItems.length,
+        terminalStatus: "complete"
+      }
+    });
+  } catch (error) {
+    console.error("Staging reset execution failed:", error);
+    try {
+      await lockRef.set({
+        status: "failed",
+        failedAt: /* @__PURE__ */ new Date(),
+        failureMessage: error?.message || "Unknown reset failure"
+      }, { merge: true });
+      await adminDb.collection("janitor").doc("cleanups").collection("history").add({
+        type: "staging-reset",
+        terminalStatus: "failed",
+        previewId,
+        projectId: currentProject,
+        failedItems,
+        startedAt,
+        failedAt: /* @__PURE__ */ new Date(),
+        completedBy: staff.email || "",
+        failureMessage: error?.message || "Unknown reset failure"
+      });
+    } catch {
+    }
+    return res.status(500).json({
+      success: false,
+      error: "Unable to execute staging reset. The job remains resumable; retry with the same preview after resolving the reported failure."
+    });
+  }
+}
+async function handleListTestRuns(req, res) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff(req);
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can list test runs." });
+  }
+  try {
+    const snap = await adminDb.collection("testRuns").orderBy("createdAt", "desc").limit(50).get();
+    const runs = snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        name: data.name,
+        environment: data.environment,
+        createdBy: data.createdBy,
+        createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt,
+        expiresAt: data.expiresAt?.toDate?.()?.toISOString() || data.expiresAt,
+        closedAt: data.closedAt?.toDate?.()?.toISOString() || null,
+        closedBy: data.closedBy || null,
+        status: data.status,
+        manifest: data.manifest || null,
+        cleanupResult: data.cleanupResult || null
+      };
+    });
+    return res.status(200).json({ success: true, data: runs });
+  } catch (error) {
+    console.error("List test runs failed:", error);
+    return res.status(500).json({ success: false, error: "Unable to list test runs." });
+  }
+}
+function normalizeRefreshMode(mode) {
+  if (mode === "sanitized") return "sanitized-snapshot";
+  if (mode === "unsanitized") return "unsanitized-diagnostic";
+  if (mode === "sanitized-snapshot" || mode === "config-only" || mode === "unsanitized-diagnostic") return mode;
+  return "sanitized-snapshot";
+}
+function syntheticFromSource(sourceValue, salt, prefix, domain) {
+  if (sourceValue === null || sourceValue === void 0) return "";
+  const normalized = String(sourceValue).trim().toLowerCase();
+  if (!normalized) return "";
+  const h3 = import_node_crypto.default.createHash("sha256").update(`${salt}:${domain}:${normalized}`).digest("hex").slice(0, 8);
+  return `${prefix}-${h3}@${domain}`;
+}
+function sanitizeBookingExport(booking, salt, snapshotId, importedAt) {
+  const guestEmail = String(booking.guestEmail || "");
+  const guestName = String(booking.guestName || "");
+  const guestPhone = String(booking.guestPhone || "");
+  const sourceEmail = guestEmail.trim().toLowerCase();
+  const sanitized = {
+    ...booking,
+    guestName: syntheticFromSource(guestName, salt, "Guest", "guests.invalid"),
+    guestEmail: sourceEmail ? syntheticFromSource(sourceEmail, salt, "guest", "example.invalid") : "",
+    guestPhone: guestPhone ? syntheticFromSource(guestPhone, salt, "+639****0000", "phones.invalid") : "",
+    address: "[REDACTED \u2014 sanitized for staging]",
+    emergencyContactName: "",
+    emergencyContactPhone: "",
+    // Per ETR-R05 (file sanitization): all
+    // file URLs are scrubbed in sanitized
+    // mode so the operator can't
+    // accidentally click through to
+    // production files. The R05 follow-up
+    // (storage path fixture replacement) is
+    // a separate ticket.
+    guestIdUrl: "",
+    guestIdPhotoUrl: "",
+    paymentProofUrl: "",
+    signatureUrl: "",
+    // Booking doc keeps its original id so payments/charges
+    // subcollections can be walked in step 4. bookingRef is
+    // preserved so the staff can still reference it by the
+    // confirmation number; createdAt/updatedAt preserved; status
+    // + financial fields preserved (operational signal).
+    notes: "",
+    internalNotes: "",
+    // Per ETR-R07 (staging isolation
+    // metadata): every sanitized doc
+    // carries a `sourceSanitization`
+    // block. The Admin can scan the
+    // staging bookings list and see at
+    // a glance which rows came from a
+    // refresh. The salt is per-snapshot
+    // + scoped (no cross-snapshot
+    // correlation). The snapshotId is
+    // the same one the audit row at
+    // janitor/refresh-snapshots uses.
+    sourceSanitization: {
+      applied: true,
+      salt: salt.slice(0, 8) + "\u2026",
+      snapshotId,
+      importedAt,
+      mode: "sanitized-snapshot"
+    }
+  };
+  if (Array.isArray(sanitized.addedCharges)) {
+    sanitized.addedCharges = sanitized.addedCharges.map((c2) => ({
+      ...c2,
+      description: "[REDACTED]",
+      notes: ""
+    }));
+  }
+  if (Array.isArray(sanitized.payments)) {
+    sanitized.payments = sanitized.payments.map((p) => ({
+      ...p,
+      transactionReference: syntheticFromSource(p.transactionReference || "", salt, "PAY", "staging.invalid"),
+      notes: ""
+    }));
+  }
+  return sanitized;
+}
+function sanitizeStoreOrderExport(order, salt, snapshotId, importedAt) {
+  return {
+    ...order,
+    guestName: syntheticFromSource(order.guestName, salt, "Guest", "guests.invalid"),
+    guestEmail: order.guestEmail ? syntheticFromSource(String(order.guestEmail).trim().toLowerCase(), salt, "guest", "example.invalid") : "",
+    guestPhone: order.guestPhone ? syntheticFromSource(String(order.guestPhone), salt, "+63900000", "phones.invalid") : "",
+    paymentProofUrl: "",
+    notes: "",
+    internalNotes: "",
+    sourceSanitization: {
+      applied: true,
+      salt: salt.slice(0, 8) + "\u2026",
+      appliedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      mode: "sanitized-snapshot"
+    }
+  };
+}
+function sanitizeMemberExport(member, salt, snapshotId, importedAt) {
+  return {
+    ...member,
+    fullName: syntheticFromSource(member.fullName, salt, "Member", "members.invalid"),
+    // The member's email is the SAME identity as a guest who booked
+    // with that email — use the "guest" prefix for the email so the
+    // synthetic value matches the booking's synthetic email. The
+    // member's full name is a separate identity (a person has one
+    // email but may have multiple display names over time), so it
+    // uses its own "Member" prefix for `fullName`.
+    email: member.email ? syntheticFromSource(String(member.email).trim().toLowerCase(), salt, "guest", "example.invalid") : "",
+    phone: member.phone ? syntheticFromSource(String(member.phone), salt, "+63900000", "phones.invalid") : "",
+    photoUrl: "",
+    sourceSanitization: {
+      applied: true,
+      salt: salt.slice(0, 8) + "\u2026",
+      appliedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      mode: "sanitized-snapshot"
+    }
+  };
+}
+function runPreImportDenylistScan(exportPayload) {
+  const productionEmailPattern = /(?:@gmail\.com|@yahoo\.com|@hotmail\.com|@outlook\.com|@icloud\.com)\b/i;
+  const phonePattern = /\b(?:\+63|0)9\d{2}[\s-]?\d{3}[\s-]?\d{4}\b/;
+  const productionStorageUrl = /(?:googleapis\.com|firebasestorage\.googleapis\.com|storage\.googleapis\.com)/i;
+  const hits = [];
+  const scanDoc = (collection, doc) => {
+    const stringFields = Object.entries(doc || {}).filter(([_2, v6]) => typeof v6 === "string");
+    for (const [field, value] of stringFields) {
+      const str = String(value);
+      if (productionEmailPattern.test(str)) {
+        hits.push({ collection, field, value: str, pattern: "productionEmail" });
+        if (hits.length >= 5) return;
+      } else if (phonePattern.test(str)) {
+        hits.push({ collection, field, value: str, pattern: "phone" });
+        if (hits.length >= 5) return;
+      } else if (productionStorageUrl.test(str)) {
+        hits.push({ collection, field, value: str, pattern: "productionStorageUrl" });
+        if (hits.length >= 5) return;
+      }
+    }
+  };
+  for (const b3 of exportPayload?.export?.bookings || []) scanDoc("bookings", b3);
+  for (const o2 of exportPayload?.export?.storeOrders || []) scanDoc("storeOrders", o2);
+  for (const m2 of exportPayload?.export?.members || []) scanDoc("members", m2);
+  return hits;
+}
+function checkFinanceInvariant(exportPayload) {
+  let sumPayments = 0;
+  let sumRefunds = 0;
+  let sumBalanceDue = 0;
+  for (const b3 of exportPayload?.export?.bookings || []) {
+    const data = b3;
+    if (Array.isArray(data.payments)) {
+      for (const p of data.payments) {
+        const amt = Number(p.amount || 0);
+        if (p.type === "refund" || amt < 0) {
+          sumRefunds += Math.abs(amt);
+        } else {
+          sumPayments += amt;
+        }
+      }
+    }
+    sumBalanceDue += Number(data.balanceDue || data.totalPrice || 0);
+  }
+  const expectedBalance = sumPayments - sumRefunds;
+  const drift = Math.abs(sumBalanceDue - expectedBalance);
+  return { sumPayments, sumRefunds, sumBalanceDue, drift };
+}
+async function handleStagingRefreshPreview(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff(req);
+  if (!staff.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can refresh staging from production." });
+  }
+  if (!isStagingProject()) {
+    return res.status(403).json({
+      success: false,
+      error: "Staging refresh is only available on staging projects. The current project is not on the staging allowlist."
+    });
+  }
+  const parsed = stagingRefreshSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a valid production export (bookings, storeOrders, members) and options."
+    });
+  }
+  const { export: exportPayload, options } = parsed.data;
+  const mode = options.mode;
+  const salt = import_node_crypto.default.randomBytes(16).toString("hex");
+  const snapshotId = `refresh-${Date.now()}-${import_node_crypto.default.randomBytes(4).toString("hex")}`;
+  const importedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const sourceCounts = {
+    bookings: exportPayload.bookings.length,
+    storeOrders: exportPayload.storeOrders.length,
+    members: exportPayload.members.length
+  };
+  if (mode === "unsanitized-diagnostic") {
+    const missingGates = [];
+    if (!options.dpoApprovalReference) missingGates.push("dpoApprovalReference");
+    if (!options.defectReference) missingGates.push("defectReference");
+    if (!options.projectConfirmation) missingGates.push("projectConfirmation");
+    if (!options.reauthenticatedAt) missingGates.push("reauthenticatedAt");
+    if (!options.acknowledgedRestrictedMode) missingGates.push("acknowledgedRestrictedMode");
+    if (missingGates.length > 0) {
+      return res.status(422).json({
+        success: false,
+        error: "Restricted Diagnostic Mode requires all 5 gates to be present.",
+        missingGates
+      });
+    }
+    if (options.scopeManifest.bookingIds.length === 0 && options.scopeManifest.memberIds.length === 0) {
+      return res.status(422).json({
+        success: false,
+        error: "Restricted Diagnostic Mode requires an explicit scope manifest (at least one bookingId or memberId)."
+      });
+    }
+    if (options.ttlHours > 168) {
+      return res.status(422).json({
+        success: false,
+        error: "Restricted Diagnostic Mode TTL cannot exceed 168 hours (1 week)."
+      });
+    }
+  }
+  if (mode === "sanitized-snapshot") {
+    const denylistHits = runPreImportDenylistScan(exportPayload);
+    if (denylistHits.length > 0) {
+      return res.status(422).json({
+        success: false,
+        error: "Pre-import denylist scan found production PII patterns. The sanitization engine should have scrubbed these \u2014 refusing the import to prevent a leak.",
+        denylistHits: denylistHits.slice(0, 5)
+      });
+    }
+  }
+  try {
+    const sanitizedBookings = mode === "sanitized-snapshot" ? exportPayload.bookings.map((b3) => sanitizeBookingExport(b3, salt, snapshotId, importedAt)) : exportPayload.bookings;
+    const sanitizedStoreOrders = mode === "sanitized-snapshot" ? exportPayload.storeOrders.map((o2) => sanitizeStoreOrderExport(o2, salt, snapshotId, importedAt)) : exportPayload.storeOrders;
+    const sanitizedMembers = mode === "sanitized-snapshot" ? exportPayload.members.map((m2) => sanitizeMemberExport(m2, salt, snapshotId, importedAt)) : exportPayload.members;
+    const sanitizedCounts = {
+      bookings: sanitizedBookings.length,
+      storeOrders: sanitizedStoreOrders.length,
+      members: sanitizedMembers.length
+    };
+    const sourceHash = import_node_crypto.default.createHash("sha256").update(JSON.stringify(exportPayload)).digest("hex");
+    await adminDb.collection("janitor").doc("refresh-snapshots").collection("items").doc(snapshotId).set({
+      projectId: process.env.FIREBASE_PROJECT_ID || "unknown",
+      mode,
+      createdAt: /* @__PURE__ */ new Date(),
+      createdBy: staff.email || staff.uid || "",
+      sourceCounts,
+      sanitizedCounts,
+      sourceHash,
+      saltPrefix: salt.slice(0, 8),
+      snapshotNote: options.snapshotNote,
+      // Per ETR-R07: the audit row carries
+      // the snapshot metadata (mode +
+      // importedAt + TTL). The
+      // importedAt is the same value
+      // the sanitized docs carry. The
+      // expiresAt is set on import (not
+      // preview) — the preview is a dry
+      // run that doesn't need a TTL.
+      importedAt,
+      ttlHours: mode === "unsanitized-diagnostic" ? options.ttlHours : null,
+      // Per ETR-R10: the audit row is the
+      // source of truth for the snapshot.
+      // Deletion/replacement of prior
+      // snapshots is supported through
+      // the staging-reset workflow (the
+      // existing handleStagingResetExecute
+      // handles it).
+      status: "complete"
+    });
+    return res.status(200).json({
+      success: true,
+      data: {
+        snapshotId,
+        mode,
+        projectId: process.env.FIREBASE_PROJECT_ID || "unknown",
+        sourceCounts,
+        sanitizedCounts,
+        sanitized: {
+          bookings: sanitizedBookings,
+          storeOrders: sanitizedStoreOrders,
+          members: sanitizedMembers
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Staging refresh preview failed:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Unable to generate sanitized staging refresh."
+    });
+  }
+}
+async function handleStagingRefreshImport(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff(req);
+  if (!staff.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can import staging refreshes." });
+  }
+  if (!isStagingProject()) {
+    return res.status(403).json({
+      success: false,
+      error: "Staging import is only available on staging projects."
+    });
+  }
+  const { snapshotId, sanitizedExport } = req.body || {};
+  if (!snapshotId || !sanitizedExport) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a snapshotId + the sanitizedExport from the preview."
+    });
+  }
+  try {
+    const sanitizedHash = import_node_crypto.default.createHash("sha256").update(JSON.stringify(sanitizedExport)).digest("hex");
+    const snapshotRef = adminDb.collection("janitor").doc("refresh-snapshots").collection("items").doc(snapshotId);
+    const snapshotDoc = await snapshotRef.get();
+    if (!snapshotDoc.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "Snapshot not found. Generate a new preview before importing."
+      });
+    }
+    const snapshotData = snapshotDoc.data() || {};
+    const financeCheck = checkFinanceInvariant({ export: sanitizedExport });
+    if (financeCheck.drift > 0.01) {
+      await snapshotRef.update({
+        status: "incomplete",
+        failureReason: `Finance invariant drift: ${financeCheck.drift.toFixed(2)} (sumPayments=${financeCheck.sumPayments}, sumRefunds=${financeCheck.sumRefunds}, sumBalanceDue=${financeCheck.sumBalanceDue})`,
+        completedAt: /* @__PURE__ */ new Date(),
+        completedBy: staff.email || staff.uid || ""
+      });
+      return res.status(422).json({
+        success: false,
+        error: `Finance invariant drift detected: ${financeCheck.drift.toFixed(2)}. Import refused. The sanitization engine or the source export is inconsistent.`,
+        financeCheck
+      });
+    }
+    if (snapshotData.mode === "unsanitized-diagnostic") {
+      const ttlHours = Number(snapshotData.ttlHours || 24);
+      const ttlMs = ttlHours * 60 * 60 * 1e3;
+      const expiresAt2 = new Date(Date.now() + ttlMs);
+      await adminDb.collection("janitor").doc("outbound-suppression").collection("items").doc(snapshotId).set({
+        snapshotId,
+        suppressedAt: /* @__PURE__ */ new Date(),
+        expiresAt: expiresAt2,
+        suppressedBy: staff.email || staff.uid || "",
+        reason: "Restricted Diagnostic Mode"
+      });
+    }
+    if (snapshotData.mode === "unsanitized-diagnostic") {
+      const reauthAt = Date.parse(String(snapshotData.reauthenticatedAt || ""));
+      const now = Date.now();
+      const thirtyMin = 30 * 60 * 1e3;
+      if (Number.isNaN(reauthAt) || now - reauthAt > thirtyMin) {
+        await snapshotRef.update({
+          status: "incomplete",
+          failureReason: `Reauth timestamp is not recent (must be within 30 min; got ${snapshotData.reauthenticatedAt || "missing"})`,
+          completedAt: /* @__PURE__ */ new Date(),
+          completedBy: staff.email || staff.uid || ""
+        });
+        return res.status(401).json({
+          success: false,
+          error: "Reauthentication is stale (must be within 30 min). Reauthenticate and regenerate the preview."
+        });
+      }
+    }
+    const sensitiveFileOptIn = Boolean(snapshotData.sensitiveFileOptIn);
+    const scopeBookingIds = new Set(
+      Array.isArray(snapshotData.scopeManifest?.bookingIds) ? snapshotData.scopeManifest.bookingIds : []
+    );
+    const scopeMemberIds = new Set(
+      Array.isArray(snapshotData.scopeManifest?.memberIds) ? snapshotData.scopeManifest.memberIds : []
+    );
+    const hasScopeRestriction = scopeBookingIds.size > 0 || scopeMemberIds.size > 0;
+    let bookingsWritten = 0;
+    let storeOrdersWritten = 0;
+    let membersWritten = 0;
+    let bookingsDropped = 0;
+    let membersDropped = 0;
+    for (const booking of sanitizedExport?.bookings || []) {
+      if (hasScopeRestriction && !scopeBookingIds.has(booking?.id)) {
+        bookingsDropped++;
+        continue;
+      }
+      const toWrite = { ...booking };
+      if (snapshotData.mode === "unsanitized-diagnostic" && !sensitiveFileOptIn) {
+        toWrite.guestIdUrl = "";
+        toWrite.guestIdPhotoUrl = "";
+        toWrite.paymentProofUrl = "";
+        toWrite.signatureUrl = "";
+      }
+      await adminDb.collection("bookings").doc(String(booking.id)).set(toWrite, { merge: false });
+      bookingsWritten++;
+    }
+    for (const order of sanitizedExport?.storeOrders || []) {
+      const toWrite = { ...order };
+      if (snapshotData.mode === "unsanitized-diagnostic" && !sensitiveFileOptIn) {
+        toWrite.guestIdUrl = "";
+        toWrite.paymentProofUrl = "";
+        toWrite.signatureUrl = "";
+      }
+      await adminDb.collection("storeOrders").doc(String(order.id)).set(toWrite, { merge: false });
+      storeOrdersWritten++;
+    }
+    for (const member of sanitizedExport?.members || []) {
+      if (hasScopeRestriction && !scopeMemberIds.has(member?.id)) {
+        membersDropped++;
+        continue;
+      }
+      const toWrite = { ...member };
+      if (snapshotData.mode === "unsanitized-diagnostic" && !sensitiveFileOptIn) {
+        toWrite.profilePhotoUrl = "";
+        toWrite.idImageUrl = "";
+      }
+      await adminDb.collection("members").doc(String(member.id)).set(toWrite, { merge: false });
+      membersWritten++;
+    }
+    const completedAt = /* @__PURE__ */ new Date();
+    const expiresAt = snapshotData.mode === "unsanitized-diagnostic" ? new Date(Date.now() + Number(snapshotData.ttlHours || 24) * 60 * 60 * 1e3) : null;
+    await snapshotRef.update({
+      status: "complete",
+      completedAt,
+      completedBy: staff.email || staff.uid || "",
+      expiresAt,
+      financeCheck: {
+        sumPayments: financeCheck.sumPayments,
+        sumRefunds: financeCheck.sumRefunds,
+        sumBalanceDue: financeCheck.sumBalanceDue,
+        drift: financeCheck.drift
+      },
+      sanitizedHash,
+      writeSummary: {
+        bookingsWritten,
+        storeOrdersWritten,
+        membersWritten,
+        bookingsDropped,
+        membersDropped,
+        sensitiveFileOptIn,
+        scopeRestricted: hasScopeRestriction
+      }
+    });
+    await adminDb.collection("janitor").doc("refresh-access-audit").collection("items").doc().set({
+      action: "import",
+      snapshotId,
+      adminUid: staff.uid,
+      adminEmail: staff.email || "",
+      timestamp: /* @__PURE__ */ new Date(),
+      mode: snapshotData.mode
+    });
+    return res.status(200).json({
+      success: true,
+      data: {
+        snapshotId,
+        status: "complete",
+        completedAt: completedAt.toISOString(),
+        expiresAt: expiresAt ? expiresAt.toISOString() : null,
+        financeCheck
+      }
+    });
+  } catch (error) {
+    console.error("Staging refresh import failed:", error);
+    try {
+      await adminDb.collection("janitor").doc("refresh-snapshots").collection("items").doc(snapshotId).update({
+        status: "incomplete",
+        failureReason: error?.message || "Unknown error",
+        completedAt: /* @__PURE__ */ new Date(),
+        completedBy: staff.email || staff.uid || ""
+      });
+    } catch (nestedErr) {
+      console.error("Failed to mark snapshot incomplete:", nestedErr);
+    }
+    return res.status(500).json({
+      success: false,
+      error: "Unable to import staging refresh. The snapshot is marked incomplete."
+    });
+  }
+}
+async function handleStagingRefreshDestroy(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const staff = getStaff(req);
+  if (!staff.uid) {
+    return res.status(401).json({ success: false, error: "Staff authentication is required." });
+  }
+  if (staff.role !== "admin") {
+    return res.status(403).json({ success: false, error: "Only admins can destroy staging refreshes." });
+  }
+  if (!isStagingProject()) {
+    return res.status(403).json({
+      success: false,
+      error: "Staging destroy is only available on staging projects."
+    });
+  }
+  const { snapshotId } = req.body || {};
+  if (!snapshotId) {
+    return res.status(400).json({
+      success: false,
+      error: "Please provide a snapshotId to destroy."
+    });
+  }
+  try {
+    const snapshotRef = adminDb.collection("janitor").doc("refresh-snapshots").collection("items").doc(snapshotId);
+    const snapshotDoc = await snapshotRef.get();
+    if (!snapshotDoc.exists) {
+      return res.status(404).json({ success: false, error: "Snapshot not found." });
+    }
+    const snapshotData = snapshotDoc.data() || {};
+    if (snapshotData.status === "destroyed") {
+      return res.status(409).json({
+        success: false,
+        error: "Snapshot is already destroyed."
+      });
+    }
+    if (!snapshotData.writeSummary) {
+      return res.status(422).json({
+        success: false,
+        error: "Snapshot has no writeSummary (legacy snapshot). Cannot reverse the import without a full staging walk. Use the staging reset workflow instead."
+      });
+    }
+    let deletedBookings = 0;
+    let deletedStoreOrders = 0;
+    let deletedMembers = 0;
+    let deleteFailures = [];
+    for (const booking of (await adminDb.collection("bookings").where("sourceSanitization.snapshotId", "==", snapshotId).get()).docs) {
+      try {
+        await booking.ref.delete();
+        deletedBookings++;
+      } catch (err) {
+        deleteFailures.push(`bookings/${booking.id}`);
+      }
+    }
+    for (const order of (await adminDb.collection("storeOrders").where("sourceSanitization.snapshotId", "==", snapshotId).get()).docs) {
+      try {
+        await order.ref.delete();
+        deletedStoreOrders++;
+      } catch (err) {
+        deleteFailures.push(`storeOrders/${order.id}`);
+      }
+    }
+    for (const member of (await adminDb.collection("members").where("sourceSanitization.snapshotId", "==", snapshotId).get()).docs) {
+      try {
+        await member.ref.delete();
+        deletedMembers++;
+      } catch (err) {
+        deleteFailures.push(`members/${member.id}`);
+      }
+    }
+    await adminDb.collection("janitor").doc("outbound-suppression").collection("items").doc(snapshotId).delete().catch(() => void 0);
+    await adminDb.collection("janitor").doc("refresh-access-audit").collection("items").doc().set({
+      action: "destroy",
+      snapshotId,
+      adminUid: staff.uid,
+      adminEmail: staff.email || "",
+      timestamp: /* @__PURE__ */ new Date(),
+      deletedBookings,
+      deletedStoreOrders,
+      deletedMembers,
+      deleteFailures
+    });
+    if (deleteFailures.length > 0) {
+      await snapshotRef.update({
+        status: "incomplete",
+        failureReason: `Partial destroy: ${deleteFailures.length} doc(s) failed to delete`,
+        destroyedAt: /* @__PURE__ */ new Date(),
+        destroyedBy: staff.email || staff.uid || ""
+      });
+      return res.status(500).json({
+        success: false,
+        error: `Partial destroy: ${deleteFailures.length} doc(s) failed to delete. Retry the destroy.`,
+        deletedBookings,
+        deletedStoreOrders,
+        deletedMembers,
+        deleteFailures
+      });
+    }
+    await snapshotRef.update({
+      status: "destroyed",
+      destroyedAt: /* @__PURE__ */ new Date(),
+      destroyedBy: staff.email || staff.uid || ""
+    });
+    return res.status(200).json({
+      success: true,
+      data: {
+        snapshotId,
+        status: "destroyed",
+        destroyedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        deletedBookings,
+        deletedStoreOrders,
+        deletedMembers
+      }
+    });
+  } catch (error) {
+    console.error("Staging refresh destroy failed:", error);
+    try {
+      await adminDb.collection("janitor").doc("refresh-snapshots").collection("items").doc(snapshotId).update({
+        status: "incomplete",
+        failureReason: error?.message || "Unknown error",
+        completedAt: /* @__PURE__ */ new Date(),
+        completedBy: staff.email || staff.uid || ""
+      });
+    } catch (nestedErr) {
+      console.error("Failed to mark snapshot incomplete:", nestedErr);
+    }
+    return res.status(500).json({
+      success: false,
+      error: "Unable to destroy staging refresh."
+    });
+  }
+}
+var import_node_crypto, createTestRunSchema, closeTestRunSchema, deleteTestRunSchema, CLEANUP_TIMEOUT_MS, TEST_RUN_BOOKING_SUBCOLLECTIONS, PREVIEW_TTL_MS, LOCK_TIMEOUT_MS, RESET_BATCH_SIZE, stagingResetConfirmSchema, PROTECTED_RESET_COLLECTIONS, REFRESH_MODES, stagingRefreshSchema;
+var init_test_runs = __esm({
+  "server/handlers/test-runs.ts"() {
+    "use strict";
+    init_zod();
+    import_node_crypto = __toESM(require("node:crypto"));
+    init_firebase_admin();
+    createTestRunSchema = external_exports.object({
+      name: external_exports.string().trim().min(1).max(120),
+      environment: external_exports.enum(["staging", "production"]),
+      durationMinutes: external_exports.number().int().min(5).max(43200)
+    }).strict();
+    closeTestRunSchema = external_exports.object({
+      runId: external_exports.string().trim().min(1).max(64)
+    }).strict();
+    deleteTestRunSchema = external_exports.object({
+      runId: external_exports.string().trim().min(1).max(64)
+    }).strict();
+    CLEANUP_TIMEOUT_MS = 30 * 60 * 1e3;
+    TEST_RUN_BOOKING_SUBCOLLECTIONS = ["payments", "charges"];
+    PREVIEW_TTL_MS = 5 * 60 * 1e3;
+    LOCK_TIMEOUT_MS = 30 * 60 * 1e3;
+    RESET_BATCH_SIZE = 20;
+    stagingResetConfirmSchema = external_exports.object({
+      confirmation: external_exports.literal("RESET STAGING"),
+      projectName: external_exports.string().trim().min(1).max(120),
+      previewId: external_exports.string().trim().min(1).max(64)
+    }).strict();
+    PROTECTED_RESET_COLLECTIONS = [
+      "counters",
+      "settings",
+      "guests",
+      "members",
+      "storeItems",
+      "vouchers",
+      "corporateCodes"
+    ];
+    REFRESH_MODES = ["sanitized-snapshot", "config-only", "unsanitized-diagnostic", "sanitized", "unsanitized"];
+    stagingRefreshSchema = external_exports.object({
+      export: external_exports.object({
+        bookings: external_exports.array(external_exports.record(external_exports.any())).optional().default([]),
+        storeOrders: external_exports.array(external_exports.record(external_exports.any())).optional().default([]),
+        members: external_exports.array(external_exports.record(external_exports.any())).optional().default([])
+      }).strict(),
+      options: external_exports.object({
+        mode: external_exports.enum(REFRESH_MODES).optional().transform((m2) => normalizeRefreshMode(m2)).default("sanitized-snapshot"),
+        snapshotNote: external_exports.string().trim().max(280).optional().default(""),
+        // Per ETR-R03 (reviewable preservation):
+        // per-field preservation checkboxes for
+        // the unsanitized-diagnostic mode. The
+        // sanitized-snapshot mode + config-only
+        // mode ignore these (sanitized always
+        // scrubs; config-only has no per-doc
+        // preservation). The defaults are
+        // conservative (preserve operational
+        // signal, scrub PII).
+        preserveDates: external_exports.boolean().optional().default(true),
+        preserveFinancialValues: external_exports.boolean().optional().default(true),
+        preserveStatuses: external_exports.boolean().optional().default(true),
+        // Per ETR-D01 (restricted-mode gates):
+        // 5 separate gates before the preview
+        // generates. ALL 5 are required for
+        // unsanitized-diagnostic mode; ignored
+        // for the other two modes.
+        dpoApprovalReference: external_exports.string().trim().max(120).optional().default(""),
+        defectReference: external_exports.string().trim().max(120).optional().default(""),
+        projectConfirmation: external_exports.string().trim().max(60).optional().default(""),
+        reauthenticatedAt: external_exports.string().optional().default(""),
+        acknowledgedRestrictedMode: external_exports.boolean().optional().default(false),
+        // Per ETR-D03 (minimize scope): the
+        // operator must specify the explicit
+        // scope. The full-dataset path is
+        // rejected (the unsanitized mode
+        // requires narrow scope).
+        scopeManifest: external_exports.object({
+          bookingIds: external_exports.array(external_exports.string()).optional().default([]),
+          memberIds: external_exports.array(external_exports.string()).optional().default([]),
+          dateRange: external_exports.object({
+            start: external_exports.string().optional().default(""),
+            end: external_exports.string().optional().default("")
+          }).optional().default({ start: "", end: "" })
+        }).optional().default({ bookingIds: [], memberIds: [], dateRange: { start: "", end: "" } }),
+        // Per ETR-D04 (sensitive-file opt-in):
+        // OFF by default even in unsanitized
+        // mode. The operator has to check a
+        // SEPARATE box to opt into copying
+        // sensitive files (IDs, payment
+        // proofs, signatures).
+        sensitiveFileOptIn: external_exports.boolean().optional().default(false),
+        // Per ETR-D06 (TTL): the snapshot's
+        // expiresAt. Default 24h. Operator can
+        // pick a shorter window.
+        ttlHours: external_exports.number().int().min(1).max(168).optional().default(24)
+      }).strict().optional().default({
+        mode: "sanitized-snapshot",
+        snapshotNote: "",
+        preserveDates: true,
+        preserveFinancialValues: true,
+        preserveStatuses: true,
+        dpoApprovalReference: "",
+        defectReference: "",
+        projectConfirmation: "",
+        reauthenticatedAt: "",
+        acknowledgedRestrictedMode: false,
+        scopeManifest: { bookingIds: [], memberIds: [], dateRange: { start: "", end: "" } },
+        sensitiveFileOptIn: false,
+        ttlHours: 24
+      })
+    }).strict();
   }
 });
 
@@ -226077,1639 +227710,6 @@ var init_notifications = __esm({
   }
 });
 
-// server/handlers/test-runs.ts
-function getStaff(req) {
-  return req.staff || {};
-}
-function generateRunId() {
-  return import_node_crypto.default.randomBytes(16).toString("hex");
-}
-function hashToken(token2) {
-  return import_node_crypto.default.createHash("sha256").update(token2).digest("hex");
-}
-async function collectManifest(runId) {
-  const affectedRooms = /* @__PURE__ */ new Set();
-  const affectedStockItems = /* @__PURE__ */ new Set();
-  const bookingsSnap = await adminDb.collection("bookings").where("testRunId", "==", runId).get();
-  const bookingIds = bookingsSnap.docs.map((d) => {
-    affectedRooms.add(d.data().roomNumber || "");
-    return d.id;
-  });
-  const storeSnap = await adminDb.collection("storeOrders").where("testRunId", "==", runId).get();
-  storeSnap.docs.forEach((d) => {
-    const itemIds = (d.data().items || []).map((i2) => i2.itemId);
-    itemIds.forEach((id) => {
-      if (id) affectedStockItems.add(id);
-    });
-  });
-  return {
-    bookings: bookingIds.length,
-    storeOrders: storeSnap.docs.length,
-    affectedRooms: [...affectedRooms].filter(Boolean),
-    affectedStockItems: [...affectedStockItems].filter(Boolean)
-  };
-}
-async function handleCreateTestRun(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ success: false, error: "Method not allowed." });
-  }
-  const staff = getStaff(req);
-  if (staff.role !== "admin") {
-    return res.status(403).json({ success: false, error: "Only admins can create test runs." });
-  }
-  const parsed = createTestRunSchema.safeParse(req.body || {});
-  if (!parsed.success) {
-    return res.status(400).json({
-      success: false,
-      error: "Please provide a valid test run name, environment, and duration."
-    });
-  }
-  const { name: name2, environment, durationMinutes } = parsed.data;
-  try {
-    if (environment === "production") {
-      const activeRuns = await adminDb.collection("testRuns").where("environment", "==", "production").where("status", "==", "active").get();
-      if (!activeRuns.empty) {
-        return res.status(409).json({
-          success: false,
-          error: "There is already an active production test run. Close it before creating a new one."
-        });
-      }
-    }
-    const now = /* @__PURE__ */ new Date();
-    const runId = generateRunId();
-    const tokenBytes = import_node_crypto.default.randomBytes(24);
-    const token2 = tokenBytes.toString("base64url");
-    const run = {
-      id: runId,
-      name: name2,
-      environment,
-      createdBy: staff.email || "",
-      createdByUid: staff.uid || "",
-      createdAt: now,
-      expiresAt: new Date(now.getTime() + durationMinutes * 6e4),
-      closedAt: null,
-      closedBy: null,
-      status: "active",
-      tokenHash: hashToken(token2)
-    };
-    await adminDb.collection("testRuns").doc(runId).set(run);
-    return res.status(200).json({
-      success: true,
-      data: {
-        id: runId,
-        name: name2,
-        environment,
-        token: token2,
-        expiresAt: run.expiresAt.toISOString(),
-        durationMinutes
-      }
-    });
-  } catch (error) {
-    console.error("Test run creation failed:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Unable to create test run. Please try again."
-    });
-  }
-}
-async function handleCloseTestRun(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ success: false, error: "Method not allowed." });
-  }
-  const staff = getStaff(req);
-  if (staff.role !== "admin") {
-    return res.status(403).json({ success: false, error: "Only admins can close test runs." });
-  }
-  const parsed = closeTestRunSchema.safeParse(req.body || {});
-  if (!parsed.success) {
-    return res.status(400).json({
-      success: false,
-      error: "Please provide a valid test run ID."
-    });
-  }
-  const { runId } = parsed.data;
-  try {
-    const runRef = adminDb.collection("testRuns").doc(runId);
-    const runDoc = await runRef.get();
-    if (!runDoc.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "Test run not found."
-      });
-    }
-    const runData = runDoc.data();
-    if (runData.status !== "active") {
-      return res.status(400).json({
-        success: false,
-        error: "This test run is not active and cannot be closed."
-      });
-    }
-    const manifest = await collectManifest(runId);
-    const now = /* @__PURE__ */ new Date();
-    await runRef.set({
-      closedAt: now,
-      closedBy: staff.email || "",
-      status: "closed",
-      manifest
-    }, { merge: true });
-    return res.status(200).json({
-      success: true,
-      data: { runId, closedAt: now.toISOString(), manifest }
-    });
-  } catch (error) {
-    console.error("Test run close failed:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Unable to close test run. Please try again."
-    });
-  }
-}
-async function deleteTestRunBookingSubcollections(bookingRef2) {
-  for (const subcollection of TEST_RUN_BOOKING_SUBCOLLECTIONS) {
-    const snapshot = await bookingRef2.collection(subcollection).get();
-    await Promise.all(snapshot.docs.map((child) => child.ref.delete()));
-  }
-}
-async function heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount) {
-  await runRef.set({
-    cleanupStartedAt: /* @__PURE__ */ new Date(),
-    cleanupCursor: {
-      bookingsDeleted: bookingCount,
-      storeOrdersDeleted: storeOrderCount
-    }
-  }, { merge: true });
-}
-async function handleDeleteTestRun(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ success: false, error: "Method not allowed." });
-  }
-  const staff = getStaff(req);
-  if (staff.role !== "admin") {
-    return res.status(403).json({ success: false, error: "Only admins can delete test data." });
-  }
-  const parsed = deleteTestRunSchema.safeParse(req.body || {});
-  if (!parsed.success) {
-    return res.status(400).json({
-      success: false,
-      error: "Please provide a valid test run ID."
-    });
-  }
-  const { runId } = parsed.data;
-  const runRef = adminDb.collection("testRuns").doc(runId);
-  const now = /* @__PURE__ */ new Date();
-  try {
-    await adminDb.runTransaction(async (transaction) => {
-      const runDoc = await transaction.get(runRef);
-      if (!runDoc.exists) {
-        throw new Error("NOT_FOUND");
-      }
-      const runData = runDoc.data();
-      const status = runData.status;
-      if (status === "cleaned") {
-        throw new Error("ALREADY_CLEANED");
-      }
-      if (status === "closed") {
-        transaction.set(runRef, {
-          status: "cleanup-in-progress",
-          cleanupStartedAt: now,
-          cleanupCursor: null
-        }, { merge: true });
-        return;
-      }
-      if (status === "cleanup-in-progress") {
-        const startedAt = runData.cleanupStartedAt?.toDate?.() || runData.cleanupStartedAt;
-        if (startedAt && now.getTime() - new Date(startedAt).getTime() < CLEANUP_TIMEOUT_MS) {
-          throw new Error("CLEANUP_IN_PROGRESS");
-        }
-        transaction.set(runRef, {
-          status: "cleanup-in-progress",
-          cleanupStartedAt: now
-        }, { merge: true });
-        return;
-      }
-      throw new Error("INVALID_STATUS");
-    });
-  } catch (txError) {
-    const msg = txError.message || "";
-    if (msg === "NOT_FOUND") {
-      return res.status(404).json({ success: false, error: "Test run not found." });
-    }
-    if (msg === "ALREADY_CLEANED") {
-      return res.status(400).json({ success: false, error: "This test run has already been cleaned up." });
-    }
-    if (msg === "CLEANUP_IN_PROGRESS") {
-      return res.status(409).json({
-        success: false,
-        error: "Cleanup is already in progress. Please wait for it to complete or try again after 30 minutes."
-      });
-    }
-    if (msg === "INVALID_STATUS") {
-      return res.status(400).json({ success: false, error: "Only closed test runs can be cleaned up. Close the run first." });
-    }
-    throw txError;
-  }
-  try {
-    let bookingCount = 0;
-    let storeOrderCount = 0;
-    let failedItems = [];
-    const batchSize = 20;
-    let lastDoc = null;
-    while (true) {
-      let q3 = adminDb.collection("bookings").where("testRunId", "==", runId).limit(batchSize);
-      if (lastDoc) q3 = q3.startAfter(lastDoc);
-      const snap = await q3.get();
-      if (snap.empty) break;
-      lastDoc = snap.docs[snap.docs.length - 1];
-      for (const doc of snap.docs) {
-        try {
-          const bookingRef2 = adminDb.collection("bookings").doc(doc.id);
-          await deleteTestRunBookingSubcollections(bookingRef2);
-          await doc.ref.delete();
-          bookingCount++;
-        } catch (err) {
-          failedItems.push(`booking/${doc.id}`);
-        }
-      }
-      await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
-    }
-    lastDoc = null;
-    while (true) {
-      let q3 = adminDb.collection("storeOrders").where("testRunId", "==", runId).limit(batchSize);
-      if (lastDoc) q3 = q3.startAfter(lastDoc);
-      const snap = await q3.get();
-      if (snap.empty) break;
-      lastDoc = snap.docs[snap.docs.length - 1];
-      for (const doc of snap.docs) {
-        try {
-          const subSnap = await adminDb.collection("storeOrders").doc(doc.id).collection("tenders").get();
-          await Promise.all(subSnap.docs.map((sd) => sd.ref.delete()));
-          await doc.ref.delete();
-          storeOrderCount++;
-        } catch (err) {
-          failedItems.push(`storeOrder/${doc.id}`);
-        }
-      }
-      await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
-    }
-    let notifQ = adminDb.collection("notifications").where("testRunId", "==", runId);
-    const notifSnap = await notifQ.get();
-    for (const doc of notifSnap.docs) {
-      try {
-        await doc.ref.delete();
-      } catch {
-        failedItems.push(`notification/${doc.id}`);
-      }
-    }
-    await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
-    let intercomQ = adminDb.collection("intercoms").where("testRunId", "==", runId);
-    const intercomSnap = await intercomQ.get();
-    for (const doc of intercomSnap.docs) {
-      try {
-        const msgSnap = await adminDb.collection("intercoms").doc(doc.id).collection("messages").get();
-        await Promise.all(msgSnap.docs.map((md) => md.ref.delete()));
-        await doc.ref.delete();
-      } catch {
-        failedItems.push(`intercom/${doc.id}`);
-      }
-    }
-    await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
-    const auditResult = {
-      type: "test-run-cleanup",
-      runId,
-      bookingsDeleted: bookingCount,
-      storeOrdersDeleted: storeOrderCount,
-      failedItems,
-      completedAt: now,
-      completedBy: staff.email || ""
-    };
-    await adminDb.collection("janitor").doc("cleanups").collection("history").add(auditResult);
-    const runDoc = await runRef.get();
-    const runData = runDoc.data();
-    const affectedRooms = runData.manifest?.affectedRooms || [];
-    for (const roomNumber of affectedRooms) {
-      if (!roomNumber) continue;
-      const roomsSnap = await adminDb.collection("rooms").where("roomNumber", "==", roomNumber).get();
-      for (const doc of roomsSnap.docs) {
-        await doc.ref.set({
-          status: "available",
-          housekeepingStatus: "clean"
-        }, { merge: true });
-      }
-      await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
-    }
-    await runRef.set({
-      status: "cleaned",
-      cleanupCompletedAt: now,
-      cleanupCursor: null,
-      cleanupResult: { bookingsDeleted: bookingCount, storeOrdersDeleted: storeOrderCount, failedItems: failedItems.length }
-    }, { merge: true });
-    return res.status(200).json({
-      success: true,
-      data: {
-        runId,
-        bookingsDeleted: bookingCount,
-        storeOrdersDeleted: storeOrderCount,
-        failedItems: failedItems.length,
-        roomsRestored: affectedRooms.length
-      }
-    });
-  } catch (error) {
-    console.error("Test run cleanup failed:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Unable to clean up test data. Please try again."
-    });
-  }
-}
-function isStagingProject() {
-  const projectId = process.env.FIREBASE_PROJECT_ID || "";
-  const allowlistRaw = process.env.STAGING_ALLOWLIST_PROJECT_IDS || "";
-  const allowlist = allowlistRaw.split(",").map((s4) => s4.trim()).filter(Boolean);
-  return allowlist.includes(projectId);
-}
-async function acquireResetLock(staff, currentProject, previewId) {
-  const lockRef = adminDb.collection("janitor").doc("staging-reset-lock");
-  const now = /* @__PURE__ */ new Date();
-  try {
-    let acquired = false;
-    let message;
-    let resumed = false;
-    let resumePhase = "starting";
-    await adminDb.runTransaction(async (tx) => {
-      const lockDoc = await tx.get(lockRef);
-      if (lockDoc.exists) {
-        const data = lockDoc.data();
-        const startedAt = data.startedAt?.toDate?.() || data.startedAt;
-        if (data.status === "running" && startedAt && now.getTime() - new Date(startedAt).getTime() < LOCK_TIMEOUT_MS) {
-          message = "A staging reset is already in progress. Please wait for it to complete or try again after 30 minutes.";
-          return;
-        }
-        if (data.previewId === previewId && data.status === "complete") {
-          message = "This staging reset job has already completed. Run a new preview for another reset.";
-          return;
-        }
-        if (data.previewId === previewId && (data.status === "failed" || data.status === "incomplete" || data.status === "running")) {
-          resumed = true;
-          resumePhase = data.phase || "starting";
-        }
-      }
-      const lockData = {
-        projectId: currentProject,
-        startedAt: now,
-        status: "running",
-        previewId,
-        phase: resumed ? resumePhase : "starting",
-        startedBy: staff.email || "",
-        resumedAt: resumed ? now : null
-      };
-      if (!resumed) lockData.checkpoint = 0;
-      tx.set(lockRef, lockData, { merge: resumed });
-      acquired = true;
-    });
-    return { acquired, message, resumed, resumePhase };
-  } catch {
-    return { acquired: false, message: "Unable to acquire reset lock. Please try again.", resumed: false, resumePhase: "starting" };
-  }
-}
-async function releaseResetLock(lockRef, status, phase, checkpoint) {
-  try {
-    await lockRef.set({ status, phase, checkpoint, completedAt: /* @__PURE__ */ new Date() }, { merge: true });
-  } catch {
-  }
-}
-async function collectProtectedState() {
-  const [protectedSnapshots, roomsSnapshot] = await Promise.all([
-    Promise.all(PROTECTED_RESET_COLLECTIONS.map(async (name2) => [name2, await adminDb.collection(name2).get()])),
-    adminDb.collection("rooms").get()
-  ]);
-  const collections = Object.fromEntries(protectedSnapshots.map(([name2, snapshot]) => {
-    const documents = snapshot.docs.map((doc) => ({ id: doc.id, data: doc.data() })).sort((a, b3) => a.id.localeCompare(b3.id));
-    return [name2, {
-      count: documents.length,
-      hash: import_node_crypto.default.createHash("sha256").update(JSON.stringify(documents)).digest("hex")
-    }];
-  }));
-  return { collections, roomsCount: roomsSnapshot.docs.length };
-}
-async function collectFullManifest() {
-  const [bookingsSnap, storeSnap, notifSnap, intercomSnap, testRunSnap, callsSnap, dailyCloseSnap, corpInquirySnap, roomBlocksSnap, cleanupSnap] = await Promise.all([
-    adminDb.collection("bookings").get(),
-    adminDb.collection("storeOrders").get(),
-    adminDb.collection("notifications").get(),
-    adminDb.collection("intercoms").get(),
-    adminDb.collection("testRuns").get(),
-    adminDb.collection("calls").get(),
-    adminDb.collection("dailyCloses").get(),
-    adminDb.collection("corporateInquiries").get(),
-    adminDb.collection("roomBlocks").get(),
-    adminDb.collection("janitor").doc("cleanups").collection("history").get()
-  ]);
-  const affectedRooms = /* @__PURE__ */ new Set();
-  bookingsSnap.docs.forEach((d) => {
-    const r3 = d.data().roomNumber;
-    if (r3) affectedRooms.add(r3);
-  });
-  roomBlocksSnap.docs.forEach((d) => {
-    const r3 = d.data().roomNumber;
-    if (r3) affectedRooms.add(r3);
-  });
-  const protectedState = await collectProtectedState();
-  return {
-    bookings: bookingsSnap.docs.length,
-    storeOrders: storeSnap.docs.length,
-    notifications: notifSnap.docs.length,
-    intercomStays: intercomSnap.docs.length,
-    testRuns: testRunSnap.docs.length,
-    calls: callsSnap.docs.length,
-    dailyCloses: dailyCloseSnap.docs.length,
-    corporateInquiries: corpInquirySnap.docs.length,
-    roomBlocks: roomBlocksSnap.docs.length,
-    cleanupHistory: cleanupSnap.docs.length,
-    affectedRooms: [...affectedRooms].filter(Boolean),
-    affectedStockItems: [],
-    protectedState
-  };
-}
-function hashManifest(manifest) {
-  return import_node_crypto.default.createHash("sha256").update(JSON.stringify(manifest)).digest("hex").slice(0, 16);
-}
-async function handleStagingResetPreview(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ success: false, error: "Method not allowed." });
-  }
-  const staff = getStaff(req);
-  if (staff.role !== "admin") {
-    return res.status(403).json({ success: false, error: "Only admins can preview staging reset." });
-  }
-  if (!isStagingProject()) {
-    return res.status(403).json({
-      success: false,
-      error: "This project is not authorized for operational reset. Staging allowlist check failed."
-    });
-  }
-  try {
-    const projectId = process.env.FIREBASE_PROJECT_ID || "unknown";
-    const manifest = await collectFullManifest();
-    const previewId = hashManifest({ projectId, manifest, ts: Date.now() });
-    await adminDb.collection("janitor").doc("previews").collection("items").doc(previewId).set({
-      projectId,
-      manifest,
-      manifestHash: hashManifest(manifest),
-      createdAt: /* @__PURE__ */ new Date(),
-      createdBy: staff.email || ""
-    });
-    return res.status(200).json({
-      success: true,
-      data: {
-        projectId,
-        isStaging: true,
-        manifest,
-        previewId,
-        confirmedAt: (/* @__PURE__ */ new Date()).toISOString()
-      }
-    });
-  } catch (error) {
-    console.error("Staging reset preview failed:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Unable to generate staging reset preview."
-    });
-  }
-}
-async function handleStagingResetExecute(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ success: false, error: "Method not allowed." });
-  }
-  const staff = getStaff(req);
-  if (staff.role !== "admin") {
-    return res.status(403).json({ success: false, error: "Only admins can execute staging reset." });
-  }
-  if (!isStagingProject()) {
-    return res.status(403).json({
-      success: false,
-      error: "This project is not authorized for operational reset. Staging allowlist check failed."
-    });
-  }
-  const parsed = stagingResetConfirmSchema.safeParse(req.body || {});
-  if (!parsed.success) {
-    return res.status(400).json({
-      success: false,
-      error: "Preview ID, typed RESET STAGING, and project name are required."
-    });
-  }
-  const { confirmation, projectName, previewId } = parsed.data;
-  const currentProject = process.env.FIREBASE_PROJECT_ID || "";
-  if (projectName !== currentProject) {
-    return res.status(400).json({
-      success: false,
-      error: `Project name mismatch. Expected "${currentProject}".`
-    });
-  }
-  let validatedPreview;
-  let resumeAllowed = false;
-  try {
-    const previewRef = adminDb.collection("janitor").doc("previews").collection("items").doc(previewId);
-    const previewDoc = await previewRef.get();
-    if (!previewDoc.exists) {
-      return res.status(400).json({ success: false, error: "Preview not found. Please run a new preview." });
-    }
-    const preview = previewDoc.data();
-    validatedPreview = preview;
-    const existingLockDoc = await adminDb.collection("janitor").doc("staging-reset-lock").get();
-    if (existingLockDoc.exists) {
-      const existingLock = existingLockDoc.data();
-      resumeAllowed = existingLock.previewId === previewId && ["running", "failed", "incomplete"].includes(existingLock.status);
-    }
-    const createdAt = preview.createdAt?.toDate?.() || preview.createdAt;
-    if (!resumeAllowed && createdAt && Date.now() - new Date(createdAt).getTime() > PREVIEW_TTL_MS) {
-      return res.status(400).json({ success: false, error: "Preview has expired. Please run a new preview." });
-    }
-    if (preview.projectId !== currentProject) {
-      return res.status(400).json({ success: false, error: "Preview was created for a different project." });
-    }
-    const currentManifest = resumeAllowed ? null : await collectFullManifest();
-    if (currentManifest && hashManifest(currentManifest) !== preview.manifestHash) {
-      return res.status(409).json({
-        success: false,
-        error: "Staging data has changed since preview. Please run a new preview."
-      });
-    }
-  } catch (error) {
-    console.error("Preview validation failed:", error);
-    return res.status(500).json({ success: false, error: "Unable to validate preview." });
-  }
-  const lock = await acquireResetLock(staff, currentProject, previewId);
-  if (!lock.acquired) {
-    const isConflict = lock.message?.includes("already in progress") || lock.message?.includes("already completed");
-    return res.status(isConflict ? 409 : 500).json({
-      success: false,
-      error: lock.message || "Unable to acquire reset lock."
-    });
-  }
-  const lockRef = adminDb.collection("janitor").doc("staging-reset-lock");
-  const startedAt = /* @__PURE__ */ new Date();
-  const failedItems = [];
-  let bookingCount = 0, storeOrderCount = 0, notifCount = 0;
-  let intercomCount = 0, testRunCount = 0, callCount = 0;
-  let dailyCloseCount = 0, corpInquiryCount = 0, roomBlockCount = 0, cleanupCount = 0;
-  let roomRestoreCount = 0;
-  let integrityFailed = false;
-  let manifestBefore;
-  async function deleteCollectionPage(collectionName, subcollections, counter) {
-    let lastDoc = null;
-    while (true) {
-      let q3 = adminDb.collection(collectionName).limit(RESET_BATCH_SIZE);
-      if (lastDoc) q3 = q3.startAfter(lastDoc);
-      const snap = await q3.get();
-      if (snap.empty) break;
-      lastDoc = snap.docs[snap.docs.length - 1];
-      const failuresBeforePage = failedItems.length;
-      for (const doc of snap.docs) {
-        try {
-          for (const sub of subcollections) {
-            const subSnap = await adminDb.collection(collectionName).doc(doc.id).collection(sub).get();
-            await Promise.all(subSnap.docs.map((sd) => sd.ref.delete()));
-          }
-          await doc.ref.delete();
-          counter.value++;
-        } catch {
-          failedItems.push(`${collectionName}/${doc.id}`);
-        }
-      }
-      if (failedItems.length > failuresBeforePage) {
-        throw new Error(`Deletion failed in ${collectionName}; retry this reset job to resume.`);
-      }
-    }
-  }
-  async function deleteCollectionGroupPage(groupName) {
-    let lastDoc = null;
-    while (true) {
-      let q3 = adminDb.collectionGroup(groupName).limit(RESET_BATCH_SIZE);
-      if (lastDoc) q3 = q3.startAfter(lastDoc);
-      const snap = await q3.get();
-      if (snap.empty) break;
-      lastDoc = snap.docs[snap.docs.length - 1];
-      const failuresBeforePage = failedItems.length;
-      for (const doc of snap.docs) {
-        try {
-          await doc.ref.delete();
-        } catch {
-          failedItems.push(`${groupName}/${doc.id}`);
-        }
-      }
-      if (failedItems.length > failuresBeforePage) {
-        throw new Error(`Deletion failed in collection group ${groupName}; retry this reset job to resume.`);
-      }
-    }
-  }
-  try {
-    manifestBefore = validatedPreview.manifest;
-    const phaseOrder = [
-      "bookings",
-      "storeOrders",
-      "notifications",
-      "intercoms",
-      "testRuns",
-      "calls",
-      "dailyCloses",
-      "corporateInquiries",
-      "roomBlocks",
-      "cleanupHistory",
-      "rooms",
-      "integrity"
-    ];
-    const storedPhaseIndex = lock.resumed ? phaseOrder.indexOf(lock.resumePhase) : 0;
-    const resumePhaseIndex = storedPhaseIndex >= 0 ? storedPhaseIndex : 0;
-    const shouldRunPhase = (phase) => phaseOrder.indexOf(phase) >= resumePhaseIndex;
-    const runDeletionPhase = async (phase, collectionName, subcollections, expectedCount) => {
-      if (!shouldRunPhase(phase)) return expectedCount;
-      await lockRef.set({ phase, checkpoint: 0 }, { merge: true });
-      const counter = { value: 0 };
-      await deleteCollectionPage(collectionName, subcollections, counter);
-      for (const sub of subcollections) {
-        await deleteCollectionGroupPage(sub);
-      }
-      await lockRef.set({ checkpoint: counter.value }, { merge: true });
-      return lock.resumed ? expectedCount : counter.value;
-    };
-    bookingCount = await runDeletionPhase(
-      "bookings",
-      "bookings",
-      ["payments", "charges", "incidentalCharges", "notifications", "audit"],
-      manifestBefore.bookings
-    );
-    storeOrderCount = await runDeletionPhase(
-      "storeOrders",
-      "storeOrders",
-      ["payments", "tenders"],
-      manifestBefore.storeOrders
-    );
-    notifCount = await runDeletionPhase("notifications", "notifications", [], manifestBefore.notifications);
-    intercomCount = await runDeletionPhase("intercoms", "intercoms", ["messages"], manifestBefore.intercomStays);
-    testRunCount = await runDeletionPhase("testRuns", "testRuns", [], manifestBefore.testRuns);
-    callCount = await runDeletionPhase("calls", "calls", ["iceCandidates"], manifestBefore.calls);
-    dailyCloseCount = await runDeletionPhase("dailyCloses", "dailyCloses", [], manifestBefore.dailyCloses);
-    corpInquiryCount = await runDeletionPhase(
-      "corporateInquiries",
-      "corporateInquiries",
-      [],
-      manifestBefore.corporateInquiries
-    );
-    roomBlockCount = await runDeletionPhase("roomBlocks", "roomBlocks", [], manifestBefore.roomBlocks);
-    if (shouldRunPhase("cleanupHistory")) {
-      await lockRef.set({ phase: "cleanupHistory", checkpoint: 0 }, { merge: true });
-      const clCounter = { value: 0 };
-      const cleanupSnap = await adminDb.collection("janitor").doc("cleanups").collection("history").get();
-      for (const doc of cleanupSnap.docs) {
-        try {
-          await doc.ref.delete();
-          clCounter.value++;
-        } catch {
-          failedItems.push(`cleanupHistory/${doc.id}`);
-        }
-      }
-      cleanupCount = lock.resumed ? manifestBefore.cleanupHistory : clCounter.value;
-      await lockRef.set({ checkpoint: cleanupCount }, { merge: true });
-    } else {
-      cleanupCount = manifestBefore.cleanupHistory;
-    }
-    if (failedItems.length > 0) {
-      throw new Error("Cleanup-history deletion was incomplete; retry this reset job to resume.");
-    }
-    if (shouldRunPhase("rooms")) {
-      await lockRef.set({ phase: "rooms", checkpoint: 0 }, { merge: true });
-      for (const roomNumber of manifestBefore.affectedRooms) {
-        if (!roomNumber) continue;
-        const roomsSnap = await adminDb.collection("rooms").where("roomNumber", "==", roomNumber).get();
-        if (roomsSnap.empty) {
-          failedItems.push(`room/${roomNumber} (not found)`);
-          continue;
-        }
-        for (const doc of roomsSnap.docs) {
-          await doc.ref.set({ status: "available", housekeepingStatus: "clean" }, { merge: true });
-          roomRestoreCount++;
-        }
-      }
-      await lockRef.set({ checkpoint: roomRestoreCount }, { merge: true });
-    } else {
-      roomRestoreCount = manifestBefore.affectedRooms.length;
-    }
-    if (failedItems.length > 0) {
-      throw new Error("Room baseline restoration was incomplete; retry this reset job to resume.");
-    }
-    await lockRef.set({ phase: "integrity", checkpoint: roomRestoreCount }, { merge: true });
-    const integrityErrors = [];
-    const verifyCollection = async (name2) => {
-      const snap = await adminDb.collection(name2).limit(1).get();
-      if (!snap.empty) integrityErrors.push(`${name2} still has ${snap.size} document(s)`);
-    };
-    await Promise.all([
-      verifyCollection("bookings"),
-      verifyCollection("storeOrders"),
-      verifyCollection("notifications"),
-      verifyCollection("intercoms"),
-      verifyCollection("testRuns"),
-      verifyCollection("calls"),
-      verifyCollection("dailyCloses"),
-      verifyCollection("corporateInquiries"),
-      verifyCollection("roomBlocks")
-    ]);
-    const verifyCollectionGroup = async (name2) => {
-      const snap = await adminDb.collectionGroup(name2).limit(1).get();
-      if (!snap.empty) integrityErrors.push(`orphaned ${name2} subcollection data remains`);
-    };
-    await Promise.all([
-      verifyCollectionGroup("payments"),
-      verifyCollectionGroup("charges"),
-      verifyCollectionGroup("incidentalCharges"),
-      verifyCollectionGroup("notifications"),
-      verifyCollectionGroup("audit"),
-      verifyCollectionGroup("tenders"),
-      verifyCollectionGroup("messages"),
-      verifyCollectionGroup("iceCandidates")
-    ]);
-    for (const roomNumber of manifestBefore.affectedRooms) {
-      if (!roomNumber) continue;
-      const snap = await adminDb.collection("rooms").where("roomNumber", "==", roomNumber).get();
-      for (const doc of snap.docs) {
-        const d = doc.data();
-        if (d.status !== "available" || d.housekeepingStatus !== "clean") {
-          integrityErrors.push(`room ${roomNumber} is ${d.status}/${d.housekeepingStatus}`);
-        }
-      }
-    }
-    const protectedStateAfter = await collectProtectedState();
-    if (JSON.stringify(protectedStateAfter) !== JSON.stringify(manifestBefore.protectedState)) {
-      integrityErrors.push("protected settings, identity, catalog, counters, or room count changed during reset");
-    }
-    if (integrityErrors.length > 0 || failedItems.length > 0) {
-      integrityFailed = true;
-      failedItems.push(...integrityErrors.map((e3) => `integrity: ${e3}`));
-    }
-    const auditResult = {
-      type: "staging-reset",
-      bookingsDeleted: bookingCount,
-      storeOrdersDeleted: storeOrderCount,
-      notificationsDeleted: notifCount,
-      intercomStaysDeleted: intercomCount,
-      testRunsDeleted: testRunCount,
-      callsDeleted: callCount,
-      dailyClosesDeleted: dailyCloseCount,
-      corporateInquiriesDeleted: corpInquiryCount,
-      roomBlocksDeleted: roomBlockCount,
-      cleanupHistoryDeleted: cleanupCount,
-      roomsRestored: roomRestoreCount,
-      failedItems,
-      integrityErrors: integrityErrors.length > 0 ? integrityErrors : [],
-      manifestBefore: {
-        bookings: manifestBefore.bookings,
-        storeOrders: manifestBefore.storeOrders,
-        notifications: manifestBefore.notifications,
-        intercomStays: manifestBefore.intercomStays,
-        testRuns: manifestBefore.testRuns,
-        calls: manifestBefore.calls,
-        dailyCloses: manifestBefore.dailyCloses,
-        corporateInquiries: manifestBefore.corporateInquiries,
-        roomBlocks: manifestBefore.roomBlocks,
-        cleanupHistory: manifestBefore.cleanupHistory
-      },
-      startedAt,
-      completedAt: /* @__PURE__ */ new Date(),
-      completedBy: staff.email || "",
-      projectId: currentProject,
-      previewId,
-      resumed: lock.resumed,
-      protectedStateVerified: true,
-      terminalStatus: integrityFailed ? "incomplete" : "complete"
-    };
-    await adminDb.collection("janitor").doc("cleanups").collection("history").add(auditResult);
-    if (integrityFailed) {
-      await releaseResetLock(lockRef, "incomplete", "integrity", 0);
-      return res.status(500).json({
-        success: false,
-        error: "Reset completed with integrity errors.",
-        data: {
-          projectId: currentProject,
-          bookingsDeleted: bookingCount,
-          storeOrdersDeleted: storeOrderCount,
-          roomBlocksDeleted: roomBlockCount,
-          failedItems: failedItems.length,
-          integrityErrors,
-          terminalStatus: "incomplete"
-        }
-      });
-    }
-    await releaseResetLock(lockRef, "complete", "done", 0);
-    return res.status(200).json({
-      success: true,
-      data: {
-        projectId: currentProject,
-        bookingsDeleted: bookingCount,
-        storeOrdersDeleted: storeOrderCount,
-        notificationsDeleted: notifCount,
-        intercomStaysDeleted: intercomCount,
-        testRunsDeleted: testRunCount,
-        callsDeleted: callCount,
-        dailyClosesDeleted: dailyCloseCount,
-        corporateInquiriesDeleted: corpInquiryCount,
-        roomBlocksDeleted: roomBlockCount,
-        cleanupHistoryDeleted: cleanupCount,
-        roomsRestored: roomRestoreCount,
-        failedItems: failedItems.length,
-        terminalStatus: "complete"
-      }
-    });
-  } catch (error) {
-    console.error("Staging reset execution failed:", error);
-    try {
-      await lockRef.set({
-        status: "failed",
-        failedAt: /* @__PURE__ */ new Date(),
-        failureMessage: error?.message || "Unknown reset failure"
-      }, { merge: true });
-      await adminDb.collection("janitor").doc("cleanups").collection("history").add({
-        type: "staging-reset",
-        terminalStatus: "failed",
-        previewId,
-        projectId: currentProject,
-        failedItems,
-        startedAt,
-        failedAt: /* @__PURE__ */ new Date(),
-        completedBy: staff.email || "",
-        failureMessage: error?.message || "Unknown reset failure"
-      });
-    } catch {
-    }
-    return res.status(500).json({
-      success: false,
-      error: "Unable to execute staging reset. The job remains resumable; retry with the same preview after resolving the reported failure."
-    });
-  }
-}
-async function handleListTestRuns(req, res) {
-  if (req.method !== "GET") {
-    return res.status(405).json({ success: false, error: "Method not allowed." });
-  }
-  const staff = getStaff(req);
-  if (staff.role !== "admin") {
-    return res.status(403).json({ success: false, error: "Only admins can list test runs." });
-  }
-  try {
-    const snap = await adminDb.collection("testRuns").orderBy("createdAt", "desc").limit(50).get();
-    const runs = snap.docs.map((d) => {
-      const data = d.data();
-      return {
-        id: d.id,
-        name: data.name,
-        environment: data.environment,
-        createdBy: data.createdBy,
-        createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt,
-        expiresAt: data.expiresAt?.toDate?.()?.toISOString() || data.expiresAt,
-        closedAt: data.closedAt?.toDate?.()?.toISOString() || null,
-        closedBy: data.closedBy || null,
-        status: data.status,
-        manifest: data.manifest || null,
-        cleanupResult: data.cleanupResult || null
-      };
-    });
-    return res.status(200).json({ success: true, data: runs });
-  } catch (error) {
-    console.error("List test runs failed:", error);
-    return res.status(500).json({ success: false, error: "Unable to list test runs." });
-  }
-}
-function normalizeRefreshMode(mode) {
-  if (mode === "sanitized") return "sanitized-snapshot";
-  if (mode === "unsanitized") return "unsanitized-diagnostic";
-  if (mode === "sanitized-snapshot" || mode === "config-only" || mode === "unsanitized-diagnostic") return mode;
-  return "sanitized-snapshot";
-}
-function syntheticFromSource(sourceValue, salt, prefix, domain) {
-  if (sourceValue === null || sourceValue === void 0) return "";
-  const normalized = String(sourceValue).trim().toLowerCase();
-  if (!normalized) return "";
-  const h3 = import_node_crypto.default.createHash("sha256").update(`${salt}:${domain}:${normalized}`).digest("hex").slice(0, 8);
-  return `${prefix}-${h3}@${domain}`;
-}
-function sanitizeBookingExport(booking, salt, snapshotId, importedAt) {
-  const guestEmail = String(booking.guestEmail || "");
-  const guestName = String(booking.guestName || "");
-  const guestPhone = String(booking.guestPhone || "");
-  const sourceEmail = guestEmail.trim().toLowerCase();
-  const sanitized = {
-    ...booking,
-    guestName: syntheticFromSource(guestName, salt, "Guest", "guests.invalid"),
-    guestEmail: sourceEmail ? syntheticFromSource(sourceEmail, salt, "guest", "example.invalid") : "",
-    guestPhone: guestPhone ? syntheticFromSource(guestPhone, salt, "+639****0000", "phones.invalid") : "",
-    address: "[REDACTED \u2014 sanitized for staging]",
-    emergencyContactName: "",
-    emergencyContactPhone: "",
-    // Per ETR-R05 (file sanitization): all
-    // file URLs are scrubbed in sanitized
-    // mode so the operator can't
-    // accidentally click through to
-    // production files. The R05 follow-up
-    // (storage path fixture replacement) is
-    // a separate ticket.
-    guestIdUrl: "",
-    guestIdPhotoUrl: "",
-    paymentProofUrl: "",
-    signatureUrl: "",
-    // Booking doc keeps its original id so payments/charges
-    // subcollections can be walked in step 4. bookingRef is
-    // preserved so the staff can still reference it by the
-    // confirmation number; createdAt/updatedAt preserved; status
-    // + financial fields preserved (operational signal).
-    notes: "",
-    internalNotes: "",
-    // Per ETR-R07 (staging isolation
-    // metadata): every sanitized doc
-    // carries a `sourceSanitization`
-    // block. The Admin can scan the
-    // staging bookings list and see at
-    // a glance which rows came from a
-    // refresh. The salt is per-snapshot
-    // + scoped (no cross-snapshot
-    // correlation). The snapshotId is
-    // the same one the audit row at
-    // janitor/refresh-snapshots uses.
-    sourceSanitization: {
-      applied: true,
-      salt: salt.slice(0, 8) + "\u2026",
-      snapshotId,
-      importedAt,
-      mode: "sanitized-snapshot"
-    }
-  };
-  if (Array.isArray(sanitized.addedCharges)) {
-    sanitized.addedCharges = sanitized.addedCharges.map((c2) => ({
-      ...c2,
-      description: "[REDACTED]",
-      notes: ""
-    }));
-  }
-  if (Array.isArray(sanitized.payments)) {
-    sanitized.payments = sanitized.payments.map((p) => ({
-      ...p,
-      transactionReference: syntheticFromSource(p.transactionReference || "", salt, "PAY", "staging.invalid"),
-      notes: ""
-    }));
-  }
-  return sanitized;
-}
-function sanitizeStoreOrderExport(order, salt, snapshotId, importedAt) {
-  return {
-    ...order,
-    guestName: syntheticFromSource(order.guestName, salt, "Guest", "guests.invalid"),
-    guestEmail: order.guestEmail ? syntheticFromSource(String(order.guestEmail).trim().toLowerCase(), salt, "guest", "example.invalid") : "",
-    guestPhone: order.guestPhone ? syntheticFromSource(String(order.guestPhone), salt, "+63900000", "phones.invalid") : "",
-    paymentProofUrl: "",
-    notes: "",
-    internalNotes: "",
-    sourceSanitization: {
-      applied: true,
-      salt: salt.slice(0, 8) + "\u2026",
-      appliedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      mode: "sanitized-snapshot"
-    }
-  };
-}
-function sanitizeMemberExport(member, salt, snapshotId, importedAt) {
-  return {
-    ...member,
-    fullName: syntheticFromSource(member.fullName, salt, "Member", "members.invalid"),
-    // The member's email is the SAME identity as a guest who booked
-    // with that email — use the "guest" prefix for the email so the
-    // synthetic value matches the booking's synthetic email. The
-    // member's full name is a separate identity (a person has one
-    // email but may have multiple display names over time), so it
-    // uses its own "Member" prefix for `fullName`.
-    email: member.email ? syntheticFromSource(String(member.email).trim().toLowerCase(), salt, "guest", "example.invalid") : "",
-    phone: member.phone ? syntheticFromSource(String(member.phone), salt, "+63900000", "phones.invalid") : "",
-    photoUrl: "",
-    sourceSanitization: {
-      applied: true,
-      salt: salt.slice(0, 8) + "\u2026",
-      appliedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      mode: "sanitized-snapshot"
-    }
-  };
-}
-function runPreImportDenylistScan(exportPayload) {
-  const productionEmailPattern = /(?:@gmail\.com|@yahoo\.com|@hotmail\.com|@outlook\.com|@icloud\.com)\b/i;
-  const phonePattern = /\b(?:\+63|0)9\d{2}[\s-]?\d{3}[\s-]?\d{4}\b/;
-  const productionStorageUrl = /(?:googleapis\.com|firebasestorage\.googleapis\.com|storage\.googleapis\.com)/i;
-  const hits = [];
-  const scanDoc = (collection, doc) => {
-    const stringFields = Object.entries(doc || {}).filter(([_2, v6]) => typeof v6 === "string");
-    for (const [field, value] of stringFields) {
-      const str = String(value);
-      if (productionEmailPattern.test(str)) {
-        hits.push({ collection, field, value: str, pattern: "productionEmail" });
-        if (hits.length >= 5) return;
-      } else if (phonePattern.test(str)) {
-        hits.push({ collection, field, value: str, pattern: "phone" });
-        if (hits.length >= 5) return;
-      } else if (productionStorageUrl.test(str)) {
-        hits.push({ collection, field, value: str, pattern: "productionStorageUrl" });
-        if (hits.length >= 5) return;
-      }
-    }
-  };
-  for (const b3 of exportPayload?.export?.bookings || []) scanDoc("bookings", b3);
-  for (const o2 of exportPayload?.export?.storeOrders || []) scanDoc("storeOrders", o2);
-  for (const m2 of exportPayload?.export?.members || []) scanDoc("members", m2);
-  return hits;
-}
-function checkFinanceInvariant(exportPayload) {
-  let sumPayments = 0;
-  let sumRefunds = 0;
-  let sumBalanceDue = 0;
-  for (const b3 of exportPayload?.export?.bookings || []) {
-    const data = b3;
-    if (Array.isArray(data.payments)) {
-      for (const p of data.payments) {
-        const amt = Number(p.amount || 0);
-        if (p.type === "refund" || amt < 0) {
-          sumRefunds += Math.abs(amt);
-        } else {
-          sumPayments += amt;
-        }
-      }
-    }
-    sumBalanceDue += Number(data.balanceDue || data.totalPrice || 0);
-  }
-  const expectedBalance = sumPayments - sumRefunds;
-  const drift = Math.abs(sumBalanceDue - expectedBalance);
-  return { sumPayments, sumRefunds, sumBalanceDue, drift };
-}
-async function handleStagingRefreshPreview(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ success: false, error: "Method not allowed." });
-  }
-  const staff = getStaff(req);
-  if (!staff.uid) {
-    return res.status(401).json({ success: false, error: "Staff authentication is required." });
-  }
-  if (staff.role !== "admin") {
-    return res.status(403).json({ success: false, error: "Only admins can refresh staging from production." });
-  }
-  if (!isStagingProject()) {
-    return res.status(403).json({
-      success: false,
-      error: "Staging refresh is only available on staging projects. The current project is not on the staging allowlist."
-    });
-  }
-  const parsed = stagingRefreshSchema.safeParse(req.body || {});
-  if (!parsed.success) {
-    return res.status(400).json({
-      success: false,
-      error: "Please provide a valid production export (bookings, storeOrders, members) and options."
-    });
-  }
-  const { export: exportPayload, options } = parsed.data;
-  const mode = options.mode;
-  const salt = import_node_crypto.default.randomBytes(16).toString("hex");
-  const snapshotId = `refresh-${Date.now()}-${import_node_crypto.default.randomBytes(4).toString("hex")}`;
-  const importedAt = (/* @__PURE__ */ new Date()).toISOString();
-  const sourceCounts = {
-    bookings: exportPayload.bookings.length,
-    storeOrders: exportPayload.storeOrders.length,
-    members: exportPayload.members.length
-  };
-  if (mode === "unsanitized-diagnostic") {
-    const missingGates = [];
-    if (!options.dpoApprovalReference) missingGates.push("dpoApprovalReference");
-    if (!options.defectReference) missingGates.push("defectReference");
-    if (!options.projectConfirmation) missingGates.push("projectConfirmation");
-    if (!options.reauthenticatedAt) missingGates.push("reauthenticatedAt");
-    if (!options.acknowledgedRestrictedMode) missingGates.push("acknowledgedRestrictedMode");
-    if (missingGates.length > 0) {
-      return res.status(422).json({
-        success: false,
-        error: "Restricted Diagnostic Mode requires all 5 gates to be present.",
-        missingGates
-      });
-    }
-    if (options.scopeManifest.bookingIds.length === 0 && options.scopeManifest.memberIds.length === 0) {
-      return res.status(422).json({
-        success: false,
-        error: "Restricted Diagnostic Mode requires an explicit scope manifest (at least one bookingId or memberId)."
-      });
-    }
-    if (options.ttlHours > 168) {
-      return res.status(422).json({
-        success: false,
-        error: "Restricted Diagnostic Mode TTL cannot exceed 168 hours (1 week)."
-      });
-    }
-  }
-  if (mode === "sanitized-snapshot") {
-    const denylistHits = runPreImportDenylistScan(exportPayload);
-    if (denylistHits.length > 0) {
-      return res.status(422).json({
-        success: false,
-        error: "Pre-import denylist scan found production PII patterns. The sanitization engine should have scrubbed these \u2014 refusing the import to prevent a leak.",
-        denylistHits: denylistHits.slice(0, 5)
-      });
-    }
-  }
-  try {
-    const sanitizedBookings = mode === "sanitized-snapshot" ? exportPayload.bookings.map((b3) => sanitizeBookingExport(b3, salt, snapshotId, importedAt)) : exportPayload.bookings;
-    const sanitizedStoreOrders = mode === "sanitized-snapshot" ? exportPayload.storeOrders.map((o2) => sanitizeStoreOrderExport(o2, salt, snapshotId, importedAt)) : exportPayload.storeOrders;
-    const sanitizedMembers = mode === "sanitized-snapshot" ? exportPayload.members.map((m2) => sanitizeMemberExport(m2, salt, snapshotId, importedAt)) : exportPayload.members;
-    const sanitizedCounts = {
-      bookings: sanitizedBookings.length,
-      storeOrders: sanitizedStoreOrders.length,
-      members: sanitizedMembers.length
-    };
-    const sourceHash = import_node_crypto.default.createHash("sha256").update(JSON.stringify(exportPayload)).digest("hex");
-    await adminDb.collection("janitor").doc("refresh-snapshots").collection("items").doc(snapshotId).set({
-      projectId: process.env.FIREBASE_PROJECT_ID || "unknown",
-      mode,
-      createdAt: /* @__PURE__ */ new Date(),
-      createdBy: staff.email || staff.uid || "",
-      sourceCounts,
-      sanitizedCounts,
-      sourceHash,
-      saltPrefix: salt.slice(0, 8),
-      snapshotNote: options.snapshotNote,
-      // Per ETR-R07: the audit row carries
-      // the snapshot metadata (mode +
-      // importedAt + TTL). The
-      // importedAt is the same value
-      // the sanitized docs carry. The
-      // expiresAt is set on import (not
-      // preview) — the preview is a dry
-      // run that doesn't need a TTL.
-      importedAt,
-      ttlHours: mode === "unsanitized-diagnostic" ? options.ttlHours : null,
-      // Per ETR-R10: the audit row is the
-      // source of truth for the snapshot.
-      // Deletion/replacement of prior
-      // snapshots is supported through
-      // the staging-reset workflow (the
-      // existing handleStagingResetExecute
-      // handles it).
-      status: "complete"
-    });
-    return res.status(200).json({
-      success: true,
-      data: {
-        snapshotId,
-        mode,
-        projectId: process.env.FIREBASE_PROJECT_ID || "unknown",
-        sourceCounts,
-        sanitizedCounts,
-        sanitized: {
-          bookings: sanitizedBookings,
-          storeOrders: sanitizedStoreOrders,
-          members: sanitizedMembers
-        }
-      }
-    });
-  } catch (error) {
-    console.error("Staging refresh preview failed:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Unable to generate sanitized staging refresh."
-    });
-  }
-}
-async function handleStagingRefreshImport(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ success: false, error: "Method not allowed." });
-  }
-  const staff = getStaff(req);
-  if (!staff.uid) {
-    return res.status(401).json({ success: false, error: "Staff authentication is required." });
-  }
-  if (staff.role !== "admin") {
-    return res.status(403).json({ success: false, error: "Only admins can import staging refreshes." });
-  }
-  if (!isStagingProject()) {
-    return res.status(403).json({
-      success: false,
-      error: "Staging import is only available on staging projects."
-    });
-  }
-  const { snapshotId, sanitizedExport } = req.body || {};
-  if (!snapshotId || !sanitizedExport) {
-    return res.status(400).json({
-      success: false,
-      error: "Please provide a snapshotId + the sanitizedExport from the preview."
-    });
-  }
-  try {
-    const sanitizedHash = import_node_crypto.default.createHash("sha256").update(JSON.stringify(sanitizedExport)).digest("hex");
-    const snapshotRef = adminDb.collection("janitor").doc("refresh-snapshots").collection("items").doc(snapshotId);
-    const snapshotDoc = await snapshotRef.get();
-    if (!snapshotDoc.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "Snapshot not found. Generate a new preview before importing."
-      });
-    }
-    const snapshotData = snapshotDoc.data() || {};
-    const financeCheck = checkFinanceInvariant({ export: sanitizedExport });
-    if (financeCheck.drift > 0.01) {
-      await snapshotRef.update({
-        status: "incomplete",
-        failureReason: `Finance invariant drift: ${financeCheck.drift.toFixed(2)} (sumPayments=${financeCheck.sumPayments}, sumRefunds=${financeCheck.sumRefunds}, sumBalanceDue=${financeCheck.sumBalanceDue})`,
-        completedAt: /* @__PURE__ */ new Date(),
-        completedBy: staff.email || staff.uid || ""
-      });
-      return res.status(422).json({
-        success: false,
-        error: `Finance invariant drift detected: ${financeCheck.drift.toFixed(2)}. Import refused. The sanitization engine or the source export is inconsistent.`,
-        financeCheck
-      });
-    }
-    if (snapshotData.mode === "unsanitized-diagnostic") {
-      const ttlHours = Number(snapshotData.ttlHours || 24);
-      const ttlMs = ttlHours * 60 * 60 * 1e3;
-      const expiresAt2 = new Date(Date.now() + ttlMs);
-      await adminDb.collection("janitor").doc("outbound-suppression").collection("items").doc(snapshotId).set({
-        snapshotId,
-        suppressedAt: /* @__PURE__ */ new Date(),
-        expiresAt: expiresAt2,
-        suppressedBy: staff.email || staff.uid || "",
-        reason: "Restricted Diagnostic Mode"
-      });
-    }
-    if (snapshotData.mode === "unsanitized-diagnostic") {
-      const reauthAt = Date.parse(String(snapshotData.reauthenticatedAt || ""));
-      const now = Date.now();
-      const thirtyMin = 30 * 60 * 1e3;
-      if (Number.isNaN(reauthAt) || now - reauthAt > thirtyMin) {
-        await snapshotRef.update({
-          status: "incomplete",
-          failureReason: `Reauth timestamp is not recent (must be within 30 min; got ${snapshotData.reauthenticatedAt || "missing"})`,
-          completedAt: /* @__PURE__ */ new Date(),
-          completedBy: staff.email || staff.uid || ""
-        });
-        return res.status(401).json({
-          success: false,
-          error: "Reauthentication is stale (must be within 30 min). Reauthenticate and regenerate the preview."
-        });
-      }
-    }
-    const sensitiveFileOptIn = Boolean(snapshotData.sensitiveFileOptIn);
-    const scopeBookingIds = new Set(
-      Array.isArray(snapshotData.scopeManifest?.bookingIds) ? snapshotData.scopeManifest.bookingIds : []
-    );
-    const scopeMemberIds = new Set(
-      Array.isArray(snapshotData.scopeManifest?.memberIds) ? snapshotData.scopeManifest.memberIds : []
-    );
-    const hasScopeRestriction = scopeBookingIds.size > 0 || scopeMemberIds.size > 0;
-    let bookingsWritten = 0;
-    let storeOrdersWritten = 0;
-    let membersWritten = 0;
-    let bookingsDropped = 0;
-    let membersDropped = 0;
-    for (const booking of sanitizedExport?.bookings || []) {
-      if (hasScopeRestriction && !scopeBookingIds.has(booking?.id)) {
-        bookingsDropped++;
-        continue;
-      }
-      const toWrite = { ...booking };
-      if (snapshotData.mode === "unsanitized-diagnostic" && !sensitiveFileOptIn) {
-        toWrite.guestIdUrl = "";
-        toWrite.guestIdPhotoUrl = "";
-        toWrite.paymentProofUrl = "";
-        toWrite.signatureUrl = "";
-      }
-      await adminDb.collection("bookings").doc(String(booking.id)).set(toWrite, { merge: false });
-      bookingsWritten++;
-    }
-    for (const order of sanitizedExport?.storeOrders || []) {
-      const toWrite = { ...order };
-      if (snapshotData.mode === "unsanitized-diagnostic" && !sensitiveFileOptIn) {
-        toWrite.guestIdUrl = "";
-        toWrite.paymentProofUrl = "";
-        toWrite.signatureUrl = "";
-      }
-      await adminDb.collection("storeOrders").doc(String(order.id)).set(toWrite, { merge: false });
-      storeOrdersWritten++;
-    }
-    for (const member of sanitizedExport?.members || []) {
-      if (hasScopeRestriction && !scopeMemberIds.has(member?.id)) {
-        membersDropped++;
-        continue;
-      }
-      const toWrite = { ...member };
-      if (snapshotData.mode === "unsanitized-diagnostic" && !sensitiveFileOptIn) {
-        toWrite.profilePhotoUrl = "";
-        toWrite.idImageUrl = "";
-      }
-      await adminDb.collection("members").doc(String(member.id)).set(toWrite, { merge: false });
-      membersWritten++;
-    }
-    const completedAt = /* @__PURE__ */ new Date();
-    const expiresAt = snapshotData.mode === "unsanitized-diagnostic" ? new Date(Date.now() + Number(snapshotData.ttlHours || 24) * 60 * 60 * 1e3) : null;
-    await snapshotRef.update({
-      status: "complete",
-      completedAt,
-      completedBy: staff.email || staff.uid || "",
-      expiresAt,
-      financeCheck: {
-        sumPayments: financeCheck.sumPayments,
-        sumRefunds: financeCheck.sumRefunds,
-        sumBalanceDue: financeCheck.sumBalanceDue,
-        drift: financeCheck.drift
-      },
-      sanitizedHash,
-      writeSummary: {
-        bookingsWritten,
-        storeOrdersWritten,
-        membersWritten,
-        bookingsDropped,
-        membersDropped,
-        sensitiveFileOptIn,
-        scopeRestricted: hasScopeRestriction
-      }
-    });
-    await adminDb.collection("janitor").doc("refresh-access-audit").collection("items").doc().set({
-      action: "import",
-      snapshotId,
-      adminUid: staff.uid,
-      adminEmail: staff.email || "",
-      timestamp: /* @__PURE__ */ new Date(),
-      mode: snapshotData.mode
-    });
-    return res.status(200).json({
-      success: true,
-      data: {
-        snapshotId,
-        status: "complete",
-        completedAt: completedAt.toISOString(),
-        expiresAt: expiresAt ? expiresAt.toISOString() : null,
-        financeCheck
-      }
-    });
-  } catch (error) {
-    console.error("Staging refresh import failed:", error);
-    try {
-      await adminDb.collection("janitor").doc("refresh-snapshots").collection("items").doc(snapshotId).update({
-        status: "incomplete",
-        failureReason: error?.message || "Unknown error",
-        completedAt: /* @__PURE__ */ new Date(),
-        completedBy: staff.email || staff.uid || ""
-      });
-    } catch (nestedErr) {
-      console.error("Failed to mark snapshot incomplete:", nestedErr);
-    }
-    return res.status(500).json({
-      success: false,
-      error: "Unable to import staging refresh. The snapshot is marked incomplete."
-    });
-  }
-}
-async function handleStagingRefreshDestroy(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ success: false, error: "Method not allowed." });
-  }
-  const staff = getStaff(req);
-  if (!staff.uid) {
-    return res.status(401).json({ success: false, error: "Staff authentication is required." });
-  }
-  if (staff.role !== "admin") {
-    return res.status(403).json({ success: false, error: "Only admins can destroy staging refreshes." });
-  }
-  if (!isStagingProject()) {
-    return res.status(403).json({
-      success: false,
-      error: "Staging destroy is only available on staging projects."
-    });
-  }
-  const { snapshotId } = req.body || {};
-  if (!snapshotId) {
-    return res.status(400).json({
-      success: false,
-      error: "Please provide a snapshotId to destroy."
-    });
-  }
-  try {
-    const snapshotRef = adminDb.collection("janitor").doc("refresh-snapshots").collection("items").doc(snapshotId);
-    const snapshotDoc = await snapshotRef.get();
-    if (!snapshotDoc.exists) {
-      return res.status(404).json({ success: false, error: "Snapshot not found." });
-    }
-    const snapshotData = snapshotDoc.data() || {};
-    if (snapshotData.status === "destroyed") {
-      return res.status(409).json({
-        success: false,
-        error: "Snapshot is already destroyed."
-      });
-    }
-    if (!snapshotData.writeSummary) {
-      return res.status(422).json({
-        success: false,
-        error: "Snapshot has no writeSummary (legacy snapshot). Cannot reverse the import without a full staging walk. Use the staging reset workflow instead."
-      });
-    }
-    let deletedBookings = 0;
-    let deletedStoreOrders = 0;
-    let deletedMembers = 0;
-    let deleteFailures = [];
-    for (const booking of (await adminDb.collection("bookings").where("sourceSanitization.snapshotId", "==", snapshotId).get()).docs) {
-      try {
-        await booking.ref.delete();
-        deletedBookings++;
-      } catch (err) {
-        deleteFailures.push(`bookings/${booking.id}`);
-      }
-    }
-    for (const order of (await adminDb.collection("storeOrders").where("sourceSanitization.snapshotId", "==", snapshotId).get()).docs) {
-      try {
-        await order.ref.delete();
-        deletedStoreOrders++;
-      } catch (err) {
-        deleteFailures.push(`storeOrders/${order.id}`);
-      }
-    }
-    for (const member of (await adminDb.collection("members").where("sourceSanitization.snapshotId", "==", snapshotId).get()).docs) {
-      try {
-        await member.ref.delete();
-        deletedMembers++;
-      } catch (err) {
-        deleteFailures.push(`members/${member.id}`);
-      }
-    }
-    await adminDb.collection("janitor").doc("outbound-suppression").collection("items").doc(snapshotId).delete().catch(() => void 0);
-    await adminDb.collection("janitor").doc("refresh-access-audit").collection("items").doc().set({
-      action: "destroy",
-      snapshotId,
-      adminUid: staff.uid,
-      adminEmail: staff.email || "",
-      timestamp: /* @__PURE__ */ new Date(),
-      deletedBookings,
-      deletedStoreOrders,
-      deletedMembers,
-      deleteFailures
-    });
-    if (deleteFailures.length > 0) {
-      await snapshotRef.update({
-        status: "incomplete",
-        failureReason: `Partial destroy: ${deleteFailures.length} doc(s) failed to delete`,
-        destroyedAt: /* @__PURE__ */ new Date(),
-        destroyedBy: staff.email || staff.uid || ""
-      });
-      return res.status(500).json({
-        success: false,
-        error: `Partial destroy: ${deleteFailures.length} doc(s) failed to delete. Retry the destroy.`,
-        deletedBookings,
-        deletedStoreOrders,
-        deletedMembers,
-        deleteFailures
-      });
-    }
-    await snapshotRef.update({
-      status: "destroyed",
-      destroyedAt: /* @__PURE__ */ new Date(),
-      destroyedBy: staff.email || staff.uid || ""
-    });
-    return res.status(200).json({
-      success: true,
-      data: {
-        snapshotId,
-        status: "destroyed",
-        destroyedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        deletedBookings,
-        deletedStoreOrders,
-        deletedMembers
-      }
-    });
-  } catch (error) {
-    console.error("Staging refresh destroy failed:", error);
-    try {
-      await adminDb.collection("janitor").doc("refresh-snapshots").collection("items").doc(snapshotId).update({
-        status: "incomplete",
-        failureReason: error?.message || "Unknown error",
-        completedAt: /* @__PURE__ */ new Date(),
-        completedBy: staff.email || staff.uid || ""
-      });
-    } catch (nestedErr) {
-      console.error("Failed to mark snapshot incomplete:", nestedErr);
-    }
-    return res.status(500).json({
-      success: false,
-      error: "Unable to destroy staging refresh."
-    });
-  }
-}
-var import_node_crypto, createTestRunSchema, closeTestRunSchema, deleteTestRunSchema, CLEANUP_TIMEOUT_MS, TEST_RUN_BOOKING_SUBCOLLECTIONS, PREVIEW_TTL_MS, LOCK_TIMEOUT_MS, RESET_BATCH_SIZE, stagingResetConfirmSchema, PROTECTED_RESET_COLLECTIONS, REFRESH_MODES, stagingRefreshSchema;
-var init_test_runs = __esm({
-  "server/handlers/test-runs.ts"() {
-    "use strict";
-    init_zod();
-    import_node_crypto = __toESM(require("node:crypto"));
-    init_firebase_admin();
-    createTestRunSchema = external_exports.object({
-      name: external_exports.string().trim().min(1).max(120),
-      environment: external_exports.enum(["staging", "production"]),
-      durationMinutes: external_exports.number().int().min(5).max(43200)
-    }).strict();
-    closeTestRunSchema = external_exports.object({
-      runId: external_exports.string().trim().min(1).max(64)
-    }).strict();
-    deleteTestRunSchema = external_exports.object({
-      runId: external_exports.string().trim().min(1).max(64)
-    }).strict();
-    CLEANUP_TIMEOUT_MS = 30 * 60 * 1e3;
-    TEST_RUN_BOOKING_SUBCOLLECTIONS = ["payments", "charges"];
-    PREVIEW_TTL_MS = 5 * 60 * 1e3;
-    LOCK_TIMEOUT_MS = 30 * 60 * 1e3;
-    RESET_BATCH_SIZE = 20;
-    stagingResetConfirmSchema = external_exports.object({
-      confirmation: external_exports.literal("RESET STAGING"),
-      projectName: external_exports.string().trim().min(1).max(120),
-      previewId: external_exports.string().trim().min(1).max(64)
-    }).strict();
-    PROTECTED_RESET_COLLECTIONS = [
-      "counters",
-      "settings",
-      "guests",
-      "members",
-      "storeItems",
-      "vouchers",
-      "corporateCodes"
-    ];
-    REFRESH_MODES = ["sanitized-snapshot", "config-only", "unsanitized-diagnostic", "sanitized", "unsanitized"];
-    stagingRefreshSchema = external_exports.object({
-      export: external_exports.object({
-        bookings: external_exports.array(external_exports.record(external_exports.any())).optional().default([]),
-        storeOrders: external_exports.array(external_exports.record(external_exports.any())).optional().default([]),
-        members: external_exports.array(external_exports.record(external_exports.any())).optional().default([])
-      }).strict(),
-      options: external_exports.object({
-        mode: external_exports.enum(REFRESH_MODES).optional().transform((m2) => normalizeRefreshMode(m2)).default("sanitized-snapshot"),
-        snapshotNote: external_exports.string().trim().max(280).optional().default(""),
-        // Per ETR-R03 (reviewable preservation):
-        // per-field preservation checkboxes for
-        // the unsanitized-diagnostic mode. The
-        // sanitized-snapshot mode + config-only
-        // mode ignore these (sanitized always
-        // scrubs; config-only has no per-doc
-        // preservation). The defaults are
-        // conservative (preserve operational
-        // signal, scrub PII).
-        preserveDates: external_exports.boolean().optional().default(true),
-        preserveFinancialValues: external_exports.boolean().optional().default(true),
-        preserveStatuses: external_exports.boolean().optional().default(true),
-        // Per ETR-D01 (restricted-mode gates):
-        // 5 separate gates before the preview
-        // generates. ALL 5 are required for
-        // unsanitized-diagnostic mode; ignored
-        // for the other two modes.
-        dpoApprovalReference: external_exports.string().trim().max(120).optional().default(""),
-        defectReference: external_exports.string().trim().max(120).optional().default(""),
-        projectConfirmation: external_exports.string().trim().max(60).optional().default(""),
-        reauthenticatedAt: external_exports.string().optional().default(""),
-        acknowledgedRestrictedMode: external_exports.boolean().optional().default(false),
-        // Per ETR-D03 (minimize scope): the
-        // operator must specify the explicit
-        // scope. The full-dataset path is
-        // rejected (the unsanitized mode
-        // requires narrow scope).
-        scopeManifest: external_exports.object({
-          bookingIds: external_exports.array(external_exports.string()).optional().default([]),
-          memberIds: external_exports.array(external_exports.string()).optional().default([]),
-          dateRange: external_exports.object({
-            start: external_exports.string().optional().default(""),
-            end: external_exports.string().optional().default("")
-          }).optional().default({ start: "", end: "" })
-        }).optional().default({ bookingIds: [], memberIds: [], dateRange: { start: "", end: "" } }),
-        // Per ETR-D04 (sensitive-file opt-in):
-        // OFF by default even in unsanitized
-        // mode. The operator has to check a
-        // SEPARATE box to opt into copying
-        // sensitive files (IDs, payment
-        // proofs, signatures).
-        sensitiveFileOptIn: external_exports.boolean().optional().default(false),
-        // Per ETR-D06 (TTL): the snapshot's
-        // expiresAt. Default 24h. Operator can
-        // pick a shorter window.
-        ttlHours: external_exports.number().int().min(1).max(168).optional().default(24)
-      }).strict().optional().default({
-        mode: "sanitized-snapshot",
-        snapshotNote: "",
-        preserveDates: true,
-        preserveFinancialValues: true,
-        preserveStatuses: true,
-        dpoApprovalReference: "",
-        defectReference: "",
-        projectConfirmation: "",
-        reauthenticatedAt: "",
-        acknowledgedRestrictedMode: false,
-        scopeManifest: { bookingIds: [], memberIds: [], dateRange: { start: "", end: "" } },
-        sensitiveFileOptIn: false,
-        ttlHours: 24
-      })
-    }).strict();
-  }
-});
-
 // server/handlers/email-banner.ts
 function escapeHtml(value) {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -230009,10 +230009,6 @@ function logModeOnce(mode) {
   }
 }
 
-// server/apiRouter.ts
-init_email();
-init_notifications();
-
 // server/handlers/bookings.ts
 init_firebase_admin();
 init_test_runs();
@@ -231156,14 +231152,14 @@ function generateOtherAddOnRefundId() {
 init_shared();
 
 // server/handlers/reservationScopeTransition.ts
-async function preReadSiblingChildren(transaction, adminDb2, bookingReservationId, map2) {
+async function preReadSiblingChildren(transaction, adminDb3, bookingReservationId, map2) {
   if (bookingReservationId.length === 0) return [];
   const childrenForFlip = await transaction.get(
-    adminDb2.collection("bookings").where("reservationId", "==", bookingReservationId)
+    adminDb3.collection("bookings").where("reservationId", "==", bookingReservationId)
   );
   return childrenForFlip.docs.map(map2);
 }
-function applyReservationScopePaymentTransition(transaction, adminDb2, bookingReservationId, targetBookingId, children, rule, updatedAt) {
+function applyReservationScopePaymentTransition(transaction, adminDb3, bookingReservationId, targetBookingId, children, rule, updatedAt) {
   const postUpdateChildStatuses = [];
   const siblingFlips = [];
   for (const child of children) {
@@ -231172,11 +231168,11 @@ function applyReservationScopePaymentTransition(transaction, adminDb2, bookingRe
     postUpdateChildStatuses.push(newStatus);
     if (decision && child.id !== targetBookingId) {
       siblingFlips.push({ id: child.id, fromStatus: child.status, toStatus: newStatus });
-      transaction.update(adminDb2.collection("bookings").doc(child.id), decision.write);
+      transaction.update(adminDb3.collection("bookings").doc(child.id), decision.write);
     }
   }
   if (bookingReservationId.length > 0 && children.length > 0) {
-    transaction.update(adminDb2.collection("reservations").doc(bookingReservationId), { updatedAt });
+    transaction.update(adminDb3.collection("reservations").doc(bookingReservationId), { updatedAt });
   }
   return {
     siblingFlippedCount: siblingFlips.length,
@@ -235766,6 +235762,7 @@ async function handleRejectPayment(req, res) {
   const paymentRejectedBy = req.staff?.uid || "staff";
   let bookingData = null;
   let siblingRejectedCount = 0;
+  let transitioned = false;
   try {
     const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
     const updatedAt = /* @__PURE__ */ new Date();
@@ -235797,6 +235794,7 @@ async function handleRejectPayment(req, res) {
         throw new Error(`Only a booking in 'payment-uploaded' status can be rejected (current: ${data.status}).`);
       }
       bookingData = data;
+      transitioned = isTargetInPaymentUploaded;
       const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
       const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data() : {};
       const holdWindowHours = normalizePaymentHoldWindowHours(
@@ -235854,6 +235852,29 @@ async function handleRejectPayment(req, res) {
         });
       }
     });
+    if (transitioned || siblingRejectedCount > 0) {
+      try {
+        await sendBookingTrigger("payment-rejected", {
+          ...bookingData,
+          status: "pending",
+          paymentRejectionReason
+        });
+      } catch (emailErr) {
+        console.error("Failed to send payment-rejected email:", emailErr);
+      }
+      try {
+        await writeNotification({
+          type: "payment",
+          title: `Payment proof rejected \u2014 ${bookingData?.bookingRef || bookingId} (Room ${bookingData?.roomNumber || ""})`.trim(),
+          entityType: "booking",
+          entityId: bookingId,
+          roomNumber: bookingData?.roomNumber || null,
+          bookingRef: bookingData?.bookingRef || null
+        });
+      } catch (notifErr) {
+        console.error("Failed to write payment-rejection notification:", notifErr);
+      }
+    }
     return res.status(200).json({
       success: true,
       data: {
@@ -235866,7 +235887,10 @@ async function handleRejectPayment(req, res) {
         // the sibling-rejection count for symmetry with
         // `handleVerifyAndRecordPayment`. Zero for the
         // N=1 case or when no flippable siblings.
-        siblingRejectedCount
+        siblingRejectedCount,
+        // Per XCC-05: whether this call performed the transition. The
+        // caller (and the test suite) can assert on it.
+        transitioned
       }
     });
   } catch (error) {
@@ -247498,39 +247522,7 @@ async function handler(req, res) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     req.staff = authResult;
-    const bookingId = String((req.body || {}).bookingId || "").trim();
-    let preRejectSnapshot = null;
-    if (bookingId) {
-      const snap = await adminDb.collection("bookings").doc(bookingId).get();
-      if (snap.exists) preRejectSnapshot = snap.data() || null;
-    }
-    const wasEligible = preRejectSnapshot?.status === "payment-uploaded";
-    const result = await handleRejectPayment(req, res);
-    if (wasEligible) {
-      try {
-        const emailBooking = {
-          ...preRejectSnapshot,
-          status: "pending",
-          paymentRejectionReason: (req.body || {}).reason
-        };
-        await sendBookingTrigger("payment-rejected", emailBooking);
-      } catch (emailErr) {
-        console.error("Failed to send payment-rejected email:", emailErr);
-      }
-      try {
-        await writeNotification({
-          type: "payment",
-          title: `Payment proof rejected \xE2\u20AC\u201D ${preRejectSnapshot.bookingRef || bookingId} (Room ${preRejectSnapshot.roomNumber || ""})`.trim(),
-          entityType: "booking",
-          entityId: bookingId,
-          roomNumber: preRejectSnapshot.roomNumber || null,
-          bookingRef: preRejectSnapshot.bookingRef || null
-        });
-      } catch (notifErr) {
-        console.error("Failed to write payment-rejection notification:", notifErr);
-      }
-    }
-    return result;
+    return await handleRejectPayment(req, res);
   }
   if (domain === "bookings" && action === "apply-discount" && req.method === "POST") {
     const authResult = await authenticateStaff(req);
