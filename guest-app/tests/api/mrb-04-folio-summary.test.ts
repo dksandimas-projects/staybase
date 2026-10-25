@@ -184,8 +184,16 @@ describe("MRB-04 folio migration — Phase 1 (types + subcollection rules + beha
       // The CRL-01 negative-amount convention is honored.
       // The `refunds ?? []` default keeps Phase 1 callers
       // backward-compatible.
+      //
+      // Per FIN-REFUND-LIABILITY (QA pass 2026-10-24) the reduce is
+      // `sumCollectedPayments` — sign-aware AND status-aware: a SETTLED
+      // refund (the money left the till) nets, a PENDING one is a
+      // liability and does not.
       expect(folio).toMatch(
-        /const refunds = input\.refunds \?\? \[\];\s*\n\s*const paymentsTotal =\s*\n\s*input\.payments\.reduce\(\(sum, p\) => sum \+ \(Number\(p\.amount\) \|\| 0\), 0\) \+\s*\n\s*refunds\.reduce\(\(sum, r\) => sum \+ \(Number\(r\.amount\) \|\| 0\), 0\);/
+        /const refunds = input\.refunds \?\? \[\];/
+      );
+      expect(folio).toMatch(
+        /const paymentsTotal =\s*\n\s*sumCollectedPayments\(input\.payments\) \+ sumCollectedPayments\(refunds\);/
       );
     });
 

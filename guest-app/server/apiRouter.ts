@@ -58,7 +58,7 @@ const staffOnlyEmailActions = new Set([
   // server-triggered from authenticated mutations; the public
   // /api/email/* endpoint only re-sends for guest-driven actions.
   // voucher-issued + store-order-* + staff-* are not in
-  // publicEmailActions below — they bypass the endpoint and are
+  // publicEmailActions below â€” they bypass the endpoint and are
   // fired directly from the handler.
   "voucher-issued",
   "store-order-placed",
@@ -90,7 +90,7 @@ const PRODUCTION_GUEST_HOSTS = new Set([
 // the admin/guest apps from staging subdomains that are NOT the production
 // `config.domain`/`config.adminDomain`. Because the admin app calls the guest
 // API cross-origin, those staging origins must be in the CORS allow-list or
-// every staff action (confirm, checkout, payment, …) is blocked by the browser
+// every staff action (confirm, checkout, payment, â€¦) is blocked by the browser
 // preflight. Derive them from the base guest domain using the documented
 // `stg.` / `stg-admin.` convention (see plan/project/PROD-CUTOVER-RUNBOOK.md),
 // only when this deployment is not production.
@@ -256,7 +256,7 @@ async function authenticateUser(req: VercelRequest): Promise<{ success: boolean;
 // Per Spark Rewards audit 2026-07-18 HIGH-1: every member-scoped
 // booking match that keys off the ID token's `email` claim must
 // first require `email_verified === true`. The `uid`-only match
-// (`booking.memberId == token.uid`) is always safe — the attacker
+// (`booking.memberId == token.uid`) is always safe â€” the attacker
 // would need their own uid, which they already have. Returns a
 // structured 403 response the client recognizes (`code:
 // "EMAIL_NOT_VERIFIED"`) so it can render a "Verify your email"
@@ -281,9 +281,9 @@ function emailClaimGuardResponse(user: { email?: string; email_verified?: boolea
 const rateLimitCache = new Map<string, { count: number; resetTime: number }>();
 
 // Per PR-AUDIT-H6 (2026-10-20): the cache was never pruned, so every
-// distinct key (IP × route × window) stayed in the Map for the life of
+// distinct key (IP Ã— route Ã— window) stayed in the Map for the life of
 // the instance. On Vercel the instance is short-lived, so the leak is
-// bounded in practice — but a long-lived warm instance (or a local
+// bounded in practice â€” but a long-lived warm instance (or a local
 // `vercel dev` session) accumulated keys indefinitely. Sweep expired
 // entries opportunistically. The sweep is amortized: at most one pass
 // per `PRUNE_INTERVAL_MS`.
@@ -328,7 +328,7 @@ function isRateLimited(ip: string, limit: number, windowMs: number): boolean {
 // backoff bucket. A single successful lookup resets the
 // counter. This drops the per-IP PoR from ~14%/day
 // (14,400 attempts / 99,999 keys) to ~0.07%/day
-// (3 attempts / IP / hour × 24 = 72 attempts/day/IP).
+// (3 attempts / IP / hour Ã— 24 = 72 attempts/day/IP).
 //
 // The state lives in module memory (same as the
 // per-minute rate-limit cache). Keep it local to avoid
@@ -372,7 +372,7 @@ async function verifyTurnstile(token: string | undefined, req?: VercelRequest): 
   // Per BI-02 (booking-intercom audit 2026-07-06): the bypass is
   // gated on NODE_ENV === "test" ONLY. The previous version also
   // short-circuited on the literal tokens "mock_token" and the
-  // Cloudflare sentinel keys — in every environment, including
+  // Cloudflare sentinel keys â€” in every environment, including
   // production. Since every guest-app caller shipped a
   // `|| "mock_token"` fallback in its bundle, any bot could read
   // it and bypass Turnstile on all gated endpoints. Local dev /
@@ -437,6 +437,45 @@ async function verifyTurnstile(token: string | undefined, req?: VercelRequest): 
   }
 }
 
+/**
+ * The bot gate for a WRITE path.
+ *
+ * Per P0-STAFF-TURNSTILE (2026-10-24): an AUTHENTICATED staff write
+ * does not need a bot token.
+ *
+ * The six staff breakfast / other-add-on mutations authenticate the
+ * caller FIRST â€” `authenticateStaff` verifies the Firebase ID token's
+ * SIGNATURE (`adminAuth.verifyIdToken`) and then requires the
+ * `role` claim to be `admin` or `front-desk` â€” and only then ran the
+ * Turnstile gate. The admin app has no widget that can obtain a token
+ * and sends `turnstileToken: undefined`, so every one of those six
+ * endpoints answered HTTP 400 "Bot verification token is missing." and
+ * the staff features were dead in production.
+ *
+ * A bot token is a defence against ANONYMOUS callers: a bot cannot
+ * hold a verified ID token with a staff role claim. A staff write is
+ * already behind a strictly stronger control, so gating it again buys
+ * nothing and costs the whole feature.
+ *
+ * This is the posture `bookings/cancel` has used since 2026-06-26
+ * ("Staff requests bypass (they're already authenticated)"). This
+ * helper makes it one call instead of six copies of the same block.
+ *
+ * Returns `null` when the request may proceed, or the response to send
+ * when the gate refuses it.
+ */
+export async function enforceBotGate(
+  req: VercelRequest,
+  res: VercelResponse
+): Promise<VercelResponse | null> {
+  // Already authenticated as staff (or explicitly refused staff auth on
+  // a guest-only endpoint, which sets `staff` to `null`).
+  if ((req as any).staff) return null;
+  const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+  if (verification.success) return null;
+  return res.status(400).json({ success: false, error: verification.error });
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Per S2 (soft batch 2026-06-26): wrap `res.status` once
   // so the post-handler hooks (e.g. the lookup
@@ -460,7 +499,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // 1. Enforce CORS
   // Per W4.6 / W1.13 / decision #106 / #86: explicit allowlist from config + dev origins.
-  // `Access-Control-Allow-Credentials` is removed — Firebase ID tokens ride in the
+  // `Access-Control-Allow-Credentials` is removed â€” Firebase ID tokens ride in the
   // Authorization header, not cookies, so credentials are not needed.
   // (Closes SEV-1 #2 cross-cutting + 1.7 SEV-1 from the audit.)
   setCorsHeaders(req, res);
@@ -489,7 +528,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // `x-vercel-forwarded-for`. Vercel OVERWRITES `x-forwarded-for`
   // and does not forward external IPs (per Vercel's request-headers
   // documentation), so the previous first-hop read was NOT spoofable
-  // on Vercel — this is a robustness improvement, not a fix for a
+  // on Vercel â€” this is a robustness improvement, not a fix for a
   // live bypass. `x-vercel-forwarded-for` is Vercel's own sanitized
   // single-value client IP and stays correct even when a proxy sits
   // in front of Vercel (which is the one configuration where
@@ -514,7 +553,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.log("Honeypot triggered, silently ignoring write.");
       // Per BF-44 (booking-flow audit 2026-06-26): the previous
       // echo included `req.body.bookingId` if the bot supplied
-      // one — a real preallocated ID was leaked back to the bot
+      // one â€” a real preallocated ID was leaked back to the bot
       // as part of the fake success. Always return a fresh fake
       // ID; never reflect the bot's input.
       return res.status(200).json({
@@ -577,12 +616,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Per CRL-07 (2026-08-03, per decision #173): the
   // admin-only exception endpoint. The handler
   // re-checks the admin role (front-desk staff are
-  // rejected with 403) — the apiRouter-level
+  // rejected with 403) â€” the apiRouter-level
   // `authenticateStaff` only verifies the staff
   // credential, not the role. Same pattern as
   // `add-refund` (the handler is the source of
   // truth for the admin role check). Rate-limited
-  // at 30/min — an exception is a deliberate
+  // at 30/min â€” an exception is a deliberate
   // admin mutation, not a tap-and-confirm action.
   if (domain === "bookings" && action === "cancellation-exception" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-cancellation-exception:${ip}`, 30, 60000)) {
@@ -602,7 +641,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // this to render the live state without
   // computing the cumulative processed refund
   // client-side. Authenticated-staff (any role)
-  // — the data is non-sensitive (no PII, just
+  // â€” the data is non-sensitive (no PII, just
   // money-state numbers) and the admin UI uses
   // it for the drawer panel.
   if (domain === "bookings" && action === "cancellation-liability" && req.method === "POST") {
@@ -642,7 +681,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleRejectDiscount(req, res);
   }
 
-  // Per Phase 12 — Dashboard Payment Rejection & Reference
+  // Per Phase 12 â€” Dashboard Payment Rejection & Reference
   // Verification (2026-07-15): staff can reject a pending
   // payment proof from the dashboard pending-payments
   // alerts. The booking bounces back to `pending` (room
@@ -697,7 +736,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       try {
         await writeNotification({
           type: "payment",
-          title: `Payment proof rejected — ${preRejectSnapshot.bookingRef || bookingId} (Room ${preRejectSnapshot.roomNumber || ""})`.trim(),
+          title: `Payment proof rejected â€” ${preRejectSnapshot.bookingRef || bookingId} (Room ${preRejectSnapshot.roomNumber || ""})`.trim(),
           entityType: "booking",
           entityId: bookingId,
           roomNumber: preRejectSnapshot.roomNumber || null,
@@ -738,7 +777,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Per VOU-02 (2026-08-14): remove-voucher is the missing
   // half of the apply-discount symmetry. Senior/PWD has
   // handleRejectDiscount; vouchers had no equivalent.
-  // Staff-only (mirrors apply-discount's auth posture) —
+  // Staff-only (mirrors apply-discount's auth posture) â€”
   // guest-facing "Remove" link in VOUCHERS.md:44 is a
   // separate future endpoint.
   if (domain === "bookings" && action === "remove-voucher" && req.method === "POST") {
@@ -756,7 +795,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // for corporate chargeback bookings. Staff-only
   // (mirrors the auth posture of `apply-discount` +
   // `reject-discount` + `reject-payment`). Rate-limited
-  // at 30/min/IP — same bucket as the other staff
+  // at 30/min/IP â€” same bucket as the other staff
   // tap-and-confirm booking mutations.
   if (domain === "bookings" && action === "set-lou-received" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-set-lou:${ip}`, 30, 60000)) {
@@ -853,13 +892,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleRescheduleBooking(req, res);
   }
 
-  // Per MRB-14 (2026-08-03, per decision #180 — proposed):
+  // Per MRB-14 (2026-08-03, per decision #180 â€” proposed):
   // the add-room surface. Staff adds a room to an
   // existing pre-arrival reservation using the
   // header's current dates. Same auth posture as the
   // reschedule surface (staff-only, 401/403 split).
   // The rate limit shares the bookings-reschedule
-  // bucket — both are staff-driven, deliberate
+  // bucket â€” both are staff-driven, deliberate
   // mutations that the desk performs a handful of
   // times per session. A separate bucket would just
   // starve one path at the expense of the other.
@@ -938,7 +977,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (domain === "bookings" && action === "cancel" && req.method === "POST") {
     // Per PR-AUDIT-H5 (2026-10-20): the cancel path had NO IP rate
-    // limit — Turnstile was the only throttle, and Turnstile is a
+    // limit â€” Turnstile was the only throttle, and Turnstile is a
     // per-request human-verification challenge, not a throughput
     // cap. Its read-only sibling `cancel-preview` already had
     // 10/min; the cancel endpoint now matches it, so a caller cannot
@@ -976,13 +1015,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Per CRL-06 (2026-08-02): the cancellation preview.
   // The URL is `POST /api/bookings/cancel-preview` (the
   // apiRouter splits on `/` and uses `[domain, action]`
-  // — a slash-separated path would drop the second
+  // â€” a slash-separated path would drop the second
   // segment, so the action name uses the same hyphen-
   // separated shape as `add-payment` / `create-walkin` /
   // `confirm-with-balance`). The preview is rate-limited
   // independently of the cancel bucket (10/min/IP) so
   // a flood of previews cannot starve a legitimate
-  // cancel attempt. The handler is read-only — no
+  // cancel attempt. The handler is read-only â€” no
   // Turnstile, no `runTransaction`, no writes to
   // Firestore. The same `ref + (email | token)` credential
   // as the destructive cancel is the guest gate; the
@@ -1015,7 +1054,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(429).json({ success: false, error: "Too many extend requests. Please try again in a minute." });
     }
 
-    // Staff token → reject (guest-only endpoint)
+    // Staff token â†’ reject (guest-only endpoint)
     if (req.headers.authorization) {
       const staffAuth = await authenticateStaff(req);
       if (staffAuth.success) {
@@ -1049,7 +1088,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Per H1 (hardening batch 2026-06-26): the lookup
-    // endpoint is a ref+email oracle — without Turnstile,
+    // endpoint is a ref+email oracle â€” without Turnstile,
     // a bot can probe the 99,999-key daily namespace
     // (5-digit post-H3) within the 10/min rate limit and
     // learn which refs are real via the 200 vs 404 timing
@@ -1101,7 +1140,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // `[domain, action]` destructuring above drops. We
   // discriminate by `pathSegments[2]` because both
   // routes share `domain === "bookings" && action
-  // === "breakfast"`. Route order matters — the
+  // === "breakfast"`. Route order matters â€” the
   // more-specific `manage` / `update` blocks come
   // before the catch-all `breakfast-config` block
   // below so the dispatch lands on the right branch.
@@ -1116,7 +1155,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Mirror the `bookings-lookup` budget (10/min/IP)
     // so a probing bot can't fan out faster than the
     // existing lookup surface. The 3-failure 1-hour
-    // backoff doesn't apply here — the manage path
+    // backoff doesn't apply here â€” the manage path
     // always discloses "Booking not found" identically
     // to lookup, so a sophisticated attacker can't
     // distinguish, and the rate limit is the
@@ -1133,7 +1172,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Lookup-token gated via the dispatcher +
   // Turnstile-gated per `plan/docs/SECURITY.md`
   // (the same gate the booking-create path uses for
-  // mutations). Rate-limited at 10/min/IP — the same
+  // mutations). Rate-limited at 10/min/IP â€” the same
   // window as the lookup + cancel-preview surfaces.
   if (
     domain === "bookings" &&
@@ -1164,8 +1203,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // (the staff drawer is admin-app-only, never the
   // guest Magic-Link token gate). Turnstile-gated per
   // `plan/docs/SECURITY.md` (same posture as every other
-  // staff mutation endpoint — see `add-refund`,
-  // `add-payment`). Rate-limited at 30/min/IP — front
+  // staff mutation endpoint â€” see `add-refund`,
+  // `add-payment`). Rate-limited at 30/min/IP â€” front
   // desk can fan out across many bookings in a shift
   // but the per-booking context still keeps the limit
   // generous enough for the multi-booking workflow.
@@ -1187,13 +1226,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult;
 
-    // Per H1 (hardening batch 2026-06-26): the
-    // mutation is Turnstile-gated like every other
-    // staff write path. Same posture as `add-refund`.
-    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
-    if (!verification.success) {
-      return res.status(400).json({ success: false, error: verification.error });
-    }
+    // Per P0-STAFF-TURNSTILE (2026-10-24): an authenticated staff write
+    // is already behind a verified ID token + a role claim, so it does
+    // not need a bot token. Same posture as `bookings/cancel`.
+    //
+    // It WAS Turnstile-gated (per H1, 2026-06-26), which is what made
+    // the feature dead in production: the admin app has no widget that
+    // can obtain a token, so every call answered HTTP 400.
+    const denied = await enforceBotGate(req, res);
+    if (denied) return denied;
 
     return await handleStaffUpdateBreakfast(req, res);
   }
@@ -1203,7 +1244,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // `breakfastServed[key]` + `breakfastAudit` for the
   // BR-07 kitchen list. STAFF-Token gated; Turnstile-
   // gated per SECURITY.md; rate-limited at 60/min/IP
-  // — kitchen ticks happen frequently during the
+  // â€” kitchen ticks happen frequently during the
   // breakfast service window (a 12-table morning can
   // plate 60+ meals in 90 minutes).
   if (
@@ -1224,10 +1265,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult;
 
-    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
-    if (!verification.success) {
-      return res.status(400).json({ success: false, error: verification.error });
-    }
+    // Per P0-STAFF-TURNSTILE (2026-10-24): an authenticated staff write
+    // is already behind a verified ID token + a role claim, so it does
+    // not need a bot token. Same posture as `bookings/cancel`.
+    const denied = await enforceBotGate(req, res);
+    if (denied) return denied;
 
     return await handleMarkServed(req, res);
   }
@@ -1237,7 +1279,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // STAFF-Token gated; Turnstile-gated; rate-limited
   // at 30/min/IP (this is a manual ops action, not
   // kitchen-frequency). Idempotent on `refundId` per
-  // CRL-01 — a re-POST returns the existing paid
+  // CRL-01 â€” a re-POST returns the existing paid
   // entry unchanged.
   if (
     domain === "bookings" &&
@@ -1257,10 +1299,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     (req as any).staff = authResult;
 
-    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
-    if (!verification.success) {
-      return res.status(400).json({ success: false, error: verification.error });
-    }
+    // Per P0-STAFF-TURNSTILE (2026-10-24): an authenticated staff write
+    // is already behind a verified ID token + a role claim, so it does
+    // not need a bot token. Same posture as `bookings/cancel`.
+    const denied = await enforceBotGate(req, res);
+    if (denied) return denied;
 
     return await handleMarkRefundPaid(req, res);
   }
@@ -1270,7 +1313,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // admin Refunds view. Distinct URL from the
   // booking-drawer path (`/api/bookings/breakfast/mark-refund-paid`,
   // above) because this one is gated separately
-  // (admin staff only — no public inbound) and
+  // (admin staff only â€” no public inbound) and
   // posts to the SAME helper via the dedicated
   // refund-handler. The helper is the single
   // source of truth for the `status: "paid"`
@@ -1303,9 +1346,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // recompute from `breakfastSelections`) + `lateChanges`
   // (`breakfastAudit` with `occurredAfterCutoff === true`)
   // for one date. STAFF-Token gated; rate-limited at
-  // 30/min/IP — the page reloads occasionally during a
+  // 30/min/IP â€” the page reloads occasionally during a
   // shift. The 30s in-memory cache is owned by the
-  // handler module (not Redis) — see
+  // handler module (not Redis) â€” see
   // `breakfast-kitchen-list.ts` for the cache contract.
   if (
     domain === "bookings" &&
@@ -1331,7 +1374,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Per BR-07: the per-audit acknowledge endpoint for
   // the kitchen list's "Late changes" column. STAFF-Token
-  // gated; rate-limited at 120/min/IP — a single shift
+  // gated; rate-limited at 120/min/IP â€” a single shift
   // can acknowledge 60+ entries during the breakfast
   // service window.
   if (
@@ -1368,7 +1411,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // (the meal catalog is non-sensitive public site
   // content). Cached 60s via the `Cache-Control` header
   // set inside the handler. Rate-limited at 60/min/IP
-  // — the same window the existing per-IP mutation
+  // â€” the same window the existing per-IP mutation
   // limits use, generous enough for a multi-render page.
   // The third URL segment (`config`) is dropped by the
   // `[domain, action] = pathSegments` destructuring
@@ -1391,7 +1434,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleGetBreakfastConfig(req, res);
   }
 
-  // Per BR-12 (Phase 14 — Other Add-Ons, decision #245 reserved,
+  // Per BR-12 (Phase 14 â€” Other Add-Ons, decision #245 reserved,
   // 2026-10-14): the guest Manage Other Add-Ons read endpoint
   // (`/api/bookings/addons/manage`). Lookup-token gated via the
   // `handleGetAddOnsManage` dispatcher. Rate-limited at 10/min/IP.
@@ -1443,10 +1486,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
-    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
-    if (!verification.success) {
-      return res.status(400).json({ success: false, error: verification.error });
-    }
+    // Per P0-STAFF-TURNSTILE (2026-10-24): an authenticated staff write
+    // is already behind a verified ID token + a role claim, so it does
+    // not need a bot token. Same posture as `bookings/cancel`.
+    const denied = await enforceBotGate(req, res);
+    if (denied) return denied;
     return await handleStaffUpdateAddOns(req, res);
   }
 
@@ -1467,10 +1511,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
-    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
-    if (!verification.success) {
-      return res.status(400).json({ success: false, error: verification.error });
-    }
+    // Per P0-STAFF-TURNSTILE (2026-10-24): an authenticated staff write
+    // is already behind a verified ID token + a role claim, so it does
+    // not need a bot token. Same posture as `bookings/cancel`.
+    const denied = await enforceBotGate(req, res);
+    if (denied) return denied;
     return await handleMarkServedAddOns(req, res);
   }
 
@@ -1491,10 +1536,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     (req as any).staff = authResult;
-    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
-    if (!verification.success) {
-      return res.status(400).json({ success: false, error: verification.error });
-    }
+    // Per P0-STAFF-TURNSTILE (2026-10-24): an authenticated staff write
+    // is already behind a verified ID token + a role claim, so it does
+    // not need a bot token. Same posture as `bookings/cancel`.
+    const denied = await enforceBotGate(req, res);
+    if (denied) return denied;
     return await handleMarkRefundPaidAddOns(req, res);
   }
 
@@ -1518,9 +1564,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // projection of `settings/hotelConfig`
   // (`GET /api/public/hotel-config`). The Firestore rules no longer
   // serve `settings/hotelConfig` to an unauthenticated client, so the
-  // guest site reads the hotel's PUBLIC content — name, contact
+  // guest site reads the hotel's PUBLIC content â€” name, contact
   // details, room types, amenities, public prices, booking
-  // preferences, payment methods — through this endpoint instead.
+  // preferences, payment methods â€” through this endpoint instead.
   //
   // The payload is a corporate-rate-free projection: no
   // `roomTypes[].corporateRate`, and no `accountNumber` for a
@@ -1710,7 +1756,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (domain === "members" && action === "redeem-points-self" && req.method === "POST") {
     // Per PR #9 (2026-10-13): the member-self-service redemption
-    // endpoint. NOT staff-authenticated — the handler does its own
+    // endpoint. NOT staff-authenticated â€” the handler does its own
     // Firebase ID token verification + the toggle check +
     // ownership guard (booking.memberId === authUser.uid) inside
     // `applyPointsRedemption`.
@@ -1718,7 +1764,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Per PR-AUDIT-H5 (2026-10-20): this endpoint had NO rate limit
     // of any kind. The handler's own comment claimed a
     // `withRateLimit` middleware applied "at the Vercel API catch-all
-    // level" — no such middleware exists anywhere in the repo. A
+    // level" â€” no such middleware exists anywhere in the repo. A
     // redemption mutates points and writes to the points ledger, so
     // an unbounded retry loop is a real risk, not a theoretical one.
     // 10/min per IP is generous for a human redeeming a voucher.
@@ -1766,7 +1812,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // and the Firestore rule can drop `rewardsPoints` from the
   // staff update allowlist. The handler enforces admin-only and
   // returns 403 for front-desk (mirrors the client UI guard at
-  // MembersPage.tsx). Rate-limited to 10/min/IP — the same
+  // MembersPage.tsx). Rate-limited to 10/min/IP â€” the same
   // budget as `set-active`.
   if (domain === "members" && action === "manual-adjust" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`members-manual-adjust:${ip}`, 10, 60000)) {
@@ -1788,7 +1834,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // manual link of an existing booking to a member, used when the
   // member's account email differs from the email on an earlier
   // anonymous booking. Admin-only (front-desk 403), rate-limited to
-  // 10/min/IP — the same posture as the other staff-mediated
+  // 10/min/IP â€” the same posture as the other staff-mediated
   // member mutations. The handler refuses cancelled / test-run
   // bookings and refuses re-linking to a different member
   // (no unlink from this surface; the booking-drawer memberId edit
@@ -1840,7 +1886,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // auto-bumps the patch version. Mirrors the existing
   // `set-active` route's role gate + rate limit posture; the
   // admin-only role is the gate (front-desk 403). No new
-  // Vercel function — this reuses the existing catch-all
+  // Vercel function â€” this reuses the existing catch-all
   // pattern per `plan/docs/VERCEL-FUNCTION-LIMIT.md`.
   if (domain === "admin" && action === "update-terms" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`admin-update-terms:${ip}`, 10, 60000)) {
@@ -1935,14 +1981,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     //   - the GUEST in the room presents the intercom session
     //     capability token (`sessionToken`), which the handler
     //     verifies against `intercoms/{roomNumber}.currentStayToken`
-    //     — the same binding `handleSendGuestMessage` uses. A
+    //     â€” the same binding `handleSendGuestMessage` uses. A
     //     missing / unknown / mismatched token is rejected 401/403.
     //   - STAFF present a Firebase ID token. `authenticateStaff`
     //     is attempted FIRST: on success the handler runs its
     //     staff path and skips the guest-session check, exactly
     //     like the other staff routes in this router.
     // Staff auth that does not apply (no bearer header) falls
-    // through to the guest path rather than failing the request —
+    // through to the guest path rather than failing the request â€”
     // the guest has no Firebase session.
     const authResult = await authenticateStaff(req);
     if (authResult.success) {
@@ -2037,10 +2083,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // ceiling was not a ceiling at all.
     //
     // The fix is TWO limits:
-    //   1. per-IP-per-action (20/hour) — the anti-spam ceiling. It
+    //   1. per-IP-per-action (20/hour) â€” the anti-spam ceiling. It
     //      is keyed on the platform-sanitized client IP, so it
     //      cannot be varied by the caller.
-    //   2. per-IP-per-action-per-target (3/hour) — the original
+    //   2. per-IP-per-action-per-target (3/hour) â€” the original
     //      intent, so one specific booking can still not have its
     //      guest spammed with repeated triggers.
     //
@@ -2148,7 +2194,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleH2BackfillStatus(req, res);
   }
 
-  // Per Phase 12 — Notification Center (decision #120):
+  // Per Phase 12 â€” Notification Center (decision #120):
   // daily retention job that prunes `notifications` docs
   // older than 30 days. Wired into `vercel.json` (see the
   // `crons` array). CRON_SECRET-gated like the existing
@@ -2163,21 +2209,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CRON_SECRET auth as the other Vercel cron handlers;
   // registered in `guest-app/vercel.json` so the
   // project-local cron config (not the monorepo-root
-  // `vercel.json`) owns the schedule. Idempotent — re-fires
+  // `vercel.json`) owns the schedule. Idempotent â€” re-fires
   // of the same cron tick find zero matches.
   if (domain === "holds" && action === "expire" && (req.method === "POST" || req.method === "GET")) {
 
     return await handleHoldExpiryCron(req, res);
   }
 
-  // In-flow hold (Steps 2 + 3 countdown banner) — see
-  // `plan/features/BOOKING-FLOW.md §In-flow hold`. Public
+  // In-flow hold (Steps 2 + 3 countdown banner) â€” see
+  // `plan/features/BOOKING-FLOW.md Â§In-flow hold`. Public
   // surface, rate-limited at 30/IP/min (matches the public
   // availability endpoint's surface; a guest browsing dates
   // and starting a hold should not collide with the
   // booking-create limit).
   //
-  // No Turnstile gate on the start endpoint — the
+  // No Turnstile gate on the start endpoint â€” the
   // `useInFlowHold` hook fires POST on Step 2 mount,
   // BEFORE the BookingPage's Turnstile widget (gated to
   // `isReviewStep`) has loaded a token. Requiring
@@ -2185,10 +2231,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // "We couldn't load the hold timer" (see
   // `fix/holds-start-turnstile`). The actual security gate
   // is the booking transaction (`/api/bookings/create` IS
-  // Turnstile-gated) — a hold is a soft UX signal, not a
+  // Turnstile-gated) â€” a hold is a soft UX signal, not a
   // server-state change with security implications. A
   // spam attacker creating fake hold docs gets nothing
-  // (they can't book a room — the booking transaction is
+  // (they can't book a room â€” the booking transaction is
   // the real security boundary). Rate limit (30/IP/min)
   // is the spam protection. The daily Janitor sweep keeps
   // the `bookingHolds` collection bounded.
@@ -2208,9 +2254,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleReadInFlowHold(req, res);
   }
 
-  // Per IMT-02 (2026-10-14, `plan/project/ROADMAP.md §IMT`): the "I
+  // Per IMT-02 (2026-10-14, `plan/project/ROADMAP.md Â§IMT`): the "I
   // need more time" endpoint. Adds a window to an active hold, or
-  // revives an expired one — the explicit-action-only counterpart to
+  // revives an expired one â€” the explicit-action-only counterpart to
   // IMT-01's "Pick a new room" fresh-hold path.
   //
   // Rate limit is 10/IP/min, deliberately TIGHTER than start's 30.
@@ -2223,7 +2269,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Steps 2 + 3 and fires before the Step-3-only Turnstile widget has
   // loaded a token, so gating here would break the exact surface the
   // button lives on (see `fix/holds-start-turnstile`). Extending a
-  // SOFT hold unlocks nothing — the authoritative boundary stays the
+  // SOFT hold unlocks nothing â€” the authoritative boundary stays the
   // Turnstile-gated `/api/bookings/create`.
   if (domain === "holds" && action === "extend" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`holds-extend:${ip}`, 10, 60000)) {
@@ -2235,18 +2281,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Per the IFH-01 follow-up: the daily Janitor sweep
   // for stale in-flow holds (Vercel Hobby plan only
-  // allows daily cron jobs — the previous hourly
+  // allows daily cron jobs â€” the previous hourly
   // schedule was rejected; see
   // `fix/vercel-hobby-hourly-cron`). The IFH-01 commit
   // shipped the start + read + consume handlers but
-  // deferred the sweep — the read-time
+  // deferred the sweep â€” the read-time
   // `isInFlowHoldActive` evaluation already reports
   // stale holds as `"expired"` honestly, so the sweep
   // is a cleanup of the on-disk `status`, not a UX-
   // critical path. Same `CRON_SECRET` auth as the
   // existing PEX-06 `/api/holds/expire` cron. See
   // `server/handlers/in-flow-hold.ts` +
-  // `guest-app/vercel.json §crons`.
+  // `guest-app/vercel.json Â§crons`.
   if (domain === "holds" && action === "sweep" && (req.method === "POST" || req.method === "GET")) {
 
     const result = await handleSweepInFlowHolds(req, res);
@@ -2257,7 +2303,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ success: true, data: result });
   }
 
-  // ── Test Runs (ETR) ──────────────────────────────────────
+  // â”€â”€ Test Runs (ETR) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (domain === "test-runs" && action === "create" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`test-runs-create:${ip}`, 5, 60000)) {
       return res.status(429).json({ success: false, error: "Too many requests. Please try again in a minute." });
@@ -2309,7 +2355,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleListTestRuns(req, res);
   }
 
-  // ── Staging Reset (ETR-S) ─────────────────────────────────
+  // â”€â”€ Staging Reset (ETR-S) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (domain === "test-runs" && action === "staging-reset-preview" && req.method === "POST") {
     const authResult = await authenticateStaff(req);
     if (!authResult.success) {
@@ -2337,7 +2383,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleStagingResetExecute(req, res);
   }
 
-  // ETR-R01 / ETR-R04 / ETR-R10 (foundation) — production-to-
+  // ETR-R01 / ETR-R04 / ETR-R10 (foundation) â€” production-to-
   // staging refresh preview. Accepts a JSON export of the production
   // collections and returns the sanitized version + an audit row.
   // See `handleStagingRefreshPreview` for the full contract.

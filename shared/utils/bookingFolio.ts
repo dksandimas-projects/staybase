@@ -19,6 +19,58 @@ import type { BookingRevenueAllocation, ReservationPaymentStatus } from "../type
 import { calculateDiscountChain, type DiscountScope } from "./bookingDiscounts";
 
 /**
+ * Is this ledger entry a refund that has NOT been paid out yet?
+ *
+ * Per FIN-REFUND-LIABILITY (QA pass 2026-10-24): a refund the hotel
+ * has APPROVED but not yet PAID is money the hotel still holds and
+ * owes back — a LIABILITY, not collected money. Subtracting it from
+ * `paymentsTotal` made a fully settled guest look like a debtor:
+ *
+ *   SI-20261021-00058  collected ₱2,800 · bill ₱2,800 · refund ₱100 PENDING
+ *     before: paid ₱2,700 · balance ₱100   ← the guest owes nothing
+ *     after:  paid ₱2,800 · balance ₱0     ← and the hotel owes ₱100
+ *
+ * The folio's own contract already says it: "a negative balance means
+ * the guest is overpaid (refund pending)". The implementation did not
+ * match it — `normalizeLedgerDoc` dropped the refund's `status`, so a
+ * pending refund was indistinguishable from a paid one and both were
+ * netted into `paymentsTotal`.
+ *
+ * The rule:
+ *   * a PAYMENT always counts (payments carry no `status`);
+ *   * a refund whose status is `paid` / `processed` counts — the money
+ *     really left the till;
+ *   * a refund whose status is `pending` — or which has NO status, the
+ *     same convention the dashboard's pending-refunds counter uses
+ *     (`data.status || "pending"`) — does NOT count. It is a liability
+ *     and belongs in the Refunds view, where it already is.
+ */
+export function isUnpaidRefund(entry: {
+  amount?: number | null;
+  type?: string | null;
+  status?: string | null;
+}): boolean {
+  const amount = Number(entry.amount) || 0;
+  const isRefund = entry.type === "refund" || amount < 0;
+  if (!isRefund) return false;
+  const status = typeof entry.status === "string" ? entry.status.trim().toLowerCase() : "";
+  return status !== "paid" && status !== "processed";
+}
+
+/**
+ * Sum the ledger entries that represent money actually COLLECTED.
+ * Pending refunds are excluded (see `isUnpaidRefund`).
+ */
+export function sumCollectedPayments(
+  entries: ReadonlyArray<{ amount?: number | null; type?: string | null; status?: string | null }>
+): number {
+  return entries.reduce(
+    (sum, entry) => (isUnpaidRefund(entry) ? sum : sum + (Number(entry.amount) || 0)),
+    0
+  );
+}
+
+/**
  * The minimal shape the folio math needs from a `Booking`. The
  * shared `Booking` type satisfies this; admin-app's `Booking` (which
  * adds `updatedAt`, `earlyCheckIn`, etc.) is structurally compatible
@@ -85,6 +137,10 @@ export interface FolioCharge {
  */
 export interface FolioLivePayment {
   amount: number;
+  /** Per FIN-REFUND-LIABILITY (2026-10-24) — see `isUnpaidRefund`. */
+  status?: string | null;
+  /** `refund` for a refund entry; omitted (or `payment`) for a payment. */
+  type?: string | null;
 }
 export type FolioLivePayments = FolioLivePayment[];
 
@@ -96,6 +152,10 @@ export type FolioLivePayments = FolioLivePayment[];
  */
 export interface FolioPersistedPayment {
   amount: number;
+  /** Per FIN-REFUND-LIABILITY (2026-10-24) — see `isUnpaidRefund`. */
+  status?: string | null;
+  /** `refund` for a refund entry; omitted (or `payment`) for a payment. */
+  type?: string | null;
 }
 export type FolioPersistedPayments = FolioPersistedPayment[];
 
@@ -204,10 +264,10 @@ export function computeBookingFolio(input: BookingFolioInput): BookingFolio {
   const payments = input.selectedBookingPayments
     ? input.selectedBookingPayments
     : (input.persistedPayments || []);
-  const paymentsTotal = payments.reduce(
-    (sum, p) => sum + (Number(p.amount) || 0),
-    0
-  );
+  // Per FIN-REFUND-LIABILITY (QA pass 2026-10-24): a PENDING refund is
+  // a liability, not collected money — it must not reduce what the
+  // guest has paid. See `isUnpaidRefund`.
+  const paymentsTotal = sumCollectedPayments(payments);
 
   const totalPrice = Number(booking.totalPrice) || 0;
   // Per OCT-FOL-01 (2026-10-20, decision #298): the other add-ons
@@ -328,6 +388,15 @@ export function computeServerFolioTotals(
  */
 export interface FolioReservationPayment {
   amount: number;
+  /**
+   * Per FIN-REFUND-LIABILITY (QA pass 2026-10-24): the refund's
+   * lifecycle status, so a refund that has been approved but not paid
+   * is not netted against collected money. Optional — an entry without
+   * it keeps the previous behaviour.
+   */
+  status?: string | null;
+  /** `refund` for a refund entry; omitted (or `payment`) for a payment. */
+  type?: string | null;
 }
 
 /**
@@ -464,9 +533,13 @@ export function getReservationFolioSummary(
   // doc block above) so the sum is over the ACTIVE entries
   // only.
   const refunds = input.refunds ?? [];
+  // Per FIN-REFUND-LIABILITY (QA pass 2026-10-24): a PENDING refund is
+  // a liability — the hotel still holds the money and owes it back — so
+  // it does NOT reduce `paymentsTotal`. Only a refund that has actually
+  // been paid out does. That is what makes the balance negative for a
+  // guest who is owed money, exactly as the invariant below describes.
   const paymentsTotal =
-    input.payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) +
-    refunds.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+    sumCollectedPayments(input.payments) + sumCollectedPayments(refunds);
   const chargesTotal = input.charges.reduce(
     (sum, c) => sum + (Number(c.amount) || 0),
     0

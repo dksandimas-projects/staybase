@@ -78,7 +78,7 @@ describe("MRB-04 Phase 4 — reservation-aware transactional folio reads", () =>
       expect(resolver).toContain('transaction.get(childRef.collection("payments"))');
       expect(resolver).toContain('transaction.get(childRef.collection("charges"))');
       expect(resolver).toMatch(
-        /sumLedgerAmounts\(reservationPaymentsSnapshot\)\s*\+\s*sumLedgerAmounts\(reservationRefundsSnapshot\)\s*\+\s*transitionalCollectedTotal/
+        /sumLedgerAmounts\(reservationPaymentsSnapshot\)\s*\+\s*sumRefundAmounts\(reservationRefundsSnapshot\)\s*\+\s*transitionalCollectedTotal/
       );
       expect(resolver).toMatch(
         /sumLedgerAmounts\(reservationChargesSnapshot\)\s*\+\s*transitionalIncidentalTotal/

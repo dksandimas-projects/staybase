@@ -224,7 +224,22 @@ export function computeRefundPaidAmountDelta(
 ): number {
   const safe = Number.isFinite(currentPaidAmount) ? currentPaidAmount : 0;
   const safeRefund = Number.isFinite(refundAmountPositive) ? refundAmountPositive : 0;
-  return safe - Math.max(0, safeRefund);
+  // Per FIN-PAID-AMOUNT-FLOOR (QA pass 2026-10-24): `paidAmount` is
+  // "what the guest has paid for this booking". It can never be
+  // NEGATIVE.
+  //
+  // The refund path decremented it from a base that was never seeded,
+  // so `SI-20261021-00011` ended at −₱1,000: a guest who paid ₱5,400
+  // read as owing ₱1,000. A negative base also breaks
+  // `shared/utils/bookingAddOnReschedule.ts`, which reads `paidAmount`
+  // as the "was this meal paid for?" budget — so a PAID breakfast
+  // removed on that booking opened NO refund liability, and the guest
+  // was never owed the money back.
+  //
+  // A refund larger than what was collected is a LIABILITY (the hotel
+  // owes the guest more than it holds) and is recorded by the refund
+  // doc itself — it does not belong in `paidAmount`.
+  return Math.max(0, safe - Math.max(0, safeRefund));
 }
 
 /** Resolves the refund-doc parent (cancellation follows MRB-04 Phase 2.x). */

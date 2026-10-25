@@ -221220,7 +221220,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.18.19";
+    VERSION2 = "2.18.20";
   }
 });
 
@@ -222594,6 +222594,19 @@ var init_bookingDiscounts = __esm({
 });
 
 // ../shared/utils/bookingFolio.ts
+function isUnpaidRefund(entry) {
+  const amount = Number(entry.amount) || 0;
+  const isRefund = entry.type === "refund" || amount < 0;
+  if (!isRefund) return false;
+  const status = typeof entry.status === "string" ? entry.status.trim().toLowerCase() : "";
+  return status !== "paid" && status !== "processed";
+}
+function sumCollectedPayments(entries) {
+  return entries.reduce(
+    (sum, entry) => isUnpaidRefund(entry) ? sum : sum + (Number(entry.amount) || 0),
+    0
+  );
+}
 function computeBookingFolio(input) {
   const { booking, storeOrders } = input;
   const folioBookingIds = new Set(
@@ -222612,10 +222625,7 @@ function computeBookingFolio(input) {
     0
   );
   const payments = input.selectedBookingPayments ? input.selectedBookingPayments : input.persistedPayments || [];
-  const paymentsTotal = payments.reduce(
-    (sum, p) => sum + (Number(p.amount) || 0),
-    0
-  );
+  const paymentsTotal = sumCollectedPayments(payments);
   const totalPrice = Number(booking.totalPrice) || 0;
   const otherAddOnTotal = Math.max(0, Number(booking.otherAddOnTotal) || 0);
   const grandTotal = totalPrice + otherAddOnTotal + storeTotal + chargesTotal;
@@ -222645,7 +222655,7 @@ function getReservationFolioSummary(input) {
   const reservationTotal = Number(input.reservationTotal) || 0;
   const otherAddOnTotal = Math.max(0, Number(input.otherAddOnTotal) || 0);
   const refunds = input.refunds ?? [];
-  const paymentsTotal = input.payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) + refunds.reduce((sum, r3) => sum + (Number(r3.amount) || 0), 0);
+  const paymentsTotal = sumCollectedPayments(input.payments) + sumCollectedPayments(refunds);
   const chargesTotal = input.charges.reduce(
     (sum, c2) => sum + (Number(c2.amount) || 0),
     0
@@ -225746,6 +225756,7 @@ __export(shared_exports, {
   isPaymentVerified: () => isPaymentVerified,
   isRewardVoucher: () => isRewardVoucher,
   isUnlimitedStay: () => isUnlimitedStay,
+  isUnpaidRefund: () => isUnpaidRefund,
   isValidBookingRef: () => isValidBookingRef,
   isValidIsoDate: () => isValidIsoDate,
   isValidLookupToken: () => isValidLookupToken,
@@ -225806,6 +225817,7 @@ __export(shared_exports, {
   subscribeToPublicSiteContentBust: () => subscribeToPublicSiteContentBust,
   sumAttributedLedgerEntryAmounts: () => sumAttributedLedgerEntryAmounts,
   sumBreakfastRateLines: () => sumBreakfastRateLines,
+  sumCollectedPayments: () => sumCollectedPayments,
   sumLedgerEntryAmounts: () => sumLedgerEntryAmounts,
   sweepBookingsStorage: () => sweepBookingsStorage,
   toDateOrNow: () => toDateOrNow,
@@ -229837,7 +229849,8 @@ var init_email = __esm({
 // server/apiRouter.ts
 var apiRouter_exports = {};
 __export(apiRouter_exports, {
-  default: () => handler
+  default: () => handler,
+  enforceBotGate: () => enforceBotGate
 });
 module.exports = __toCommonJS(apiRouter_exports);
 init_firebase_admin();
@@ -230413,7 +230426,7 @@ function trimOrNull(input, maxLen) {
 function computeRefundPaidAmountDelta(currentPaidAmount, refundAmountPositive) {
   const safe = Number.isFinite(currentPaidAmount) ? currentPaidAmount : 0;
   const safeRefund = Number.isFinite(refundAmountPositive) ? refundAmountPositive : 0;
-  return safe - Math.max(0, safeRefund);
+  return Math.max(0, safe - Math.max(0, safeRefund));
 }
 function resolveRefundDocParent(db, bookingId, category, reservationId) {
   const bookingRef2 = db.collection("bookings").doc(bookingId);
@@ -231362,6 +231375,16 @@ function isExpectedBookingUploadPath(path, bookingId, folder) {
 function sumLedgerAmounts(snapshot) {
   return snapshot.docs.reduce((sum, docSnap) => sum + Number(docSnap.data()?.amount || 0), 0);
 }
+function sumRefundAmounts(snapshot) {
+  return snapshot.docs.reduce((sum, docSnap) => {
+    const data = docSnap.data() || {};
+    const amount = Number(data.amount || 0);
+    const isRefund = data.type === "refund" || amount < 0;
+    const status = typeof data.status === "string" ? data.status.trim().toLowerCase() : "";
+    const isPendingRefund = isRefund && status !== "paid" && status !== "processed";
+    return isPendingRefund ? sum : sum + amount;
+  }, 0);
+}
 function deriveSourceNote(source) {
   switch (source) {
     case "walk-in":
@@ -231466,7 +231489,7 @@ async function readTransactionalFolioSnapshot(input) {
     (sum, snapshots) => sum + sumBilledAddToBillOrders(snapshots.storeOrdersSnapshot),
     0
   );
-  const collectedTotal = sumLedgerAmounts(reservationPaymentsSnapshot) + sumLedgerAmounts(reservationRefundsSnapshot) + transitionalCollectedTotal;
+  const collectedTotal = sumLedgerAmounts(reservationPaymentsSnapshot) + sumRefundAmounts(reservationRefundsSnapshot) + transitionalCollectedTotal;
   const incidentalTotal = sumLedgerAmounts(reservationChargesSnapshot) + transitionalIncidentalTotal;
   const totalPrice = Number(reservationDoc.data()?.totalPrice) || 0;
   const otherAddOnTotal = childBookingsSnapshot.docs.reduce(
@@ -231490,6 +231513,18 @@ async function readTransactionalFolioSnapshot(input) {
     ...totals,
     source: "reservation-subcollection"
   };
+}
+async function resolvePaidAmountForLiability(input) {
+  const { transaction, bookingId, bookingData } = input;
+  const seeded = Number(bookingData?.paidAmount);
+  if (Number.isFinite(seeded) && seeded > 0) return seeded;
+  const folioSnapshot = await readTransactionalFolioSnapshot({
+    transaction,
+    bookingRef: adminDb.collection("bookings").doc(String(bookingId)),
+    bookingId,
+    bookingData
+  });
+  return Math.max(0, Number(folioSnapshot.collectedTotal) || 0);
 }
 function calculateCheckoutPoints(totalPrice, rewardsConfig) {
   if (!rewardsConfig || rewardsConfig.pointsEnabled === false) return 0;
@@ -235650,9 +235685,13 @@ async function handleRejectPayment(req, res) {
     return res.status(500).json({ success: false, error: message });
   }
 }
-function redateAddOnsForCancel(input) {
+async function redateAddOnsForCancel(input) {
   const { transaction, bookingId, bookingRef: bookingRef2, booking, today, actorUid, actorRole } = input;
-  const paidAmount = Number(booking.paidAmount) || 0;
+  const paidAmount = await resolvePaidAmountForLiability({
+    transaction,
+    bookingId,
+    bookingData: booking
+  });
   const redatedBreakfast = redateBreakfastSelections({
     mode: "cancel",
     window: { checkIn: String(booking.checkIn || ""), checkOut: String(booking.checkOut || "") },
@@ -235968,7 +236007,7 @@ async function handleCancelBooking(req, res) {
         );
         for (const child of children) {
           if (!cancellableIds.has(child.id)) continue;
-          const redated = redateAddOnsForCancel({
+          const redated = await redateAddOnsForCancel({
             transaction,
             bookingId: child.id,
             bookingRef: String(child.data.bookingRef || ""),
@@ -236132,7 +236171,7 @@ async function handleCancelBooking(req, res) {
         const perChildCancelPolicyRefunded = Boolean(
           liabilitySnapshot && Number(liabilitySnapshot.policyResult?.policyRefund) > 0
         );
-        const perChildRedated = redateAddOnsForCancel({
+        const perChildRedated = await redateAddOnsForCancel({
           transaction,
           bookingId: bookingDocumentRef.id,
           bookingRef: String(freshBooking.bookingRef || ""),
@@ -238550,14 +238589,25 @@ async function handleRescheduleBooking(req, res) {
         window: { checkIn, checkOut },
         today: todayKey,
         selections: booking.breakfastSelections,
-        paidAmount: Number(booking.paidAmount) || 0
+        // Per FIN-PAID-AMOUNT-SOURCE (QA pass 2026-10-24) — the
+        // denormalized field can be negative or absent; fall back to the
+        // ledger so a PAID removal still opens its refund liability.
+        paidAmount: await resolvePaidAmountForLiability({
+          transaction,
+          bookingId,
+          bookingData: booking
+        })
       });
       const redatedOtherAddOns = redateOtherAddOnSelections({
         mode: "reschedule",
         window: { checkIn, checkOut },
         today: todayKey,
         selections: booking.otherAddOnSelections,
-        paidAmount: Number(booking.paidAmount) || 0
+        paidAmount: await resolvePaidAmountForLiability({
+          transaction,
+          bookingId,
+          bookingData: booking
+        })
       });
       const preservedExtraBedCount = Number(booking.extraBedCount) || 0;
       const preservedExtraBedRate = Number(booking.extraBedRate) || 0;
@@ -246817,7 +246867,7 @@ var staffOnlyEmailActions = /* @__PURE__ */ new Set([
   // server-triggered from authenticated mutations; the public
   // /api/email/* endpoint only re-sends for guest-driven actions.
   // voucher-issued + store-order-* + staff-* are not in
-  // publicEmailActions below — they bypass the endpoint and are
+  // publicEmailActions below â€” they bypass the endpoint and are
   // fired directly from the handler.
   "voucher-issued",
   "store-order-placed",
@@ -247079,6 +247129,12 @@ async function verifyTurnstile(token2, req) {
     return { success: false, error: "Turnstile connection failed. Please try again." };
   }
 }
+async function enforceBotGate(req, res) {
+  if (req.staff) return null;
+  const verification = await verifyTurnstile(req.body?.turnstileToken, req);
+  if (verification.success) return null;
+  return res.status(400).json({ success: false, error: verification.error });
+}
 async function handler(req, res) {
   const existingStatus = res.status;
   if (typeof existingStatus === "function" && !existingStatus.mock) {
@@ -247228,7 +247284,7 @@ async function handler(req, res) {
       try {
         await writeNotification({
           type: "payment",
-          title: `Payment proof rejected \u2014 ${preRejectSnapshot.bookingRef || bookingId} (Room ${preRejectSnapshot.roomNumber || ""})`.trim(),
+          title: `Payment proof rejected \xE2\u20AC\u201D ${preRejectSnapshot.bookingRef || bookingId} (Room ${preRejectSnapshot.roomNumber || ""})`.trim(),
           entityType: "booking",
           entityId: bookingId,
           roomNumber: preRejectSnapshot.roomNumber || null,
@@ -247502,10 +247558,8 @@ async function handler(req, res) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     req.staff = authResult;
-    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
-    if (!verification.success) {
-      return res.status(400).json({ success: false, error: verification.error });
-    }
+    const denied = await enforceBotGate(req, res);
+    if (denied) return denied;
     return await handleStaffUpdateBreakfast(req, res);
   }
   if (domain === "bookings" && action === "breakfast" && pathSegments[2] === "mark-served" && req.method === "POST") {
@@ -247517,10 +247571,8 @@ async function handler(req, res) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     req.staff = authResult;
-    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
-    if (!verification.success) {
-      return res.status(400).json({ success: false, error: verification.error });
-    }
+    const denied = await enforceBotGate(req, res);
+    if (denied) return denied;
     return await handleMarkServed(req, res);
   }
   if (domain === "bookings" && action === "breakfast" && pathSegments[2] === "mark-refund-paid" && req.method === "POST") {
@@ -247532,10 +247584,8 @@ async function handler(req, res) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     req.staff = authResult;
-    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
-    if (!verification.success) {
-      return res.status(400).json({ success: false, error: verification.error });
-    }
+    const denied = await enforceBotGate(req, res);
+    if (denied) return denied;
     return await handleMarkRefundPaid(req, res);
   }
   if (domain === "refunds" && action === "mark-paid" && req.method === "POST") {
@@ -247602,10 +247652,8 @@ async function handler(req, res) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     req.staff = authResult;
-    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
-    if (!verification.success) {
-      return res.status(400).json({ success: false, error: verification.error });
-    }
+    const denied = await enforceBotGate(req, res);
+    if (denied) return denied;
     return await handleStaffUpdateAddOns(req, res);
   }
   if (domain === "bookings" && action === "addons" && pathSegments[2] === "mark-served" && req.method === "POST") {
@@ -247617,10 +247665,8 @@ async function handler(req, res) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     req.staff = authResult;
-    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
-    if (!verification.success) {
-      return res.status(400).json({ success: false, error: verification.error });
-    }
+    const denied = await enforceBotGate(req, res);
+    if (denied) return denied;
     return await handleMarkServedAddOns(req, res);
   }
   if (domain === "bookings" && action === "addons" && pathSegments[2] === "mark-refund-paid" && req.method === "POST") {
@@ -247632,10 +247678,8 @@ async function handler(req, res) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
     req.staff = authResult;
-    const verification = await verifyTurnstile(req.body?.turnstileToken, req);
-    if (!verification.success) {
-      return res.status(400).json({ success: false, error: verification.error });
-    }
+    const denied = await enforceBotGate(req, res);
+    if (denied) return denied;
     return await handleMarkRefundPaidAddOns(req, res);
   }
   if (domain === "bookings" && action === "addons" && (pathSegments[2] === void 0 || pathSegments[2] === "config") && req.method === "GET") {
@@ -248187,6 +248231,10 @@ async function handler(req, res) {
   }
   return res.status(404).json({ success: false, error: `Endpoint /api/${domain}/${action} not found.` });
 }
+// Annotate the CommonJS export names for ESM import in node:
+0 && (module.exports = {
+  enforceBotGate
+});
 /*! Bundled license information:
 
 web-streams-polyfill/dist/ponyfill.es2018.js:
