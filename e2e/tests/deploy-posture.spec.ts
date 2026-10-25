@@ -1,5 +1,6 @@
 import { test, expect } from "../support/qa";
 import { adminIdentity } from "../support/env";
+import { liveBotMode } from "../support/bot-mode";
 
 /**
  * AI-BROWSER-QA (2026-10-23) — deployment posture checks.
@@ -216,12 +217,24 @@ test.describe("Deployment posture", () => {
   });
 
   test("the API refuses a bot-token-less booking creation with a clear error", async ({ page }) => {
+    // The hotel-wide bot-protection switch decides whether the gate is
+    // applied. Both modes are asserted strictly: with the gate on the
+    // refusal is the GATE's, with it off the refusal is the REQUEST's —
+    // and either way the caller is refused with a clear message.
+    const mode = await liveBotMode(GUEST_BASE);
     const res = await page.request.post(`${GUEST_BASE}/api/bookings/create`, {
       data: { checkIn: "2026-11-05", checkOut: "2026-11-06" }
     });
     expect(res.status()).toBe(400);
     const body = await res.json();
     expect(body.success).toBe(false);
-    expect(String(body.error)).toMatch(/bot verification/i);
+    if (mode === "turnstile") {
+      expect(String(body.error)).toMatch(/bot verification/i);
+    } else {
+      expect(String(body.error ?? ""), "the refusal must be the request's, not the bot gate's").not.toMatch(
+        /bot verification|turnstile/i
+      );
+      expect(String(body.error ?? ""), "the refusal must still say what is wrong").toMatch(/required field|invalid|check the booking/i);
+    }
   });
 });

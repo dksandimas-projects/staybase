@@ -69,20 +69,32 @@ test.describe("Admin app", () => {
     // Before the fix the list read "All bookings 69 / Needs attention
     // 10 / Balance due 69" — every booking owing money, because the
     // rows' ledger was never populated (RPT-01b, §3.6).
-    const TRUTH = { all: 69, balanceDue: 53, needsAttention: 5 };
-
-    // The total is not in dispute — it anchors that the chips were read.
-    expect.soft(allBookings, "the bookings list must hold every production booking").toBe(TRUTH.all);
+    //
+    // The ABSOLUTE counts move with every booking the hotel takes — this
+    // QA pass's own 20 bookings moved them (69 → 89) — so the spec pins
+    // the RELATIONSHIP the defect broke, and the exact figures stay in
+    // the reconciliation (check I18), which recomputes them from the raw
+    // ledger. A zeroed ledger is exactly "every booking looks unpaid":
+    // Balance due collapses onto All bookings, and Needs attention onto
+    // Balance due.
+    expect.soft(allBookings, "the bookings list must hold every production booking").toBeGreaterThan(0);
 
     expect.soft(
       balanceDue,
-      `Balance due must be ${TRUTH.balanceDue}, not ${TRUTH.all} — every row reads as if ₱0 was paid`
-    ).toBe(TRUTH.balanceDue);
+      `Balance due (${balanceDue}) must be fewer than every booking (${allBookings}) — ` +
+        "a zeroed ledger makes the two equal"
+    ).toBeLessThan(allBookings);
 
     expect.soft(
       needsAttention,
-      `Needs attention must be ${TRUTH.needsAttention}, not ${balanceDue} — the same zeroed folio drives both chips`
-    ).toBe(TRUTH.needsAttention);
+      `Needs attention (${needsAttention}) must be fewer than Balance due (${balanceDue}) — ` +
+        "the same zeroed folio drives both chips"
+    ).toBeLessThan(balanceDue);
+
+    expect.soft(
+      needsAttention,
+      "some booking must need attention — the chip is not a constant"
+    ).toBeGreaterThan(0);
 
     // ── The per-row half of the scenario ────────────────────────────
     // "the paid booking shows the Paid pill; the partial one shows
@@ -182,40 +194,55 @@ test.describe("Admin app", () => {
     };
 
     const total = await readResultCount();
-    expect(total, "the unfiltered list must hold every production booking").toBe(69);
+    expect(total, "the unfiltered list must hold every production booking").toBeGreaterThan(0);
 
     // The truth from the independent recomputation with the LIST's model
-    // (scripts/qa/reconcile-production.ts, check I18): 16 bookings are
-    // paid in full, 1 is partially paid and 52 are unpaid. Before the
-    // fix every filter matched NOTHING, because every booking read ₱0
-    // paid.
+    // (scripts/qa/reconcile-production.ts, check I18): the bookings are
+    // paid in full, partly paid or unpaid. Before the fix every filter
+    // matched NOTHING, because every booking read ₱0 paid.
+    //
+    // The absolute counts move with every booking the hotel takes — this
+    // QA pass's own bookings moved them — so the spec pins the
+    // RELATIONSHIPS: each bucket is non-empty (the ledger is populated),
+    // the three partition the list, and not every booking is unpaid (that
+    // is the zeroed-ledger symptom).
     await payState.selectOption("paid");
     await page.waitForTimeout(1500);
     const paid = await readResultCount();
-    console.log(`      FL-02 · "Fully paid" → ${paid} of 69`);
+    console.log(`      FL-02 · "Fully paid" → ${paid} of ${total}`);
 
     await payState.selectOption("partial");
     await page.waitForTimeout(1500);
     const partial = await readResultCount();
-    console.log(`      FL-02 · "Partially paid" → ${partial} of 69`);
+    console.log(`      FL-02 · "Partially paid" → ${partial} of ${total}`);
 
     await payState.selectOption("unpaid");
     await page.waitForTimeout(1500);
     const unpaid = await readResultCount();
-    console.log(`      FL-02 · "Unpaid" → ${unpaid} of 69`);
+    console.log(`      FL-02 · "Unpaid" → ${unpaid} of ${total}`);
 
     expect.soft(
       paid,
-      "the Fully paid filter must return the 16 paid bookings, not an empty list"
-    ).toBe(16);
+      "the Fully paid filter must return the paid bookings, not an empty list"
+    ).toBeGreaterThan(0);
     expect.soft(
       partial,
-      "the Partially paid filter must return the 1 partly-paid booking, not an empty list"
-    ).toBe(1);
+      "the Partially paid filter must return the partly-paid booking, not an empty list"
+    ).toBeGreaterThan(0);
     expect.soft(
       unpaid,
-      "the Unpaid filter must return the 52 unpaid bookings"
-    ).toBe(52);
+      "the Unpaid filter must return the unpaid bookings, not an empty list"
+    ).toBeGreaterThan(0);
+
+    expect.soft(
+      paid + partial + unpaid,
+      `the three payment states must partition the list — ${paid} + ${partial} + ${unpaid} ≠ ${total}`
+    ).toBe(total);
+
+    expect.soft(
+      unpaid,
+      `not every booking can be unpaid (${unpaid} of ${total}) — that is the zeroed-ledger symptom`
+    ).toBeLessThan(total);
 
     // Leave the filter as we found it — the list is shared state.
     await payState.selectOption("");
@@ -250,11 +277,17 @@ test.describe("Admin app", () => {
     // The truth, recomputed from the raw production documents
     // (scripts/qa/probe-dashboard-cards.ts, read-only):
     //
-    //   Pending payments : 0   (no booking has status "payment-uploaded")
-    //   Pending refunds  : 2   (0 cancellation + 2 breakfast)
+    //   Pending payments : the bookings with status "payment-uploaded"
+    //   Pending refunds  : 0 cancellation + 2 breakfast (unchanged by the
+    //                      QA pass — the QA bookings carry no money)
     //
     // The pre-fix symptom was that the card claimed EVERY guest owed
     // the full amount. It must not.
+    //
+    // The count moves with the book (the QA pass's own GCash-proof
+    // booking added one), so the truth is taken from the LIST: the card
+    // must agree with the number of "Proof pending" rows the bookings
+    // list actually renders.
     const pending = await cardFigures("Pending Payments");
     const refunds = await cardFigures("Pending refunds");
     console.log(
@@ -262,9 +295,30 @@ test.describe("Admin app", () => {
         `"${refunds.label}" = ${refunds.value} (${refunds.context})`
     );
 
+    // The truth from the bookings list itself.
+    await openAdmin(page, "/bookings");
+    await page.waitForTimeout(3000);
+    // The bookings table renders the status badge as the status with its
+    // dash replaced by a space ("payment uploaded"), and the RESERVATION
+    // row renders the same state as "Proof pending".
+    const proofPendingRows = await page.getByText("payment uploaded", { exact: true }).count();
+    console.log(`      FL-03 · "Proof pending" rows in the list → ${proofPendingRows}`);
+
     expect(pending.label).toBe("Pending Payments");
-    expect(pending.value, "no production booking has status payment-uploaded").toBe("0");
-    expect(pending.context, "the card must not claim guests owe money").toBe("No payment proofs queued");
+    expect(pending.value, "the card must show a number of bookings").toMatch(/^\d+$/);
+    const pendingValue = Number(pending.value);
+    expect(
+      pendingValue,
+      `the card claims ${pendingValue} queued proofs; the list renders ${proofPendingRows} "Proof pending" rows`
+    ).toBe(proofPendingRows);
+    expect(
+      pending.context,
+      "the card's context must describe the count it shows"
+    ).toBe(
+      pendingValue > 0
+        ? `${pendingValue} proof${pendingValue === 1 ? "" : "s"} queued`
+        : "No payment proofs queued"
+    );
 
     expect(refunds.label).toBe("Pending refunds");
     expect(refunds.value, "2 breakfast refunds are pending, 0 cancellation refunds").toBe("2");
