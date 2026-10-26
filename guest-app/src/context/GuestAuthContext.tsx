@@ -156,6 +156,13 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [memberProfile, setMemberProfile] = useState<MemberProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  /**
+   * Bumped when the app applies an email-verification action code, so the
+   * effect that finishes the verification re-reads the session. The
+   * Firebase SDK restores the session asynchronously and mutates the user
+   * object in place, so a state change is the only reliable nudge.
+   */
+  const [verificationNonce, setVerificationNonce] = useState(0);
 
   // Listen to Firebase Auth state
   useEffect(() => {
@@ -182,11 +189,7 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
   // have to work:
   //
   //   a) `?emailVerified=true` (no `oobCode`) — Firebase's handler already
-  //      verified the address. The app only has to notice the marker,
-  //      re-read the user and force-refresh the id token, because the
-  //      cached token still carries `email_verified: false`. Without the
-  //      refresh, `/api/members/stays` keeps answering 403
-  //      EMAIL_NOT_VERIFIED and "My Stays" stays empty.
+  //      verified the address. The app only has to notice the marker.
   //   b) `?oobCode=…` — a `handleCodeInApp` link that carried the action
   //      code onto the app's own origin. The app has to finish the action
   //      itself with `applyActionCode`.
@@ -195,12 +198,28 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
   // their email was still unverified in the app, the "Verify your email"
   // banner never cleared, and (see §3.20) the past bookings were never
   // linked, so "My Stays" stayed empty for every email/password member.
+  //
+  // THIS effect only recognises the landing and remembers it. The refresh
+  // and the re-registration live in the effect below, because the Firebase
+  // SDK restores the session ASYNCHRONOUSLY: on the first render
+  // `auth.currentUser` is still null, so a refresh attempted here would
+  // silently do nothing — and the cached id token would keep claiming
+  // `email_verified: false`, which is what makes `/api/members/stays`
+  // answer 403 EMAIL_NOT_VERIFIED.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     const oobCode = params.get("oobCode");
     const justVerified = params.get("emailVerified") === "true";
     if (!oobCode && !justVerified) return;
+
+    // Remember the verification SYNCHRONOUSLY — the effect below must see
+    // it whether the session is already restored or not.
+    try {
+      window.localStorage.setItem(PENDING_VERIFICATION_KEY, "1");
+    } catch {
+      // A blocked storage API must not break the landing.
+    }
 
     let cancelled = false;
     (async () => {
@@ -211,33 +230,10 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
         }
         // Take the markers out of the URL so a reload does not replay them.
         window.history.replaceState({}, document.title, window.location.pathname);
-        const current = auth.currentUser;
-        if (!current) {
-          // No session on THIS device — the verification link usually
-          // lands in the guest's phone, the session is on their laptop.
-          // Remember it so the next sign-in re-runs the registration and
-          // the past bookings get linked then.
-          try {
-            window.localStorage.setItem(PENDING_VERIFICATION_KEY, "1");
-          } catch {
-            // A blocked storage API must not break the landing.
-          }
-          return;
-        }
         if (cancelled) return;
-        await current.reload();
-        // The `email_verified` claim is stale in the cached token — force
-        // a refresh so the next request carries the verified state.
-        await current.getIdToken(true);
-        setUser(auth.currentUser);
-        if (auth.currentUser?.emailVerified) {
-          // Per §3.20: the registration endpoint only links the guest's
-          // past bookings when the email is verified ("Once verified,
-          // re-calling /api/members/register re-runs the link"). The
-          // signup call ran while the email was still unverified, so
-          // this is the call that actually links them.
-          await registerCurrentMember();
-        }
+        // Nudge the effect below: the action code has just been applied,
+        // so the session must be re-read now.
+        setVerificationNonce((n) => n + 1);
       } catch (err) {
         console.error("Email verification could not be completed:", err);
       }
@@ -253,26 +249,58 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
   // Per §3.20 (cross-device half): the verification link usually lands
   // in a DIFFERENT browser than the one the guest signed up on — the
   // mail is on their phone, the session is on their laptop. That landing
-  // has no session, so the registration above cannot run there; the
-  // guest then signs in later and the past bookings are STILL not
-  // linked (nothing re-runs `/api/members/register` for an
-  // already-enrolled member).
+  // has no session, so the registration cannot run there; the guest then
+  // signs in later and the past bookings are STILL not linked (nothing
+  // re-runs `/api/members/register` for an already-enrolled member).
   //
-  // The flag below survives that hop: the landing sets it, and the next
-  // sign-in with a verified address consumes it.
+  // This effect is the ONE place that finishes the verification. It runs
+  // when the session arrives (`user`) and when the action code has just
+  // been applied (`verificationNonce`), because:
+  //
+  //   - the Firebase SDK restores the session asynchronously, so on the
+  //     first render there is no `user` at all;
+  //   - the RESTORED session carries the CACHED id token, which still
+  //     claims `email_verified: false`. The token has to be force-refreshed
+  //     before the API will accept it — that is what turns
+  //     `/api/members/stays` from 403 EMAIL_NOT_VERIFIED into the stay.
   useEffect(() => {
     if (!user) return;
     if (typeof window === "undefined") return;
     if (window.localStorage.getItem(PENDING_VERIFICATION_KEY) !== "1") return;
-    if (user.emailVerified !== true) return;
-    window.localStorage.removeItem(PENDING_VERIFICATION_KEY);
-    void registerCurrentMember().catch((err) => {
-      console.error("The past stays could not be linked after the verification:", err);
-    });
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const current = auth.currentUser;
+        if (!current) return;
+        // The cached token is stale — force a refresh so the next request
+        // carries the verified state.
+        await current.getIdToken(true);
+        if (cancelled) return;
+        // `reload()` re-reads the user record; the SDK mutates the object
+        // in place, so the next render sees the verified flag.
+        await current.reload();
+        if (cancelled) return;
+        setUser(auth.currentUser);
+        if (auth.currentUser?.emailVerified !== true) return;
+        // Per §3.20: the registration endpoint only links the guest's past
+        // bookings when the email is verified ("Once verified, re-calling
+        // `/api/members/register` re-runs the link"). The signup call ran
+        // while the email was still unverified, so this is the call that
+        // actually links them.
+        window.localStorage.removeItem(PENDING_VERIFICATION_KEY);
+        await registerCurrentMember();
+      } catch (err) {
+        console.error("The past stays could not be linked after the verification:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
     // Per the exhaustive-deps rule this must run once per user change —
     // the flag is in localStorage, not in React state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [user, verificationNonce]);
 
   // Listen to member profile when user changes
   useEffect(() => {
