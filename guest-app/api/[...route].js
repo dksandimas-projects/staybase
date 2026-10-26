@@ -13867,8 +13867,8 @@ var require_src5 = __commonJS({
         url: options.url?.toString().replace(getBaseUrl(), getBaseUrl(exports2.SECONDARY_HOST_ADDRESS))
       };
       const r1 = (0, gaxios_1.request)(options);
-      const r22 = (0, gaxios_1.request)(secondaryOptions);
-      return Promise.any([r1, r22]);
+      const r23 = (0, gaxios_1.request)(secondaryOptions);
+      return Promise.any([r1, r23]);
     }
     function instance(options) {
       return metadataAccessor("instance", options);
@@ -24644,7 +24644,7 @@ var require_longbits = __commonJS({
       }
       return value.low || value.high ? new LongBits(value.low >>> 0, value.high >>> 0) : zero;
     };
-    LongBits.prototype.toNumber = function toNumber(unsigned) {
+    LongBits.prototype.toNumber = function toNumber2(unsigned) {
       if (!unsigned && this.hi >>> 31) {
         var lo3 = ~this.lo + 1 >>> 0, hi2 = ~this.hi >>> 0;
         if (!lo3)
@@ -25185,7 +25185,7 @@ var require_umd = __commonJS({
         LongPrototype.toInt = function toInt() {
           return this.unsigned ? this.low >>> 0 : this.low;
         };
-        LongPrototype.toNumber = function toNumber() {
+        LongPrototype.toNumber = function toNumber2() {
           if (this.unsigned)
             return (this.high >>> 0) * TWO_PWR_32_DBL + (this.low >>> 0);
           return this.high * TWO_PWR_32_DBL + (this.low >>> 0);
@@ -36279,13 +36279,13 @@ var require_src10 = __commonJS({
         return res;
       }).catch((err) => {
         if (responded) {
-          return r22;
+          return r23;
         } else {
           responded = true;
           throw err;
         }
       });
-      const r22 = (0, gaxios_1.request)(secondaryOptions).then((res) => {
+      const r23 = (0, gaxios_1.request)(secondaryOptions).then((res) => {
         responded = true;
         return res;
       }).catch((err) => {
@@ -36296,7 +36296,7 @@ var require_src10 = __commonJS({
           throw err;
         }
       });
-      return Promise.race([r1, r22]);
+      return Promise.race([r1, r23]);
     }
     function instance(options) {
       return metadataAccessor("instance", options);
@@ -37371,7 +37371,7 @@ var require_oauth2client2 = __commonJS({
         }
       }
       async requestAsync(opts, reAuthRetried = false) {
-        let r22;
+        let r23;
         try {
           const r3 = await this.getRequestMetadataAsync(opts.url);
           opts.headers = opts.headers || {};
@@ -37384,7 +37384,7 @@ var require_oauth2client2 = __commonJS({
           if (this.apiKey) {
             opts.headers["X-Goog-Api-Key"] = this.apiKey;
           }
-          r22 = await this.transporter.request(opts);
+          r23 = await this.transporter.request(opts);
         } catch (e3) {
           const res = e3.response;
           if (res) {
@@ -37406,7 +37406,7 @@ var require_oauth2client2 = __commonJS({
           }
           throw e3;
         }
-        return r22;
+        return r23;
       }
       verifyIdToken(options, callback) {
         if (callback && typeof callback !== "function") {
@@ -110396,10 +110396,10 @@ var require_intersects = __commonJS({
   "../node_modules/jsonwebtoken/node_modules/semver/ranges/intersects.js"(exports2, module2) {
     "use strict";
     var Range = require_range();
-    var intersects = (r1, r22, options) => {
+    var intersects = (r1, r23, options) => {
       r1 = new Range(r1, options);
-      r22 = new Range(r22, options);
-      return r1.intersects(r22, options);
+      r23 = new Range(r23, options);
+      return r1.intersects(r23, options);
     };
     module2.exports = intersects;
   }
@@ -111151,7 +111151,7 @@ var require_lodash2 = __commonJS({
       if (!value) {
         return value === 0 ? value : 0;
       }
-      value = toNumber(value);
+      value = toNumber2(value);
       if (value === INFINITY || value === -INFINITY) {
         var sign = value < 0 ? -1 : 1;
         return sign * MAX_INTEGER;
@@ -111162,7 +111162,7 @@ var require_lodash2 = __commonJS({
       var result = toFinite(value), remainder = result % 1;
       return result === result ? remainder ? result - remainder : result : 0;
     }
-    function toNumber(value) {
+    function toNumber2(value) {
       if (typeof value == "number") {
         return value;
       }
@@ -111237,7 +111237,7 @@ var require_lodash4 = __commonJS({
       if (!value) {
         return value === 0 ? value : 0;
       }
-      value = toNumber(value);
+      value = toNumber2(value);
       if (value === INFINITY || value === -INFINITY) {
         var sign = value < 0 ? -1 : 1;
         return sign * MAX_INTEGER;
@@ -111248,7 +111248,7 @@ var require_lodash4 = __commonJS({
       var result = toFinite(value), remainder = result % 1;
       return result === result ? remainder ? result - remainder : result : 0;
     }
-    function toNumber(value) {
+    function toNumber2(value) {
       if (typeof value == "number") {
         return value;
       }
@@ -111395,7 +111395,7 @@ var require_lodash8 = __commonJS({
       if (!value) {
         return value === 0 ? value : 0;
       }
-      value = toNumber(value);
+      value = toNumber2(value);
       if (value === INFINITY || value === -INFINITY) {
         var sign = value < 0 ? -1 : 1;
         return sign * MAX_INTEGER;
@@ -111406,7 +111406,7 @@ var require_lodash8 = __commonJS({
       var result = toFinite(value), remainder = result % 1;
       return result === result ? remainder ? result - remainder : result : 0;
     }
-    function toNumber(value) {
+    function toNumber2(value) {
       if (typeof value == "number") {
         return value;
       }
@@ -121455,13 +121455,13 @@ var require_src21 = __commonJS({
         return res;
       }).catch((err) => {
         if (responded) {
-          return r22;
+          return r23;
         } else {
           responded = true;
           throw err;
         }
       });
-      const r22 = (0, gaxios_1.request)(secondaryOptions).then((res) => {
+      const r23 = (0, gaxios_1.request)(secondaryOptions).then((res) => {
         responded = true;
         return res;
       }).catch((err) => {
@@ -121472,7 +121472,7 @@ var require_src21 = __commonJS({
           throw err;
         }
       });
-      return Promise.race([r1, r22]);
+      return Promise.race([r1, r23]);
     }
     function instance(options) {
       return metadataAccessor("instance", options);
@@ -122547,7 +122547,7 @@ var require_oauth2client3 = __commonJS({
         }
       }
       async requestAsync(opts, reAuthRetried = false) {
-        let r22;
+        let r23;
         try {
           const r3 = await this.getRequestMetadataAsync(opts.url);
           opts.headers = opts.headers || {};
@@ -122560,7 +122560,7 @@ var require_oauth2client3 = __commonJS({
           if (this.apiKey) {
             opts.headers["X-Goog-Api-Key"] = this.apiKey;
           }
-          r22 = await this.transporter.request(opts);
+          r23 = await this.transporter.request(opts);
         } catch (e3) {
           const res = e3.response;
           if (res) {
@@ -122582,7 +122582,7 @@ var require_oauth2client3 = __commonJS({
           }
           throw e3;
         }
-        return r22;
+        return r23;
       }
       verifyIdToken(options, callback) {
         if (callback && typeof callback !== "function") {
@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.20.11";
+    VERSION2 = "2.21.0";
   }
 });
 
@@ -162948,12 +162948,12 @@ var require_html2canvas = __commonJS({
         CORNER2[CORNER2["BOTTOM_RIGHT"] = 2] = "BOTTOM_RIGHT";
         CORNER2[CORNER2["BOTTOM_LEFT"] = 3] = "BOTTOM_LEFT";
       })(CORNER || (CORNER = {}));
-      var getCurvePoints = function(x4, y2, r1, r22, position2) {
+      var getCurvePoints = function(x4, y2, r1, r23, position2) {
         var kappa = 4 * ((Math.sqrt(2) - 1) / 3);
         var ox = r1 * kappa;
-        var oy = r22 * kappa;
+        var oy = r23 * kappa;
         var xm = x4 + r1;
-        var ym = y2 + r22;
+        var ym = y2 + r23;
         switch (position2) {
           case CORNER.TOP_LEFT:
             return new BezierCurve(new Vector(x4, ym), new Vector(x4, ym - oy), new Vector(xm - ox, y2), new Vector(xm, y2));
@@ -171460,9 +171460,9 @@ var require_es_number_constructor = __commonJS({
     var charCodeAt = uncurryThis("".charCodeAt);
     var toNumeric = function(value) {
       var primValue = toPrimitive(value, "number");
-      return typeof primValue == "bigint" ? primValue : toNumber(primValue);
+      return typeof primValue == "bigint" ? primValue : toNumber2(primValue);
     };
-    var toNumber = function(argument) {
+    var toNumber2 = function(argument) {
       var it3 = toPrimitive(argument, "number");
       var first, third, radix, maxCode, digits, length, index, code;
       if (isSymbol(it3)) throw new TypeError2("Cannot convert a Symbol value to a number");
@@ -246855,6 +246855,392 @@ async function handleNotificationsPrune(req, res) {
   }
 }
 
+// server/lib/reconciliation.ts
+init_firebase_admin();
+init_shared();
+function r22(value) {
+  return Math.round(value * 100) / 100;
+}
+function toNumber(value) {
+  const n2 = Number(value);
+  return Number.isFinite(n2) ? n2 : 0;
+}
+async function readBookingLedger(booking) {
+  const entries = [];
+  const readSub = async (parentName, parentId, sub) => {
+    if (!parentId) return;
+    try {
+      const snap = await adminDb.collection(parentName).doc(parentId).collection(sub).get();
+      for (const doc of snap.docs) {
+        const data = doc.data();
+        entries.push({
+          amount: toNumber(data.amount),
+          type: String(data.type || (toNumber(data.amount) < 0 ? "refund" : "payment")),
+          status: String(data.status || "")
+        });
+      }
+    } catch (err) {
+      console.error(
+        `[reconciliation] could not read ${parentName}/${parentId}/${sub}:`,
+        err
+      );
+    }
+  };
+  const reservationId = String(booking.reservationId || "");
+  if (reservationId) {
+    await readSub("reservations", reservationId, "payments");
+    await readSub("reservations", reservationId, "refunds");
+  }
+  const bookingId = String(booking.id || "");
+  await readSub("bookings", bookingId, "payments");
+  await readSub("bookings", bookingId, "refunds");
+  return entries;
+}
+async function readBookingStoreOrders(booking) {
+  try {
+    const snap = await adminDb.collection("storeOrders").get();
+    return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })).filter((order) => String(order.bookingId || "") === String(booking.id)).filter((order) => order.status === "delivered" && order.isBilled === true).map((order) => ({
+      id: order.id,
+      total: toNumber(order.total),
+      isBilled: order.isBilled === true
+    }));
+  } catch {
+    return [];
+  }
+}
+async function runReconciliation() {
+  const startedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const startedMs = Date.now();
+  const bookingSnap = await adminDb.collection("bookings").get();
+  const bookings = bookingSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+  const findings = [];
+  const add = (id, title, status, summary, details = []) => {
+    findings.push({ id, title, status, summary, details: details.slice(0, 50) });
+  };
+  const models = [];
+  for (const booking of bookings) {
+    const ledger = await readBookingLedger(booking);
+    const ledgerCollected = r22(sumCollectedPayments(ledger));
+    const pendingRefund = r22(
+      ledger.filter((e3) => isUnpaidRefund(e3)).reduce((sum, e3) => sum + e3.amount, 0)
+    );
+    const selections = booking.breakfastSelections;
+    let liveSlots = 0;
+    if (selections && typeof selections === "object") {
+      for (const byDate of Object.values(selections)) {
+        if (!Array.isArray(byDate)) continue;
+        for (const slot of byDate) {
+          if (slot && slot.removedAt === null && slot.mealId) liveSlots += 1;
+        }
+      }
+    }
+    models.push({
+      ref: String(booking.bookingRef || booking.id),
+      totalPrice: toNumber(booking.totalPrice),
+      paidAmountField: typeof booking.paidAmount === "number" ? booking.paidAmount : null,
+      ledgerCollected,
+      pendingRefund,
+      allocation: booking.revenueAllocation || null,
+      hasAnyBreakfast: booking.hasAnyBreakfast === true,
+      liveBreakfastSlots: liveSlots,
+      status: String(booking.status || "")
+    });
+  }
+  {
+    const mismatched = [];
+    const negative = [];
+    for (const m2 of models) {
+      if (m2.paidAmountField === null) continue;
+      if (m2.paidAmountField < 0) {
+        negative.push(
+          `${m2.ref} paidAmount=${r22(m2.paidAmountField)} (NEGATIVE) collected=${m2.ledgerCollected}`
+        );
+      }
+      if (r22(m2.paidAmountField) !== m2.ledgerCollected) {
+        mismatched.push(
+          `${m2.ref} paidAmount=${r22(m2.paidAmountField)} ledger=${m2.ledgerCollected} \u0394=${r22(
+            m2.paidAmountField - m2.ledgerCollected
+          )}`
+        );
+      }
+    }
+    add(
+      "I06",
+      "PAY-01 \u2014 booking.paidAmount agrees with the independently summed ledger",
+      mismatched.length === 0 && negative.length === 0 ? "PASS" : "FAIL",
+      `${mismatched.length} mismatch(es) \xB7 ${negative.length} negative paidAmount`,
+      [...negative, ...mismatched]
+    );
+  }
+  {
+    const offenders = [];
+    for (const m2 of models) {
+      if (m2.paidAmountField === null) continue;
+      if (m2.pendingRefund !== 0) {
+        const netted = r22(m2.ledgerCollected + m2.pendingRefund);
+        if (r22(m2.paidAmountField) === netted && netted !== m2.ledgerCollected) {
+          offenders.push(
+            `${m2.ref} paidAmount=${r22(m2.paidAmountField)} = collected ${m2.ledgerCollected} + pending refund ${m2.pendingRefund}`
+          );
+        }
+      }
+    }
+    add(
+      "I06b",
+      "A pending refund liability must not be netted against collected money",
+      offenders.length === 0 ? "PASS" : "FAIL",
+      `${offenders.length} booking(s) net a pending refund against collected money`,
+      offenders
+    );
+  }
+  {
+    const broken = [];
+    for (const m2 of models) {
+      const alloc = m2.allocation;
+      if (!alloc) continue;
+      const totalNet = toNumber(alloc.totalNet);
+      const roomNet = toNumber(alloc.roomNet);
+      const breakfastNet = toNumber(alloc.breakfastNet);
+      const addOnNet = toNumber(alloc.addOnNet);
+      const deductionNet = toNumber(alloc.deductionNet);
+      const sum = r22(roomNet + breakfastNet + addOnNet - deductionNet);
+      if (Math.abs(sum - r22(totalNet)) > 0.05) {
+        broken.push(
+          `${m2.ref} components ${roomNet}+${breakfastNet}+${addOnNet}-${deductionNet}=${sum} but totalNet=${totalNet}`
+        );
+      }
+    }
+    add(
+      "I03",
+      "MRB-11 \u2014 the revenue allocation's components sum to its total",
+      broken.length === 0 ? "PASS" : "FAIL",
+      `${broken.length} allocation(s) do not balance`,
+      broken
+    );
+  }
+  {
+    const offenders = [];
+    for (const booking of bookings) {
+      const addOnTotal = toNumber(booking.otherAddOnTotal);
+      if (addOnTotal === 0) continue;
+      const alloc = booking.revenueAllocation;
+      if (!alloc) {
+        offenders.push(`${String(booking.bookingRef || booking.id)} otherAddOnTotal=${addOnTotal} but NO allocation`);
+        continue;
+      }
+      const addOnNet = toNumber(alloc.addOnNet);
+      if (addOnNet < addOnTotal) {
+        offenders.push(
+          `${String(booking.bookingRef || booking.id)} otherAddOnTotal=${addOnTotal} but addOnNet=${addOnNet}`
+        );
+      }
+    }
+    add(
+      "I04",
+      "MRB-11b \u2014 the other add-ons reach the revenue allocation",
+      offenders.length === 0 ? "PASS" : "FAIL",
+      `${offenders.length} booking(s) carry add-ons the allocation misses`,
+      offenders
+    );
+  }
+  {
+    const stale = [];
+    for (const m2 of models) {
+      if (m2.hasAnyBreakfast && m2.liveBreakfastSlots === 0) {
+        stale.push(`${m2.ref} hasAnyBreakfast=true but no live meal slot (status=${m2.status})`);
+      }
+    }
+    add(
+      "I13",
+      "BR-01 \u2014 hasAnyBreakfast agrees with the live meal slots",
+      stale.length === 0 ? "PASS" : "WARN",
+      `${stale.length} stale flag(s)`,
+      stale
+    );
+  }
+  {
+    const holders = [];
+    for (const m2 of models) {
+      if (m2.status !== "cancelled") continue;
+      if (m2.ledgerCollected > 0) {
+        holders.push(
+          `${m2.ref} cancelled but collected=${m2.ledgerCollected} pendingRefund=${m2.pendingRefund}`
+        );
+      }
+    }
+    add(
+      "I14",
+      "A cancelled booking does not still hold money",
+      holders.length === 0 ? "PASS" : "WARN",
+      `${holders.length} cancelled booking(s) hold money`,
+      holders
+    );
+  }
+  {
+    const offenders = [];
+    try {
+      const ordersSnap = await adminDb.collection("storeOrders").get();
+      for (const doc of ordersSnap.docs) {
+        const order = doc.data();
+        if (String(order.status || "") !== "cancelled") continue;
+        const paymentsSnap = await adminDb.collection("storeOrders").doc(doc.id).collection("payments").get();
+        if (!paymentsSnap.empty) {
+          const total = paymentsSnap.docs.reduce(
+            (sum, d) => sum + toNumber(d.data()?.amount),
+            0
+          );
+          offenders.push(`${String(order.orderRef || doc.id)} cancelled but holds a tender of ${r22(total)}`);
+        }
+      }
+    } catch {
+    }
+    add(
+      "F-C2",
+      "A cancelled store order does not still hold a tender",
+      offenders.length === 0 ? "PASS" : "FAIL",
+      `${offenders.length} cancelled order(s) hold a tender`,
+      offenders
+    );
+  }
+  {
+    const disagreements = [];
+    for (const booking of bookings) {
+      try {
+        const ledger = await readBookingLedger(booking);
+        const storeOrders = await readBookingStoreOrders(booking);
+        const folio = computeBookingFolio({
+          booking: { id: String(booking.id), totalPrice: toNumber(booking.totalPrice) },
+          persistedPayments: ledger.map((e3) => ({
+            amount: e3.amount,
+            type: e3.type,
+            status: e3.status
+          })),
+          selectedBookingCharges: [],
+          storeOrders
+        });
+        const independent = r22(sumCollectedPayments(ledger));
+        if (r22(folio.paymentsTotal) !== independent) {
+          disagreements.push(
+            `${String(booking.bookingRef || booking.id)} folio=${r22(folio.paymentsTotal)} independent=${independent}`
+          );
+        }
+      } catch {
+      }
+    }
+    add(
+      "I07",
+      "Two independent implementations agree on the collected total",
+      disagreements.length === 0 ? "PASS" : "FAIL",
+      `${disagreements.length} disagreement(s)`,
+      disagreements
+    );
+  }
+  const passed = findings.filter((f5) => f5.status === "PASS").length;
+  const failed = findings.filter((f5) => f5.status === "FAIL").length;
+  const warned = findings.filter((f5) => f5.status === "WARN").length;
+  const info = findings.filter((f5) => f5.status === "INFO").length;
+  return {
+    startedAt,
+    finishedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    durationMs: Date.now() - startedMs,
+    bookingsScanned: bookings.length,
+    findings,
+    passed,
+    failed,
+    warned,
+    info
+  };
+}
+async function recordReconciliationRun(result) {
+  const runId = `RR-${result.startedAt.slice(0, 10)}-${Date.now().toString(36).toUpperCase()}`;
+  await adminDb.collection("reconciliationRuns").doc(runId).set({
+    runId,
+    startedAt: result.startedAt,
+    finishedAt: result.finishedAt,
+    durationMs: result.durationMs,
+    bookingsScanned: result.bookingsScanned,
+    passed: result.passed,
+    failed: result.failed,
+    warned: result.warned,
+    info: result.info,
+    findings: result.findings,
+    createdAt: (/* @__PURE__ */ new Date()).toISOString()
+  });
+  if (result.failed === 0) {
+    console.log(
+      `[reconciliation] ${runId} OK \u2014 ${result.bookingsScanned} bookings scanned, ${result.passed} passed, ${result.failed} failed, ${result.warned} warned`
+    );
+    return;
+  }
+  const failures = result.findings.filter((f5) => f5.status === "FAIL");
+  console.error(
+    `[reconciliation] ${runId} FAILED \u2014 ${result.failed} check(s): ` + failures.map((f5) => `${f5.id} ${f5.summary}`).join(" | ")
+  );
+  try {
+    const { writeNotification: writeNotification2 } = await Promise.resolve().then(() => (init_notifications(), notifications_exports));
+    const firstOffender = failures.flatMap((f5) => f5.details).map((d) => String(d).split(" ")[0]).find((ref) => /^SI-/.test(ref));
+    let entityDocId = runId;
+    if (firstOffender) {
+      const refLookup = await adminDb.collection("bookings").where("bookingRef", "==", firstOffender).limit(1).get();
+      if (!refLookup.empty) entityDocId = refLookup.docs[0].id;
+    }
+    await writeNotification2({
+      type: "payment",
+      title: "Nightly reconciliation found a money mismatch",
+      entityType: "booking",
+      entityId: entityDocId,
+      bookingRef: firstOffender || null,
+      roomNumber: null
+    });
+  } catch (err) {
+    console.error("[reconciliation] could not write the desk notification:", err);
+  }
+}
+
+// server/handlers/reconciliation.ts
+function isAuthorizedCronRequest3(req) {
+  const expected = process.env.CRON_SECRET;
+  if (!expected) return false;
+  const headerSecret = req.headers["x-cron-secret"];
+  if (typeof headerSecret === "string" && headerSecret === expected) return true;
+  const authHeader = req.headers.authorization;
+  if (typeof authHeader === "string" && authHeader.startsWith("Bearer ") && authHeader.slice("Bearer ".length) === expected) {
+    return true;
+  }
+  return false;
+}
+async function handleReconciliationCron(req, res) {
+  if (req.method !== "POST" && req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  if (!process.env.CRON_SECRET) {
+    return res.status(500).json({ success: false, error: "CRON_SECRET is not configured on the server." });
+  }
+  if (!isAuthorizedCronRequest3(req)) {
+    return res.status(401).json({ success: false, error: "Unauthorized cron request." });
+  }
+  try {
+    const result = await runReconciliation();
+    await recordReconciliationRun(result);
+    return res.status(200).json({
+      success: true,
+      data: {
+        startedAt: result.startedAt,
+        finishedAt: result.finishedAt,
+        durationMs: result.durationMs,
+        bookingsScanned: result.bookingsScanned,
+        passed: result.passed,
+        failed: result.failed,
+        warned: result.warned,
+        findings: result.findings
+      }
+    });
+  } catch (err) {
+    console.error("[reconciliation] the run failed:", err);
+    return res.status(500).json({ success: false, error: "The nightly reconciliation failed to run." });
+  }
+}
+
 // server/handlers/hold-expiry.ts
 init_firestore();
 init_email();
@@ -246862,7 +247248,7 @@ init_firebase_admin();
 init_shared();
 var SYSTEM_CANCELLATION_SOURCE = "system";
 var EXPIRY_BATCH_SIZE = 200;
-function isAuthorizedCronRequest3(req) {
+function isAuthorizedCronRequest4(req) {
   const expected = process.env.CRON_SECRET;
   if (!expected) return false;
   const headerSecret = req.headers["x-cron-secret"];
@@ -246883,7 +247269,7 @@ async function handleHoldExpiryCron(req, res) {
       error: "CRON_SECRET is not configured on the server."
     });
   }
-  if (!isAuthorizedCronRequest3(req)) {
+  if (!isAuthorizedCronRequest4(req)) {
     return res.status(401).json({ success: false, error: "Unauthorized cron request." });
   }
   const now = /* @__PURE__ */ new Date();
@@ -248153,6 +248539,9 @@ async function handler(req, res) {
     if (!authResult.success) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can convert corporate inquiries into bookings." });
+    }
     req.staff = authResult;
     return await handleConvertInquiryToBooking(req, res);
   }
@@ -248201,6 +248590,9 @@ async function handler(req, res) {
     const authResult = await authenticateStaff(req);
     if (!authResult.success) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can apply points redemptions." });
     }
     req.staff = authResult;
     return await handleRedeemMemberPoints(req, res);
@@ -248493,6 +248885,9 @@ async function handler(req, res) {
   }
   if (domain === "holds" && action === "expire" && (req.method === "POST" || req.method === "GET")) {
     return await handleHoldExpiryCron(req, res);
+  }
+  if (domain === "reconciliation" && action === "run" && (req.method === "POST" || req.method === "GET")) {
+    return await handleReconciliationCron(req, res);
   }
   if (domain === "holds" && action === "start" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`holds-start:${ip}`, 30, 6e4)) {

@@ -63,7 +63,21 @@ describe("launch-readiness must-fix regressions", () => {
     const rules = read("firebase/firestore.rules");
 
     expect(rules).toMatch(/affectedKeys\(\)\s*\.hasOnly\(\["fullName", "phone", "photoUrl", "updatedAt"\]\)/);
-    expect(rules).toMatch(/match \/storeOrders\/\{orderId\} \{\s*allow read, update: if isStaff\(\);\s*allow create: if false;/);
+    // Per QA §3.7 (2026-10-26) the store-order rule is now TIGHTER than
+    // the launch-readiness baseline it was written against. The baseline
+    // made a store order unreadable-and-uncreatable by a guest, and
+    // staff-writable; the follow-up keeps that AND closes the last line —
+    // a client may no longer change a store order's `status` at all. The
+    // status transitions are the SERVER's (see the tender guard), so a
+    // client write could only ever bypass the state machine.
+    expect(rules).toMatch(
+      /match \/storeOrders\/\{orderId\} \{\s*allow read: if isStaff\(\);\s*allow create: if false;/
+    );
+    expect(rules).toMatch(
+      /allow update: if isStaff\(\)\s*&&\s*!request\.resource\.data\.diff\(resource\.data\)\.affectedKeys\(\)\.hasAny\(\["status"\]\);/
+    );
+    // The status may only be changed by the server, never by a client.
+    expect(rules).not.toMatch(/match \/storeOrders\/\{orderId\} \{\s*allow read, update: if isStaff\(\);/);
   });
 
   it("LR-H4 rejects non-staff Firebase users instead of defaulting to front desk", () => {
