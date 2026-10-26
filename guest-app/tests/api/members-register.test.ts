@@ -146,8 +146,28 @@ describe("/api/members/register handler", () => {
     });
   });
 
-  test("is idempotent for an existing member number", async () => {
-    mockMemberDoc.exists = true;
+  // Per §3.20 (AI-BROWSER-QA 2026-10-26): the registration is called
+  // AGAIN once the guest verifies their email (that is the call that
+  // links their past bookings). A booking that is already linked to
+  // this member must be COUNTED but not re-written — otherwise every
+  // re-registration churns `updatedAt` on records that did not change.
+  test("counts an already-linked booking without rewriting it", async () => {
+    mockCounterDoc.exists = true;
+    mockCounterDoc.data.mockReturnValue({ count: 41 });
+    mockBookingDocs.push({
+      ref: { path: "bookings/booking_1" },
+      data: () => ({ memberId: "member_123" })
+    });
+    const res = mockResponse();
+
+    await handleRegisterMember(authedReq, res);
+
+    expect(mockBatchUpdate).not.toHaveBeenCalled();
+    const last = (res.json as any).mock.calls.at(-1)?.[0];
+    expect(last.data.linkedBookings).toBe(1);
+  });
+
+  test("is idempotent for an existing member number", async () => {    mockMemberDoc.exists = true;
     mockMemberDoc.data.mockReturnValue({
       memberNumber: "SR-00007",
       isMember: true,

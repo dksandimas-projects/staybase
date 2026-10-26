@@ -112,6 +112,17 @@ async function linkBookingsByEmail(email: string, uid: string, explicitBookingId
     if (data.memberId && data.memberId !== uid) {
       return;
     }
+    // Per §3.20 (AI-BROWSER-QA 2026-10-26): a booking that is ALREADY
+    // linked to this member must not be rewritten. The registration
+    // endpoint is idempotent and is now called again after the guest
+    // verifies their email (that is the call that links the past
+    // bookings) — re-writing every linked booking on every call would
+    // churn `updatedAt` on records that did not change. It is still
+    // COUNTED, so `linkedBookings` keeps its meaning.
+    if (data.memberId === uid) {
+      linkedCount += 1;
+      return;
+    }
     batch.update(bookingDoc.ref, { memberId: uid, updatedAt: new Date() });
     linkedPaths.add(bookingDoc.ref.path);
     linkedCount += 1;
