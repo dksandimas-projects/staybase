@@ -25,7 +25,7 @@
 // children eligible; N=3 reservation with 1 child already
 // discounted; voucher cap exceeded; staff-auth gate).
 
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -362,13 +362,26 @@ const seedFixtures = () => {
 
 // The handler is imported lazily so the test can fail clearly
 // when the handler does not exist yet (TDD).
+//
+// The module graph behind it pulls in the whole `firebase-admin` SDK,
+// and that ONE-TIME load used to be charged to whichever test ran
+// first — so the first runtime assertion spent ~4.2s of its 5s budget
+// importing the SDK and the rest ran with none. On a loaded machine
+// that tipped it over Vitest's 5s default and the file reported a
+// spurious timeout. The import is warmed ONCE in a hook below, which
+// has its own budget; the lazy-import contract is preserved.
+let handlerPromise: Promise<any> | null = null;
+
 async function getHandler(): Promise<any> {
-  try {
-    const mod = await import("../../server/handlers/bookings");
-    return (mod as any).handleApplyReservationDiscount;
-  } catch (e: any) {
-    throw new Error(`handleApplyReservationDiscount import failed: ${e.message}`);
+  if (!handlerPromise) {
+    handlerPromise = import("../../server/handlers/bookings")
+      .then((mod) => (mod as any).handleApplyReservationDiscount)
+      .catch((e: any) => {
+        handlerPromise = null;
+        throw new Error(`handleApplyReservationDiscount import failed: ${e.message}`);
+      });
   }
+  return handlerPromise;
 }
 
 async function callHandler(body: any, mockResponse: any) {
@@ -393,6 +406,13 @@ const mockResponse = () => {
 };
 
 describe("DSC-04 — handleApplyReservationDiscount runtime", () => {
+  // Warm the handler module ONCE, here, where the load has its own
+  // budget — instead of letting the first runtime assertion pay for
+  // the whole `firebase-admin` SDK import out of its 5s allowance.
+  beforeAll(async () => {
+    await getHandler();
+  }, 60_000);
+
   beforeEach(() => {
     seedFixtures();
     vi.clearAllMocks();
