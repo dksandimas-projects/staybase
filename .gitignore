@@ -55,3 +55,9 @@ staybase-breakfast-redesign/
 e2e/.artifacts/
 e2e/.qa.env.local
 !e2e/.env.example
+
+# The money reconciliation report. It is a run artifact that carries
+# LIVE production figures - real booking balances, real collected
+# amounts, real refunds. It must never enter a commit, and the script
+# writes it to the repo root by default.
+qa-reconciliation.json
