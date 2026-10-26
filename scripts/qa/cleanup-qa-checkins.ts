@@ -102,9 +102,9 @@ for (const doc of stuck) {
 }
 
 const rooms = (await db.collection("rooms").get()).docs
-  .filter((d) => String(d.data()?.roomNumber) === "101")
+  .filter((d) => String(d.data()?.roomNumber) === String(process.argv[2] || "101"))
   .map((d) => `${d.id}:${d.data()?.status}`);
-console.log(`room 101 now: ${rooms.join(", ") || "(not found)"}`);
+console.log(`room ${process.argv[2] || "101"} now: ${rooms.join(", ") || "(not found)"}`);
 
 // ---- the store fixtures -------------------------------------------------
 //
