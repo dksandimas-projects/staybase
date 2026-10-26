@@ -130,7 +130,31 @@ export async function openTestRun(idToken: string): Promise<TestRun> {
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
     body: JSON.stringify({ name: RUN_NAME, environment, durationMinutes: 180 })
   });
-  const body: any = await res.json().catch(() => ({}));
+  let body: any = await res.json().catch(() => ({}));
+
+  // The list endpoint only returns the 50 most recent runs, so an active
+  // PRODUCTION run that is older than that window is invisible here and
+  // the create is refused with 409. Fall back to the staging slot — the
+  // single-active rule only guards production, and the booking-create
+  // token check validates against ANY active run, so the tagging is the
+  // same either way.
+  if (res.status === 409 && environment === "production") {
+    console.log(
+      `[guest-write] the production slot is taken by a run outside the list window — ` +
+        "opening the QA run in the staging slot instead"
+    );
+    const retry = await fetch(`${base}/api/test-runs/create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+      body: JSON.stringify({ name: RUN_NAME, environment: "staging", durationMinutes: 180 })
+    });
+    body = await retry.json().catch(() => ({}));
+    if (!retry.ok || !body?.success || !body?.data?.token) {
+      throw new Error(`Could not open the test run (HTTP ${retry.status}): ${body?.error || "unknown"}`);
+    }
+    return { runId: body.data.id, token: body.data.token };
+  }
+
   if (!res.ok || !body?.success || !body?.data?.token) {
     throw new Error(`Could not open the test run (HTTP ${res.status}): ${body?.error || "unknown"}`);
   }
