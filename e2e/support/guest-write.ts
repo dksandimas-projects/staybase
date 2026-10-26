@@ -423,8 +423,22 @@ export async function createBookingViaBrowser(page: Page, options: BookingOption
  * inbox in this pass, so the token is read from Firestore with the READ-ONLY
  * admin SDK — exactly the value the email would have carried. It is written
  * to a gitignored file, never to stdout, never into the report.
+ *
+ * The room assignment, status and total ride along in the same index
+ * (per AI-BROWSER-QA 2026-10-26) — the ST-04 scenario needs the room the
+ * booking was allocated, and RW-03 asserts on the live total.
  */
-export async function readBookingIds(bookingRef: string): Promise<{ id: string; token: string }> {
+export async function readBookingIds(
+  bookingRef: string
+): Promise<{
+  id: string;
+  token: string;
+  roomNumber: string;
+  roomId: string;
+  status: string;
+  totalPrice: number;
+  memberId: string | null;
+}> {
   const outFile = resolve(REPO_ROOT, "tmp/qa-2026-10-23/flow-tokens.json");
   const script = resolve(REPO_ROOT, "scripts/qa/fetch-flow-tokens.ts");
   const bundle = resolve(REPO_ROOT, "tmp/qa-2026-10-23/fetch-flow-tokens.mjs");
@@ -446,12 +460,31 @@ export async function readBookingIds(bookingRef: string): Promise<{ id: string; 
   if (!existsSync(outFile)) {
     throw new Error("The booking-id read did not produce a file.");
   }
-  const map: Record<string, { id: string; token: string }> = JSON.parse(readFileSync(outFile, "utf8"));
+  const map: Record<
+    string,
+    {
+      id: string;
+      token: string;
+      roomNumber?: string;
+      roomId?: string;
+      status?: string;
+      totalPrice?: number;
+      memberId?: string | null;
+    }
+  > = JSON.parse(readFileSync(outFile, "utf8"));
   const entry = map[bookingRef];
   if (!entry) {
     throw new Error(`No booking id was found for ${bookingRef}.`);
   }
-  return entry;
+  return {
+    id: entry.id,
+    token: entry.token,
+    roomNumber: entry.roomNumber || "",
+    roomId: entry.roomId || "",
+    status: entry.status || "",
+    totalPrice: Number(entry.totalPrice || 0),
+    memberId: entry.memberId ?? null
+  };
 }
 
 /** The lookup token alone — the magic-link credential. */
