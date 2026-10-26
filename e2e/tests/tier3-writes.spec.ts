@@ -191,6 +191,11 @@ async function stageRefundChainBooking(page: any, dates: { checkIn: string; chec
 }
 
 test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
+  // These scenarios walk a whole booking + staff flow and (RW-01) wait on
+  // a Firebase rate-limited link generation, so they need more than the
+  // suite's default 90 s.
+  test.setTimeout(300_000);
+
   test.beforeEach(async ({ page }, testInfo) => {
     test.skip(
       testInfo.project.name !== "desktop",
@@ -780,11 +785,19 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     // There is no inbox in this pass, so the harness generates the SAME
     // link the server sends and clicks it in the browser — the app's own
     // code path has to complete it.
+    //
+    // The link points at Firebase's OWN action handler
+    // (`<project>.firebaseapp.com/__/auth/action?…&oobCode=…&continueUrl=…`).
+    // That handler performs the verification and redirects to the
+    // server's continue URL — `/account/profile?emailVerified=true`. The
+    // app must notice that marker, refresh the stale id token (it still
+    // claims `email_verified: false`) and re-run the registration so
+    // the past bookings get linked.
     const verifyLink = await getVerificationLink(RW01_EMAIL);
     await page.goto(verifyLink, { waitUntil: "domcontentloaded" });
-    await page.waitForURL(/\/account\/profile/, { timeout: 45_000 });
-    // The app consumes the code and takes it out of the URL.
-    await page.waitForFunction(() => !window.location.href.includes("oobCode"), undefined, {
+    await page.waitForURL(/\/account\/profile/, { timeout: 60_000 });
+    // The app consumes the marker and takes it out of the URL.
+    await page.waitForFunction(() => !window.location.href.includes("emailVerified=true"), undefined, {
       timeout: 45_000
     });
     await page.waitForTimeout(4000);
