@@ -131,6 +131,18 @@
 
 ---
 
+## QA Backlog Reconciliation — 2026-10-26
+
+> **Full list: [`plan/project/QA-BACKLOG-2026-10-26.md`](plan/project/QA-BACKLOG-2026-10-26.md)** — the defect backlog the 2026-10-23 QA report did **not** cover, reconciled against live production.
+
+- ✅ **The QA report's scope gap is reconciled.** The 2026-10-23 report closed as *"no findings remain open"*, which was true **inside its own scenario catalogue** — but `HANDOFF-2026-10-23.md` §6 carried a separate list of **~27 defects confirmed against production** that appeared nowhere in the report. **Four are now closed** (SEC-3, SEC-4, the §3.7 store-order rule, H8), each verified against the **live deployment**. The rest are listed with their live-verified status.
+- ⬜ **Two live money-permission holes closed** — **SEC-3** (front-desk could redeem rewards points; the UI hid the panel, the server did not enforce it) and **SEC-4** (no admin gate on the corporate convert path). Both are now admin-only **on the server**, verified with a real front-desk token → HTTP 403 and a real admin token → HTTP 400.
+- ⬜ **The nightly money reconciliation is scheduled** — **H8**, `POST /api/reconciliation/run` at `30 4 * * *`, `CRON_SECRET`-gated and read-only with respect to the money. The guest project now runs **6 crons** (was 5). This is the standing check that would have caught §3.23 and §3.4 before a guest was affected.
+- ⬜ **~19 backlog defects remain open**, verified live: the **Full Backup omits every store tender** (₱180 of till cash) and **9 root collections**, so a restore cannot rebuild room inventory (**F-A2**, **F-A3**, **F-A5**); the **kitchen list cannot tell guests apart** — **0 of 157** production bookings carry a `guests[]` array (**F-B5**); the **Low Stock panel lists a retired item** (**F-C3**); the **finance scanner checks no ledger invariant** (**F-D3**); and the rest in [`QA-BACKLOG-2026-10-26.md`](plan/project/QA-BACKLOG-2026-10-26.md).
+- ⬜ **The process gap to close:** a report scoped to its own catalogue cannot contain defects tracked under a different id-prefix in a different document. `scripts/qa/verify-matrix.ts` checks the report's catalogue against its own matrix — it does **not** check the sibling backlog. That reconciliation needs to be a gate, or the next report will repeat this.
+
+---
+
 ## Production Readiness Audit — 2026-10-20
 
 > **Full report: [`plan/project/AUDIT-PRODUCTION-READINESS-2026-10-20.md`](plan/project/AUDIT-PRODUCTION-READINESS-2026-10-20.md)** — 7 blockers, 10 highs, 10 mediums. Verdict at the time: *feature-complete, NOT production-ready*. Decisions #306–#308.
