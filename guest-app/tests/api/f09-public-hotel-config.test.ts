@@ -27,7 +27,7 @@
 // pre-fix run reports a clean assertion failure for the source-text
 // tripwires instead of dying at module resolution.
 
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 
@@ -147,10 +147,28 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 describe("F09 / SEC-6 — the public hotel-config projection", () => {
+  // The projection module is imported lazily on purpose (see the file
+  // header) so a pre-fix run reports a clean assertion failure rather
+  // than dying at module resolution. But the module pulls in the whole
+  // `firebase-admin` SDK, and that ONE-TIME load was being charged to
+  // whichever test happened to run first — so the file's first
+  // assertion spent ~2.6s of its 5s budget importing the SDK and the
+  // rest of the suite ran with none. On a loaded machine that tipped
+  // the first test over Vitest's 5s default and the file reported a
+  // spurious timeout.
+  //
+  // Warming the module ONCE in a hook moves that cost out of the
+  // assertions entirely. The hook gets its own generous budget, the
+  // lazy-import contract is preserved, and every assertion below now
+  // starts with the module already in memory.
+  let buildPublicHotelConfig: typeof import("../../server/lib/publicHotelConfig").buildPublicHotelConfig;
+
+  beforeAll(async () => {
+    const mod = await import("../../server/lib/publicHotelConfig");
+    buildPublicHotelConfig = mod.buildPublicHotelConfig;
+  }, 60_000);
+
   it("keeps every public field the guest site renders", async () => {
-    const { buildPublicHotelConfig } = await import(
-      "../../server/lib/publicHotelConfig"
-    );
     const projected = buildPublicHotelConfig(RAW_HOTEL_CONFIG);
 
     expect(projected.brandName).toBe("Spark Inn");
@@ -193,9 +211,6 @@ describe("F09 / SEC-6 — the public hotel-config projection", () => {
   });
 
   it("never carries a corporateRate on any room type", async () => {
-    const { buildPublicHotelConfig } = await import(
-      "../../server/lib/publicHotelConfig"
-    );
     const projected = buildPublicHotelConfig(RAW_HOTEL_CONFIG);
 
     for (const roomType of projected.roomTypes) {
@@ -211,9 +226,6 @@ describe("F09 / SEC-6 — the public hotel-config projection", () => {
   });
 
   it("drops the accountNumber of a `showInCorporate: false` payment method", async () => {
-    const { buildPublicHotelConfig } = await import(
-      "../../server/lib/publicHotelConfig"
-    );
     const projected = buildPublicHotelConfig(RAW_HOTEL_CONFIG);
 
     const paypal = projected.paymentMethods.find((m) => m.method === "paypal");
@@ -230,9 +242,6 @@ describe("F09 / SEC-6 — the public hotel-config projection", () => {
   });
 
   it("drops the admin-only settings fields (the projection is an allow-list)", async () => {
-    const { buildPublicHotelConfig } = await import(
-      "../../server/lib/publicHotelConfig"
-    );
     const projected = buildPublicHotelConfig(RAW_HOTEL_CONFIG) as Record<
       string,
       unknown
@@ -251,9 +260,6 @@ describe("F09 / SEC-6 — the public hotel-config projection", () => {
   });
 
   it("is resilient to a missing / malformed settings doc", async () => {
-    const { buildPublicHotelConfig } = await import(
-      "../../server/lib/publicHotelConfig"
-    );
     const projected = buildPublicHotelConfig(null);
     expect(projected.roomTypes).toEqual([]);
     expect(projected.paymentMethods).toEqual([]);
