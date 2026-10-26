@@ -50,6 +50,10 @@
     {
       "path": "/api/notifications/prune",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/reconciliation/run",
+      "schedule": "30 4 * * *"
     }
   ],
   "rewrites": [

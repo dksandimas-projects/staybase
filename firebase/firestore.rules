@@ -794,9 +794,32 @@ service cloud.firestore {
       allow write: if isStaff();
     }
 
+    // Per QA §3.7 (2026-10-26): the desk's store-order STATUS is owned by
+    // the SERVER, not by a client write.
+    //
+    // The desk's order actions used to be a raw client-side `updateDoc`, so
+    // the state machine existed only as UI BUTTONS — nothing enforced it.
+    // Any staff client could write ANY status onto ANY order, including
+    // cancelling an order that had already been DELIVERED and whose direct
+    // payment had been collected: money collected against a void order, a
+    // guest who is never told, and a reconciliation delta that never closes.
+    //
+    // The fix moved every transition onto the server (`POST /api/store/…`),
+    // which refuses any transition on an order that holds a tender. But the
+    // RULE was the last line and it stayed open — so the fix was only
+    // enforced as long as the app kept its hands off the document.
+    //
+    // This closes it: a client may no longer change `status` at all. The
+    // server writes it through the Admin SDK, which bypasses these rules.
+    //
+    // The other fields stay staff-writable, because the desk's "bill to room"
+    // action is a legitimate client write: it sets `isBilled` / `billedAt` /
+    // `updatedAt` / `handledBy` and never touches `status`.
     match /storeOrders/{orderId} {
-      allow read, update: if isStaff();
+      allow read: if isStaff();
       allow create: if false;
+      allow update: if isStaff()
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["status"]);
       allow delete: if isAdmin();
     }
 

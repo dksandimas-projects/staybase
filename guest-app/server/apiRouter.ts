@@ -38,6 +38,7 @@ import {
 import { handleMarkRefundPaidStandalone } from "./handlers/refunds";
 import { handlePublishSeo } from "./handlers/seo";
 import { handleNotificationsPrune } from "./handlers/notifications-prune";
+import { handleReconciliationCron } from "./handlers/reconciliation";
 import { handleHoldExpiryCron } from "./handlers/hold-expiry";
 import { handleExtendInFlowHold, handleReadInFlowHold, handleStartInFlowHold, handleSweepInFlowHolds } from "./handlers/in-flow-hold";
 import { handleGetPrivateStorageUrl } from "./handlers/storage";
@@ -1673,6 +1674,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!authResult.success) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
     }
+    // Per the AI browser QA pass (2026-10-23) + the handoff's Wave 2 item
+    // SEC-4: converting a corporate inquiry into a real booking is an
+    // ADMIN-only action.
+    //
+    // `authenticateStaff` admits BOTH staff roles, so before this the
+    // front-desk role could create a priced corporate booking and flip the
+    // inquiry's status — a real money-affecting write that the UI never
+    // offered them. The server is the only place that can refuse it.
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can convert corporate inquiries into bookings." });
+    }
     (req as any).staff = authResult;
     
     return await handleConvertInquiryToBooking(req, res);
@@ -1734,6 +1746,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const authResult = await authenticateStaff(req);
     if (!authResult.success) {
       return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    // Per the AI browser QA pass (2026-10-23) + the handoff's Wave 2 item
+    // SEC-3: applying points against a booking is an ADMIN-only action.
+    //
+    // The admin UI hides the redemption panel from the front desk, but the
+    // SERVER did not enforce it — `authenticateStaff` admits BOTH staff
+    // roles, so a front-desk client could redeem a member's points against
+    // any booking by calling this endpoint directly. The visible buttons
+    // were the only thing doing the work.
+    //
+    // This is the same "the buttons are the security" shape as QA §3.7
+    // (the desk's store-order transitions), so the gate belongs here, on
+    // the server, where it holds regardless of what the client renders.
+    if (authResult.role !== "admin") {
+      return res.status(403).json({ success: false, error: "Only admins can apply points redemptions." });
     }
     (req as any).staff = authResult;
 
@@ -2215,6 +2242,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (domain === "holds" && action === "expire" && (req.method === "POST" || req.method === "GET")) {
 
     return await handleHoldExpiryCron(req, res);
+  }
+
+  // Per H8 (production-readiness audit 2026-10-20): the NIGHTLY money
+  // reconciliation. It recomputes every money figure from the raw
+  // Firestore documents — the same independent arithmetic the AI browser
+  // QA pass used to find a refund written without a settled status, and
+  // add-ons that never reached `revenueAllocation` — and reports any
+  // disagreement. READ-ONLY with respect to the money.
+  //
+  // Same CRON_SECRET auth as the other crons; registered in
+  // `guest-app/vercel.json` so the project-local cron config owns the
+  // schedule. Idempotent — a re-fire finds the same state and reports the
+  // same result.
+  if (domain === "reconciliation" && action === "run" && (req.method === "POST" || req.method === "GET")) {
+
+    return await handleReconciliationCron(req, res);
   }
 
   // In-flow hold (Steps 2 + 3 countdown banner) â€” see
