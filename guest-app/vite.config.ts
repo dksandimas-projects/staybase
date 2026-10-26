@@ -267,6 +267,26 @@ function indexHtmlTransformPlugin(): Plugin {
 export default defineConfig(async ({ mode }) => {
   if (mode !== "test") await loadPublishedSeo(mode);
   return {
+  // Vitest's default `testTimeout` is 5000ms. That is a reasonable
+  // budget for a unit test and far too small for this suite on a
+  // loaded machine: the API suite is 241 files, and the import phase
+  // alone measured 190-210s under load, so individual files can spend
+  // several seconds simply loading the `firebase-admin` SDK before
+  // their first assertion runs.
+  //
+  // With the default, a busy CI runner produced failures that had
+  // nothing behind them — `br-07-kitchen-list-routes`,
+  // `bot-protection-client-gate`, `oct-l7-strip-comments-order` and
+  // others, all of which pass in isolation (84 tests, 7 files) and
+  // pass in a normal full run. Those are false alarms, and a red suite
+  // nobody can reproduce trains people to ignore the red suite.
+  //
+  // 20s is a ceiling, not a target: it is only ever reached by a test
+  // that is genuinely stuck, which is exactly what a timeout is for.
+  test: {
+    testTimeout: 20_000,
+    hookTimeout: 20_000
+  },
   plugins: [
     indexHtmlTransformPlugin(),
     seoAssetsPlugin(),
