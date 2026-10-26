@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.20.5";
+    VERSION2 = "2.20.7";
   }
 });
 
@@ -240934,6 +240934,10 @@ async function linkBookingsByEmail(email, uid, explicitBookingId) {
   bookingsSnapshot.docs.forEach((bookingDoc) => {
     const data = bookingDoc.data();
     if (data.memberId && data.memberId !== uid) {
+      return;
+    }
+    if (data.memberId === uid) {
+      linkedCount += 1;
       return;
     }
     batch.update(bookingDoc.ref, { memberId: uid, updatedAt: /* @__PURE__ */ new Date() });

@@ -9,6 +9,7 @@ import {
   sendPasswordResetEmail,
   sendEmailVerification as firebaseSendEmailVerification,
   updateProfile,
+  applyActionCode,
   type User
 } from "firebase/auth";
 import { doc, getDoc, onSnapshot } from "firebase/firestore";
@@ -154,6 +155,59 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     });
     return unsubscribe;
+  }, []);
+
+  // Per §3.21 (AI-BROWSER-QA 2026-10-26): complete the email
+  // verification the guest clicks.
+  //
+  // The server generates the verification link with
+  // `handleCodeInApp: true` (`guest-app/server/handlers/members.ts` →
+  // `generateEmailVerificationLink`), so the link carries an `oobCode`
+  // and the APP has to finish it. The app never did — the guest
+  // clicked the link, landed back on
+  // `/account/profile?emailVerified=true&oobCode=…`, and their email
+  // was STILL unverified. The "Verify your email" banner therefore
+  // never cleared, and (see §3.20) the past bookings were never
+  // linked, so "My Stays" stayed empty for every email/password
+  // member.
+  //
+  // `applyActionCode` is the documented API for a `mode=verifyEmail`
+  // action code. It verifies the address; the session (when there is
+  // one) is then reloaded and its id token force-refreshed so the
+  // `email_verified` claim is true.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const oobCode = new URLSearchParams(window.location.search).get("oobCode");
+    if (!oobCode) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        await applyActionCode(auth, oobCode);
+        // Take the code out of the URL so a reload does not replay it.
+        window.history.replaceState({}, document.title, window.location.pathname);
+        const current = auth.currentUser;
+        if (!current || cancelled) return;
+        await current.reload();
+        // The claim is stale in the cached token — force a refresh.
+        await current.getIdToken(true);
+        setUser(auth.currentUser);
+        // Per §3.20: the registration endpoint only links the guest's
+        // past bookings when the email is verified ("Once verified,
+        // re-calling /api/members/register re-runs the link"). The
+        // signup call ran while the email was still unverified, so
+        // this is the call that actually links them.
+        await registerCurrentMember();
+      } catch (err) {
+        console.error("Email verification could not be completed:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Per the exhaustive-deps rule this must run once, on mount — the
+    // code is in the URL, not in React state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Listen to member profile when user changes
