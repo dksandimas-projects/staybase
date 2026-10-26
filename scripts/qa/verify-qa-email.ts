@@ -89,5 +89,35 @@ const actionCodeSettings = {
   url: `${baseUrl}/account/profile?emailVerified=true`,
   handleCodeInApp: true
 };
-const link = await adminAuth.generateEmailVerificationLink(email, actionCodeSettings);
+
+// Firebase throttles link generation (`TOO_MANY_ATTEMPTS_TRY_LATER`) —
+// the signup itself already generated one. Retry with a backoff.
+//
+// The Admin SDK collapses several Identity Platform errors onto
+// `auth/internal-error`, so the rate-limit marker only survives in the
+// MESSAGE. The code and the message must therefore be tested TOGETHER —
+// reading `err.code || err.message` would short-circuit on the generic
+// code and never see the marker.
+let link = "";
+for (let attempt = 1; attempt <= 8; attempt++) {
+  try {
+    link = await adminAuth.generateEmailVerificationLink(email, actionCodeSettings);
+    break;
+  } catch (err: any) {
+    const code = String(err?.code || "");
+    const message = String(err?.message || "");
+    const haystack = `${code} ${message}`;
+    const rateLimited = /too[_ ]many[_ ]attempts|TOO_MANY_ATTEMPTS/i.test(haystack);
+    if (!rateLimited || attempt === 8) {
+      console.error(`link generation failed: ${code} — ${message}`);
+      throw err;
+    }
+    console.error(`attempt ${attempt} was rate-limited by Firebase — retrying in 20s…`);
+    await new Promise((r) => setTimeout(r, 20_000));
+  }
+}
+if (!link) {
+  console.error("the verification link could not be generated.");
+  process.exit(1);
+}
 console.log(link);
