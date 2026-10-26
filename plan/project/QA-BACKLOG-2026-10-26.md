@@ -22,28 +22,55 @@ Each of these was re-checked against the **live deployment** today, not read off
 | ID | Defect | Verified live | Sev |
 |---|---|---|---|
 | **F-A2** | The **Full Backup** omits every store payment tender — the "Store Orders" sheet has no *Paid* column, so the cash at the till is invisible in the backup. | **2 tender docs, ₱180.00** exist in production and are **not** exported. | S2 |
-| **F-A3** | The "full backup" omits **9 root collections** (`rooms`, `reservations`, `corporateCodes`, `guests`, `addOns`, `roomBlocks`, `testRuns`, `settings`, `intercoms`) and the Bookings sheet has no `reservationId` column — so a restore **cannot rebuild room inventory**. | The export reads a subset of collections only. | S2 |
-| **F-A5** | `revenueAllocation` is not exported — so the MRB-11 violations are **invisible to whoever audits the backup**. | Not in the export. | S2 |
-| **F-A6** | The staging-refresh import points at `scripts/export-prod-data.mjs`, which **does not exist** — and the path is quoted in **user-visible UI text** (`SettingsPage.tsx:9434`). | File absent; the UI still names it. | S3 |
-| **F-B3** | Reports → "Daily Kitchen Prep" disagrees with the bookings it summarises — bare `<date>-N` slot keys contribute nothing, it does not filter `removedAt`, and it derives dates from `checkIn + numNights` instead of the slot keys. | Logic unchanged. | S2 |
-| **F-B5** | The kitchen list **cannot tell guests apart** — it resolves a name from the booking's `guests[]` array, and **0 of 157** production bookings carry one. (All 157 carry a single top-level `guestName`, so the list falls back to it.) | **0 of 157** have `guests[]`. | S2 |
+| **F-A3** | The "full backup" omits **9 root collections** (`rooms`, `reservations`, `corporateCodes`, `guests`, `addOns`, `roomBlocks`, `testRuns`, `settings`, `intercoms`) and the Bookings sheet has no `reservationId` column — so a restore **cannot rebuild room inventory**. | **9 of 9** collections carry live data and are all omitted. | S2 |
+| **F-A5** | `revenueAllocation` is not exported — so the MRB-11 violations are **invisible to whoever audits the backup**. | **157 of 157** bookings carry a `revenueAllocation`; none is exported. | S2 |
+| **F-A4** | Two backup rows carry a **negative** "Outstanding Balance". | The reconciliation's own **I08** now finds **3** over-collected bookings (`SI-20261021-00006` −₱200, `-00061` −₱100, `-00060` −₱100). All are QA fixtures, so no real money is wrong — but the backup shows a negative balance. | S3 |
+| **F-A6** | The staging-refresh import points at `scripts/export-prod-data.mjs`, which **does not exist** — and the path is quoted in **user-visible UI text** (`SettingsPage.tsx:9434`). | File confirmed absent; the UI still names it. | S3 |
+| **F-B3** | Reports → "Daily Kitchen Prep" disagrees with the bookings it summarises — bare `<date>-N` slot keys contribute nothing, it does not filter `removedAt`, and it derives dates from `checkIn + numNights` instead of the slot keys. | Confirmed unchanged: the date loop is still `for (let i = 0; i < b.numNights; i++) { const date = toDate(b.checkIn); … }` (`ReportsPage.tsx:1510`). | S2 |
+| **F-B5** | The kitchen list **cannot tell guests apart** — it resolves a name from the booking's `guests[]` array. | **0 of 157** production bookings have a `guests[]` array. (All 157 carry a single top-level `guestName`, so the list falls back to it.) | S2 |
 | **F-C3** | The **Low Stock Alerts** panel lists **soft-deleted** items — a retired product still raises a purchasing flag. | **1 retired item, `stock=3`, `isActive=false`** still raises the flag. | S3 |
 | **F-C4** | The store report has **no export**, although `plan/features/STORE-MANAGEMENT.md` line 84 is checked `[x] Export store report as CSV`. | No store CSV export in `ReportsPage.tsx`. | S3 |
-| **F-D3** | `scripts/finance-integrity-scan.ts` covers the pricing invariants and **none of the ledger ones** — it never scans the `payments` / `refunds` / `charges` collections. | It reads `bookings` + `storeOrders` + the store tender only. | S2 |
-| **F-D4** | Bookings where money was taken but the books do not close. | **5 bookings** are paid more than billed. All are QA fixtures, so the money is not real — but the arithmetic is wrong. | S3 |
+| **F-D3** | `scripts/finance-integrity-scan.ts` covers the pricing invariants and **none of the ledger ones** — it never scans the `payments` / `refunds` / `charges` collections. | The scanner reads only the pricing side. (Note: the **nightly reconciliation cron** added in this session DOES cover the ledger — I05/I06/I07 all PASS against production. The gap is in this one script only.) | S2 |
+| **F-D4** | Bookings where money was taken but the books do not close. | The reconciliation's **I08** (over-collected) and **I14** (cancelled bookings holding money) both still WARN. All are QA fixtures — no real money is wrong — but the arithmetic is. | S3 |
 | **RPT-18** | A **₱0 store order can never be delivered** — `handleDeliverStoreOrder` rejects `totalAmount <= 0` with a 409. | Guard still present (`guest-app/server/handlers/store.ts:108`). | S3 |
-| **SEC-2** | A member can claim an **unlinked** booking — the claim path does not verify the booking belongs to the member. | Not yet re-verified. | S1 |
-| **RPT-2** | "Charge after checkout" is **UI-only** — the server does not enforce it. | Not yet re-verified. | S2 |
-| **RPT-3** | The room-occupancy gate is not date-scoped — a block covers the whole range. | Not yet re-verified. | S3 |
-| **RPT-5** | The corporate path writes `paymentMethod:"chargeback"`. | Not yet re-verified. | S3 |
-| **RPT-6** | `paymentRejectedBy` is always null. | Not yet re-verified. | S3 |
-| — | `booking-confirmed` returns 401 for guests (the email-link path is broken). | Not yet re-verified. | S2 |
-| **NO-ID-A67** | The guest bed-setup choice is only offered for **one** room type. | Not yet re-verified. | S3 |
-| **NO-ID-A68** | Validation errors raised inside the create/booking transaction surface as **HTTP 500, not 400**. | Not yet re-verified. | S2 |
-| **NO-ID-A69** | `createBookingSchema` is `.strict()` with no `testRunId`/`isTestData`, so a guest booking cannot be tagged as test data (the walk-in schema can). | Not yet re-verified. | S3 |
-| **SR-05** | The `additionalPreferences` allowed-values rule is **inverted** — it rejects every legal value. (Shipped as RPT-03 in the item-#3 release; verify before re-filing.) | Not yet re-verified. | S2 |
+| **SEC-2** | A member can claim an **unlinked** booking — the claim path does not verify the booking belongs to the member. | The **staff** link path (`POST /api/members/link-booking`) IS admin-gated (`members.ts:1255`). The **member self-service** claim path is the unverified one — still open. | S1 |
+| **RPT-2** | "Charge after checkout" is **UI-only** — the server does not enforce it. | No `chargeAfterCheckout` reference exists anywhere under `guest-app/server/` — the server never reads the setting. | S2 |
+| **RPT-5** | The corporate path writes `paymentMethod:"chargeback"`. | Still there: the schema still `.default("chargeback")` (`corporate-inquiries.ts:76`) and the write still records `billingArrangement: "chargeback"` (`:585`). | S3 |
+| — | `booking-confirmed` returns 401 for guests (the email-link path is broken). | Confirmed live: `POST /api/email/booking-confirmed` with no auth → **HTTP 401**, while the public `booking-submitted` → **HTTP 400** (reaches validation). `"booking-confirmed"` is in BOTH `staffOnlyEmailActions` and `publicEmailActions`; staff-only wins. | S2 |
+| **NO-ID-A67** | The guest bed-setup choice is only offered for **one** room type. | Confirmed: **1 of 5** live room types has a non-empty `bedSetupValues`. | S3 |
+| **NO-ID-A68** | Validation errors raised inside the create/booking transaction surface as **HTTP 500, not 400**. | The **schema** parse is a 400 (`bookings.ts:1725`). The item is about errors raised *inside* the transaction — that path is still unverified. | S2 |
+| **NO-ID-A69** | `createBookingSchema` is `.strict()` with no `testRunId`/`isTestData`, so a guest booking cannot be tagged as test data (the walk-in schema can). | Confirmed: the schema still closes with `}).strict();` (`bookings.ts:1669`) and carries no `testRunId`/`isTestData` field. | S3 |
 
-> **"Not yet re-verified"** means the 2026-10-26 triage did not reach a live verdict on it. It is **not** a claim that the defect is present. Each needs the same treatment the closed rows above got: read the deployed code, probe production, then fix or close.
+### Wave status at a glance (re-verified 2026-10-26 against the live deployment)
+
+| Wave | Scope | Closed | Still open |
+|---|---|---|---|
+| **Wave 2** | role gates + payment semantics (8 items) | **SEC-3**, **SEC-4**, **RPT-3**, **RPT-6** | SEC-2, RPT-2, RPT-5, `booking-confirmed` |
+| **Wave 3** | backup + reporting cluster (15 items) | **F-C1**, **F-C2**, **RPT-19** | F-A2, F-A3, F-A4, F-A5, F-A6, F-B3, F-B5, F-C3, F-C4, F-D3, F-D4, RPT-18 |
+| **Wave 4** | data, misc + the nightly cron (5 items) | **H8**, **SR-05** | NO-ID-A67, NO-ID-A68, NO-ID-A69 |
+| **Wave 5** | owner-gated / physically impossible (10 items) | — | all 10 — **by design**; they need a real inbox, a physical printer, a real device, or the Firebase Console |
+
+\* **NO-ID-A68** is **partly** fixed: the schema layer now returns 400 (`bookings.ts:1725`); the in-transaction half is still open. **RPT-3**, **RPT-6**, **SR-05**, **F-C1**, **F-C2** and **RPT-19** were re-verified as **already fixed** — the earlier triage had simply not reached a verdict on them.
+
+**Net: 9 of 28 code-verifiable items are closed. 19 remain open. Wave 5 (10 items) is untouched by design.**
+
+The two closed items that were **live money-permission holes** (SEC-3, SEC-4) are the important ones: both are now enforced **on the server**, proven with a real front-desk token (HTTP 403) and a real admin token (reaching validation).
+
+**What is still open is overwhelmingly BACKUP and REPORTING** — 12 of the 19 open items are in Wave 3, and 8 of those 12 are the backup cluster. **No open item can lose a guest's money or turn them away.** The one S1 (SEC-2, a member claiming an unlinked booking) is the only one worth prioritising on severity.
+
+### ✅ Closed since the QA report (re-verified 2026-10-26 against the live deployment)
+
+These were already fixed; the earlier triage had simply not reached a verdict. Now confirmed:
+
+| ID | Defect | How it is closed (verified) |
+|---|---|---|
+| **RPT-6** | `paymentRejectedBy` is always null. | The handler now stamps it: `const paymentRejectedBy = req.staff?.uid \|\| "staff";` (`bookings.ts:7544`) and writes it at `:7655`, `:7689`, `:7712`. |
+| **RPT-3** | The room-occupancy gate is not date-scoped — a block covers the whole range. | The gate is now a **date-scoped overlap test** for all three sources — bookings, `roomBlocks` and `staffInventoryHolds` — each testing `bStart < reqEnd && bEnd > reqStart` against the requested window (`guest-app/server/handlers/rooms.ts:130-175`). The Firestore query is also narrowed to `checkIn < reqEnd` so it no longer scans the whole collection. |
+| **RPT-19** | Staff store-order **Cancel has no status guard** — cancelling a delivered order returns the stock but leaves the tender in the ledger. | The transition is **server-owned** and the client can no longer write the field: `firebase/firestore.rules` → `allow update: if isStaff() && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["status"])` (`firestore.rules:821-822`). |
+| **SR-05** | The `additionalPreferences` allowed-values rule is **inverted** — it rejects every legal value. | Fixed as RPT-03: the catalog resolves through the shared helper with a `DEFAULT_BOOKING_PREFERENCES` fallback, and the rule is now `!bookingPreferencesCatalog.includes(key)` — it rejects only *unknown* keys (`bookings.ts:2484-2493`). |
+| **F-C1** | Store revenue does not reconcile with the store tenders. | Reconciliation **I17 PASS**: "store revenue reconciles with the store tenders" — 12 store orders, delivered revenue ₱280.00, tenders ₱180.00, Δ exactly the ₱100.00 add-to-bill total, **0 cancelled orders still hold a tender**. |
+| **F-C2** | A cancelled store order **keeps its settlement tender**. | Reconciliation **I17 PASS** — "0 cancelled order(s) still hold a tender", and a direct probe of production confirms **0** cancelled orders carry a tender. |
+
 
 ### The structural fix — a scope reconciliation gate
 
