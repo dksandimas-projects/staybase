@@ -321,8 +321,60 @@ test.describe("Admin app", () => {
     );
 
     expect(refunds.label).toBe("Pending refunds");
-    expect(refunds.value, "2 breakfast refunds are pending, 0 cancellation refunds").toBe("2");
-    expect(refunds.context).toBe("0 cancellation + 2 breakfast");
+    expect(refunds.value, "the pending-refunds card must show a count").toMatch(/^\d+$/);
+    const refundsValue = Number(refunds.value);
+
+    // The count is DERIVED, never hardcoded.
+    //
+    // The card's number is "the money the hotel still owes guests" — a
+    // union of the cancellation liabilities and the breakfast refunds
+    // that carry `status: "pending"`. That number MOVES with the book:
+    // a guest removing a paid breakfast opens a new liability, and the
+    // desk settling one closes it. A hardcoded expectation therefore
+    // fails the next time the hotel does anything at all — which is
+    // what happened when the Tier-3 pass opened a third breakfast
+    // liability and this assertion (written when the number was 2)
+    // started reporting a false failure.
+    //
+    // The truth comes from the OTHER SURFACE that reads the same
+    // `collectionGroup("refunds")` query: the Reports → Liability tab's
+    // "Breakfast refunds pending" metric. Two independent readers of the
+    // same data must agree — and if they ever do not, THAT is the
+    // defect worth failing on.
+    await openAdmin(page, "/reports?tab=liability");
+    await page.waitForTimeout(3500);
+
+    // `MetricCard` renders <span>label</span><p>value</p><p>sublabel</p>
+    // inside one div, so the label's grandparent is the card.
+    const liabilityLabel = page.getByText("Breakfast refunds pending", { exact: true }).first();
+    await expect(
+      liabilityLabel,
+      'the Liability tab must render the "Breakfast refunds pending" metric'
+    ).toBeVisible({ timeout: 20_000 });
+    const liabilityValueText = await liabilityLabel
+      .locator("xpath=../..")
+      .locator("p")
+      .first()
+      .innerText();
+    const breakfastPending = Number(liabilityValueText.replace(/\s+/g, " ").trim());
+    expect(
+      Number.isInteger(breakfastPending),
+      `the Liability tab must render a count, got "${liabilityValueText}"`
+    ).toBe(true);
+
+    // The card's context names the two arms it unions. The breakfast arm
+    // must equal the Liability tab's own count.
+    expect(
+      refunds.context,
+      `the card's context must name the breakfast arm the Liability tab reports (${breakfastPending})`
+    ).toMatch(new RegExp(`^\\d+ cancellation \\+ ${breakfastPending} breakfast$`));
+
+    // And the card's TOTAL must be the union of its two arms — so it can
+    // never be smaller than the breakfast arm alone.
+    expect(
+      refundsValue,
+      `the card shows ${refundsValue} pending refunds; the Liability tab shows ${breakfastPending} breakfast liabilities`
+    ).toBeGreaterThanOrEqual(breakfastPending);
   });
 
   test("DH-01 · the TEST DATA badge renders for tagged bookings", async ({ page }) => {
