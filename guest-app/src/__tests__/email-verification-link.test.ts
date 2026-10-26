@@ -66,12 +66,21 @@ describe("the guest email-verification link (§3.20 + §3.21)", () => {
     expect(authContext).toContain("registerCurrentMember()");
   });
 
+  it("waits for the session instead of refreshing on the first render", () => {
+    // The Firebase SDK restores the session ASYNCHRONOUSLY — on the
+    // first render `auth.currentUser` is still null. A refresh attempted
+    // there silently does nothing and the cached token keeps claiming
+    // `email_verified: false`, which is what makes
+    // `/api/members/stays` answer 403 EMAIL_NOT_VERIFIED.
+    expect(authContext).toMatch(/\[user,\s*verificationNonce\]/);
+    expect(authContext).toContain("setVerificationNonce");
+  });
+
   it("only re-registers once the address really is verified", () => {
     // The register endpoint gates the link on `email_verified`; calling it
     // with an unverified token is a no-op, but it must not be treated as
     // a successful link.
-    expect(authContext).toContain("emailVerified");
-    expect(authContext).toMatch(/if\s*\(auth\.currentUser\?\.emailVerified\)/);
+    expect(authContext).toMatch(/auth\.currentUser\?\.emailVerified\s*!==\s*true/);
   });
 
   it("takes the markers out of the URL so a reload does not replay them", () => {
@@ -104,6 +113,6 @@ describe("the guest email-verification link (§3.20 + §3.21)", () => {
   });
 
   it("re-runs the registration on the next sign-in with a verified address", () => {
-    expect(authContext).toMatch(/user\.emailVerified\s*!==\s*true/);
+    expect(authContext).toMatch(/auth\.currentUser\?\.emailVerified\s*!==\s*true/);
   });
 });

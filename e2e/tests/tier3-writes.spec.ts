@@ -35,6 +35,7 @@
  */
 
 import { test, expect, requireIdentity, guestLogin, staffLogin, ADMIN, FRONT_DESK, MEMBER } from "../support/qa";
+import { qaEnv } from "../support/env";
 import {
   FLOW_EMAIL,
   FLOW_LAST_NAME,
@@ -69,7 +70,11 @@ const PROOF_FILE = resolve(REPO_ROOT, "tmp/qa-2026-10-23/qa-gcash-proof.png");
  */
 const RW01_EMAIL =
   process.env.QA_RW01_EMAIL || "qa.rw01.signup+sparkinn.dev@gmail.com";
-const RW01_PASSWORD = "SparkInn123!";
+/**
+ * NEVER commit a password. The account password lives in the gitignored
+ * `e2e/.qa.env.local` (or the process env) like every other QA credential.
+ */
+const RW01_PASSWORD = qaEnv("QA_RW01_PASSWORD") || "";
 
 /** The one test run this worker owns. */
 let run: TestRun | null = null;
@@ -745,6 +750,9 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     page
   }) => {
     const member = requireIdentity("member", MEMBER());
+    if (!RW01_PASSWORD) {
+      test.skip(true, "No QA_RW01_PASSWORD — the signup scenario is not executed.");
+    }
 
     // ---- a booking made with the signup address -----------------------
     const dates = await pickFreeStay(300);
@@ -788,13 +796,32 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     //
     // The link points at Firebase's OWN action handler
     // (`<project>.firebaseapp.com/__/auth/action?…&oobCode=…&continueUrl=…`).
-    // That handler performs the verification and redirects to the
-    // server's continue URL — `/account/profile?emailVerified=true`. The
-    // app must notice that marker, refresh the stale id token (it still
-    // claims `email_verified: false`) and re-run the registration so
-    // the past bookings get linked.
+    // That handler runs its own two-step confirmation — the guest clicks
+    // "Complete verification", sees "Your email has been verified", and
+    // clicks "Continue" — and only THEN is the guest sent to the server's
+    // continue URL, `/account/profile?emailVerified=true`. The app must
+    // notice that marker, refresh the stale id token (it still claims
+    // `email_verified: false`) and re-run the registration so the past
+    // bookings get linked.
     const verifyLink = await getVerificationLink(RW01_EMAIL);
     await page.goto(verifyLink, { waitUntil: "domcontentloaded" });
+    const completeVerification = page.getByText(/complete verification/i).first();
+    await expect(
+      completeVerification,
+      "the verification action page must offer its confirmation step"
+    ).toBeVisible({ timeout: 60_000 });
+    await completeVerification.click();
+
+    const continueButton = page
+      .getByRole("button", { name: /^continue$/i })
+      .or(page.getByRole("link", { name: /^continue$/i }))
+      .first();
+    await expect(
+      continueButton,
+      "the verification action page must offer its continue step"
+    ).toBeVisible({ timeout: 60_000 });
+    await continueButton.click();
+
     await page.waitForURL(/\/account\/profile/, { timeout: 60_000 });
     // The app consumes the marker and takes it out of the URL.
     await page.waitForFunction(() => !window.location.href.includes("emailVerified=true"), undefined, {
@@ -803,6 +830,10 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     await page.waitForTimeout(4000);
 
     const afterVerify = await page.locator("body").innerText();
+    expect(
+      afterVerify,
+      "the member number must survive the verification"
+    ).toMatch(/SR-\d{5}/);
     expect(
       afterVerify.match(/SR-\d{5}/)![0],
       "the member number must survive the verification"
