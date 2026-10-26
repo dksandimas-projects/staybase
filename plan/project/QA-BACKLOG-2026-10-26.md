@@ -21,9 +21,6 @@ Each of these was re-checked against the **live deployment** today, not read off
 
 | ID | Defect | Verified live | Sev |
 |---|---|---|---|
-| **F-A2** | The **Full Backup** omits every store payment tender — the "Store Orders" sheet has no *Paid* column, so the cash at the till is invisible in the backup. | **2 tender docs, ₱180.00** exist in production and are **not** exported. | S2 |
-| **F-A3** | The "full backup" omits **9 root collections** (`rooms`, `reservations`, `corporateCodes`, `guests`, `addOns`, `roomBlocks`, `testRuns`, `settings`, `intercoms`) and the Bookings sheet has no `reservationId` column — so a restore **cannot rebuild room inventory**. | **9 of 9** collections carry live data and are all omitted. | S2 |
-| **F-A5** | `revenueAllocation` is not exported — so the MRB-11 violations are **invisible to whoever audits the backup**. | **157 of 157** bookings carry a `revenueAllocation`; none is exported. | S2 |
 | **F-A4** | Two backup rows carry a **negative** "Outstanding Balance". | The reconciliation's own **I08** now finds **3** over-collected bookings (`SI-20261021-00006` −₱200, `-00061` −₱100, `-00060` −₱100). All are QA fixtures, so no real money is wrong — but the backup shows a negative balance. | S3 |
 | **F-A6** | The staging-refresh import points at `scripts/export-prod-data.mjs`, which **does not exist** — and the path is quoted in **user-visible UI text** (`SettingsPage.tsx:9434`). | File confirmed absent; the UI still names it. | S3 |
 | **F-B3** | Reports → "Daily Kitchen Prep" disagrees with the bookings it summarises — bare `<date>-N` slot keys contribute nothing, it does not filter `removedAt`, and it derives dates from `checkIn + numNights` instead of the slot keys. | Confirmed unchanged: the date loop is still `for (let i = 0; i < b.numNights; i++) { const date = toDate(b.checkIn); … }` (`ReportsPage.tsx:1510`). | S2 |
@@ -46,17 +43,17 @@ Each of these was re-checked against the **live deployment** today, not read off
 | Wave | Scope | Closed | Still open |
 |---|---|---|---|
 | **Wave 2** | role gates + payment semantics (8 items) | **SEC-3**, **SEC-4**, **RPT-3**, **RPT-6** | SEC-2, RPT-2, RPT-5, `booking-confirmed` |
-| **Wave 3** | backup + reporting cluster (15 items) | **F-C1**, **F-C2**, **RPT-19** | F-A2, F-A3, F-A4, F-A5, F-A6, F-B3, F-B5, F-C3, F-C4, F-D3, F-D4, RPT-18 |
+| **Wave 3** | backup + reporting cluster (15 items) | **F-A2**, **F-A3**, **F-A5**, **F-C1**, **F-C2**, **RPT-19** | F-A4, F-A6, F-B3, F-B5, F-C3, F-C4, F-D3, F-D4, RPT-18 |
 | **Wave 4** | data, misc + the nightly cron (5 items) | **H8**, **SR-05** | NO-ID-A67, NO-ID-A68, NO-ID-A69 |
 | **Wave 5** | owner-gated / physically impossible (10 items) | — | all 10 — **by design**; they need a real inbox, a physical printer, a real device, or the Firebase Console |
 
 \* **NO-ID-A68** is **partly** fixed: the schema layer now returns 400 (`bookings.ts:1725`); the in-transaction half is still open. **RPT-3**, **RPT-6**, **SR-05**, **F-C1**, **F-C2** and **RPT-19** were re-verified as **already fixed** — the earlier triage had simply not reached a verdict on them.
 
-**Net: 9 of 28 code-verifiable items are closed. 19 remain open. Wave 5 (10 items) is untouched by design.**
+**Net: 12 of 28 code-verifiable items are closed. 16 remain open. Wave 5 (10 items) is untouched by design.**
 
 The two closed items that were **live money-permission holes** (SEC-3, SEC-4) are the important ones: both are now enforced **on the server**, proven with a real front-desk token (HTTP 403) and a real admin token (reaching validation).
 
-**What is still open is overwhelmingly BACKUP and REPORTING** — 12 of the 19 open items are in Wave 3, and 8 of those 12 are the backup cluster. **No open item can lose a guest's money or turn them away.** The one S1 (SEC-2, a member claiming an unlinked booking) is the only one worth prioritising on severity.
+**What is still open is still mostly BACKUP and REPORTING** — 9 of the 16 open items are in Wave 3. The remaining backup items are F-A4 (a negative outstanding balance on 3 QA-fixture bookings) and F-A6 (the staging-refresh import names a script that does not exist). **No open item can lose a guest's money or turn them away.** The one S1 (SEC-2, a member claiming an unlinked booking) is the only one worth prioritising on severity.
 
 ### ✅ Closed since the QA report (re-verified 2026-10-26 against the live deployment)
 
@@ -70,6 +67,9 @@ These were already fixed; the earlier triage had simply not reached a verdict. N
 | **SR-05** | The `additionalPreferences` allowed-values rule is **inverted** — it rejects every legal value. | Fixed as RPT-03: the catalog resolves through the shared helper with a `DEFAULT_BOOKING_PREFERENCES` fallback, and the rule is now `!bookingPreferencesCatalog.includes(key)` — it rejects only *unknown* keys (`bookings.ts:2484-2493`). |
 | **F-C1** | Store revenue does not reconcile with the store tenders. | Reconciliation **I17 PASS**: "store revenue reconciles with the store tenders" — 12 store orders, delivered revenue ₱280.00, tenders ₱180.00, Δ exactly the ₱100.00 add-to-bill total, **0 cancelled orders still hold a tender**. |
 | **F-C2** | A cancelled store order **keeps its settlement tender**. | Reconciliation **I17 PASS** — "0 cancelled order(s) still hold a tender", and a direct probe of production confirms **0** cancelled orders carry a tender. |
+| **F-A2** | The **Full Backup** omits every store payment tender — the "Store Orders" sheet had no *Paid* column, so the cash at the till was invisible in the backup. | **FIXED.** The export now reads each order's tender at `storeOrders/{id}/payments/delivery-tender` and the "Store Orders" sheet carries **Paid**, **Paid At**, **Paid By** and **Tender Ref**. An add-to-bill order reads `Paid = 0` (its money is on the room folio — reporting the order total there would double-count it). Proven by `admin-app/src/__tests__/f-a2-f-a3-f-a5-full-backup-completeness.test.ts`. |
+| **F-A3** | The "full backup" omitted **9 root collections** and the Bookings sheet had no `reservationId` column — so a restore **could not rebuild room inventory**. | **FIXED.** The export now reads `rooms`, `reservations`, `corporateCodes`, `guests`, `addOns`, `roomBlocks`, `settings` and `intercoms` (8 client-readable collections) and carries `testRuns` from the server-only context list, each on its own sheet with the **Doc ID** first. The Bookings sheet now carries **Reservation ID** and **Reservation Ref**. |
+| **F-A5** | `revenueAllocation` was not exported — so the MRB-11 violations were **invisible to whoever audits the backup**. | **FIXED.** The Bookings sheet now carries **Revenue Room Net**, **Revenue Breakfast Net**, **Revenue Add-On Net**, **Revenue Deduction Net** and **Revenue Total Net**, so the MRB-11 invariant (roomNet + breakfastNet + addOnNet − deductionNet == totalNet) is checkable from the backup alone. A booking with no allocation exports BLANK, not zero — "no allocation recorded" is a different claim from "earned nothing from rooms". |
 
 
 ### The structural fix — a scope reconciliation gate

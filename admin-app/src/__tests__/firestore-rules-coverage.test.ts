@@ -321,22 +321,61 @@ function ruleSegmentCoversClientSegment(ruleSeg: string, clientSeg: Segment): bo
 /**
  * Does this rule block apply to the document at `pathSegs`?
  *
- * A rule whose final segment is a recursive wildcard (`{document=**}`,
- * `{allPaths=**}`) matches that prefix plus ZERO OR MORE trailing
- * segments, so its length is compared as a minimum.
+ * A recursive wildcard (`{document=**}`, `{allPaths=**}`, `{path=**}`)
+ * matches ZERO OR MORE path segments, and — as Firestore actually
+ * evaluates it — it may sit ANYWHERE in the rule path, not only at the
+ * end. `match /{path=**}/payments/{paymentId}` is the canonical
+ * collection-group pattern: it covers `bookings/{id}/payments/{pid}`,
+ * `reservations/{id}/payments/{pid}` and `storeOrders/{id}/payments/{pid}`
+ * alike.
+ *
+ * The previous implementation only recognised a recursive wildcard as
+ * the FINAL segment, so a rule that used the mid-path form was
+ * reported as covering nothing. That is a false negative in the
+ * COVERAGE CHECK, not a gap in the rules — and a false negative in a
+ * security guard is the worst kind of bug: it pushes people to add a
+ * duplicate rule block (or to distrust the checker) when the rules
+ * were already correct.
+ *
+ * The wildcard spans a variable-length MIDDLE, exactly as Firestore
+ * evaluates it: the rule's segments before it align with the START of
+ * the path, and the rule's segments after it align with the END. That
+ * anchoring matters — a naive left-to-right walk would let
+ * `/{path=**}/payments/{paymentId}` "match" a `charges` path, because
+ * the wildcard could absorb one segment and shift the alignment.
  */
 function ruleCoversPath(rulePath: string, pathSegs: Segment[]): boolean {
   const ruleSegs = rulePath.split("/");
-  const last = ruleSegs[ruleSegs.length - 1];
+  const pathLen = pathSegs.length;
 
-  if (last && isRecursiveWildcard(last)) {
-    const prefix = ruleSegs.slice(0, -1);
-    if (pathSegs.length < prefix.length) return false;
-    return prefix.every((seg, i) => ruleSegmentCoversClientSegment(seg, pathSegs[i]));
+  const wildcardIndex = ruleSegs.findIndex((seg) => isRecursiveWildcard(seg));
+
+  // No recursive wildcard — the rule and the path must line up
+  // segment for segment.
+  if (wildcardIndex === -1) {
+    if (ruleSegs.length !== pathLen) return false;
+    return ruleSegs.every((seg, i) => ruleSegmentCoversClientSegment(seg, pathSegs[i]));
   }
 
-  if (ruleSegs.length !== pathSegs.length) return false;
-  return ruleSegs.every((seg, i) => ruleSegmentCoversClientSegment(seg, pathSegs[i]));
+  const head = ruleSegs.slice(0, wildcardIndex);
+  const tail = ruleSegs.slice(wildcardIndex + 1);
+
+  // The wildcard absorbs the middle, so the path must be at least as
+  // long as the segments the rule pins down.
+  if (pathLen < head.length + tail.length) return false;
+
+  // The head aligns with the START of the path.
+  if (!head.every((seg, i) => ruleSegmentCoversClientSegment(seg, pathSegs[i]))) {
+    return false;
+  }
+
+  // The tail aligns with the END of the path.
+  const tailStart = pathLen - tail.length;
+  if (!tail.every((seg, i) => ruleSegmentCoversClientSegment(seg, pathSegs[tailStart + i]))) {
+    return false;
+  }
+
+  return true;
 }
 
 /**
@@ -360,6 +399,70 @@ function describeSegments(segments: Segment[]): string {
 }
 
 // ── The guardrail ───────────────────────────────────────────────────
+
+describe("Firestore rules coverage — the matcher understands a mid-path recursive wildcard", () => {
+  // The coverage checker is a SECURITY GUARD. It must not report a
+  // covered path as uncovered (a false negative pushes people to add
+  // duplicate rules) — and it must not report an uncovered path as
+  // covered (a false positive is worse: it hides a real gap).
+  //
+  // `match /{path=**}/payments/{paymentId}` is Firestore's canonical
+  // collection-group pattern. The wildcard spans a variable-length
+  // MIDDLE: the rule's head aligns with the path's start and its tail
+  // with the path's end.
+  const S = (v: string): Segment => ({ kind: "static", value: v });
+  const D: Segment = { kind: "dynamic" };
+
+  it("a mid-path recursive wildcard covers a payments subcollection", () => {
+    // storeOrders/{orderId}/payments/{paymentId}
+    expect(
+      ruleCoversPath("{path=**}/payments/{paymentId}", [
+        S("storeOrders"), D, S("payments"), D
+      ])
+    ).toBe(true);
+    // bookings/{bookingId}/payments/{paymentId}
+    expect(
+      ruleCoversPath("{path=**}/payments/{paymentId}", [
+        S("bookings"), D, S("payments"), D
+      ])
+    ).toBe(true);
+    // reservations/{reservationId}/payments/{paymentId}
+    expect(
+      ruleCoversPath("{path=**}/payments/{paymentId}", [
+        S("reservations"), D, S("payments"), D
+      ])
+    ).toBe(true);
+  });
+
+  it("a mid-path recursive wildcard does NOT cover a different subcollection", () => {
+    // The tail anchors to the END of the path. A `charges` path must
+    // not be "covered" by a `payments` rule, however the wildcard is
+    // allowed to stretch.
+    expect(
+      ruleCoversPath("{path=**}/payments/{paymentId}", [
+        S("bookings"), D, S("charges"), D
+      ])
+    ).toBe(false);
+    // And a top-level collection that is not a payments subcollection.
+    expect(
+      ruleCoversPath("{path=**}/payments/{paymentId}", [S("storeItems"), D])
+    ).toBe(false);
+  });
+
+  it("a trailing recursive wildcard still covers its prefix", () => {
+    // The original behaviour must not regress.
+    expect(
+      ruleCoversPath("bookings/{bookingId}/{document=**}", [
+        S("bookings"), D, S("anything"), D
+      ])
+    ).toBe(true);
+    expect(
+      ruleCoversPath("bookings/{bookingId}/{document=**}", [
+        S("storeItems"), D
+      ])
+    ).toBe(false);
+  });
+});
 
 describe("Firestore rules coverage — every client-touched path has a rule block", () => {
   it("parses the rules file into rule blocks", () => {
