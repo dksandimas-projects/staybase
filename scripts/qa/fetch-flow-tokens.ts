@@ -46,8 +46,34 @@ const FLOW_EMAIL = "qa.browser.flow+sparkinn.dev@gmail.com";
 const outIndex = process.argv.indexOf("--out");
 const outFile = outIndex === -1 ? "tmp/qa-2026-10-23/flow-tokens.json" : process.argv[outIndex + 1];
 
-// Every booking this pass created carries the QA guest email.
-const snapshot = await db.collection("bookings").where("guestEmail", "==", FLOW_EMAIL).get();
+// Per AI-BROWSER-QA (2026-10-26): the RW-03 scenario books under the QA
+// MEMBER's address (so the server links the booking to the member) and
+// RW-01 books under its own signup address. The index therefore covers
+// every QA identity this pass uses, not just the guest-flow one.
+//
+// The addresses are read from the gitignored QA env file — none of them
+// is hardcoded here, and no non-QA address is ever indexed (a real
+// guest's lookup token must never land in this file).
+const qaEmails = new Set<string>([
+  FLOW_EMAIL,
+  // The RW-01 signup address — a QA alias this pass creates.
+  "qa.rw01.signup+sparkinn.dev@gmail.com"
+]);
+try {
+  const qaVars = loadEnv("e2e/.qa.env.local");
+  for (const key of ["QA_MEMBER_EMAIL", "QA_MEMBERB_EMAIL"]) {
+    const value = String(qaVars[key] || "").trim();
+    if (value) qaEmails.add(value);
+  }
+} catch {
+  // The QA env file is optional — the guest-flow address alone still works.
+}
+
+// Every booking this pass created carries a QA guest email.
+const snapshot = await db
+  .collection("bookings")
+  .where("guestEmail", "in", Array.from(qaEmails).slice(0, 30))
+  .get();
 
 // Per AI-BROWSER-QA (2026-10-26): the ST-04 scenario needs the room the
 // booking was allocated (the in-room store session is scoped to a room's

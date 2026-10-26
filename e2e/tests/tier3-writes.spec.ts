@@ -63,8 +63,12 @@ const PROOF_FILE = resolve(REPO_ROOT, "tmp/qa-2026-10-23/qa-gcash-proof.png");
  * creates a REAL member account — which is the point of the scenario. The
  * booking for the scenario is made with the same address, so the
  * registration link (which matches on `guestEmail`) has a stay to link.
+ *
+ * `QA_RW01_EMAIL` lets a re-run use a fresh alias (a signup cannot be
+ * repeated on an address that already has an auth user).
  */
-const RW01_EMAIL = "qa.rw01.signup+sparkinn.dev@gmail.com";
+const RW01_EMAIL =
+  process.env.QA_RW01_EMAIL || "qa.rw01.signup+sparkinn.dev@gmail.com";
 const RW01_PASSWORD = "SparkInn123!";
 
 /** The one test run this worker owns. */
@@ -113,14 +117,14 @@ async function adminSignIn(page: any, identity: { email: string; password: strin
 }
 
 /**
- * Mark the QA email address as verified through the Firebase Admin SDK.
+ * Generate the REAL email-verification link for a QA identity.
  *
- * There is no inbox in this pass, so the click on the emailed verification
- * link cannot be reproduced by hand. This performs exactly what that click
- * does — `emailVerified: true` on the QA auth user — and nothing else. It
- * is a WRITE, it touches one QA identity, and the report records it.
+ * The server sends it through Resend; this pass has no inbox, so the
+ * harness generates the identical link (the same
+ * `generateEmailVerificationLink` call the server makes) and the browser
+ * clicks it — so the app's own code path is what gets tested.
  */
-async function verifyQaEmail(email: string): Promise<void> {
+async function getVerificationLink(email: string): Promise<string> {
   const script = resolve(REPO_ROOT, "scripts/qa/verify-qa-email.ts");
   const bundle = resolve(REPO_ROOT, "tmp/qa-2026-10-23/verify-qa-email.mjs");
   await build({
@@ -132,11 +136,16 @@ async function verifyQaEmail(email: string): Promise<void> {
     external: ["firebase-admin"],
     logLevel: "silent"
   });
-  execFileSync(process.execPath, [bundle, "--email", email], {
+  const out = execFileSync(process.execPath, [bundle, "--email", email], {
     cwd: REPO_ROOT,
-    stdio: "ignore",
+    encoding: "utf8",
     env: { ...process.env, ENV_FILE: process.env.ENV_FILE || "guest-app/.env.spark-inn-prod" }
   });
+  const link = out.trim().split("\n").filter(Boolean).pop() || "";
+  if (!link.startsWith("http")) {
+    throw new Error("the verification link was not generated.");
+  }
+  return link;
 }
 
 /**
@@ -269,6 +278,13 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     // The refund must appear in the ledger, in RED (the catalogue requires
     // the refund to read as a negative entry).
     await page.waitForTimeout(2500);
+    // From four entries on, the ledger collapses behind an "N entries"
+    // summary — expand it so the rows are in the tree.
+    const entriesSummary = drawer.getByText(/^\d+ entries$/).first();
+    if (await entriesSummary.count()) {
+      await entriesSummary.click();
+      await page.waitForTimeout(800);
+    }
     const ledger = drawer.getByText(/Refund —/).first();
     await expect(ledger, "the refund must be listed in the payment ledger").toBeVisible({
       timeout: 20_000
@@ -329,19 +345,22 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     });
     await page.waitForTimeout(3000);
 
-    // The first meal select that still holds a meal is the breakfast the
-    // guest bought.
+    // The first meal select that still holds a meal AND is editable is
+    // the breakfast the guest bought. A slot the guest already removed
+    // (or that was served) renders a DISABLED select, so it is skipped.
     const mealSelects = page.locator('select[aria-label^="Meal for"]');
     const count = await mealSelects.count();
     expect(count, "the manage-breakfast page must list the stay's meals").toBeGreaterThan(0);
     let target = -1;
     for (let i = 0; i < count; i++) {
-      if ((await mealSelects.nth(i).inputValue()) !== "") {
+      const select = mealSelects.nth(i);
+      if (await select.isDisabled()) continue;
+      if ((await select.inputValue()) !== "") {
         target = i;
         break;
       }
     }
-    expect(target, "the paid breakfast must be listed").toBeGreaterThanOrEqual(0);
+    expect(target, "the paid breakfast must be listed as an editable meal").toBeGreaterThanOrEqual(0);
     await mealSelects.nth(target).selectOption("");
 
     const saveResponse = page.waitForResponse(
@@ -396,6 +415,9 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     expect(markRes.status(), `refunds/mark-paid → ${markText}`).toBe(200);
     const markBody = JSON.parse(markText);
     expect(markBody.success).toBe(true);
+    expect(markBody.alreadyPaid, "the refund must not have been paid before").toBe(false);
+    expect(markBody.refundEntry.status, "the refund must flip to paid").toBe("paid");
+    expect(markBody.refundEntry.refundId).toBe(refundId);
 
     // The catalogue is explicit: the request must go to the GUEST origin
     // with a staff Bearer token.
@@ -403,14 +425,17 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     const authHeader = markRes.request().headers()["authorization"] || "";
     expect(authHeader, "mark-paid must carry a staff Bearer token").toMatch(/^Bearer\s+\S+/);
 
-    // The row must flip to paid.
-    await page.waitForTimeout(3000);
-    const row = drawer2.getByTestId(`refund-row-${refundId}`);
-    await expect(row, "the refund row must still be listed").toBeVisible({ timeout: 20_000 });
+    // The panel lists the PENDING liabilities only, so a settled refund
+    // must leave it — the hotel no longer owes the guest that money.
+    await page.waitForTimeout(3500);
     await expect(
-      row.getByRole("button", { name: /mark as paid/i }),
-      "a paid refund must not still offer Mark as paid"
+      drawer2.getByTestId(`refund-row-${refundId}`),
+      "a paid refund must no longer be listed as a pending liability"
     ).toHaveCount(0);
+    await expect(
+      page.getByText(/refund marked paid/i).first(),
+      "the staff must be told the refund was settled"
+    ).toBeVisible({ timeout: 15_000 });
   });
 
   test("ST-04 · the in-room store refuses an order whose item was zeroed after it was in the cart", async ({
@@ -482,7 +507,10 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     await expect(lastName, "the intercom must ask for the booking last name").toBeVisible({
       timeout: 25_000
     });
-    await lastName.fill(FLOW_LAST_NAME.split(" ").pop() || FLOW_LAST_NAME);
+    // The guest types the last name EXACTLY as the booking carries it —
+    // the server reads `guestDetails.lastName` (not a split of the full
+    // name), so a shortened form would be refused.
+    await lastName.fill(FLOW_LAST_NAME);
     await page.getByRole("button", { name: /start chatting/i }).click();
     await page.waitForTimeout(3500);
 
@@ -591,15 +619,22 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     // A signed-in member's booking is linked to the member automatically.
     await guestLogin(page, member);
     const dates = await pickFreeStay(270);
-    const created: BookingResult = await createBookingViaBrowser(page, {
-      ...dates,
-      paymentMethod: "pay-at-hotel",
-      email: member.email
-    });
-    expect(created.createStatus, "the booking must be created").toBe(200);
-    const ids = await readBookingIds(created.bookingRef);
+    const reuseRef = process.env.QA_REUSE_BOOKING_REF;
+    let created: BookingResult | null = null;
+    let ids: Awaited<ReturnType<typeof readBookingIds>>;
+    if (reuseRef) {
+      ids = await readBookingIds(reuseRef);
+    } else {
+      created = await createBookingViaBrowser(page, {
+        ...dates,
+        paymentMethod: "pay-at-hotel",
+        email: member.email
+      });
+      expect(created.createStatus, "the booking must be created").toBe(200);
+      ids = await readBookingIds(created.bookingRef);
+    }
     expect(ids.memberId, "the booking must be linked to the member").not.toBe("");
-    const total = Number(created.createBody?.data?.totalPrice);
+    const total = created ? Number(created.createBody?.data?.totalPrice) : ids.totalPrice;
     expect(total).toBeGreaterThan(0);
 
     // The redemption panel only renders for a CONFIRMED booking.
@@ -624,7 +659,7 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     expect(adjustRes.status(), `members/manual-adjust → ${adjustText}`).toBe(200);
 
     await adminSignIn(page, admin);
-    const drawer = await openDrawer(page, ids.id, created.bookingRef);
+    const drawer = await openDrawer(page, ids.id, created?.bookingRef ?? reuseRef);
     // The redemption panel lives in the Folio section.
     await openSection(page, "folio");
 
@@ -697,7 +732,7 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     ).toBeVisible({ timeout: 20_000 });
 
     // The booking's total is restored.
-    const afterUndo = await readBookingIds(created.bookingRef);
+    const afterUndo = await readBookingIds(created?.bookingRef ?? reuseRef!);
     expect(afterUndo.totalPrice, "the undo must restore the booking total").toBe(total);
   });
 
@@ -742,19 +777,27 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     console.log(`      RW-01 · the member number is ${memberNumber}`);
 
     // The email is unverified until the guest clicks the emailed link.
-    // There is no inbox in this pass, so the harness performs exactly what
-    // that click does.
-    verifyQaEmail(RW01_EMAIL);
+    // There is no inbox in this pass, so the harness generates the SAME
+    // link the server sends and clicks it in the browser — the app's own
+    // code path has to complete it.
+    const verifyLink = await getVerificationLink(RW01_EMAIL);
+    await page.goto(verifyLink, { waitUntil: "domcontentloaded" });
+    await page.waitForURL(/\/account\/profile/, { timeout: 45_000 });
+    // The app consumes the code and takes it out of the URL.
+    await page.waitForFunction(() => !window.location.href.includes("oobCode"), undefined, {
+      timeout: 45_000
+    });
+    await page.waitForTimeout(4000);
 
-    // Re-registering now re-runs the link (the registration path is
-    // idempotent — the member number is preserved).
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await page.waitForTimeout(5000);
     const afterVerify = await page.locator("body").innerText();
     expect(
       afterVerify.match(/SR-\d{5}/)![0],
-      "the member number must survive the re-registration"
+      "the member number must survive the verification"
     ).toBe(memberNumber);
+    expect(
+      afterVerify,
+      "the 'verify your email' banner must clear once the link is clicked"
+    ).not.toMatch(/verify your email/i);
 
     // ---- My Stays -------------------------------------------------------
     await page.goto("/account/stays", { waitUntil: "domcontentloaded" });
