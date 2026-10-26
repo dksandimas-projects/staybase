@@ -308,7 +308,24 @@ export async function handleGetBreakfastManage(req: VercelRequest, res: VercelRe
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
 
-  const parsed = manageGetSchema.safeParse(req.body || {});
+  // Per §3.18 (AI-BROWSER-QA 2026-10-26): this endpoint is a GET, so
+  // the reference + lookup token arrive as QUERY params — the guest's
+  // page calls `/api/bookings/breakfast/manage?ref=…&token=…`. The
+  // handler read `req.body`, which Vercel leaves empty on a GET, so
+  // EVERY load returned 400 "Please provide a valid booking reference
+  // and lookup token." and the guest's Manage Breakfast page could
+  // never render a stay. The sibling add-ons handler
+  // (`handleGetAddOnsManage`) already reads `req.query.ref` /
+  // `req.query.token` — this mirrors that contract. The body is still
+  // accepted so the existing unit-test harness keeps working.
+  const firstValue = (value: unknown): string =>
+    Array.isArray(value) ? String(value[0] ?? "") : String(value ?? "");
+  const rawRef = firstValue(
+    (req.query as any)?.ref ?? (req.query as any)?.bookingRef ?? req.body?.bookingRef
+  ).trim();
+  const rawToken = firstValue((req.query as any)?.token ?? req.body?.token).trim();
+
+  const parsed = manageGetSchema.safeParse({ bookingRef: rawRef, token: rawToken });
   if (!parsed.success) {
     return res.status(400).json({
       success: false,

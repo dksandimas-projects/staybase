@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.20.3";
+    VERSION2 = "2.20.5";
   }
 });
 
@@ -243551,7 +243551,12 @@ async function handleGetBreakfastManage(req, res) {
   if (req.method !== "GET") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
-  const parsed = manageGetSchema.safeParse(req.body || {});
+  const firstValue = (value) => Array.isArray(value) ? String(value[0] ?? "") : String(value ?? "");
+  const rawRef = firstValue(
+    req.query?.ref ?? req.query?.bookingRef ?? req.body?.bookingRef
+  ).trim();
+  const rawToken = firstValue(req.query?.token ?? req.body?.token).trim();
+  const parsed = manageGetSchema.safeParse({ bookingRef: rawRef, token: rawToken });
   if (!parsed.success) {
     return res.status(400).json({
       success: false,
