@@ -152,7 +152,7 @@ import {
 } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
-import { arrayUnion, collection, collectionGroup, deleteField, doc, getDocs, limit, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
+import { arrayUnion, collection, collectionGroup, deleteField, doc, getDoc, getDocs, limit, onSnapshot, updateDoc, addDoc, deleteDoc, setDoc, Timestamp, serverTimestamp, orderBy, query, runTransaction, where } from "firebase/firestore";
 import { deleteObject, getDownloadURL, listAll, ref as storageRef, uploadBytes } from "firebase/storage";
 import { db, storage } from "../firebase/config";
 import { notify } from "../components/Toast";
@@ -6438,105 +6438,76 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
   }, [currentUser]);
 
   const updateStoreOrderStatus = async (orderId: string, status: StoreOrder["status"], cancellationReason = "") => {
-    if (status === "delivered") {
-      const token = await auth.currentUser?.getIdToken(true);
-      const response = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/store/deliver-order`, {
+    // Per QA §3.7 (2026-10-26): every staff status transition goes
+    // through the SERVER now.
+    //
+    // The desk's actions used to be a raw client-side `updateDoc` on
+    // `storeOrders/{orderId}`, so the state machine existed only as UI
+    // BUTTONS — nothing enforced it. Any staff client could write any
+    // status onto any order, including cancelling a DELIVERED order
+    // whose direct payment had already been collected: the result was
+    // a cancelled order still holding a cash tender, and a
+    // reconciliation delta that never closed.
+    //
+    // The server owns the transitions, and it refuses any transition on
+    // an order that holds a tender (the money is already collected —
+    // that is a REFUND, not a cancellation).
+    const token = await auth.currentUser?.getIdToken(true);
+    const apiBase = getApiBaseUrl().replace(/\/$/, "");
+    const post = async (path: string, body: Record<string, unknown>, fallbackError: string) => {
+      const response = await fetch(`${apiBase}${path}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": token ? `Bearer ${token}` : ""
         },
-        body: JSON.stringify({ orderId })
+        body: JSON.stringify(body)
       });
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || "Failed to mark store order delivered.");
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || fallbackError);
       }
+      return data;
+    };
+
+    if (status === "delivered") {
+      await post("/api/store/deliver-order", { orderId }, "Failed to mark store order delivered.");
       return;
     }
 
-    if (status === "cancelled" || status === "confirmed") {
-      await runTransaction(db, async (transaction) => {
-        const orderRef = doc(db, "storeOrders", orderId);
-        const orderSnap = await transaction.get(orderRef);
-        if (!orderSnap.exists()) {
-          throw new Error("Store order not found");
-        }
-
-        const orderData = orderSnap.data();
-        const orderItems = Array.isArray(orderData.items) ? orderData.items : [];
-
-        if (status === "cancelled") {
-          const shouldRestoreStock = !!orderData.stockDecrementedAt && !orderData.stockRestoredAt;
-          const itemRefs = shouldRestoreStock
-            ? orderItems.map((item: any) => doc(db, "storeItems", item.itemId))
-            : [];
-          const itemSnaps = await Promise.all(itemRefs.map((itemRef) => transaction.get(itemRef)));
-
-          itemSnaps.forEach((itemSnap, index) => {
-            if (!itemSnap.exists()) return;
-            const itemData = itemSnap.data();
-            const stock = itemData.stock ?? null;
-            if (stock !== null) {
-              transaction.update(itemRefs[index], {
-                stock: Number(stock || 0) + Number(orderItems[index].quantity || 0),
-                updatedAt: serverTimestamp()
-              });
-            }
-          });
-
-          transaction.update(orderRef, {
-            status,
-            cancellationReason,
-            stockRestoredAt: shouldRestoreStock ? serverTimestamp() : orderData.stockRestoredAt || null,
-            updatedAt: serverTimestamp(),
-            handledBy: currentUser?.uid || currentUser?.email || ""
-          });
-          return;
-        }
-
-        // status === "confirmed": decrement stock exactly once on placed -> confirmed transition
-        if (orderData.status === "placed" && !orderData.stockDecrementedAt) {
-          const itemRefs = orderItems.map((item: any) => doc(db, "storeItems", item.itemId));
-          const itemSnaps = await Promise.all(itemRefs.map((itemRef) => transaction.get(itemRef)));
-          itemSnaps.forEach((itemSnap, index) => {
-            if (!itemSnap.exists()) return;
-            const itemData = itemSnap.data();
-            const stock = itemData.stock ?? null;
-            if (stock !== null) {
-              const remaining = Number(stock || 0) - Number(orderItems[index].quantity || 0);
-              if (remaining < 0) {
-                throw new Error("INSUFFICIENT_STOCK");
-              }
-              transaction.update(itemRefs[index], {
-                stock: remaining,
-                updatedAt: serverTimestamp()
-              });
-            }
-          });
-          transaction.update(orderRef, {
-            status,
-            stockDecrementedAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-            handledBy: currentUser?.uid || currentUser?.email || ""
-          });
-          return;
-        }
-
-        transaction.update(orderRef, {
-          status,
-          updatedAt: serverTimestamp(),
-          handledBy: currentUser?.uid || currentUser?.email || ""
-        });
-      });
+    if (status === "confirmed") {
+      // `confirm-order` is the staff endpoint that owns the stock
+      // decrement — it stamps `stockDecrementedAt`, which the cancel
+      // path reads before restoring — and it fires the guest's
+      // "store order confirmed" email, which the old client-side
+      // transition never did.
+      //
+      // It checks the caller's room number and order reference against
+      // the stored order, so they are read fresh from Firestore rather
+      // than from a possibly stale snapshot.
+      const orderSnap = await getDoc(doc(db, "storeOrders", orderId));
+      if (!orderSnap.exists()) {
+        throw new Error("Store order not found.");
+      }
+      const orderData = orderSnap.data();
+      await post(
+        "/api/store/confirm-order",
+        {
+          orderId,
+          roomNumber: orderData?.roomNumber || "",
+          orderRef: orderData?.orderRef || ""
+        },
+        "Failed to confirm store order."
+      );
       return;
     }
 
-    await updateDoc(doc(db, "storeOrders", orderId), {
-      status,
-      updatedAt: serverTimestamp(),
-      handledBy: currentUser?.uid || currentUser?.email || ""
-    });
+    // "out-for-delivery" and "cancelled"
+    await post(
+      "/api/store/update-order-status",
+      { orderId, status, cancellationReason },
+      status === "cancelled" ? "Failed to cancel store order." : "Failed to update store order."
+    );
   };
 
   const billStoreOrder = async (orderId: string) => {
