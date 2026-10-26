@@ -51,7 +51,7 @@ console.log("=== QA bookings (isTestData) ===");
 const bookings = (await db.collection("bookings").get()).docs
   .filter((d) => d.data()?.isTestData === true)
   .sort((a, b) => createdAt(b) - createdAt(a));
-console.log(`  count=${bookings.size}`);
+console.log(`  count=${bookings.length}`);
 for (const d of bookings) {
   const x = d.data() as Record<string, any>;
   console.log(
@@ -66,7 +66,7 @@ console.log("\n=== QA reservations (isTestData) ===");
 const reservations = (await db.collection("reservations").get()).docs
   .filter((d) => d.data()?.isTestData === true)
   .sort((a, b) => createdAt(b) - createdAt(a));
-console.log(`  count=${reservations.size}`);
+console.log(`  count=${reservations.length}`);
 for (const d of reservations) {
   const x = d.data() as Record<string, any>;
   console.log(`  ${x.reservationRef ?? d.id}  booking=${x.bookingId ?? "-"}  total=${x.totalPrice ?? "-"}`);
@@ -76,7 +76,7 @@ console.log("\n=== QA store orders (isTestData) ===");
 const orders = (await db.collection("storeOrders").get()).docs
   .filter((d) => d.data()?.isTestData === true)
   .sort((a, b) => createdAt(b) - createdAt(a));
-console.log(`  count=${orders.size}`);
+console.log(`  count=${orders.length}`);
 for (const d of orders) {
   const x = d.data() as Record<string, any>;
   console.log(`  ${x.orderRef ?? d.id}  status=${x.status}  total=${x.totalAmount ?? "-"}  room=${x.roomNumber ?? "-"}`);

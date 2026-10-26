@@ -195,11 +195,40 @@ async function stageRefundChainBooking(page: any, dates: { checkIn: string; chec
   return { created, ids, total, alreadyPaid: false };
 }
 
+/**
+ * The store card that carries the given item name.
+ *
+ * The card root is the nearest ancestor with the `rounded-card` class — the
+ * name itself sits in a nested block that does NOT hold the card's action
+ * button, so scoping on the name alone finds the badge but not the button.
+ */
+function storeCard(page: any, name: string) {
+  return page
+    .getByRole("heading", { name, exact: true })
+    .locator("xpath=ancestor::div[contains(@class,'rounded-card')]");
+}
+
+/**
+ * The admin store-catalogue row that carries the given item name — the
+ * closest ancestor that also holds the row's "Edit" control.
+ */
+function adminStoreRow(page: any, name: string) {
+  return page
+    .getByText(name, { exact: true })
+    .locator("xpath=ancestor::*[.//button[normalize-space()='Edit']][1]");
+}
+
 test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
   // These scenarios walk a whole booking + staff flow and (RW-01) wait on
   // a Firebase rate-limited link generation, so they need more than the
   // suite's default 90 s.
   test.setTimeout(300_000);
+
+  /**
+   * The booking the current scenario has checked in, so the `afterEach`
+   * can release its room even when the scenario fails half way through.
+   */
+  let checkedInBooking: { bookingId: string; token: string } | null = null;
 
   test.beforeEach(async ({ page }, testInfo) => {
     test.skip(
@@ -208,6 +237,28 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     );
     const active = await ensureRun();
     await tagBookingCreates(page, active.token);
+  });
+
+  test.afterEach(async ({ page }) => {
+    // A booking left checked in HOLDS its room: the room's status is a
+    // single field, not a date range, so the next scenario's check-in is
+    // refused with "Assigned room is already occupied by another checked-in
+    // booking". The release therefore has to run even when the scenario
+    // failed half way through.
+    if (!checkedInBooking) return;
+    const { bookingId, token } = checkedInBooking;
+    checkedInBooking = null;
+    const res = await page.request.post(`${API_BASE}/api/bookings/checkout`, {
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      data: {
+        bookingId,
+        // The folio carries a positive balance (the stay was never paid), so
+        // the departure needs an unpaid reason. "other" is one of the
+        // server's accepted shortcuts.
+        unpaidCheckoutReason: "other"
+      }
+    });
+    console.log(`      ST-04 · room released → check-out ${res.status()}`);
   });
 
   test.afterAll(async () => {
@@ -464,16 +515,29 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     const ids = await readBookingIds(created.bookingRef);
     expect(ids.roomNumber, "the booking must carry an allocated room").not.toBe("");
 
+    // The check-in gate needs the guest registration + an ID photo, and the
+    // registration form is only offered once the booking is CONFIRMED —
+    // `BookingRegistrationForm` renders nothing below that status. So the
+    // booking is confirmed BEFORE the drawer is opened.
+    const confirmRes = await page.request.post(`${API_BASE}/api/bookings/confirm`, {
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${staffToken}` },
+      data: { bookingId: ids.id }
+    });
+    expect(confirmRes.status(), `bookings/confirm → ${await confirmRes.text()}`).toBe(200);
+
     await adminSignIn(page, admin);
     const drawer = await openDrawer(page, ids.id, created.bookingRef);
 
     // The check-in gate needs the guest registration + an ID photo.
     await openSection(page, "check-in");
+
+    // A booking with NO registration renders the form straight away; a
+    // booking whose registration is already complete renders a summary
+    // with an "Edit registration" button. Handle both.
     const editRegistration = drawer.getByRole("button", { name: /edit registration/i }).first();
-    await expect(editRegistration, "the registration form must be offered").toBeVisible({
-      timeout: 20_000
-    });
-    await editRegistration.click();
+    if (await editRegistration.isVisible().catch(() => false)) {
+      await editRegistration.click();
+    }
 
     const reg = drawer.locator('input[name="nationality"]').first();
     await expect(reg, "the registration form must render").toBeVisible({ timeout: 15_000 });
@@ -495,19 +559,15 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     await idPhotoInput.setInputFiles(PROOF_FILE);
     await page.waitForTimeout(3500);
 
-    // Confirm + check in.
-    const confirmRes = await page.request.post(`${API_BASE}/api/bookings/confirm`, {
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${staffToken}` },
-      data: { bookingId: ids.id }
-    });
-    expect(confirmRes.status(), `bookings/confirm → ${await confirmRes.text()}`).toBe(200);
-
+    // Check in.
     const checkinRes = await page.request.post(`${API_BASE}/api/bookings/checkin`, {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${staffToken}` },
       data: { bookingId: ids.id }
     });
     const checkinText = await checkinRes.text();
     expect(checkinRes.status(), `bookings/checkin → ${checkinText}`).toBe(200);
+    // From here on the room is held — the `afterEach` releases it.
+    checkedInBooking = { bookingId: ids.id, token: staffToken };
 
     // ---- the guest opens the in-room shop -----------------------------
     await page.goto(`${API_BASE}/intercom/${ids.roomNumber}`, { waitUntil: "domcontentloaded" });
@@ -524,21 +584,31 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     await page.getByRole("button", { name: /start chatting/i }).click();
     await page.waitForTimeout(3500);
 
-    const shopTab = page.getByRole("button", { name: /shop/i }).first();
-    await expect(shopTab, "the Shop tab must be there").toBeVisible({ timeout: 25_000 });
+    // The store tab is labelled with the hotel's store name
+    // (`config.storeName` — "Spark Essentials"), not the word "Shop".
+    const shopTab = page
+      .getByRole("button", { name: /spark essentials|shop/i })
+      .first();
+    await expect(shopTab, "the store tab must be there").toBeVisible({ timeout: 25_000 });
     await shopTab.click();
     await page.waitForTimeout(2500);
 
     // ---- clause 1: an out-of-stock item cannot be added ---------------
-    const outOfStockCard = page.locator("div").filter({ hasText: "A7 Out Of Stock Test Item" }).last();
-    await expect(outOfStockCard.getByText("Out of Stock"), "the item must be marked out of stock").toBeVisible({
+    const outOfStockCard = storeCard(page, "A7 Out Of Stock Test Item");
+    await expect(outOfStockCard, "the out-of-stock item must be listed").toBeVisible({
+      timeout: 20_000
+    });
+    await expect(
+      outOfStockCard.getByText("Out of Stock", { exact: true }),
+      "the item must be marked out of stock"
+    ).toBeVisible({
       timeout: 20_000
     });
     const soldOut = outOfStockCard.getByRole("button", { name: /sold out/i }).first();
     await expect(soldOut, "an out-of-stock item must not be orderable").toBeDisabled();
 
     // ---- clause 2: put an in-stock item in the cart --------------------
-    const probeCard = page.locator("div").filter({ hasText: "A7 Stock Probe Item" }).last();
+    const probeCard = storeCard(page, "A7 Stock Probe Item");
     await expect(probeCard.getByRole("button", { name: /^add$/i }).first()).toBeVisible({
       timeout: 20_000
     });
@@ -552,10 +622,13 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     await page.getByRole("button", { name: /choose payment method/i }).click();
     await page.waitForTimeout(1200);
 
-    // "Pay at Hotel" needs no receipt screenshot (only gcash/bank do).
-    const payAtHotel = page.locator('input[type="radio"][value="pay-at-hotel"]');
-    await expect(payAtHotel, "pay-at-hotel must be offered").toBeAttached({ timeout: 15_000 });
-    await payAtHotel.check({ force: true });
+    // "Cash on Delivery" needs no receipt screenshot (only the online
+    // methods — gcash/paypal — do). Note the store's own method list
+    // deliberately EXCLUDES "pay-at-hotel": it is the folio/check-out
+    // option, not an in-room store method.
+    const cashOnDelivery = page.locator('input[type="radio"][value="cod"]');
+    await expect(cashOnDelivery, "cash on delivery must be offered").toBeAttached({ timeout: 15_000 });
+    await cashOnDelivery.check({ force: true });
 
     // ---- the admin zeroes the stock while the item is in the cart ------
     const adminPage = await page.context().newPage();
@@ -563,7 +636,7 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     await adminPage.goto(`${ADMIN_BASE}/settings?tab=store`, { waitUntil: "domcontentloaded" });
     await adminPage.waitForTimeout(3500);
 
-    const probeRow = adminPage.locator("div").filter({ hasText: "A7 Stock Probe Item" }).last();
+    const probeRow = adminStoreRow(adminPage, "A7 Stock Probe Item");
     const editItem = probeRow.getByRole("button", { name: /^edit$/i }).first();
     await expect(editItem, "the store item must be editable").toBeVisible({ timeout: 25_000 });
     await editItem.click();
@@ -577,48 +650,48 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     console.log(`      ST-04 · the probe item's stock went ${originalStock} → 0`);
 
     // ---- the guest places the order — the server must refuse ----------
-    const orderResponse = page.waitForResponse(
-      (r: any) => r.url().includes("/api/store/create-order") && r.request().method() === "POST",
-      { timeout: 45_000 }
-    );
-    await page.getByRole("button", { name: /place order/i }).click();
-    const orderRes = await orderResponse;
-    const orderText = await orderRes.text();
-    expect(orderRes.status(), "the server must refuse the order").toBe(409);
-    const orderBody = JSON.parse(orderText);
-    expect(orderBody.success).toBe(false);
-    expect(orderBody.error, "the refusal must be a stock error").toMatch(/stock/i);
+    // The catalogue restore is in a `finally`: a scenario that dies here
+    // would otherwise leave the probe fixture at 0, and every later run
+    // would find a sold-out probe item instead of a stockable one.
+    try {
+      const orderResponse = page.waitForResponse(
+        (r: any) => r.url().includes("/api/store/create-order") && r.request().method() === "POST",
+        { timeout: 45_000 }
+      );
+      await page.getByRole("button", { name: /place order/i }).click();
+      const orderRes = await orderResponse;
+      const orderText = await orderRes.text();
+      expect(orderRes.status(), "the server must refuse the order").toBe(409);
+      const orderBody = JSON.parse(orderText);
+      expect(orderBody.success).toBe(false);
+      expect(orderBody.error, "the refusal must be a stock error").toMatch(/stock/i);
 
-    await expect(
-      page.getByText(/no longer has enough stock/i).first(),
-      "the guest must be told the item is out of stock"
-    ).toBeVisible({ timeout: 20_000 });
+      await expect(
+        page.getByText(/no longer has enough stock/i).first(),
+        "the guest must be told the item is out of stock"
+      ).toBeVisible({ timeout: 20_000 });
 
-    // The cart must NOT be cleared — no order was placed.
-    await expect(
-      page.getByText(/your basket/i).first(),
-      "the basket must survive a refused order"
-    ).toBeVisible({ timeout: 15_000 });
-
-    // ---- restore the live catalogue ------------------------------------
-    await adminPage.goto(`${ADMIN_BASE}/settings?tab=store`, { waitUntil: "domcontentloaded" });
-    await adminPage.waitForTimeout(3000);
-    const probeRow2 = adminPage.locator("div").filter({ hasText: "A7 Stock Probe Item" }).last();
-    await probeRow2.getByRole("button", { name: /^edit$/i }).first().click();
-    const stockInput2 = adminPage.locator('input[name="stock"]').first();
-    await expect(stockInput2).toBeVisible({ timeout: 15_000 });
-    await stockInput2.fill(originalStock);
-    await adminPage.getByRole("button", { name: /update item/i }).click();
-    await adminPage.waitForTimeout(2500);
-    console.log(`      ST-04 · the probe item's stock restored to ${originalStock}`);
+      // The cart must NOT be cleared — no order was placed. The floating
+      // "My Basket" panel is hidden while the checkout drawer is open, so
+      // the cart's own subtotal is what proves it: the Place Order button
+      // carries the basket total, and it must still be ₱15 (one probe item).
+      const placeOrder = page.getByRole("button", { name: /^place order/i }).first();
+      await expect(placeOrder, "the basket must survive a refused order").toBeVisible({ timeout: 15_000 });
+      expect(await placeOrder.innerText(), "the basket must still hold the item").toContain("15");
+    } finally {
+      // ---- restore the live catalogue ----------------------------------
+      await adminPage.goto(`${ADMIN_BASE}/settings?tab=store`, { waitUntil: "domcontentloaded" });
+      await adminPage.waitForTimeout(3000);
+      const probeRow2 = adminStoreRow(adminPage, "A7 Stock Probe Item");
+      await probeRow2.getByRole("button", { name: /^edit$/i }).first().click();
+      const stockInput2 = adminPage.locator('input[name="stock"]').first();
+      await expect(stockInput2).toBeVisible({ timeout: 15_000 });
+      await stockInput2.fill(originalStock);
+      await adminPage.getByRole("button", { name: /update item/i }).click();
+      await adminPage.waitForTimeout(2500);
+      console.log(`      ST-04 · the probe item's stock restored to ${originalStock}`);
+    }
     await adminPage.close();
-
-    // ---- release the room ---------------------------------------------
-    const checkoutRes = await page.request.post(`${API_BASE}/api/bookings/checkout`, {
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${staffToken}` },
-      data: { bookingId: ids.id }
-    });
-    console.log(`      ST-04 · check-out → ${checkoutRes.status()} ${await checkoutRes.text()}`);
   });
 
   test("RW-03 · the drawer applies a points redemption and then undoes it", async ({ page }) => {
