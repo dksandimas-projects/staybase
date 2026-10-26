@@ -4,16 +4,20 @@
 //
 // THE DEFECTS THIS SUITE PINS
 // ---------------------------
-// 1. §3.21 — the server generates the verification link with
-//    `handleCodeInApp: true`
-//    (`guest-app/server/handlers/members.ts` →
-//    `generateEmailVerificationLink`), so the link carries an `oobCode`
-//    and the APP has to finish it. The app never called
-//    `applyActionCode` / `signInWithEmailLink`, so the guest clicked
-//    the link, landed back on
-//    `/account/profile?emailVerified=true&oobCode=…`, and their email
-//    was STILL unverified. The "Verify your email" banner never
-//    cleared.
+// 1. §3.21 — the verification link the guest receives is produced by the
+//    server's `generateEmailVerificationLink`
+//    (`guest-app/server/handlers/members.ts`), so it points at Firebase's
+//    OWN action handler
+//    (`https://<project>.firebaseapp.com/__/auth/action?…&oobCode=…&continueUrl=…`).
+//    That handler performs the verification and redirects to the
+//    `continueUrl` the server configured — `/account/profile?emailVerified=true`.
+//    The app only ever looked for an `oobCode` on its own origin, so the
+//    production landing shape (`?emailVerified=true`, NO `oobCode`) was
+//    ignored entirely: the guest clicked the link and their email was
+//    STILL unverified in the app, the "Verify your email" banner never
+//    cleared, and the cached id token kept claiming
+//    `email_verified: false` — which made `/api/members/stays` answer
+//    403 EMAIL_NOT_VERIFIED.
 //
 // 2. §3.20 — the registration endpoint only links a guest's past
 //    bookings when the email is verified ("Once verified, re-calling
@@ -41,9 +45,17 @@ function read(path: string) {
 describe("the guest email-verification link (§3.20 + §3.21)", () => {
   const authContext = read("context/GuestAuthContext.tsx");
 
-  it("completes the action code the link carries", () => {
+  it("completes the action code when the link carries one", () => {
     expect(authContext).toContain("applyActionCode");
     expect(authContext).toContain('get("oobCode")');
+  });
+
+  it("handles the production landing shape — `?emailVerified=true`, no oobCode", () => {
+    // Firebase's own action handler performs the verification and
+    // redirects to the server's `continueUrl`
+    // (`/account/profile?emailVerified=true`). The app must recognise
+    // that marker, or the guest clicks the link and nothing changes.
+    expect(authContext).toContain('get("emailVerified") === "true"');
   });
 
   it("refreshes the id token so the `email_verified` claim is true", () => {
@@ -54,7 +66,15 @@ describe("the guest email-verification link (§3.20 + §3.21)", () => {
     expect(authContext).toContain("registerCurrentMember()");
   });
 
-  it("takes the code out of the URL so a reload does not replay it", () => {
+  it("only re-registers once the address really is verified", () => {
+    // The register endpoint gates the link on `email_verified`; calling it
+    // with an unverified token is a no-op, but it must not be treated as
+    // a successful link.
+    expect(authContext).toContain("emailVerified");
+    expect(authContext).toMatch(/if\s*\(auth\.currentUser\?\.emailVerified\)/);
+  });
+
+  it("takes the markers out of the URL so a reload does not replay them", () => {
     expect(authContext).toContain("history.replaceState");
   });
 
@@ -64,5 +84,26 @@ describe("the guest email-verification link (§3.20 + §3.21)", () => {
       "utf8"
     );
     expect(handler).toContain("handleCodeInApp: true");
+  });
+
+  it("the server's continue URL is the marker the app now reads", () => {
+    const handler = readFileSync(
+      resolve(srcRoot, "../server/handlers/members.ts"),
+      "utf8"
+    );
+    expect(handler).toContain("/account/profile?emailVerified=true");
+  });
+
+  it("remembers a verification that landed on a device with no session", () => {
+    // The link usually lands in the guest's phone while the session is
+    // on their laptop. That landing has no session, so the registration
+    // cannot run there — the flag carries it over to the next sign-in.
+    expect(authContext).toContain("PENDING_VERIFICATION_KEY");
+    expect(authContext).toContain("localStorage.setItem");
+    expect(authContext).toContain("localStorage.removeItem");
+  });
+
+  it("re-runs the registration on the next sign-in with a verified address", () => {
+    expect(authContext).toMatch(/user\.emailVerified\s*!==\s*true/);
   });
 });

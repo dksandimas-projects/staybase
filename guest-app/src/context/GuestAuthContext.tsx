@@ -67,6 +67,15 @@ interface GuestAuthContextValue {
 
 const GuestAuthContext = createContext<GuestAuthContextValue | null>(null);
 
+/**
+ * Per §3.20 (AI-BROWSER-QA 2026-10-26): set when the guest completes
+ * the email verification on a device that has NO session (the link is
+ * on their phone, the session is on their laptop). The next sign-in
+ * with a verified address consumes it and re-runs the registration, so
+ * the past bookings get linked.
+ */
+const PENDING_VERIFICATION_KEY = "sparkinn.pendingEmailVerification";
+
 export function useGuestAuth(): GuestAuthContextValue {
   const ctx = useContext(GuestAuthContext);
   if (!ctx) throw new Error("useGuestAuth must be used within GuestAuthProvider");
@@ -161,43 +170,74 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
   // verification the guest clicks.
   //
   // The server generates the verification link with
-  // `handleCodeInApp: true` (`guest-app/server/handlers/members.ts` →
-  // `generateEmailVerificationLink`), so the link carries an `oobCode`
-  // and the APP has to finish it. The app never did — the guest
-  // clicked the link, landed back on
-  // `/account/profile?emailVerified=true&oobCode=…`, and their email
-  // was STILL unverified. The "Verify your email" banner therefore
-  // never cleared, and (see §3.20) the past bookings were never
-  // linked, so "My Stays" stayed empty for every email/password
-  // member.
+  // `generateEmailVerificationLink` + `handleCodeInApp: true`
+  // (`guest-app/server/handlers/members.ts`). The link that actually
+  // reaches the guest is
+  // `https://<project>.firebaseapp.com/__/auth/action?…&oobCode=…&continueUrl=…`
+  // — Firebase's OWN action handler, which performs the verification and
+  // then redirects to the `continueUrl` the server configured:
+  // `/account/profile?emailVerified=true`.
   //
-  // `applyActionCode` is the documented API for a `mode=verifyEmail`
-  // action code. It verifies the address; the session (when there is
-  // one) is then reloaded and its id token force-refreshed so the
-  // `email_verified` claim is true.
+  // So the guest lands back on the app with EITHER of two shapes, and both
+  // have to work:
+  //
+  //   a) `?emailVerified=true` (no `oobCode`) — Firebase's handler already
+  //      verified the address. The app only has to notice the marker,
+  //      re-read the user and force-refresh the id token, because the
+  //      cached token still carries `email_verified: false`. Without the
+  //      refresh, `/api/members/stays` keeps answering 403
+  //      EMAIL_NOT_VERIFIED and "My Stays" stays empty.
+  //   b) `?oobCode=…` — a `handleCodeInApp` link that carried the action
+  //      code onto the app's own origin. The app has to finish the action
+  //      itself with `applyActionCode`.
+  //
+  // Before this, NEITHER shape was handled: the guest clicked the link,
+  // their email was still unverified in the app, the "Verify your email"
+  // banner never cleared, and (see §3.20) the past bookings were never
+  // linked, so "My Stays" stayed empty for every email/password member.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const oobCode = new URLSearchParams(window.location.search).get("oobCode");
-    if (!oobCode) return;
+    const params = new URLSearchParams(window.location.search);
+    const oobCode = params.get("oobCode");
+    const justVerified = params.get("emailVerified") === "true";
+    if (!oobCode && !justVerified) return;
 
     let cancelled = false;
     (async () => {
       try {
-        await applyActionCode(auth, oobCode);
-        // Take the code out of the URL so a reload does not replay it.
+        // (b) The app owns the action code — finish it here.
+        if (oobCode) {
+          await applyActionCode(auth, oobCode);
+        }
+        // Take the markers out of the URL so a reload does not replay them.
         window.history.replaceState({}, document.title, window.location.pathname);
         const current = auth.currentUser;
-        if (!current || cancelled) return;
+        if (!current) {
+          // No session on THIS device — the verification link usually
+          // lands in the guest's phone, the session is on their laptop.
+          // Remember it so the next sign-in re-runs the registration and
+          // the past bookings get linked then.
+          try {
+            window.localStorage.setItem(PENDING_VERIFICATION_KEY, "1");
+          } catch {
+            // A blocked storage API must not break the landing.
+          }
+          return;
+        }
+        if (cancelled) return;
         await current.reload();
-        // The claim is stale in the cached token — force a refresh.
+        // The `email_verified` claim is stale in the cached token — force
+        // a refresh so the next request carries the verified state.
         await current.getIdToken(true);
         setUser(auth.currentUser);
-        // Per §3.20: the registration endpoint only links the guest's
-        // past bookings when the email is verified ("Once verified,
-        // re-calling /api/members/register re-runs the link"). The
-        // signup call ran while the email was still unverified, so
-        // this is the call that actually links them.
-        await registerCurrentMember();
+        if (auth.currentUser?.emailVerified) {
+          // Per §3.20: the registration endpoint only links the guest's
+          // past bookings when the email is verified ("Once verified,
+          // re-calling /api/members/register re-runs the link"). The
+          // signup call ran while the email was still unverified, so
+          // this is the call that actually links them.
+          await registerCurrentMember();
+        }
       } catch (err) {
         console.error("Email verification could not be completed:", err);
       }
@@ -209,6 +249,30 @@ export function GuestAuthProvider({ children }: { children: ReactNode }) {
     // code is in the URL, not in React state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Per §3.20 (cross-device half): the verification link usually lands
+  // in a DIFFERENT browser than the one the guest signed up on — the
+  // mail is on their phone, the session is on their laptop. That landing
+  // has no session, so the registration above cannot run there; the
+  // guest then signs in later and the past bookings are STILL not
+  // linked (nothing re-runs `/api/members/register` for an
+  // already-enrolled member).
+  //
+  // The flag below survives that hop: the landing sets it, and the next
+  // sign-in with a verified address consumes it.
+  useEffect(() => {
+    if (!user) return;
+    if (typeof window === "undefined") return;
+    if (window.localStorage.getItem(PENDING_VERIFICATION_KEY) !== "1") return;
+    if (user.emailVerified !== true) return;
+    window.localStorage.removeItem(PENDING_VERIFICATION_KEY);
+    void registerCurrentMember().catch((err) => {
+      console.error("The past stays could not be linked after the verification:", err);
+    });
+    // Per the exhaustive-deps rule this must run once per user change —
+    // the flag is in localStorage, not in React state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   // Listen to member profile when user changes
   useEffect(() => {
