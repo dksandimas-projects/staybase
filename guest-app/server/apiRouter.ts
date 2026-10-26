@@ -15,7 +15,8 @@ import { handleGenerateReference } from "./handlers/reference";
 import { handleEraseMemberAccount, handleLinkBookingToMember, handleListMemberStays, handleManualAdjustPoints, handleRedeemMemberPoints, handleRedeemPointsSelf, handleRegisterMember, handleSendVerificationEmail, handleSetMemberActive, handleUndoMemberPointsRedemption } from "./handlers/members";
 import { handleUpdateTerms } from "./handlers/legal";
 import { handleCreateStaff, handleDisableStaff, handleUpdateStaff } from "./handlers/admin";
-import { handleCancelStoreOrder, handleConfirmStoreOrder, handleCreateStoreOrder, handleDeliverStoreOrder, handleGetStoreOrderStatus } from "./handlers/store";
+import { handleCancelStoreOrder, handleConfirmStoreOrder, handleCreateStoreOrder, handleDeliverStoreOrder, handleGetStoreOrderStatus, handleStaffStoreOrderStatus } from "./handlers/store";
+import { formatUnknownEndpoint } from "./lib/apiPath";
 import { handleVerifyIntercomGuest, handleSendGuestMessage } from "./handlers/intercom";
 import { handleEmailTrigger, handleEmailPreview } from "./handlers/email";
 import { handleH2BackfillStatus, handleH2LookupTokenBackfill, handleJanitorStats, handleJanitorStorageSweep } from "./handlers/janitor";
@@ -2026,6 +2027,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return await handleDeliverStoreOrder(req, res);
   }
 
+  // Per QA §3.7 (2026-10-26): the staff order transitions that used to
+  // be a raw client-side Firestore write. The state machine now lives on
+  // the server — including the TENDER GUARD, which refuses any
+  // transition on an order whose direct payment has already been
+  // collected, so a delivered order can no longer be cancelled into a
+  // void order that still holds a cash tender.
+  if (domain === "store" && action === "update-order-status" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+    return await handleStaffStoreOrderStatus(req, res);
+  }
+
   if (domain === "intercom" && action === "verify-guest" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`intercom-verify:${ip}`, 20, 60000)) {
       return res.status(429).json({ success: false, error: "Too many verification attempts. Please try again in a minute." });
@@ -2440,5 +2456,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // Fallback 404
-  return res.status(404).json({ success: false, error: `Endpoint /api/${domain}/${action} not found.` });
+  //
+  // Per QA §3.8 (2026-10-26): the message used to interpolate
+  // `/api/${domain}/${action}`, and `action` is `undefined` for a
+  // single-segment path — so `/api/version` answered
+  // "Endpoint /api/version/undefined not found.". Echo the path the
+  // caller actually asked for instead.
+  return res.status(404).json({
+    success: false,
+    error: `Endpoint ${formatUnknownEndpoint(pathSegments)} not found.`
+  });
 }

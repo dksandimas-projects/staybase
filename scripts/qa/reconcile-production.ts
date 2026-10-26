@@ -1141,14 +1141,25 @@ function orphanReservationCount(list: string[]) {
   const cancelledWithTender = storeOrders.filter(
     (o) => o.status === "cancelled" && (tenderByOrder.get(o.id) || 0) > 0
   );
-  const noTender = delivered.filter((o) => !(tenderByOrder.get(o.id) > 0));
+  // Per QA §3.7 (2026-10-26): an ADD-TO-BILL order is delivered WITHOUT
+  // a store tender BY DESIGN — its money rolls into the room folio,
+  // not into the store's tender ledger (STORE-MANAGEMENT.md: "COD
+  // maps to Cash, Add to Bill remains on the booking folio"). Counting
+  // those as "delivered, no tender" was a false positive that kept
+  // I17 failing on correct behaviour. Only a DIRECT-PAID delivery owes
+  // a tender.
+  const noTender = delivered.filter(
+    (o) => o.paymentMethod !== "add-to-bill" && !(tenderByOrder.get(o.id) > 0)
+  );
+  const expectedGap = addToBill;
+  const actualGap = r2(storeRevenue - tenderTotal);
   check(
     "I17",
     "F-C1 / F-C2 — store revenue reconciles with the store tenders",
     cancelledWithTender.length === 0 && noTender.length === 0 ? "PASS" : "FAIL",
     `${storeOrders.length} store orders · delivered revenue ${peso(storeRevenue)} ` +
       `(add-to-bill ${peso(addToBill)}) · tenders ${peso(tenderTotal)} · ` +
-      `Δ revenue−tenders ${peso(r2(storeRevenue - tenderTotal))} · ` +
+      `Δ revenue−tenders ${peso(actualGap)} (expected ${peso(expectedGap)} — the add-to-bill total, which lands on the folio) · ` +
       `${cancelledWithTender.length} cancelled order(s) still hold a tender`,
     [
       ...cancelledWithTender.map((o) => `CANCELLED WITH TENDER: ${o.ref} tender=${tenderByOrder.get(o.id)}`),

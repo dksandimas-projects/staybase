@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.20.10";
+    VERSION2 = "2.20.11";
   }
 });
 
@@ -242364,6 +242364,7 @@ var MAX_ROOM_NUMBER_LENGTH = 12;
 var MAX_ORDER_REF_LENGTH = 40;
 var MAX_REASON_LENGTH = 500;
 var MAX_SESSION_TOKEN_LENGTH = 64;
+var STORE_TENDER_DOC_ID = "delivery-tender";
 async function handleDeliverStoreOrder(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -242407,7 +242408,7 @@ async function handleDeliverStoreOrder(req, res) {
         handledBy: staffUid2
       });
       if (isDirectPaid) {
-        const tenderRef = orderRef.collection("payments").doc("delivery-tender");
+        const tenderRef = orderRef.collection("payments").doc(STORE_TENDER_DOC_ID);
         transaction.set(tenderRef, {
           type: "payment",
           amount: totalAmount,
@@ -242791,7 +242792,7 @@ async function handleConfirmStoreOrder(req, res) {
       }
     });
   } catch (error) {
-    const message = error.message || "Unable to confirm the store order.";
+    const code = error.message || "UNKNOWN_ERROR";
     const statusMap = {
       ORDER_NOT_FOUND: 404,
       ORDER_ROOM_MISMATCH: 403,
@@ -242799,8 +242800,19 @@ async function handleConfirmStoreOrder(req, res) {
       ORDER_NOT_CONFIRMABLE: 400,
       OUT_OF_STOCK: 409
     };
-    const status = statusMap[message] || 500;
-    return res.status(status).json({ success: false, error: message });
+    const messageMap = {
+      ORDER_NOT_FOUND: "Store order was not found.",
+      ORDER_ROOM_MISMATCH: "This order does not belong to this room.",
+      ORDER_REF_MISMATCH: "This order reference does not match.",
+      ORDER_NOT_CONFIRMABLE: "This order cannot be confirmed from where it is now.",
+      OUT_OF_STOCK: "One of the selected items no longer has enough stock."
+    };
+    const status = statusMap[code] || 500;
+    return res.status(status).json({
+      success: false,
+      error: messageMap[code] || "Unable to confirm the store order.",
+      code
+    });
   }
 }
 async function handleCancelStoreOrder(req, res) {
@@ -242933,6 +242945,143 @@ async function handleCancelStoreOrder(req, res) {
     });
   }
 }
+async function handleStaffStoreOrderStatus(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const body = req.body || {};
+  const orderId = typeof body.orderId === "string" ? body.orderId.trim() : "";
+  if (!orderId || orderId.length > 64) {
+    return res.status(400).json({ success: false, error: "A valid store order ID is required." });
+  }
+  const targetStatus = typeof body.status === "string" ? body.status.trim() : "";
+  if (!["out-for-delivery", "cancelled"].includes(targetStatus)) {
+    return res.status(400).json({ success: false, error: "That store order status is not supported here." });
+  }
+  const cancellationReason = typeof body.cancellationReason === "string" ? body.cancellationReason.trim().slice(0, MAX_REASON_LENGTH) : "";
+  const staffUid2 = String(req.staff?.uid || "staff");
+  try {
+    let transitioned = null;
+    await adminDb.runTransaction(async (transaction) => {
+      const orderRef = adminDb.collection("storeOrders").doc(orderId);
+      const orderDoc = await transaction.get(orderRef);
+      if (!orderDoc.exists) {
+        throw new Error("ORDER_NOT_FOUND");
+      }
+      const order = orderDoc.data();
+      const tenderDoc = await transaction.get(orderRef.collection("payments").doc(STORE_TENDER_DOC_ID));
+      if (tenderDoc.exists) {
+        throw new Error("ORDER_ALREADY_PAID");
+      }
+      const from = String(order.status || "");
+      const allowedFrom = targetStatus === "out-for-delivery" ? ["confirmed"] : ["placed", "confirmed", "out-for-delivery"];
+      if (!allowedFrom.includes(from)) {
+        throw new Error("ORDER_TRANSITION_NOT_ALLOWED");
+      }
+      const orderItems = Array.isArray(order.items) ? order.items : [];
+      if (targetStatus === "out-for-delivery") {
+        transaction.update(orderRef, {
+          status: targetStatus,
+          updatedAt: /* @__PURE__ */ new Date(),
+          handledBy: staffUid2
+        });
+        transitioned = { ...order, status: targetStatus };
+        return;
+      }
+      if (!order.stockRestoredAt && order.stockDecrementedAt && orderItems.length > 0) {
+        const itemRefs = orderItems.map((item) => adminDb.collection("storeItems").doc(item.itemId));
+        const itemDocs = await Promise.all(itemRefs.map((itemRef) => transaction.get(itemRef)));
+        for (let index = 0; index < orderItems.length; index++) {
+          const itemDoc = itemDocs[index];
+          if (!itemDoc.exists) continue;
+          const itemData = itemDoc.data();
+          if (itemData.stock === null || itemData.stock === void 0) continue;
+          transaction.update(itemRefs[index], {
+            stock: Number(itemData.stock || 0) + Number(orderItems[index].quantity || 0),
+            updatedAt: /* @__PURE__ */ new Date()
+          });
+        }
+      }
+      transaction.update(orderRef, {
+        status: targetStatus,
+        cancellationReason: cancellationReason || "Cancelled by the front desk",
+        stockRestoredAt: /* @__PURE__ */ new Date(),
+        updatedAt: /* @__PURE__ */ new Date(),
+        handledBy: staffUid2
+      });
+      transitioned = { ...order, status: targetStatus, cancellationReason };
+    });
+    if (transitioned) {
+      try {
+        let guestEmail = "";
+        if (transitioned.bookingId) {
+          const bookingDoc = await adminDb.collection("bookings").doc(transitioned.bookingId).get();
+          if (bookingDoc.exists) {
+            guestEmail = String(bookingDoc.data()?.guestEmail || "");
+          }
+        }
+        if (targetStatus === "cancelled") {
+          await sendStoreOrderTrigger("store-order-cancelled", {
+            orderRef: transitioned.orderRef,
+            orderId,
+            roomNumber: transitioned.roomNumber,
+            guestEmail,
+            guestName: transitioned.guestName,
+            items: transitioned.items,
+            totalAmount: transitioned.totalAmount,
+            paymentMethod: transitioned.paymentMethod,
+            status: "cancelled",
+            cancellationReason: cancellationReason || "Cancelled by the front desk"
+          });
+          if (transitioned.paymentMethod === "gcash" && transitioned.paymentProofUrl) {
+            try {
+              await sendStaffRefundReviewTrigger({
+                orderRef: transitioned.orderRef,
+                orderId,
+                roomNumber: transitioned.roomNumber,
+                guestName: transitioned.guestName,
+                totalAmount: transitioned.totalAmount,
+                paymentMethod: transitioned.paymentMethod,
+                paymentProofUrl: transitioned.paymentProofUrl,
+                cancellationReason: cancellationReason || "Cancelled by the front desk",
+                bookingId: transitioned.bookingId || null
+              });
+            } catch (staffEmailErr) {
+              console.error("Failed to send staff refund-review alert:", staffEmailErr);
+            }
+          }
+        } else {
+          await sendStoreOrderTrigger("store-order-out-for-delivery", {
+            ...transitioned,
+            guestEmail,
+            handledBy: staffUid2
+          });
+        }
+      } catch (emailErr) {
+        console.error("Failed to send store order status email:", emailErr);
+      }
+    }
+    return res.status(200).json({ success: true, data: { orderId, status: targetStatus } });
+  } catch (error) {
+    const knownErrors = {
+      ORDER_NOT_FOUND: { status: 404, message: "Store order was not found." },
+      ORDER_ALREADY_PAID: {
+        status: 409,
+        message: "This order has already been paid and delivered, so its status can no longer be changed. Record a refund instead."
+      },
+      ORDER_TRANSITION_NOT_ALLOWED: {
+        status: 409,
+        message: "This order cannot move to that status from where it is now."
+      }
+    };
+    const mapped = knownErrors[error.message];
+    if (!mapped) console.error("Store order status update failed:", error);
+    return res.status(mapped?.status || 500).json({
+      success: false,
+      error: mapped?.message || "Unable to update the store order."
+    });
+  }
+}
 async function handleGetStoreOrderStatus(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -242973,6 +243122,12 @@ async function handleGetStoreOrderStatus(req, res) {
     console.error("Store order status lookup failed:", error);
     return res.status(500).json({ success: false, error: "Unable to refresh store order status." });
   }
+}
+
+// server/lib/apiPath.ts
+function formatUnknownEndpoint(pathSegments) {
+  const clean = pathSegments.filter((segment) => typeof segment === "string" && segment.length > 0);
+  return clean.length > 0 ? `/api/${clean.join("/")}` : "/api";
 }
 
 // server/handlers/intercom.ts
@@ -248242,6 +248397,14 @@ async function handler(req, res) {
     req.staff = authResult;
     return await handleDeliverStoreOrder(req, res);
   }
+  if (domain === "store" && action === "update-order-status" && req.method === "POST") {
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleStaffStoreOrderStatus(req, res);
+  }
   if (domain === "intercom" && action === "verify-guest" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`intercom-verify:${ip}`, 20, 6e4)) {
       return res.status(429).json({ success: false, error: "Too many verification attempts. Please try again in a minute." });
@@ -248470,7 +248633,10 @@ async function handler(req, res) {
     req.staff = authResult;
     return await handleStagingRefreshDestroy(req, res);
   }
-  return res.status(404).json({ success: false, error: `Endpoint /api/${domain}/${action} not found.` });
+  return res.status(404).json({
+    success: false,
+    error: `Endpoint ${formatUnknownEndpoint(pathSegments)} not found.`
+  });
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {

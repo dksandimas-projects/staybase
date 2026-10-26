@@ -65,6 +65,12 @@ const MAX_REASON_LENGTH = 500;
 // schema's `sessionToken` bound in `handlers/intercom.ts`.
 const MAX_SESSION_TOKEN_LENGTH = 64;
 
+// The deterministic document id of a direct-paid store order's tender.
+// The delivery handler WRITES it; the staff status handler READS it to
+// refuse a transition on an order whose money has already been
+// collected. Both sides must name it the same way, so it lives here.
+const STORE_TENDER_DOC_ID = "delivery-tender";
+
 export async function handleDeliverStoreOrder(req: any, res: any) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
@@ -118,7 +124,7 @@ export async function handleDeliverStoreOrder(req: any, res: any) {
         // A deterministic document id makes retries idempotent. Store tenders
         // live under the order (not the linked booking), so they participate in
         // the collection-group reconciliation without reducing the room folio.
-        const tenderRef = orderRef.collection("payments").doc("delivery-tender");
+        const tenderRef = orderRef.collection("payments").doc(STORE_TENDER_DOC_ID);
         transaction.set(tenderRef, {
           type: "payment",
           amount: totalAmount,
@@ -743,7 +749,7 @@ export async function handleConfirmStoreOrder(req: any, res: any) {
       }
     });
   } catch (error: any) {
-    const message = error.message || "Unable to confirm the store order.";
+    const code = error.message || "UNKNOWN_ERROR";
     const statusMap: Record<string, number> = {
       ORDER_NOT_FOUND: 404,
       ORDER_ROOM_MISMATCH: 403,
@@ -751,8 +757,24 @@ export async function handleConfirmStoreOrder(req: any, res: any) {
       ORDER_NOT_CONFIRMABLE: 400,
       OUT_OF_STOCK: 409
     };
-    const status = statusMap[message] || 500;
-    return res.status(status).json({ success: false, error: message });
+    // Per QA §3.7 (2026-10-26): the desk used to be shown the raw code
+    // ("OUT_OF_STOCK") because this endpoint was never reached — the
+    // admin app did the confirm client-side and failed silently. Now
+    // that the desk goes through the server, the message has to read
+    // like a sentence. The machine-readable code rides along in `code`.
+    const messageMap: Record<string, string> = {
+      ORDER_NOT_FOUND: "Store order was not found.",
+      ORDER_ROOM_MISMATCH: "This order does not belong to this room.",
+      ORDER_REF_MISMATCH: "This order reference does not match.",
+      ORDER_NOT_CONFIRMABLE: "This order cannot be confirmed from where it is now.",
+      OUT_OF_STOCK: "One of the selected items no longer has enough stock."
+    };
+    const status = statusMap[code] || 500;
+    return res.status(status).json({
+      success: false,
+      error: messageMap[code] || "Unable to confirm the store order.",
+      code
+    });
   }
 }
 
@@ -935,8 +957,213 @@ export async function handleCancelStoreOrder(req: any, res: any) {
   }
 }
 
-export async function handleGetStoreOrderStatus(req: any, res: any) {
+// ---------------------------------------------------------------------------
+// Per QA §3.7 (2026-10-26): the STAFF store-order state machine.
+//
+// The desk's order actions used to be a raw client-side Firestore write
+// (`updateDoc` on `storeOrders/{orderId}` in the admin app), so the
+// state machine existed only as UI BUTTONS — nothing enforced it. Any
+// staff client could write any status onto any order, including
+// cancelling an order that had already been DELIVERED, whose
+// direct-payment tender had been recorded. The result is a cancelled
+// order holding a cash tender: money collected against a void order,
+// and a reconciliation delta that never closes.
+//
+// This handler owns the two staff transitions the desk performs that
+// were never server-owned:
+//
+//   out-for-delivery   from `confirmed`
+//   cancelled          from `placed` / `confirmed` / `out-for-delivery`
+//
+// `confirmed` stays on `handleConfirmStoreOrder` (it owns the stock
+// decrement), `delivered` on `handleDeliverStoreOrder` (it owns the
+// tender), and the GUEST's own cancel on `handleCancelStoreOrder` —
+// one implementation per rule, no duplicated stock arithmetic.
+//
+// THE TENDER GUARD. A direct-paid order's tender is written at
+// delivery, under `storeOrders/{id}/payments/delivery-tender`. If that
+// document exists the money has already been collected, so the order
+// can no longer be voided — it can only be REFUNDED, which is a
+// different instrument (`POST /api/bookings/add-refund`). Every
+// transition below refuses a tendered order.
+//
+// FOL-03: every read completes before any write.
+// ---------------------------------------------------------------------------
+export async function handleStaffStoreOrderStatus(req: any, res: any) {
   if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  const body = (req.body || {}) as {
+    orderId?: string;
+    status?: string;
+    cancellationReason?: string;
+  };
+  const orderId = typeof body.orderId === "string" ? body.orderId.trim() : "";
+  if (!orderId || orderId.length > 64) {
+    return res.status(400).json({ success: false, error: "A valid store order ID is required." });
+  }
+
+  const targetStatus = typeof body.status === "string" ? body.status.trim() : "";
+  if (!["out-for-delivery", "cancelled"].includes(targetStatus)) {
+    return res.status(400).json({ success: false, error: "That store order status is not supported here." });
+  }
+  const cancellationReason = typeof body.cancellationReason === "string"
+    ? body.cancellationReason.trim().slice(0, MAX_REASON_LENGTH)
+    : "";
+
+  const staffUid = String(req.staff?.uid || "staff");
+
+  try {
+    let transitioned: any = null;
+    await adminDb.runTransaction(async (transaction) => {
+      const orderRef = adminDb.collection("storeOrders").doc(orderId);
+      const orderDoc = await transaction.get(orderRef);
+      if (!orderDoc.exists) {
+        throw new Error("ORDER_NOT_FOUND");
+      }
+      const order = orderDoc.data()!;
+
+      // THE TENDER GUARD — the money has already been collected, so
+      // the order can no longer be voided.
+      const tenderDoc = await transaction.get(orderRef.collection("payments").doc(STORE_TENDER_DOC_ID));
+      if (tenderDoc.exists) {
+        throw new Error("ORDER_ALREADY_PAID");
+      }
+
+      const from = String(order.status || "");
+      const allowedFrom = targetStatus === "out-for-delivery"
+        ? ["confirmed"]
+        : ["placed", "confirmed", "out-for-delivery"];
+      if (!allowedFrom.includes(from)) {
+        throw new Error("ORDER_TRANSITION_NOT_ALLOWED");
+      }
+
+      const orderItems = Array.isArray(order.items) ? order.items : [];
+
+      if (targetStatus === "out-for-delivery") {
+        transaction.update(orderRef, {
+          status: targetStatus,
+          updatedAt: new Date(),
+          handledBy: staffUid
+        });
+        transitioned = { ...order, status: targetStatus };
+        return;
+      }
+
+      // targetStatus === "cancelled"
+      //
+      // Restore the stock exactly once. The decrement happened at
+      // confirmation, so a `placed` order that was never confirmed has
+      // nothing to give back.
+      if (!order.stockRestoredAt && order.stockDecrementedAt && orderItems.length > 0) {
+        const itemRefs = orderItems.map((item: any) => adminDb.collection("storeItems").doc(item.itemId));
+        const itemDocs = await Promise.all(itemRefs.map((itemRef) => transaction.get(itemRef)));
+        for (let index = 0; index < orderItems.length; index++) {
+          const itemDoc = itemDocs[index];
+          if (!itemDoc.exists) continue;
+          const itemData = itemDoc.data()!;
+          // Unlimited stock items (stock: null) were never decremented.
+          if (itemData.stock === null || itemData.stock === undefined) continue;
+          transaction.update(itemRefs[index], {
+            stock: Number(itemData.stock || 0) + Number(orderItems[index].quantity || 0),
+            updatedAt: new Date()
+          });
+        }
+      }
+
+      transaction.update(orderRef, {
+        status: targetStatus,
+        cancellationReason: cancellationReason || "Cancelled by the front desk",
+        stockRestoredAt: new Date(),
+        updatedAt: new Date(),
+        handledBy: staffUid
+      });
+      transitioned = { ...order, status: targetStatus, cancellationReason };
+    });
+
+    if (transitioned) {
+      try {
+        let guestEmail = "";
+        if (transitioned.bookingId) {
+          const bookingDoc = await adminDb.collection("bookings").doc(transitioned.bookingId).get();
+          if (bookingDoc.exists) {
+            guestEmail = String(bookingDoc.data()?.guestEmail || "");
+          }
+        }
+
+        if (targetStatus === "cancelled") {
+          await sendStoreOrderTrigger("store-order-cancelled", {
+            orderRef: transitioned.orderRef,
+            orderId,
+            roomNumber: transitioned.roomNumber,
+            guestEmail,
+            guestName: transitioned.guestName,
+            items: transitioned.items,
+            totalAmount: transitioned.totalAmount,
+            paymentMethod: transitioned.paymentMethod,
+            status: "cancelled",
+            cancellationReason: cancellationReason || "Cancelled by the front desk"
+          });
+
+          // Per CRL-04 (2026-08-02): a paid GCash order that is
+          // cancelled needs a REFUND REVIEW with an owner — the guest
+          // has already sent the money, and a cancellation alone does
+          // not issue a refund. The guest's own cancel path fires this
+          // trigger; the DESK's cancel path did not, because it was a
+          // client-side Firestore write that never reached the server.
+          if (transitioned.paymentMethod === "gcash" && transitioned.paymentProofUrl) {
+            try {
+              await sendStaffRefundReviewTrigger({
+                orderRef: transitioned.orderRef,
+                orderId,
+                roomNumber: transitioned.roomNumber,
+                guestName: transitioned.guestName,
+                totalAmount: transitioned.totalAmount,
+                paymentMethod: transitioned.paymentMethod,
+                paymentProofUrl: transitioned.paymentProofUrl,
+                cancellationReason: cancellationReason || "Cancelled by the front desk",
+                bookingId: transitioned.bookingId || null
+              });
+            } catch (staffEmailErr) {
+              console.error("Failed to send staff refund-review alert:", staffEmailErr);
+            }
+          }
+        } else {
+          await sendStoreOrderTrigger("store-order-out-for-delivery", {
+            ...transitioned,
+            guestEmail,
+            handledBy: staffUid
+          });
+        }
+      } catch (emailErr) {
+        console.error("Failed to send store order status email:", emailErr);
+      }
+    }
+
+    return res.status(200).json({ success: true, data: { orderId, status: targetStatus } });
+  } catch (error: any) {
+    const knownErrors: Record<string, { status: number; message: string }> = {
+      ORDER_NOT_FOUND: { status: 404, message: "Store order was not found." },
+      ORDER_ALREADY_PAID: {
+        status: 409,
+        message: "This order has already been paid and delivered, so its status can no longer be changed. Record a refund instead."
+      },
+      ORDER_TRANSITION_NOT_ALLOWED: {
+        status: 409,
+        message: "This order cannot move to that status from where it is now."
+      }
+    };
+    const mapped = knownErrors[error.message];
+    if (!mapped) console.error("Store order status update failed:", error);
+    return res.status(mapped?.status || 500).json({
+      success: false,
+      error: mapped?.message || "Unable to update the store order."
+    });
+  }
+}
+
+export async function handleGetStoreOrderStatus(req: any, res: any) {  if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed." });
   }
 
