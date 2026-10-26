@@ -594,6 +594,78 @@ describe("BR-04 — Handle runtime smoke tests", () => {
       expect(last.data.cutoffStates.length).toBe(3);
       expect(last.data.refunds).toEqual([]);
     });
+
+    // Per §3.18 (AI-BROWSER-QA 2026-10-26): the reference + lookup
+    // token travel as QUERY params on this GET — the guest's page calls
+    // `/api/bookings/breakfast/manage?ref=…&token=…`. The handler used
+    // to read `req.body`, which Vercel leaves empty on a GET, so every
+    // production load returned 400 and the Manage Breakfast page could
+    // never render a stay. The unit harness only ever passed the params
+    // in the body, which is why the suite stayed green while the
+    // product was broken. This test pins the real wire shape.
+    it("reads the ref + token from the QUERY params (the real GET shape)", async () => {
+      const stored = {
+        checkIn: { toDate: () => new Date("2026-11-01T00:00:00.000Z") },
+        checkOut: { toDate: () => new Date("2026-11-04T00:00:00.000Z") },
+        bookingRef: "SI-20261101-001",
+        lookupToken: "abc123def456abc123def456abc123ab",
+        timezone: "Asia/Manila",
+        numGuests: 2,
+        numAdults: 2,
+        numChildren: 0,
+        numNights: 3,
+        totalPrice: 9000,
+        status: "confirmed",
+        breakfastSelections: {},
+        breakfastTotal: 0,
+        paidAmount: 5000,
+        balance: 4000
+      };
+      mockBookings["booking_managed_1"] = stored;
+      mockSettings["breakfastConfig"] = {
+        isEnabled: true,
+        cutoffTime: "20:00",
+        cutoffTimezone: "Asia/Manila",
+        defaultMealInstructions: "Pick what you'd like each morning.",
+        meals: [
+          { id: "silog", name: "Silog", description: "Tapsilog", price: 350, displayOrder: 1, isActive: true }
+        ],
+        servedGraceMinutes: 15
+      };
+
+      const res = mockResponse();
+      await handleGetBreakfastManage(
+        {
+          method: "GET",
+          query: { ref: "SI-20261101-001", token: "abc123def456abc123def456abc123ab" },
+          body: undefined
+        } as any,
+        res
+      );
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      const last = (res.json as any).mock.calls.at(-1)?.[0];
+      expect(last.success).toBe(true);
+      expect(last.data.booking.bookingRef).toBe("SI-20261101-001");
+    });
+
+    // The Vercel catch-all rewrite puts the route segments in
+    // `req.query.route` — the handler must not treat that as a payload
+    // field.
+    it("ignores the catch-all `route` query key", async () => {
+      const res = mockResponse();
+      await handleGetBreakfastManage(
+        {
+          method: "GET",
+          query: { route: ["bookings", "breakfast", "manage"] },
+          body: undefined
+        } as any,
+        res
+      );
+      expect(res.status).toHaveBeenCalledWith(400);
+      const last = (res.json as any).mock.calls.at(-1)?.[0];
+      expect(last.success).toBe(false);
+    });
   });
 
   describe("handleUpdateBreakfast", () => {
