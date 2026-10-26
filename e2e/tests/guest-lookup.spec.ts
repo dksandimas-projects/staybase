@@ -20,6 +20,7 @@
  */
 
 import { test, expect } from "../support/qa";
+import { requireBotGateOff } from "../support/bot-mode";
 
 const GUEST_BASE = process.env.QA_GUEST_BASE_URL || "https://www.sparkinnbohol.com";
 
@@ -29,6 +30,15 @@ const BOOKING_REF = "SI-20261021-00001";
 const BOOKING_EMAIL = "qa.a2.fd03+sparkinn.dev@gmail.com";
 
 test.describe("Guest booking lookup (bot protection off)", () => {
+  // The lookup endpoint is behind the bot-protection gate. When the gate
+  // is ON the hotel is correctly protected, so this spec SKIPS with a
+  // reason rather than reporting a false failure.
+  test.beforeEach(async () => {
+    await requireBotGateOff(
+      process.env.QA_GUEST_BASE_URL || "https://www.sparkinnbohol.com",
+      "the guest booking-status lookup"
+    );
+  });
   test("LK-01 · the guest finds their booking and sees its status", async ({ page }) => {
     await page.goto(`${GUEST_BASE}/my-booking`, { waitUntil: "domcontentloaded" });
 

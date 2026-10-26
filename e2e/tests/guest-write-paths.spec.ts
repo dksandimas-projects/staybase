@@ -20,6 +20,7 @@
  */
 
 import { test, expect } from "../support/qa";
+import { requireBotGateOff } from "../support/bot-mode";
 
 const GUEST_BASE = process.env.QA_GUEST_BASE_URL || "https://www.sparkinnbohol.com";
 
@@ -44,6 +45,15 @@ async function postJson(
 }
 
 test.describe("Guest write paths (bot protection off)", () => {
+  // Every endpoint these cases exercise is behind the bot-protection
+  // gate. When the gate is ON the hotel is correctly protected, so these
+  // cases SKIP with a reason rather than reporting a false failure.
+  test.beforeEach(async () => {
+    await requireBotGateOff(
+      process.env.QA_GUEST_BASE_URL || "https://www.sparkinnbohol.com",
+      "the guest write-path API cases"
+    );
+  });
   // The email endpoint is rate limited to 20 requests/hour per IP (and
   // 3/hour per target) — see `apiRouter.ts`. These two cases are
   // API-level, so they run on ONE project only (the result is identical

@@ -35,6 +35,7 @@
  */
 
 import { test, expect, requireIdentity, guestLogin, staffLogin, ADMIN, FRONT_DESK, MEMBER } from "../support/qa";
+import { requireBotGateOff } from "../support/bot-mode";
 import { qaEnv } from "../support/env";
 import {
   FLOW_EMAIL,
@@ -234,6 +235,14 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     test.skip(
       testInfo.project.name !== "desktop",
       "this scenario WRITES to production — one write per scenario per pass"
+    );
+    // These scenarios create a booking through the GUEST site, which is
+    // behind the bot-protection gate. When the gate is ON the hotel is
+    // correctly protected, so the scenarios SKIP with a reason rather than
+    // reporting a false failure.
+    await requireBotGateOff(
+      process.env.QA_GUEST_BASE_URL || "https://www.sparkinnbohol.com",
+      "the Tier-3 write scenarios"
     );
     const active = await ensureRun();
     await tagBookingCreates(page, active.token);

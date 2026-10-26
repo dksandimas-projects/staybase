@@ -15,6 +15,7 @@
  */
 
 import { test, expect, requireIdentity, ADMIN, MEMBER } from "../support/qa";
+import { requireBotGateOff } from "../support/bot-mode";
 import {
   FLOW_EMAIL,
   FLOW_LAST_NAME,
@@ -52,6 +53,14 @@ test.describe("Staff-side scenario writes (approved 2026-10-25)", () => {
     test.skip(
       testInfo.project.name !== "desktop",
       "this scenario WRITES to production — one write per scenario per pass"
+    );
+    // Several of these scenarios create a booking through the GUEST site
+    // or read the guest lookup, and both are behind the bot-protection
+    // gate. When the gate is ON the hotel is correctly protected, so the
+    // scenarios SKIP with a reason rather than reporting a false failure.
+    await requireBotGateOff(
+      process.env.QA_GUEST_BASE_URL || "https://www.sparkinnbohol.com",
+      "the staff-side write scenarios"
     );
   });
 

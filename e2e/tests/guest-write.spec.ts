@@ -46,6 +46,7 @@
  */
 
 import { test, expect, requireIdentity, guestLogin, ADMIN, MEMBER } from "../support/qa";
+import { requireBotGateOff } from "../support/bot-mode";
 import {
   FLOW_EMAIL,
   FLOW_FIRST_NAME,
@@ -106,6 +107,13 @@ test.describe("Guest write paths (browser, bot protection off)", () => {
       testInfo.project.name !== "desktop",
       "this scenario creates a production record — one write per scenario per pass; " +
         "the mobile layout of the same form is covered by the read-only specs"
+    );
+    // The gate must be OFF for these scenarios to reach the server from
+    // this host. When it is ON the hotel is correctly protected, so the
+    // scenarios SKIP with a reason rather than reporting a false failure.
+    await requireBotGateOff(
+      process.env.QA_GUEST_BASE_URL || "https://www.sparkinnbohol.com",
+      "the guest-write scenarios"
     );
     const current = await ensureRun();
     await tagBookingCreates(page, current.token);
