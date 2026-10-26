@@ -409,6 +409,32 @@ export function markRefundPaid(input: MarkRefundPaidInput): MarkRefundPaidResult
   // `recordedBy`, `recordedAt`. `category: "cancellation"` is
   // stamped explicitly (BR-01 reads legacy `null` as
   // `"cancellation"` — the explicit stamp is back-compat-safe).
+  //
+  // Per §3.23 (AI-BROWSER-QA 2026-10-26): the record MUST carry the
+  // SETTLED state. This branch creates a refund the staff member has
+  // already paid out in one shot (no pending stage — the drawer's
+  // "Record Refund" is the payout), and it decrements `paidAmount`
+  // below as if the money had left the till. Every READ path, however,
+  // classifies a refund by its `status` alone
+  // (`shared/utils/bookingFolio.ts` → `isUnpaidRefund`: "no status ⇒
+  // pending"), so a status-less record was read back as a PENDING
+  // LIABILITY:
+  //
+  //   * the folio's `paymentsTotal` excluded it, so the guest looked
+  //     like a DEBTOR for money the desk had already handed back
+  //     (the sign of the balance flipped);
+  //   * the dashboard's "pending refunds" queue kept listing a refund
+  //     that was already paid;
+  //   * `booking.paidAmount` (decremented) disagreed with the
+  //     independently summed settled ledger, by exactly the refund
+  //     amount.
+  //
+  // The file header already states the contract this branch broke:
+  // "CRL-01's cancellation path CREATEd a refund doc directly in the
+  // paid state (no pending stage — staff records the refund in one
+  // shot through the drawer)". The `status` is what makes that true
+  // on the read side, so it is stamped here with the same shape the
+  // BR-05 breakfast branch writes.
   const now = Timestamp.now();
   const newRecord: Record<string, any> = {
     type: "refund",
@@ -419,7 +445,11 @@ export function markRefundPaid(input: MarkRefundPaidInput): MarkRefundPaidResult
     approvedBy: actor.uid,
     recordedBy: actor.uid,
     recordedAt: now,
-    category: "cancellation"
+    category: "cancellation",
+    // The settled state — see the note above.
+    status: "paid",
+    paidAt: now,
+    paidBy: actor.uid
   };
   if (safeReference) newRecord.transactionReference = safeReference;
   if (reservationId && String(reservationId).trim().length > 0) {

@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.20.8";
+    VERSION2 = "2.20.10";
   }
 });
 
@@ -230706,7 +230706,11 @@ function markRefundPaid(input) {
     approvedBy: actor.uid,
     recordedBy: actor.uid,
     recordedAt: now,
-    category: "cancellation"
+    category: "cancellation",
+    // The settled state — see the note above.
+    status: "paid",
+    paidAt: now,
+    paidBy: actor.uid
   };
   if (safeReference) newRecord.transactionReference = safeReference;
   if (reservationId && String(reservationId).trim().length > 0) {
