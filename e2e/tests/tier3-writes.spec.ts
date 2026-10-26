@@ -639,7 +639,7 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     await pointsInput.fill("100");
     await page.waitForTimeout(600);
 
-    const preview = drawer.locator("span", { hasText: /^Preview:/ }).first();
+    const preview = drawer.getByText(/^Preview:/).first();
     await expect(preview, "a live ₱ preview must be shown").toBeVisible({ timeout: 15_000 });
     const previewText = await preview.innerText();
     expect(previewText, "the preview must price the redemption").toContain("₱100");

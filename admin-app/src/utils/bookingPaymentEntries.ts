@@ -319,3 +319,35 @@ export function sameLedgerPayments(
   }
   return true;
 }
+
+/**
+ * The per-booking REFUND entries the booking drawer's "Refunds due"
+ * panel reads (`booking.refunds`).
+ *
+ * Per §3.19 (AI-BROWSER-QA 2026-10-26): the drawer's breakfast tab
+ * renders `booking.refunds` — the refund entries with
+ * `category: "breakfast"` + `status: "pending"` — but the admin app's
+ * booking mapper NEVER populated that field. The panel was therefore
+ * always empty: the staff could not see a guest's cancelled-breakfast
+ * refund, and the "Mark as paid" control that clears it was
+ * unreachable. The unit test for the panel is a source-text tripwire, so
+ * the break was invisible to the suite.
+ *
+ * `id` is the BARE doc id, not the doc path. The "Mark as paid" control
+ * posts that id to `POST /api/refunds/mark-paid`, which reads
+ * `bookings/{bookingId}/refunds/{refundId}` — a path-derived id would
+ * never resolve.
+ */
+export function resolveBookingRefunds(
+  bookingId: string,
+  index: Record<string, LedgerPayment[]>
+): LedgerPayment[] {
+  const entries = index[bookingId] ?? [];
+  return entries
+    .filter((entry) => entry.type === "refund")
+    .map((entry) => {
+      const segments = entry.id.split("/");
+      const docId = segments[segments.length - 1] || entry.id;
+      return { ...entry, id: docId };
+    });
+}
