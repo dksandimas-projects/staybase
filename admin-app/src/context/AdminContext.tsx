@@ -174,7 +174,9 @@ import {
   buildBookingPaymentIndex,
   normalizeLedgerDoc,
   resolveBookingOnsitePayments,
+  resolveBookingRefunds,
   sameLedgerPayments,
+  type LedgerPayment,
   type PaymentLedgerDoc,
 } from "../utils/bookingPaymentEntries";
 import type { AudioRouting as AudioRoutingShape } from "@spark-inn/shared";
@@ -2460,6 +2462,15 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             legacyOnsitePaymentsRef.current[booking.id] ?? booking.onsitePayments ?? [],
             paymentIndexRef.current
           ) as OnsitePayment[];
+          // Per §3.19 (AI-BROWSER-QA 2026-10-26): the drawer's
+          // breakfast tab renders `booking.refunds` — the "Refunds due"
+          // panel. The mapper never populated that field, so the panel
+          // was ALWAYS empty and the staff could not see (or clear) a
+          // guest's cancelled-breakfast refund liability.
+          booking.refunds = resolveBookingRefunds(
+            booking.id,
+            paymentIndexRef.current
+          ) as unknown as Array<Record<string, any>>;
         });
 
         // Natural sort by createdAt descending
@@ -2559,9 +2570,20 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           legacyOnsitePaymentsRef.current[booking.id] ?? booking.onsitePayments ?? [],
           paymentIndex
         ) as OnsitePayment[];
-        if (sameLedgerPayments(resolved, booking.onsitePayments)) return booking;
+        // Per §3.19 (AI-BROWSER-QA 2026-10-26): keep `booking.refunds`
+        // in step with the ledger too — the drawer's "Refunds due"
+        // panel reads it, and a liability created while the drawer is
+        // open has to appear without a reload.
+        const resolvedRefunds = resolveBookingRefunds(booking.id, paymentIndex);
+        const currentRefunds = booking.refunds as LedgerPayment[] | undefined;
+        if (
+          sameLedgerPayments(resolved, booking.onsitePayments) &&
+          sameLedgerPayments(resolvedRefunds, currentRefunds)
+        ) {
+          return booking;
+        }
         changed = true;
-        return { ...booking, onsitePayments: resolved };
+        return { ...booking, onsitePayments: resolved, refunds: resolvedRefunds };
       });
       return changed ? next : prev;
     });
