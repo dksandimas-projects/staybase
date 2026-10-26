@@ -136,17 +136,41 @@ describe("Phase 11.6 Batch 15 — room block + store stock are spec-compliant", 
       expect(body).toMatch(/!orderData\.stockRestoredAt\s*&&\s*orderData\.stockDecrementedAt/);
     });
 
-    it("AdminContext.updateStoreOrderStatus decrements stock on the placed -> confirmed transition", () => {
+    it("the SERVER decrements stock on the placed -> confirmed transition", () => {
+      // Per QA §3.7 (2026-10-26): the decrement's owner is the
+      // server's `handleConfirmStoreOrder`, which stamps
+      // `stockDecrementedAt` and does the arithmetic inside one
+      // transaction. The admin app used to carry a SECOND copy of that
+      // arithmetic in a client-side transaction — a duplicate of the
+      // money rule, which is exactly how the desk ended up able to
+      // void a delivered order. The client's copy is gone; the desk
+      // calls the server instead.
+      const confirmFnMatch = storeHandlerSrc.match(
+        /async\s+function\s+handleConfirmStoreOrder\s*\([\s\S]*?\n\}/
+      );
+      expect(confirmFnMatch, "expected to find handleConfirmStoreOrder body").toBeTruthy();
+      const body = confirmFnMatch![0];
+      // The decrement happens exactly once — the order doc's
+      // `stockDecrementedAt` is the guard.
+      expect(body).toMatch(/stockDecrementedAt/);
+      // The arithmetic itself.
+      expect(body).toMatch(/const\s+currentStock\s*=\s*Number\(itemData\.stock\s*\|\|\s*0\)/);
+      expect(body).toMatch(/const\s+newStock\s*=\s*currentStock\s*-\s*requestedQuantity/);
+    });
+
+    it("the admin app asks the server to confirm the order — it does not decrement stock itself", () => {
       const fnMatch = adminCtxSrc.match(
-        /const\s+updateStoreOrderStatus\s*=\s*async\s*\([\s\S]*?\}\s*;/
+        /const\s+updateStoreOrderStatus\s*=\s*async\s*\([\s\S]*?\n\s{2}const\s+billStoreOrder/
       );
       expect(fnMatch, "expected to find updateStoreOrderStatus").toBeTruthy();
       const body = fnMatch![0];
-      // The function now has a confirmed branch in the transaction.
-      expect(body).toMatch(/orderData\.status\s*===\s*["']placed["']\s*&&\s*!orderData\.stockDecrementedAt/);
-      expect(body).toMatch(/stockDecrementedAt:\s*serverTimestamp\(\)/);
-      // The decrement arithmetic lives in this branch.
-      expect(body).toMatch(/Number\(stock\s*\|\|\s*0\)\s*-\s*Number\(orderItems\[index\]\.quantity\s*\|\|\s*0\)/);
+      // The confirm goes through the staff endpoint that owns the
+      // decrement.
+      expect(body).toMatch(/\/api\/store\/confirm-order/);
+      // And the client no longer performs the arithmetic itself.
+      expect(body).not.toMatch(/orderData\.status\s*===\s*["']placed["']\s*&&\s*!orderData\.stockDecrementedAt/);
+      expect(body).not.toMatch(/stockDecrementedAt:\s*serverTimestamp\(\)/);
+      expect(body).not.toMatch(/Number\(stock\s*\|\|\s*0\)\s*-\s*Number\(orderItems\[index\]\.quantity\s*\|\|\s*0\)/);
     });
 
     it("StoreOrder type exposes stockDecrementedAt for the client", () => {

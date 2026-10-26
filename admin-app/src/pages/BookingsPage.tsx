@@ -3078,10 +3078,20 @@ export function BookingsPage() {
 
   const handleCancelOrder = async (reason: string) => {
     if (!selectedOrder) return;
-    void updateStoreOrderStatus(selectedOrder.id, "cancelled", reason);
-    setSelectedOrder((prev: any) => prev ? { ...prev, status: "cancelled", cancellationReason: reason } : null);
-    toast.success("Order cancelled", reason ? `Reason: ${reason}` : `Order ${selectedOrder.orderRef} cancelled.`);
-    setShowOrderCancelForm(false);
+    // Per QA §3.7 (2026-10-26): the transition is a SERVER call now,
+    // so it can be REFUSED (a delivered order already holds its cash
+    // tender, and that is a refund, not a cancellation). The drawer
+    // only shows the cancelled state once the server has accepted it,
+    // and a refusal has to reach the desk as a message rather than an
+    // unhandled rejection.
+    try {
+      await updateStoreOrderStatus(selectedOrder.id, "cancelled", reason);
+      setSelectedOrder((prev: any) => prev ? { ...prev, status: "cancelled", cancellationReason: reason } : null);
+      toast.success("Order cancelled", reason ? `Reason: ${reason}` : `Order ${selectedOrder.orderRef} cancelled.`);
+      setShowOrderCancelForm(false);
+    } catch (error) {
+      toast.error("Could not cancel the order", error instanceof Error ? error.message : String(error));
+    }
   };
 
   const getStayDates = (booking: Booking) => {
@@ -7621,9 +7631,14 @@ export function BookingsPage() {
                 ) : (
                   <>
                     <button
-                      onClick={() => {
-                        void updateStoreOrderStatus(selectedOrder.id, "confirmed");
-                        setSelectedOrder((prev: any) => prev ? { ...prev, status: "confirmed" } : null);
+                      onClick={async () => {
+                        try {
+                          await updateStoreOrderStatus(selectedOrder.id, "confirmed");
+                          setSelectedOrder((prev: any) => prev ? { ...prev, status: "confirmed" } : null);
+                          toast.success("Order confirmed", "The guest was notified and the stock was reserved.");
+                        } catch (error) {
+                          toast.error("Could not confirm the order", error instanceof Error ? error.message : String(error));
+                        }
                       }}
                       className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-green-600 hover:bg-green-700 text-xs font-bold text-white shadow-sm transition active:scale-95"
                     >
@@ -7663,9 +7678,14 @@ export function BookingsPage() {
                 ) : (
                   <>
                     <button
-                      onClick={() => {
-                        void updateStoreOrderStatus(selectedOrder.id, "out-for-delivery");
-                        setSelectedOrder((prev: any) => prev ? { ...prev, status: "out-for-delivery" } : null);
+                      onClick={async () => {
+                        try {
+                          await updateStoreOrderStatus(selectedOrder.id, "out-for-delivery");
+                          setSelectedOrder((prev: any) => prev ? { ...prev, status: "out-for-delivery" } : null);
+                          toast.success("Out for delivery", "The guest was notified.");
+                        } catch (error) {
+                          toast.error("Could not dispatch the order", error instanceof Error ? error.message : String(error));
+                        }
                       }}
                       className="min-h-[44px] w-full inline-flex items-center justify-center rounded-lg bg-primary hover:bg-primary-dark text-xs font-bold text-white shadow-sm transition active:scale-95"
                     >
