@@ -22,6 +22,8 @@ export * from "./utils/checkin";
 export * from "./utils/dates";
 export * from "./utils/images";
 export * from "./utils/points";
+export * from "./utils/kitchenGuestNames";
+export * from "./utils/kitchenPrep";
 export * from "./utils/paymentMethodLabel";
 export * from "./utils/paymentReference";
 export * from "./utils/paymentVerification";

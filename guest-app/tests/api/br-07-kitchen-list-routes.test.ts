@@ -149,8 +149,18 @@ describe("BR-07 — Kitchen list routes (source-text tripwires)", () => {
     // The two helpers the page depends on.
     expect(source).toContain("bookingRoomNumber");
     expect(source).toContain("extractGuestNameFromSlotKey");
+
     // `guests[]` walks the per-guest map (per BR-01).
-    expect(source).toMatch(/booking\?\.guests/g);
+    //
+    // Per F-B5 (2026-10-27): the resolver moved to the SHARED helper
+    // `resolveKitchenGuestName` (shared/utils/kitchenGuestNames.ts),
+    // so the handler delegates instead of carrying its own copy. The
+    // RULE this test protects is that the guest name is resolved from
+    // the booking's per-guest map, so the assertion now follows the
+    // delegation to the helper that does it.
+    expect(source).toContain("resolveKitchenGuestName");
+    const resolverSrc = readSource("shared/utils/kitchenGuestNames.ts");
+    expect(resolverSrc).toMatch(/booking\?\.guests/g);
   });
 
   // 7. The 30s in-memory cache.

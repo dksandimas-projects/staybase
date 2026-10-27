@@ -10,6 +10,27 @@
  *
  * Requires Firebase Admin variables in guest-app/.env. The default mode never
  * writes to Firestore. Apply mode revalidates every approved row transactionally.
+ *
+ * SCOPE (per F-D3, 2026-10-27)
+ * ---------------------------
+ * This scanner covers BOTH sides now:
+ *
+ *   * the PRICING invariants (the original FLR-01 scope): the booking
+ *     total vs its rate breakdown, the revenue allocation, the
+ *     corporate allocation, the other-add-on scope, and a delivered
+ *     direct-paid store order's missing tender;
+ *   * the LEDGER invariants: an orphan payment / refund / charge (one
+ *     naming a booking that does not exist), a non-finite or negative
+ *     money amount, and a refund larger than the money collected.
+ *
+ * The ledger findings are REPORT-ONLY (`manual-review`): this script's
+ * automatic repairs are for pricing drift, and silently repairing a
+ * ledger is the kind of wide repair the audit rules forbid.
+ *
+ * The CONTINUOUS coverage is the nightly reconciliation
+ * (`scripts/qa/reconcile-production.ts` — checks I05, I06, I07, I08,
+ * I12, I14, I17), which runs against production every night. This
+ * script is the offline counterpart for the one-off repair workflow.
  */
 
 import { createHash } from "node:crypto";
@@ -22,7 +43,7 @@ import { config as dotenv } from "dotenv";
 
 export type FinanceIntegrityFinding = {
   findingId: string;
-  cohort: "FL-02" | "FL-03" | "pre-FL-05" | "pricing-drift" | "non-finite";
+  cohort: "FL-02" | "FL-03" | "pre-FL-05" | "pricing-drift" | "non-finite" | "ledger";
   entityPath: string;
   issue: string;
   observedValue: string;
@@ -216,6 +237,117 @@ export function scanStoreOrderRecord(
   }];
 }
 
+/**
+ * Per F-D3 (2026-10-27): the scanner covered the PRICING invariants
+ * and none of the LEDGER ones — it never read the `payments` /
+ * `refunds` / `charges` collections, so running it gave false
+ * confidence that the money was sound.
+ *
+ * These are the ledger invariants that are cheap to state and
+ * decisive, and that no PRICING check can catch:
+ *
+ *   L1  a payment that names a booking which does not exist (an
+ *       orphan: money recorded against a booking that is gone);
+ *   L2  a charge that names a booking which does not exist;
+ *   L3  a money amount that is not a finite number, or is negative;
+ *   L4  a refund whose amount does not bring the collected total back
+ *       to zero or below — i.e. a refund LARGER than what was
+ *       collected, which is money leaving the hotel twice.
+ *
+ * L1-L4 are REPORT-ONLY (`manual-review`): this scanner's automatic
+ * repair vocabulary (`set-booking-total`, `append-store-delivery-tender`)
+ * is for pricing drift, and silently "repairing" a ledger is exactly
+ * the kind of wide repair the audit rules forbid. Every ledger finding
+ * is a decision for a human.
+ *
+ * The CONTINUOUS ledger coverage is the nightly reconciliation
+ * (`scripts/qa/reconcile-production.ts`, checks I05/I06/I07/I08/I12/
+ * I14/I17), which runs against production every night. This pass is
+ * the offline counterpart for the one-off repair workflow.
+ */
+export function scanLedgerRecord(
+  collectionName: "payments" | "refunds" | "charges",
+  documentPath: string,
+  data: Record<string, any>,
+  knownBookingIds: Set<string>
+): FinanceIntegrityFinding[] {
+  const findings: FinanceIntegrityFinding[] = [];
+  const entityPath = documentPath;
+
+  const bookingId = String(data.bookingId ?? "").trim();
+  if (bookingId && !knownBookingIds.has(bookingId)) {
+    findings.push({
+      findingId: `${entityPath}:orphan-booking-reference`,
+      cohort: "ledger",
+      entityPath,
+      issue: `${collectionName} entry references a booking that does not exist.`,
+      observedValue: `bookingId=${bookingId}`,
+      expectedValue: "an existing booking id, or no bookingId at all",
+      proposedAction: "manual-review",
+      proposedValue: "",
+      approved: "NO",
+      reviewNotes: ""
+    });
+  }
+
+  const amount = finiteNumber(data.amount);
+  if (amount === null) {
+    findings.push({
+      findingId: `${entityPath}:non-finite-amount`,
+      cohort: "ledger",
+      entityPath,
+      issue: `${collectionName} entry has a non-finite amount.`,
+      observedValue: String(data.amount),
+      expectedValue: "a finite number",
+      proposedAction: "manual-review",
+      proposedValue: "",
+      approved: "NO",
+      reviewNotes: ""
+    });
+  } else if (amount < 0 && collectionName !== "refunds") {
+    findings.push({
+      findingId: `${entityPath}:negative-amount`,
+      cohort: "ledger",
+      entityPath,
+      issue: `${collectionName} entry has a negative amount.`,
+      observedValue: money(amount),
+      expectedValue: "zero or a positive amount",
+      proposedAction: "manual-review",
+      proposedValue: "",
+      approved: "NO",
+      reviewNotes: ""
+    });
+  }
+
+  return findings;
+}
+
+/**
+ * L4: a refund larger than what was collected.
+ *
+ * The refunds live beside the payments they offset, so the caller
+ * passes the two totals it already read.
+ */
+export function scanRefundCoverage(
+  documentPath: string,
+  collectedAmount: number,
+  refundedAmount: number
+): FinanceIntegrityFinding[] {
+  if (!(refundedAmount > collectedAmount)) return [];
+  return [{
+    findingId: `${documentPath}:refund-exceeds-collected`,
+    cohort: "ledger",
+    entityPath: documentPath,
+    issue: "Refunds exceed the money collected on this booking.",
+    observedValue: `collected=${money(collectedAmount)} refunded=${money(refundedAmount)}`,
+    expectedValue: "refunded <= collected",
+    proposedAction: "manual-review",
+    proposedValue: "",
+    approved: "NO",
+    reviewNotes: ""
+  }];
+}
+
 function csvEscape(value: string): string {
   return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
@@ -303,9 +435,77 @@ async function scan(outputPath: string) {
     findings.push(...scanStoreOrderRecord(order.id, order.data(), deliveryTender.exists));
   }
 
+  // Per F-D3 (2026-10-27): the LEDGER pass. The scanner previously
+  // read only the pricing side, so running it gave false confidence
+  // that the money was sound.
+  //
+  // `payments` and `refunds` live in SUBcollections (under a booking or
+  // a reservation), so they are read with a collection group. `charges`
+  // is a root collection.
+  //
+  // The store orders' own `payments/delivery-tender` documents are
+  // included by the group query; a tender names no `bookingId`, so it
+  // never trips the orphan check.
+  const knownBookingIds = new Set(bookings.docs.map((b) => b.id));
+
+  const paymentGroups = await db.collectionGroup("payments").get();
+  for (const doc of paymentGroups.docs) {
+    findings.push(
+      ...scanLedgerRecord("payments", doc.ref.path, doc.data(), knownBookingIds)
+    );
+  }
+
+  const refundGroups = await db.collectionGroup("refunds").get();
+  for (const doc of refundGroups.docs) {
+    findings.push(
+      ...scanLedgerRecord("refunds", doc.ref.path, doc.data(), knownBookingIds)
+    );
+  }
+
+  const chargeDocs = await db.collection("charges").get();
+  for (const doc of chargeDocs.docs) {
+    findings.push(
+      ...scanLedgerRecord("charges", doc.ref.path, doc.data(), knownBookingIds)
+    );
+  }
+
+  // L4: refunds larger than what was collected, per booking.
+  const collectedByBooking = new Map<string, number>();
+  for (const doc of paymentGroups.docs) {
+    const d = doc.data() || {};
+    const bookingId = String(d.bookingId ?? "").trim();
+    const amount = finiteNumber(d.amount);
+    if (!bookingId || amount === null) continue;
+    collectedByBooking.set(
+      bookingId,
+      (collectedByBooking.get(bookingId) || 0) + amount
+    );
+  }
+  const refundedByBooking = new Map<string, number>();
+  for (const doc of refundGroups.docs) {
+    const d = doc.data() || {};
+    const bookingId = String(d.bookingId ?? "").trim();
+    const amount = finiteNumber(d.amount);
+    if (!bookingId || amount === null) continue;
+    refundedByBooking.set(
+      bookingId,
+      (refundedByBooking.get(bookingId) || 0) + Math.abs(amount)
+    );
+  }
+  for (const [bookingId, refunded] of refundedByBooking) {
+    const collected = collectedByBooking.get(bookingId) || 0;
+    findings.push(
+      ...scanRefundCoverage(`bookings/${bookingId}`, collected, refunded)
+    );
+  }
+
   writeFileSync(outputPath, findingsToCsv(findings), { encoding: "utf8", flag: "wx" });
   console.log(`Finance integrity scan complete for project ${projectId}.`);
-  console.log(`Reviewed ${bookings.size} bookings and ${orders.size} store orders; found ${findings.length} item(s).`);
+  console.log(
+    `Reviewed ${bookings.size} bookings, ${orders.size} store orders, ` +
+    `${paymentGroups.size} payment(s), ${refundGroups.size} refund(s) and ` +
+    `${chargeDocs.size} charge(s); found ${findings.length} item(s).`
+  );
   console.log(`Review CSV written to ${outputPath}. No Firestore writes were made.`);
 }
 

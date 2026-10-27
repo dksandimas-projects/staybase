@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.21.8";
+    VERSION2 = "2.21.14";
   }
 });
 
@@ -150524,6 +150524,157 @@ var init_points = __esm({
   }
 });
 
+// ../shared/utils/kitchenGuestNames.ts
+function namedGuest(guest) {
+  if (!guest || typeof guest !== "object") return "";
+  const first = typeof guest.firstName === "string" ? guest.firstName : "";
+  const last = typeof guest.lastName === "string" ? guest.lastName : "";
+  const combined = `${first} ${last}`.trim();
+  if (combined.length > 0) return combined;
+  if (typeof guest.name === "string" && guest.name.trim().length > 0) {
+    return guest.name.trim();
+  }
+  return "";
+}
+function resolveKitchenGuestName(booking, guestIndex) {
+  const index = Number.isFinite(Number(guestIndex)) ? Math.max(0, Math.floor(Number(guestIndex))) : 0;
+  const guests = Array.isArray(booking?.guests) ? booking.guests : [];
+  const own = namedGuest(guests[index]);
+  if (own) return { guestIndex: index, guestName: own };
+  const lead = namedGuest(guests[0]) || (typeof booking?.guestName === "string" ? booking.guestName.trim() : "");
+  if (index === 0) return { guestIndex: index, guestName: lead || "Guest" };
+  return { guestIndex: index, guestName: `Guest ${index + 1}` };
+}
+var init_kitchenGuestNames = __esm({
+  "../shared/utils/kitchenGuestNames.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/breakfastSlotKey.ts
+function buildBreakfastSlotId(guestIndex) {
+  return `guest-${guestIndex}`;
+}
+function buildBreakfastSlotKey(serviceDate, guestIndex) {
+  return `${serviceDate}-${buildBreakfastSlotId(guestIndex)}`;
+}
+function buildBreakfastSlotKeyForBase(serviceDate, guestIndex, base) {
+  return base === "one-based" ? `${serviceDate}-guest-${guestIndex + 1}` : buildBreakfastSlotKey(serviceDate, guestIndex);
+}
+function parseBreakfastSlotKey(slotKey) {
+  if (typeof slotKey !== "string") return null;
+  const match = /^(\d{4}-\d{2}-\d{2})-(?:(guest-)?(\d+))$/.exec(slotKey);
+  if (!match) return null;
+  const rawIndex = Number(match[3]);
+  if (!Number.isFinite(rawIndex)) return null;
+  return {
+    serviceDate: match[1],
+    rawIndex,
+    form: match[2] ? "canonical" : "bare"
+  };
+}
+function detectBreakfastSlotIndexBase(selections, numGuests) {
+  if (!selections || typeof selections !== "object") return "zero-based";
+  let highestCanonicalIndex = -1;
+  let sawIndexZero = false;
+  for (const key of Object.keys(selections)) {
+    const parsed = parseBreakfastSlotKey(key);
+    if (!parsed || parsed.form !== "canonical") continue;
+    if (parsed.rawIndex === 0) sawIndexZero = true;
+    if (parsed.rawIndex > highestCanonicalIndex) highestCanonicalIndex = parsed.rawIndex;
+  }
+  if (sawIndexZero) return "zero-based";
+  const total = Number(numGuests);
+  if (Number.isFinite(total) && total > 0 && highestCanonicalIndex >= total) {
+    return "one-based";
+  }
+  return "zero-based";
+}
+function resolveBreakfastSlotGuestIndex(slotKey, base = "zero-based") {
+  const parsed = parseBreakfastSlotKey(slotKey);
+  if (!parsed) return null;
+  const index = parsed.form === "bare" ? parsed.rawIndex : base === "one-based" ? parsed.rawIndex - 1 : parsed.rawIndex;
+  if (index < 0) return null;
+  return index;
+}
+function normalizeBreakfastSelections(selections, numGuests) {
+  const base = detectBreakfastSlotIndexBase(
+    selections,
+    numGuests
+  );
+  const slots = /* @__PURE__ */ new Map();
+  if (!selections || typeof selections !== "object") return { base, slots };
+  for (const storedKey of Object.keys(selections)) {
+    const parsed = parseBreakfastSlotKey(storedKey);
+    if (!parsed) continue;
+    const guestIndex = resolveBreakfastSlotGuestIndex(storedKey, base);
+    if (guestIndex === null) continue;
+    const canonicalKey = buildBreakfastSlotKey(parsed.serviceDate, guestIndex);
+    const existing = slots.get(canonicalKey);
+    if (existing) {
+      const existingIsBare = parseBreakfastSlotKey(existing.storedKey)?.form === "bare";
+      if (existingIsBare && parsed.form === "canonical") {
+        slots.set(canonicalKey, {
+          canonicalKey,
+          storedKey,
+          guestIndex,
+          serviceDate: parsed.serviceDate,
+          entry: selections[storedKey]
+        });
+      }
+      continue;
+    }
+    slots.set(canonicalKey, {
+      canonicalKey,
+      storedKey,
+      guestIndex,
+      serviceDate: parsed.serviceDate,
+      entry: selections[storedKey]
+    });
+  }
+  return { base, slots };
+}
+var init_breakfastSlotKey = __esm({
+  "../shared/utils/breakfastSlotKey.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/kitchenPrep.ts
+function buildDailyKitchenPrep(bookings) {
+  const dateMap = {};
+  for (const b3 of bookings || []) {
+    const selections = b3?.breakfastSelections;
+    if (!selections || typeof selections !== "object") continue;
+    const normalized = normalizeBreakfastSelections(
+      selections,
+      b3.numGuests
+    );
+    for (const slot of normalized.slots.values()) {
+      const raw = slot.entry;
+      if (raw && typeof raw === "object" && raw.removedAt != null) continue;
+      const dateStr = slot.serviceDate;
+      if (!dateStr) continue;
+      const mealName = typeof raw === "string" ? raw : typeof raw?.mealName === "string" ? raw.mealName : null;
+      if (!mealName) continue;
+      if (!dateMap[dateStr]) dateMap[dateStr] = {};
+      dateMap[dateStr][mealName] = (dateMap[dateStr][mealName] || 0) + 1;
+    }
+  }
+  const sortedDates = Object.keys(dateMap).sort();
+  const allItems = /* @__PURE__ */ new Set();
+  for (const date of sortedDates) {
+    Object.keys(dateMap[date]).forEach((item) => allItems.add(item));
+  }
+  return { dates: sortedDates, items: Array.from(allItems), counts: dateMap };
+}
+var init_kitchenPrep = __esm({
+  "../shared/utils/kitchenPrep.ts"() {
+    "use strict";
+    init_breakfastSlotKey();
+  }
+});
+
 // ../shared/utils/paymentMethodLabel.ts
 function resolvePaymentMethodLabel(methodKey, paymentMethods) {
   if (typeof methodKey !== "string" || methodKey.length === 0) {
@@ -151809,95 +151960,6 @@ var init_breakfastCutoff = __esm({
   }
 });
 
-// ../shared/utils/breakfastSlotKey.ts
-function buildBreakfastSlotId(guestIndex) {
-  return `guest-${guestIndex}`;
-}
-function buildBreakfastSlotKey(serviceDate, guestIndex) {
-  return `${serviceDate}-${buildBreakfastSlotId(guestIndex)}`;
-}
-function buildBreakfastSlotKeyForBase(serviceDate, guestIndex, base) {
-  return base === "one-based" ? `${serviceDate}-guest-${guestIndex + 1}` : buildBreakfastSlotKey(serviceDate, guestIndex);
-}
-function parseBreakfastSlotKey(slotKey) {
-  if (typeof slotKey !== "string") return null;
-  const match = /^(\d{4}-\d{2}-\d{2})-(?:(guest-)?(\d+))$/.exec(slotKey);
-  if (!match) return null;
-  const rawIndex = Number(match[3]);
-  if (!Number.isFinite(rawIndex)) return null;
-  return {
-    serviceDate: match[1],
-    rawIndex,
-    form: match[2] ? "canonical" : "bare"
-  };
-}
-function detectBreakfastSlotIndexBase(selections, numGuests) {
-  if (!selections || typeof selections !== "object") return "zero-based";
-  let highestCanonicalIndex = -1;
-  let sawIndexZero = false;
-  for (const key of Object.keys(selections)) {
-    const parsed = parseBreakfastSlotKey(key);
-    if (!parsed || parsed.form !== "canonical") continue;
-    if (parsed.rawIndex === 0) sawIndexZero = true;
-    if (parsed.rawIndex > highestCanonicalIndex) highestCanonicalIndex = parsed.rawIndex;
-  }
-  if (sawIndexZero) return "zero-based";
-  const total = Number(numGuests);
-  if (Number.isFinite(total) && total > 0 && highestCanonicalIndex >= total) {
-    return "one-based";
-  }
-  return "zero-based";
-}
-function resolveBreakfastSlotGuestIndex(slotKey, base = "zero-based") {
-  const parsed = parseBreakfastSlotKey(slotKey);
-  if (!parsed) return null;
-  const index = parsed.form === "bare" ? parsed.rawIndex : base === "one-based" ? parsed.rawIndex - 1 : parsed.rawIndex;
-  if (index < 0) return null;
-  return index;
-}
-function normalizeBreakfastSelections(selections, numGuests) {
-  const base = detectBreakfastSlotIndexBase(
-    selections,
-    numGuests
-  );
-  const slots = /* @__PURE__ */ new Map();
-  if (!selections || typeof selections !== "object") return { base, slots };
-  for (const storedKey of Object.keys(selections)) {
-    const parsed = parseBreakfastSlotKey(storedKey);
-    if (!parsed) continue;
-    const guestIndex = resolveBreakfastSlotGuestIndex(storedKey, base);
-    if (guestIndex === null) continue;
-    const canonicalKey = buildBreakfastSlotKey(parsed.serviceDate, guestIndex);
-    const existing = slots.get(canonicalKey);
-    if (existing) {
-      const existingIsBare = parseBreakfastSlotKey(existing.storedKey)?.form === "bare";
-      if (existingIsBare && parsed.form === "canonical") {
-        slots.set(canonicalKey, {
-          canonicalKey,
-          storedKey,
-          guestIndex,
-          serviceDate: parsed.serviceDate,
-          entry: selections[storedKey]
-        });
-      }
-      continue;
-    }
-    slots.set(canonicalKey, {
-      canonicalKey,
-      storedKey,
-      guestIndex,
-      serviceDate: parsed.serviceDate,
-      entry: selections[storedKey]
-    });
-  }
-  return { base, slots };
-}
-var init_breakfastSlotKey = __esm({
-  "../shared/utils/breakfastSlotKey.ts"() {
-    "use strict";
-  }
-});
-
 // ../shared/utils/money.ts
 function roundToTwoDecimals(value) {
   const numeric = Number(value);
@@ -152751,6 +152813,7 @@ __export(shared_exports, {
   buildBreakfastSlotKey: () => buildBreakfastSlotKey,
   buildBreakfastSlotKeyForBase: () => buildBreakfastSlotKeyForBase,
   buildCancellationLiabilitySnapshot: () => buildCancellationLiabilitySnapshot,
+  buildDailyKitchenPrep: () => buildDailyKitchenPrep,
   buildGoogleCalendarUrl: () => buildGoogleCalendarUrl,
   buildIcsContent: () => buildIcsContent,
   buildOtherAddOnDraftSelections: () => buildOtherAddOnDraftSelections,
@@ -152888,6 +152951,7 @@ __export(shared_exports, {
   resolveBookingPreferenceValues: () => resolveBookingPreferenceValues,
   resolveBreakfastSlotGuestIndex: () => resolveBreakfastSlotGuestIndex,
   resolveCurrentLevel: () => resolveCurrentLevel,
+  resolveKitchenGuestName: () => resolveKitchenGuestName,
   resolveMaxStayNights: () => resolveMaxStayNights,
   resolvePaymentMethodLabel: () => resolvePaymentMethodLabel,
   resolveRangeSelection: () => resolveRangeSelection,
@@ -152946,6 +153010,8 @@ var init_shared = __esm({
     init_dates();
     init_images();
     init_points();
+    init_kitchenGuestNames();
+    init_kitchenPrep();
     init_paymentMethodLabel();
     init_paymentReference();
     init_paymentVerification();
@@ -246405,33 +246471,7 @@ function readStaff5(req) {
   if (role !== "admin" && role !== "front-desk") return null;
   return { uid: String(staff.uid), role };
 }
-function extractGuestNameFromSlotKey(booking, guestIndex) {
-  const guests = Array.isArray(booking?.guests) ? booking.guests : [];
-  const slotGuest = guests[guestIndex];
-  if (slotGuest && typeof slotGuest === "object") {
-    const first = typeof slotGuest.firstName === "string" ? slotGuest.firstName : "";
-    const last = typeof slotGuest.lastName === "string" ? slotGuest.lastName : "";
-    const combined = `${first} ${last}`.trim();
-    if (combined.length > 0) return { guestIndex, guestName: combined };
-    if (typeof slotGuest.name === "string" && slotGuest.name.trim().length > 0) {
-      return { guestIndex, guestName: slotGuest.name.trim() };
-    }
-  }
-  const firstGuest = guests[0];
-  if (firstGuest && typeof firstGuest === "object") {
-    const first = typeof firstGuest.firstName === "string" ? firstGuest.firstName : "";
-    const last = typeof firstGuest.lastName === "string" ? firstGuest.lastName : "";
-    const combined = `${first} ${last}`.trim();
-    if (combined.length > 0) return { guestIndex: 0, guestName: combined };
-    if (typeof firstGuest.name === "string" && firstGuest.name.trim().length > 0) {
-      return { guestIndex: 0, guestName: firstGuest.name.trim() };
-    }
-  }
-  if (typeof booking?.guestName === "string" && booking.guestName.trim().length > 0) {
-    return { guestIndex, guestName: booking.guestName.trim() };
-  }
-  return { guestIndex, guestName: "Guest" };
-}
+var extractGuestNameFromSlotKey = resolveKitchenGuestName;
 function bookingRoomNumber(booking) {
   const direct = booking?.roomNumber;
   if (typeof direct === "string" && direct.trim().length > 0) return direct.trim();
@@ -247892,7 +247932,6 @@ var staffOnlyEmailActions = /* @__PURE__ */ new Set([
 var publicEmailActions = /* @__PURE__ */ new Set([
   "booking-submitted",
   "payment-confirmed",
-  "booking-confirmed",
   "checkin-reminder",
   "booking-cancelled",
   "discount-rejected",

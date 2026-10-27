@@ -109,8 +109,19 @@ describe("BR-07-P1 — the admin app uses the canonical 0-based breakfast slot k
     // `<date>-guest-N` form) into the canonical space.
     expect(drawerSrc).toContain("normalizeBreakfastSelections");
     expect(bookingsPageSrc).toContain("normalizeBreakfastSelections");
-    expect(reportsPageSrc).toContain("normalizeBreakfastSelections");
     expect(dashboardPageSrc).toContain("normalizeBreakfastSelections");
+
+    // Per F-B3 (2026-10-27): the Reports page no longer calls the
+    // normaliser directly — its Daily Kitchen Prep counting moved into
+    // the SHARED `buildDailyKitchenPrep` helper, which calls the
+    // normaliser. The rule this test protects is that the slot space
+    // is resolved by the SHARED code and never hand-rolled, so the
+    // delegation satisfies it. (The helper's own use of the
+    // normaliser is pinned by `f-b3-f-b5-kitchen-list.test.ts`.)
+    expect(
+      reportsPageSrc.includes("normalizeBreakfastSelections") ||
+      reportsPageSrc.includes("buildDailyKitchenPrep")
+    ).toBe(true);
   });
 
   it("the admin app builds its keys with the shared canonical builder", () => {

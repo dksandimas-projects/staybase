@@ -3671,8 +3671,12 @@ export function SettingsPage() {
     // Parse the export JSON. The
     // operator pastes in the JSON they
     // exported from production
-    // (via the `scripts/export-prod-data.mjs`
+    // (via the `scripts/qa/export-prod-data.ts`
     // script or equivalent).
+    //
+    // Per F-A6 (2026-10-27): the UI named
+    // `scripts/export-prod-data.mjs`, which does not
+    // exist — the instruction was a dead end.
     let exportPayload: any;
     try {
       exportPayload = JSON.parse(refreshExportJson);
@@ -9752,7 +9756,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                               Production export (JSON)
                             </label>
                             <p className="text-[10px] text-gray-500 mb-1.5">
-                              Paste the JSON from <code>scripts/export-prod-data.mjs</code>. Must have{" "}
+                              Paste the JSON from <code>scripts/qa/export-prod-data.ts</code>. Must have{" "}
                               <code>export.bookings</code>, <code>export.storeOrders</code>,{" "}
                               <code>export.members</code>.
                             </p>

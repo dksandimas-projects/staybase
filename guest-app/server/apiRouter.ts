@@ -72,10 +72,22 @@ const staffOnlyEmailActions = new Set([
   "staff-new-booking",
   "staff-new-payment"
 ]);
+// Per the audit of 2026-10-27: "booking-confirmed" was listed here AND
+// in `staffOnlyEmailActions`. The staff-only gate is checked FIRST, so
+// a guest POST to `/api/email/booking-confirmed` got a 401 — which is
+// CORRECT: the action is the DESK's "resend confirmation email"
+// (`BookingEmailActions.tsx`), and no guest code or email template
+// calls it.
+//
+// It is removed from this list because the listing was dead code that
+// read as "this action is guest-reachable". The staff-only list is the
+// authoritative one.
+//
+// Proven live (2026-10-27): no token -> 401; admin token -> 400
+// (reaches validation, so the gate let it through).
 const publicEmailActions = new Set([
   "booking-submitted",
   "payment-confirmed",
-  "booking-confirmed",
   "checkin-reminder",
   "booking-cancelled",
   "discount-rejected",
