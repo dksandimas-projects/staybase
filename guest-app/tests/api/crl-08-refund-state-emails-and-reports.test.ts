@@ -222,6 +222,45 @@ describe("CRL-08 — `handleCancelBooking` writes a staff notification when the 
     );
     expect(handlerBody).toMatch(/if \(liability && liability\.policyResult\)/);
   });
+
+  // ============================================================
+  // Per FOL-03 (2026-10-27): the cancel may identify the
+  // booking by `bookingRef` (the guest's lookup token) instead
+  // of by id. The body's `bookingId` is then undefined.
+  //
+  // The cancel's post-commit work — the email view, the
+  // liability projection, and this notification — all used
+  // that undefined body id. They run inside best-effort
+  // try/catch blocks, so the cancel SUCCEEDED but the guest
+  // got no cancellation email and the desk got no
+  // notification: a silent money-communication failure.
+  // ============================================================
+  it("addresses the cancel email + notification by the booking's DOCUMENT id, not the request body's `bookingId`", () => {
+    const handlerBody = bookingsHandlerSrc.slice(
+      bookingsHandlerSrc.indexOf("export async function handleCancelBooking"),
+      bookingsHandlerSrc.indexOf("} catch (error: any) {", bookingsHandlerSrc.indexOf("export async function handleCancelBooking"))
+    );
+
+    // The canonical id is derived from the resolved document ref.
+    expect(handlerBody).toMatch(
+      /const cancelledBookingDocumentId = bookingDocumentRef\.id;/
+    );
+
+    // ...and it is what the email view, the liability projection
+    // and the notification all use.
+    expect(handlerBody).toMatch(
+      /loadReservationEmailView\(cancelledBookingDocumentId\)/
+    );
+    expect(handlerBody).toMatch(
+      /loadLiabilityProjectionForEmail\(\{ bookingId: cancelledBookingDocumentId \}\)/
+    );
+    expect(handlerBody).toMatch(/entityId:\s*cancelledBookingDocumentId,/);
+
+    // The body's `bookingId` must not reach any of them.
+    expect(handlerBody).not.toMatch(/loadReservationEmailView\(bookingId\)/);
+    expect(handlerBody).not.toMatch(/loadLiabilityProjectionForEmail\(\{ bookingId \}\)/);
+    expect(handlerBody).not.toMatch(/entityId:\s*bookingId,/);
+  });
 });
 
 describe("CRL-08 — Reports liability queue", () => {

@@ -8985,11 +8985,26 @@ export async function handleCancelBooking(req: any, res: any) {
           const clawbackMemberDoc = clawbackMemberSnapshot;
           if (clawbackMemberDoc?.exists) {
             const clawbackPoints = -Number(freshBooking.pointsAwarded || 0);
-            const clawbackHistoryRef = clawbackMemberRef.collection("pointsHistory").doc(`clawback-${bookingId}`);
+            // The booking's DOCUMENT id — NOT the `bookingId` from the
+            // request body.
+            //
+            // A cancel may identify the booking by `bookingRef` (the
+            // guest's lookup token) instead of by id, and in that case
+            // the body's `bookingId` is undefined. Writing
+            // `bookingId: undefined` into a Firestore document is
+            // rejected ("Cannot use 'undefined' as a Firestore value"),
+            // so the cancel failed with a 500 — this defect was HIDDEN
+            // behind the read-after-write 500, which fired first.
+            //
+            // `bookingDocumentRef.id` is the canonical document id, and
+            // it is what the multi-child branch uses for the same
+            // entry (`child.id`).
+            const clawbackBookingDocumentId = bookingDocumentRef.id;
+            const clawbackHistoryRef = clawbackMemberRef.collection("pointsHistory").doc(`clawback-${clawbackBookingDocumentId}`);
             transaction.set(clawbackHistoryRef, {
               type: "clawback",
               points: clawbackPoints,
-              bookingId,
+              bookingId: clawbackBookingDocumentId,
               bookingRef: freshBooking.bookingRef,
               description: `Cancellation clawback for cancelled stay (${freshBooking.bookingRef})`,
               by: cancelledBy,
@@ -9050,6 +9065,16 @@ export async function handleCancelBooking(req: any, res: any) {
     });
     }
 
+    // The booking's DOCUMENT id, not the `bookingId` from the request
+    // body. A cancel may identify the booking by `bookingRef` (the
+    // guest's lookup token) instead of by id, and in that case the
+    // body's `bookingId` is undefined — so the email view, the
+    // liability projection and the notification were all addressed to
+    // `undefined` and silently lost (they run inside a best-effort
+    // try/catch, so the cancel still succeeded but the guest got no
+    // email and the desk got no notification).
+    const cancelledBookingDocumentId = bookingDocumentRef.id;
+
     try {
       // Per MRB-09 (2026-08-02, per decision #168) +
       // MRB-13 (2026-08-02, per decision #166): the
@@ -9084,10 +9109,10 @@ export async function handleCancelBooking(req: any, res: any) {
       // falls through to the legacy
       // "no refund is issued automatically" copy.
       const { loadLiabilityProjectionForEmail } = await import("./email");
-      const reservationView = await loadReservationEmailView(bookingId);
+      const reservationView = await loadReservationEmailView(cancelledBookingDocumentId);
       const liabilityProjection = reservationView
         ? reservationView.liabilityProjection
-        : await loadLiabilityProjectionForEmail({ bookingId });
+        : await loadLiabilityProjectionForEmail({ bookingId: cancelledBookingDocumentId });
       const cancellationSourceForEmail: "guest" | "staff" | "system" = cancelledBy === "guest"
         ? "guest"
         : (cancelledBy === "system" ? "system" : "staff");
@@ -9144,13 +9169,13 @@ export async function handleCancelBooking(req: any, res: any) {
         const projection = computeCancellationLiabilityState({ liability, processedAmount: 0 });
         const stateLabel = projection.stateLabel || "Pending refund";
         const notifTitle = policyRefund > 0
-          ? `Cancellation refund pending — ${bookingData.bookingRef || bookingId} (${stateLabel}, ₱${policyRefund.toLocaleString("en-PH")})`
-          : `Cancellation recorded — ${bookingData.bookingRef || bookingId} (no refund owed)`;
+          ? `Cancellation refund pending — ${bookingData.bookingRef || cancelledBookingDocumentId} (${stateLabel}, ₱${policyRefund.toLocaleString("en-PH")})`
+          : `Cancellation recorded — ${bookingData.bookingRef || cancelledBookingDocumentId} (no refund owed)`;
         await writeNotification({
           type: "cancellation-refund",
           title: notifTitle,
           entityType: "booking",
-          entityId: bookingId,
+          entityId: cancelledBookingDocumentId,
           roomNumber: bookingData.roomNumber || null,
           bookingRef: bookingData.bookingRef || null
         });

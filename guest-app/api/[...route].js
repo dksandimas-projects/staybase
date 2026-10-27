@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.21.6";
+    VERSION2 = "2.21.7";
   }
 });
 
@@ -236464,11 +236464,12 @@ async function handleCancelBooking(req, res) {
             const clawbackMemberDoc = clawbackMemberSnapshot;
             if (clawbackMemberDoc?.exists) {
               const clawbackPoints = -Number(freshBooking.pointsAwarded || 0);
-              const clawbackHistoryRef = clawbackMemberRef.collection("pointsHistory").doc(`clawback-${bookingId}`);
+              const clawbackBookingDocumentId = bookingDocumentRef.id;
+              const clawbackHistoryRef = clawbackMemberRef.collection("pointsHistory").doc(`clawback-${clawbackBookingDocumentId}`);
               transaction.set(clawbackHistoryRef, {
                 type: "clawback",
                 points: clawbackPoints,
-                bookingId,
+                bookingId: clawbackBookingDocumentId,
                 bookingRef: freshBooking.bookingRef,
                 description: `Cancellation clawback for cancelled stay (${freshBooking.bookingRef})`,
                 by: cancelledBy,
@@ -236501,10 +236502,11 @@ async function handleCancelBooking(req, res) {
         }
       });
     }
+    const cancelledBookingDocumentId = bookingDocumentRef.id;
     try {
       const { loadLiabilityProjectionForEmail: loadLiabilityProjectionForEmail2 } = await Promise.resolve().then(() => (init_email(), email_exports));
-      const reservationView = await loadReservationEmailView(bookingId);
-      const liabilityProjection = reservationView ? reservationView.liabilityProjection : await loadLiabilityProjectionForEmail2({ bookingId });
+      const reservationView = await loadReservationEmailView(cancelledBookingDocumentId);
+      const liabilityProjection = reservationView ? reservationView.liabilityProjection : await loadLiabilityProjectionForEmail2({ bookingId: cancelledBookingDocumentId });
       const cancellationSourceForEmail = cancelledBy === "guest" ? "guest" : cancelledBy === "system" ? "system" : "staff";
       await sendBookingTrigger(
         postTransactionAction,
@@ -236528,12 +236530,12 @@ async function handleCancelBooking(req, res) {
         const { computeCancellationLiabilityState: computeCancellationLiabilityState2 } = await Promise.resolve().then(() => (init_shared(), shared_exports));
         const projection = computeCancellationLiabilityState2({ liability, processedAmount: 0 });
         const stateLabel = projection.stateLabel || "Pending refund";
-        const notifTitle = policyRefund > 0 ? `Cancellation refund pending \u2014 ${bookingData.bookingRef || bookingId} (${stateLabel}, \u20B1${policyRefund.toLocaleString("en-PH")})` : `Cancellation recorded \u2014 ${bookingData.bookingRef || bookingId} (no refund owed)`;
+        const notifTitle = policyRefund > 0 ? `Cancellation refund pending \u2014 ${bookingData.bookingRef || cancelledBookingDocumentId} (${stateLabel}, \u20B1${policyRefund.toLocaleString("en-PH")})` : `Cancellation recorded \u2014 ${bookingData.bookingRef || cancelledBookingDocumentId} (no refund owed)`;
         await writeNotification2({
           type: "cancellation-refund",
           title: notifTitle,
           entityType: "booking",
-          entityId: bookingId,
+          entityId: cancelledBookingDocumentId,
           roomNumber: bookingData.roomNumber || null,
           bookingRef: bookingData.bookingRef || null
         });

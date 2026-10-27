@@ -201,7 +201,7 @@ describe("MRB-05 — loyalty clawback + relaxed terminal-status reject (PR #2 of
       // `earn-${bookingId}` entry, in the same
       // subcollection.
       expect(handlers).toMatch(
-        /clawbackMemberRef\.collection\(["']pointsHistory["']\)\.doc\(`clawback-\$\{bookingId\}`\)/
+        /clawbackMemberRef\.collection\(["']pointsHistory["']\)\.doc\(`clawback-\$\{clawbackBookingDocumentId\}`\)/
       );
     });
 
@@ -212,8 +212,36 @@ describe("MRB-05 — loyalty clawback + relaxed terminal-status reject (PR #2 of
       // paired + auditable (a future report can sum
       // the ledger for a booking by grepping for the
       // bookingId in the doc id).
+      //
+      // Per FOL-03 (2026-10-27): the id is the booking's
+      // DOCUMENT id, not the `bookingId` from the request
+      // body. A cancel may identify the booking by
+      // `bookingRef` instead of by id, and then the body's
+      // `bookingId` is undefined — which Firestore rejects
+      // ("Cannot use 'undefined' as a Firestore value"), so
+      // the cancel 500'd.
       expect(handlers).toMatch(
+        /doc\(`clawback-\$\{clawbackBookingDocumentId\}`\)/
+      );
+      expect(handlers).toMatch(
+        /const clawbackBookingDocumentId = bookingDocumentRef\.id;/
+      );
+    });
+
+    it("never writes the request body's `bookingId` into the clawback ledger entry", () => {
+      // The body's `bookingId` is OPTIONAL (a cancel may carry
+      // only `bookingRef`), so it can be undefined. The
+      // ledger entry must use the canonical document id.
+      //
+      // This is the defect that was MASKED behind the
+      // read-after-write 500: the transaction aborted on the
+      // read first, so the undefined write never surfaced
+      // until the read was fixed.
+      expect(handlers).not.toMatch(
         /doc\(`clawback-\$\{bookingId\}`\)/
+      );
+      expect(handlers).toMatch(
+        /bookingId:\s*clawbackBookingDocumentId,/
       );
     });
 

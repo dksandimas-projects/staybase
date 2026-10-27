@@ -1498,6 +1498,23 @@ export function ReportsPage() {
 
   const lowStockItems = useMemo(() =>
     storeItems
+      // Per F-C3 (2026-10-27): a RETIRED item must never raise a
+      // purchasing flag.
+      //
+      // `deleteStoreItem` is a SOFT delete — it sets `isActive: false`
+      // + `deletedAt` rather than removing the document — so the
+      // retired item is still in `storeItems`. The old filter looked
+      // only at the stock level, so a product the hotel no longer
+      // sells kept telling the operator to buy stock for it.
+      //
+      // Proven live: `A7 Inactive Test Item` (stock=3, isActive=false)
+      // was flagged against a threshold of 5.
+      //
+      // `isActive !== false` rather than `isActive === true`: a legacy
+      // document written before the field existed has no `isActive`,
+      // and treating that as "not active" would silently drop a real
+      // product from the alert.
+      .filter(item => item.isActive !== false)
       .filter(item => item.stock !== null && item.stock <= (storeConfig.lowStockThreshold || 3))
       .sort((a, b) => Number(a.stock || 0) - Number(b.stock || 0)),
     [storeItems, storeConfig.lowStockThreshold]

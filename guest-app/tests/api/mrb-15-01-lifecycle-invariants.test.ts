@@ -215,8 +215,15 @@ describe("MRB-15-01 — Cancel-time: per-child loyalty clawback via `clawback-${
     // `clawback-${bookingId}` (a child id, not a
     // reservation id) for the per-child path. Same
     // id shape as the reservation-scope path.
+    //
+    // Per FOL-03 (2026-10-27): the id is the booking's
+    // DOCUMENT id, not the `bookingId` from the request
+    // body. The guest's own self-service cancel sends
+    // only `bookingRef`, so the body's `bookingId` is
+    // undefined there — and Firestore rejects undefined
+    // values, so the cancel 500'd.
     const clawbackSingleBlock = bookingsHandlerSrc.match(
-      /const clawbackHistoryRef = clawbackMemberRef\.collection\("pointsHistory"\)\.doc\(`clawback-\$\{bookingId\}`\)/
+      /const clawbackHistoryRef = clawbackMemberRef\.collection\("pointsHistory"\)\.doc\(`clawback-\$\{clawbackBookingDocumentId\}`\)/
     );
     expect(
       clawbackSingleBlock,
