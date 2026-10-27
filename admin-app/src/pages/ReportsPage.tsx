@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin } from "../context/AdminContext";
-import { getLatestPaymentReference, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, getBookingRevenueStreams, isVatEnabled, getEffectiveVatRate, normalizeBreakfastSelections } from "@spark-inn/shared";
+import { getLatestPaymentReference, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, getBookingRevenueStreams, isVatEnabled, getEffectiveVatRate, buildDailyKitchenPrep } from "@spark-inn/shared";
 import {
   AreaChart, Area,
   BarChart, Bar,
@@ -1526,59 +1526,25 @@ export function ReportsPage() {
     [revenueBookings]
   );
 
-  const dailyKitchenPrep = useMemo(() => {
-    const dateMap: Record<string, Record<string, number>> = {};
-    for (const b of breakfastBookings) {
-      for (let i = 0; i < b.numNights; i++) {
-        const date = toDate(b.checkIn);
-        if (!date) continue;
-        const dateCursor = new Date(date);
-        dateCursor.setDate(dateCursor.getDate() + i);
-        const dateStr = dateCursor.toISOString().split("T")[0];
-        if (!dateMap[dateStr]) dateMap[dateStr] = {};
-        // Per BR-07-P1 (2026-10-22): the booking's selections
-        // are resolved into the CANONICAL 0-based slot space
-        // through the shared normaliser, so the report counts
-        // the legacy bare (`<date>-N`) and legacy 1-based
-        // (`<date>-guest-N`) key forms too. The pre-fix code
-        // looked up a 1-based key (`${dateStr}-guest-${g}`),
-        // so it never saw the guest app's 0-based keys.
-        const normalized = normalizeBreakfastSelections(
-          (b.breakfastSelections as any) || {},
-          b.numGuests
-        );
-        for (const slot of normalized.slots.values()) {
-          if (slot.serviceDate !== dateStr) continue;
-          // Per BR-05 (2026-10-13): the booking doc's
-          // `breakfastSelections` may now be either the
-          // legacy `Record<string, string>` shape (meal
-          // name as the value) or the BR-01 rich shape
-          // (`{ mealId, mealName, price, ... }`). The
-          // legacy report counts the meal name (matches
-          // the pre-BR-05 inventory report); the rich
-          // shape needs the `mealName` extraction.
-          const rawSelection: any = slot.entry;
-          if (rawSelection) {
-            const mealName =
-              typeof rawSelection === "string"
-                ? rawSelection
-                : typeof rawSelection?.mealName === "string"
-                ? rawSelection.mealName
-                : null;
-            if (mealName) {
-              dateMap[dateStr][mealName] = (dateMap[dateStr][mealName] || 0) + 1;
-            }
-          }
-        }
-      }
-    }
-    const sortedDates = Object.keys(dateMap).sort();
-    const allItems = new Set<string>();
-    for (const date of sortedDates) {
-      Object.keys(dateMap[date]).forEach(item => allItems.add(item));
-    }
-    return { dates: sortedDates, items: Array.from(allItems), counts: dateMap };
-  }, [breakfastBookings]);
+  // Per F-B3 (2026-10-27): the counting lives in the SHARED helper
+  // `buildDailyKitchenPrep` (shared/utils/kitchenPrep.ts), so the
+  // panel and its test run the SAME code.
+  //
+  // The pre-fix version derived its dates from the booking's
+  // `checkIn + numNights` window and then kept only the slots whose
+  // service date fell inside it. That dropped a meal dated outside the
+  // stay, counted a meal cancelled before the cut-off, and emitted an
+  // EMPTY row for a date with no matching slot — so the panel
+  // disagreed with the bookings it summarised, and with the server's
+  // own kitchen list, which already filtered `removedAt`.
+  //
+  // Measured on production (2026-10-27): the old logic counted 28
+  // meals across 15 dates; the slot-driven logic counts 23 meals
+  // across 13 dates.
+  const dailyKitchenPrep = useMemo(
+    () => buildDailyKitchenPrep(breakfastBookings),
+    [breakfastBookings]
+  );
 
   // ── Search filtering for sales sub-tables ──
   const matchesSearch = (value: string) =>
@@ -1747,6 +1713,36 @@ export function ReportsPage() {
     triggerDownload(
       new Blob([csv], { type: "text/csv;charset=utf-8;" }),
       `${config.hotelId}_collections_${periodStartKey}_to_${periodEndKey}.csv`
+    );
+  };
+
+  // Per F-C4 (2026-10-27): the store report had NO export, even
+  // though `plan/features/STORE-MANAGEMENT.md` line 84 ticks
+  // "Export store report as CSV".
+  //
+  // The columns are the SAME set the Full Backup's "Store Orders"
+  // sheet already carries, so the CSV and the XLSX cannot drift: both
+  // describe an order the same way.
+  const handleExportStoreOrdersCSV = () => {
+    if (!isRangeValid) {
+      toast.error("Invalid range", "Start date cannot be after end date.");
+      return;
+    }
+    const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+    const headers = [
+      "Order Ref", "Room Number", "Booking ID", "Guest Name", "Items",
+      "Total Amount", "Payment Method", "Status", "Date"
+    ];
+    const rows = filteredStoreOrders.map((o: any) => [
+      o.orderRef, o.roomNumber, o.bookingId || "",
+      o.guestName, (o.items || []).map((i: any) => `${i.quantity}x ${i.name}`).join("; "),
+      o.totalAmount, PAYMENT_LABELS[o.paymentMethod] || o.paymentMethod,
+      o.status, toDate(o.createdAt)?.toISOString().slice(0, 10) || ""
+    ]);
+    const csv = [headers, ...rows].map((row) => row.map(escape).join(",")).join("\n");
+    triggerDownload(
+      new Blob([csv], { type: "text/csv;charset=utf-8;" }),
+      `${config.hotelId}_store_orders_${periodStartKey}_to_${periodEndKey}.csv`
     );
   };
 
@@ -2999,6 +2995,7 @@ export function ReportsPage() {
           collectionsByStaff={collectionsByStaff}
           filteredPayments={filteredPayments}
           onExportCollectionsCSV={handleExportCollectionsCSV}
+          onExportStoreOrdersCSV={handleExportStoreOrdersCSV}
           cancelledOrNoShowWithCollections={cancelledOrNoShowWithCollections}
           receivablesTotal={receivablesTotal}
           overdueReceivablesTotal={overdueReceivablesTotal}
@@ -3411,6 +3408,8 @@ function SalesTab(props: {
   collectionsByStaff: Array<{ staff: string; count: number; total: number }>;
   filteredPayments: ReportPayment[];
   onExportCollectionsCSV: () => void;
+  // Per F-C4 (2026-10-27): the store report's CSV export.
+  onExportStoreOrdersCSV: () => void;
   cancelledOrNoShowWithCollections: Array<{ bookingId: string; bookingRef: string; guestName: string; roomNumber: string; statusLabel: string; grossPaid: number; refunded: number; retained: number }>;
   receivablesTotal: number;
   overdueReceivablesTotal: number;
@@ -3499,7 +3498,7 @@ function SalesTab(props: {
     deltas,
     totalRevenue, roomRevenue, breakfastRevenue, storeRevenue, incidentalRevenue, totalTransactions,
     billedTotal, collectedTotal, grossCollectionsTotal, refundsTotal, outstandingTotal, overCollectedTotal, collectionsByDay, collectionsByStaff,
-    filteredPayments, onExportCollectionsCSV, cancelledOrNoShowWithCollections,
+    filteredPayments, onExportCollectionsCSV, onExportStoreOrdersCSV, cancelledOrNoShowWithCollections,
     receivablesTotal, overdueReceivablesTotal, corporateReceivablesTotal, addToBillReceivablesTotal,
     receivablesByAge, corporateReceivables, filteredReceivables, onExportReceivablesCSV,
     corporateInvoices, invoiceAction, onIssueCorporateInvoice, onMarkCorporateInvoicePaid,
@@ -4217,7 +4216,26 @@ function SalesTab(props: {
         )}
 
         {salesSubTab === "store" && (
-          <SalesStoreOrdersTable orders={filteredStoreOrders} toDate={toDate} isMobile={isMobile} />
+          <>
+            {/* Per F-C4 (2026-10-27): the store report's CSV export.
+                `plan/features/STORE-MANAGEMENT.md` line 84 ticks
+                "Export store report as CSV" — the button was missing
+                entirely, so the spec and the product disagreed. */}
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-[10px] text-gray-500">
+                {filteredStoreOrders.length} store order{filteredStoreOrders.length === 1 ? "" : "s"} in this range
+              </p>
+              <button
+                type="button"
+                onClick={onExportStoreOrdersCSV}
+                disabled={filteredStoreOrders.length === 0}
+                className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-gray-250 bg-white px-4 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Download size={14} /> Export Store Report CSV
+              </button>
+            </div>
+            <SalesStoreOrdersTable orders={filteredStoreOrders} toDate={toDate} isMobile={isMobile} />
+          </>
         )}
 
         {salesSubTab === "charges" && (

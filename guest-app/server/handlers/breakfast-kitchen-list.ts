@@ -78,6 +78,7 @@ import {
   computeBreakfastCutoffState,
   normalizeBreakfastSelections,
   resolveBreakfastSlotGuestIndex,
+  resolveKitchenGuestName,
   type BreakfastSlotIndexBase,
   DEFAULT_BREAKFAST_CUTOFF_TIME,
   DEFAULT_BREAKFAST_CUTOFF_TIMEZONE
@@ -238,54 +239,28 @@ function readStaff(req: VercelRequest): { uid: string; role: StaffRole } | null 
   return { uid: String(staff.uid), role };
 }
 
-// `extractGuestNameFromSlotKey` resolves the slot's guest
-// index to a display name from the booking's `guests[]`
-// array.
+// Per F-B5 (2026-10-27): the guest label is resolved by the SHARED
+// helper `resolveKitchenGuestName` (shared/utils/kitchenGuestNames.ts).
 //
-// The index is NOT re-derived from the key string here — the
-// caller passes the ALREADY-RESOLVED 0-based index that
-// `normalizeBreakfastSelections` produced. That matters
-// because three key forms exist in the wild (canonical
-// `guest-0`, the legacy bare `-0`, and the legacy 1-based
-// `guest-1`) and only the shared normaliser knows which
-// index each one denotes.
+// The defect it fixes: the resolver read the booking's `guests[]` array
+// and fell back to the booking's single top-level `guestName`. **0 of
+// 157** production bookings carry a `guests[]` array, while **141** have
+// `numGuests > 1` — so every slot of a multi-guest booking fell
+// through to the same name. The kitchen saw one name on both rows of a
+// 2-guest booking and read it as one person wanting two meals.
 //
-// Slots indexed past the array length OR with a non-numeric
-// tail fall back to the first guest (`guests[0]?.name` or
-// the booking's top-level `guestName`) so the kitchen list
-// always shows a caller label.
-function extractGuestNameFromSlotKey(
-  booking: any,
-  guestIndex: number
-): { guestIndex: number; guestName: string } {
-  const guests = Array.isArray(booking?.guests) ? booking.guests : [];
-  const slotGuest = guests[guestIndex];
-  if (slotGuest && typeof slotGuest === "object") {
-    const first = typeof slotGuest.firstName === "string" ? slotGuest.firstName : "";
-    const last = typeof slotGuest.lastName === "string" ? slotGuest.lastName : "";
-    const combined = `${first} ${last}`.trim();
-    if (combined.length > 0) return { guestIndex, guestName: combined };
-    if (typeof slotGuest.name === "string" && slotGuest.name.trim().length > 0) {
-      return { guestIndex, guestName: slotGuest.name.trim() };
-    }
-  }
-  // Fallback: first guest, then the booking's top-level
-  // `guestName` denormalization.
-  const firstGuest = guests[0];
-  if (firstGuest && typeof firstGuest === "object") {
-    const first = typeof firstGuest.firstName === "string" ? firstGuest.firstName : "";
-    const last = typeof firstGuest.lastName === "string" ? firstGuest.lastName : "";
-    const combined = `${first} ${last}`.trim();
-    if (combined.length > 0) return { guestIndex: 0, guestName: combined };
-    if (typeof firstGuest.name === "string" && firstGuest.name.trim().length > 0) {
-      return { guestIndex: 0, guestName: firstGuest.name.trim() };
-    }
-  }
-  if (typeof booking?.guestName === "string" && booking.guestName.trim().length > 0) {
-    return { guestIndex, guestName: booking.guestName.trim() };
-  }
-  return { guestIndex, guestName: "Guest" };
-}
+// The rule now: the slot's own guest when the booking has one; the
+// lead guest's real name for the lead slot; and a positional label
+// ("Guest 2") for the rest, because a repeated name would misstate who
+// is staying.
+//
+// The index is NOT re-derived from the key string here — the caller
+// passes the ALREADY-RESOLVED 0-based index that
+// `normalizeBreakfastSelections` produced. That matters because three
+// key forms exist in the wild (canonical `guest-0`, the legacy bare
+// `-0`, and the legacy 1-based `guest-1`) and only the shared
+// normaliser knows which index each one denotes.
+const extractGuestNameFromSlotKey = resolveKitchenGuestName;
 
 function bookingRoomNumber(booking: any): string {
   // The BR-06 refund flow + the BR-04 manage page both
