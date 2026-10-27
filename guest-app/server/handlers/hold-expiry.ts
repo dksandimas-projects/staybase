@@ -20,6 +20,12 @@ import { Timestamp } from "firebase-admin/firestore";
 import { sendBookingTrigger } from "./email";
 import { adminDb } from "../lib/firebase-admin";
 import {
+  readVoucherReleases,
+  applyVoucherReleases,
+  readCorporateCodeReleases,
+  applyCorporateCodeReleases
+} from "../lib/voucherRelease";
+import {
   isBookingOccupyingRoom,
   EXPIRED_HOLD_CANCELLATION_REASON
 } from "@spark-inn/shared";
@@ -123,22 +129,6 @@ export async function handleHoldExpiryCron(
           }, now)) {
             return null;
           }
-          transaction.update(doc.ref, {
-            status: "cancelled",
-            cancellationReason: EXPIRED_HOLD_CANCELLATION_REASON,
-            // Per CRL-02 (2026-08-02): the cron-driven retirement is
-            // a server-initiated cancellation, so the audit metadata
-            // is `cancelledBy: "system"` + `cancellationSource: "system"`.
-            // Same shape as the in-transaction retirement at the create
-            // / walkin / reschedule sites. Reports + emails can switch
-            // on either field; the canonical EXPIRED_HOLD_CANCELLATION_REASON
-            // is preserved as the reason.
-            cancelledBy: SYSTEM_CANCELLATION_SOURCE,
-            cancellationSource: SYSTEM_CANCELLATION_SOURCE,
-            cancelledAt: now,
-            updatedAt: now
-          });
-
           // ── The voucher / corporate-code release ────────────────
           //
           // Per MRB-13: a booking that is cancelled RELEASES the
@@ -158,40 +148,53 @@ export async function handleHoldExpiryCron(
           // legitimate guest is refused a voucher that was never
           // actually used.
           //
-          // The release mirrors `handleCancelBooking` exactly — same
-          // `Math.max(..., 0)` floor, same `updatedAt` stamp, and the
-          // same dedup: one decrement per booking that used the code,
-          // and one read + one write per unique code.
+          // The release is the SHARED implementation
+          // (`readVoucherReleases` / `applyVoucherReleases`), so
+          // this path and the guest cancel path cannot drift into
+          // different arithmetic. It mirrors `handleCancelBooking`:
+          // the same `Math.max(..., 0)` floor, the same `updatedAt`
+          // stamp, and one decrement per retired booking.
           //
-          // FOL-03: every read in this transaction happens BEFORE the
-          // write below, so the voucher / corporate-code reads are
-          // issued here, ahead of the `transaction.update` calls.
-          const voucherCode = String(freshData.voucherCode || "").trim().toUpperCase();
-          const corporateCode = String(freshData.corporateCode || "").trim().toUpperCase();
-
-          if (voucherCode) {
-            const vRef = adminDb.collection("vouchers").doc(voucherCode);
-            const vDoc = await transaction.get(vRef);
-            if (vDoc.exists) {
-              const vData = vDoc.data() || {};
-              transaction.update(vRef, {
-                usageCount: Math.max((Number(vData.usageCount) || 0) - 1, 0),
-                updatedAt: now
-              });
+          // FOL-03: every read in this transaction happens BEFORE any
+          // write, so the release READS are issued here — before the
+          // booking update below.
+          const voucherRelease = await readVoucherReleases(transaction, [
+            {
+              code: String(freshData.voucherCode || ""),
+              count: 1,
+              now
             }
-          }
+          ]);
 
-          if (corporateCode) {
-            const cpRef = adminDb.collection("corporateCodes").doc(corporateCode);
-            const cpDoc = await transaction.get(cpRef);
-            if (cpDoc.exists) {
-              const cpData = cpDoc.data() || {};
-              transaction.update(cpRef, {
-                usageCount: Math.max((Number(cpData.usageCount) || 0) - 1, 0),
-                updatedAt: now
-              });
+          const corporateRelease = await readCorporateCodeReleases(transaction, [
+            {
+              code: String(freshData.corporateCode || ""),
+              count: 1,
+              now
             }
-          }
+          ]);
+
+          transaction.update(doc.ref, {
+            status: "cancelled",
+            cancellationReason: EXPIRED_HOLD_CANCELLATION_REASON,
+            // Per CRL-02 (2026-08-02): the cron-driven retirement is
+            // a server-initiated cancellation, so the audit metadata
+            // is `cancelledBy: "system"` + `cancellationSource: "system"`.
+            // Same shape as the in-transaction retirement at the create
+            // / walkin / reschedule sites. Reports + emails can switch
+            // on either field; the canonical EXPIRED_HOLD_CANCELLATION_REASON
+            // is preserved as the reason.
+            cancelledBy: SYSTEM_CANCELLATION_SOURCE,
+            cancellationSource: SYSTEM_CANCELLATION_SOURCE,
+            cancelledAt: now,
+            updatedAt: now
+          });
+
+          // Apply the releases. The reads happened above, so every
+          // write in this transaction now follows every read (FOL-03).
+          applyVoucherReleases(transaction, voucherRelease);
+          applyCorporateCodeReleases(transaction, corporateRelease);
+
 
           return {
             bookingId: doc.id,

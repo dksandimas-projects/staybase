@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["DOM", "DOM.Iterable", "ES2020"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowJs": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@config": ["../hotel.config.ts"],
+      "@shared/*": ["../shared/*"],
+      "@spark-inn/shared": ["../shared/index.ts"]
+    }
+  },
+  "include": ["server", "src", "../hotel.config.ts", "../shared"],
+  "exclude": ["../shared/__tests__", "tests/api"]
+}

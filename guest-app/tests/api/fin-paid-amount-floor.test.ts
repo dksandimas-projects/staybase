@@ -71,8 +71,30 @@ describe("the paid-amount source (tripwire)", () => {
     ).not.toMatch(/paidAmount:\s*Number\(booking\.paidAmount\)\s*\|\|\s*0/);
 
     const uses = bookingsSrc.match(/resolvePaidAmountForLiability\(\{/g) || [];
-    // the cancel path + the reschedule path (breakfast + other add-ons)
-    expect(uses.length).toBe(3);
+    // Every path that needs the collected amount resolves it HERE:
+    //   1. the reservation-scope cancel (per cancellable child)
+    //   2. the single-room cancel
+    //   3. the reschedule path (breakfast)
+    //   4. the reschedule path (other add-ons)
+    //
+    // Per FOL-03 the cancel paths resolve it in the transaction's READ
+    // phase and hand the value to `redateAddOnsForCancel` — the helper
+    // itself no longer reads, because reading the ledger after a write
+    // made Firestore reject the whole cancel ("Firestore transactions
+    // require all reads to be executed before all writes").
+    expect(uses.length).toBe(4);
+
+    // The helper must not read the transaction itself any more — its
+    // callers resolve the amount and pass it in.
+    const helperBody = bookingsSrc.slice(
+      bookingsSrc.indexOf("async function redateAddOnsForCancel"),
+      bookingsSrc.indexOf("async function redateAddOnsForCancel") + 4000
+    );
+    expect(
+      helperBody,
+      "redateAddOnsForCancel must not read the transaction — the caller passes the resolved amount"
+    ).not.toMatch(/resolvePaidAmountForLiability\(/);
+    expect(helperBody).toMatch(/paidAmount: number;/);
   });
 
   it("the server folio excludes a pending refund from the collected total", () => {

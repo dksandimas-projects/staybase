@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.21.5";
+    VERSION2 = "2.21.6";
   }
 });
 
@@ -233075,6 +233075,16 @@ async function handleCreateBooking(req, res) {
       finalTotalPrice = totalPrice;
       finalRateBreakdown = rateBreakdown;
       finalReservationRef = `R-${todayCompact}-${String(sequence).padStart(5, "0")}`;
+      let selfRcData = null;
+      let selfMemberDoc = null;
+      let selfMemberRef = null;
+      if (pointsToRedeem > 0 && detectedMemberId) {
+        const selfRcRef = adminDb.collection("settings").doc("rewardsConfig");
+        const selfRcSnap = await transaction.get(selfRcRef);
+        selfRcData = selfRcSnap.exists ? selfRcSnap.data() : null;
+        selfMemberRef = adminDb.collection("members").doc(detectedMemberId);
+        selfMemberDoc = await transaction.get(selfMemberRef);
+      }
       if (corporateCodeUsageUpdate) {
         transaction.update(corporateCodeUsageUpdate.ref, corporateCodeUsageUpdate.data);
       }
@@ -233094,15 +233104,10 @@ async function handleCreateBooking(req, res) {
         if (!detectedMemberId) {
           throw new Error("Sign in is required to redeem points at booking creation. Please sign in or remove the points amount.");
         }
-        const selfRcRef = adminDb.collection("settings").doc("rewardsConfig");
-        const selfRcSnap = await transaction.get(selfRcRef);
-        const selfRcData = selfRcSnap.exists ? selfRcSnap.data() : null;
         if (selfRcData?.allowMemberPointsRedemption !== true) {
           throw new Error("Self-service points redemption is not enabled. Please contact the front desk.");
         }
-        const selfMemberRef = adminDb.collection("members").doc(detectedMemberId);
-        const selfMemberDoc = await transaction.get(selfMemberRef);
-        if (!selfMemberDoc.exists) {
+        if (!selfMemberDoc?.exists) {
           throw new Error("Member not found.");
         }
         const selfMemberData = selfMemberDoc.data();
@@ -235907,12 +235912,7 @@ async function handleRejectPayment(req, res) {
   }
 }
 async function redateAddOnsForCancel(input) {
-  const { transaction, bookingId, bookingRef: bookingRef2, booking, today, actorUid, actorRole } = input;
-  const paidAmount = await resolvePaidAmountForLiability({
-    transaction,
-    bookingId,
-    bookingData: booking
-  });
+  const { transaction, bookingId, bookingRef: bookingRef2, booking, today, actorUid, actorRole, paidAmount } = input;
   const redatedBreakfast = redateBreakfastSelections({
     mode: "cancel",
     window: { checkIn: String(booking.checkIn || ""), checkOut: String(booking.checkOut || "") },
@@ -236165,6 +236165,36 @@ async function handleCancelBooking(req, res) {
           const cp = String(child.data.corporateCode || "").trim().toUpperCase();
           if (cp) corporateCounts.set(cp, (corporateCounts.get(cp) || 0) + 1);
         }
+        const voucherDocs = /* @__PURE__ */ new Map();
+        for (const code of voucherCounts.keys()) {
+          voucherDocs.set(code, await transaction.get(adminDb.collection("vouchers").doc(code)));
+        }
+        const corporateDocs = /* @__PURE__ */ new Map();
+        for (const code of corporateCounts.keys()) {
+          corporateDocs.set(code, await transaction.get(adminDb.collection("corporateCodes").doc(code)));
+        }
+        const clawbackMemberDocs = /* @__PURE__ */ new Map();
+        for (const child of children) {
+          if (!cancellableIds.has(child.id)) continue;
+          if (child.data.loyaltyAwardStatus !== "awarded") continue;
+          if (!(Number(child.data.pointsAwarded || 0) > 0)) continue;
+          const memberId = String(child.data.memberId || "").trim();
+          if (!memberId || clawbackMemberDocs.has(memberId)) continue;
+          clawbackMemberDocs.set(memberId, await transaction.get(adminDb.collection("members").doc(memberId)));
+        }
+        const paidAmountsByChild = /* @__PURE__ */ new Map();
+        for (const child of children) {
+          if (!cancellableIds.has(child.id)) continue;
+          if (paidAmountsByChild.has(child.id)) continue;
+          paidAmountsByChild.set(
+            child.id,
+            await resolvePaidAmountForLiability({
+              transaction,
+              bookingId: child.id,
+              bookingData: child.data
+            })
+          );
+        }
         for (const child of children) {
           if (!cancellableIds.has(child.id)) continue;
           transaction.update(child.ref, {
@@ -236179,8 +236209,8 @@ async function handleCancelBooking(req, res) {
             const memberId = String(child.data.memberId || "").trim();
             if (memberId) {
               const memberRef = adminDb.collection("members").doc(memberId);
-              const memberDoc = await transaction.get(memberRef);
-              if (memberDoc.exists) {
+              const memberDoc = clawbackMemberDocs.get(memberId);
+              if (memberDoc?.exists) {
                 const clawbackPoints = -Number(child.data.pointsAwarded || 0);
                 const clawbackHistoryRef = memberRef.collection("pointsHistory").doc(`clawback-${child.id}`);
                 transaction.set(clawbackHistoryRef, {
@@ -236203,8 +236233,8 @@ async function handleCancelBooking(req, res) {
         }
         for (const [code, count] of voucherCounts.entries()) {
           const vRef = adminDb.collection("vouchers").doc(code);
-          const vDoc = await transaction.get(vRef);
-          if (vDoc.exists) {
+          const vDoc = voucherDocs.get(code);
+          if (vDoc?.exists) {
             const vData = vDoc.data() || {};
             transaction.update(vRef, {
               usageCount: Math.max((Number(vData.usageCount) || 0) - count, 0),
@@ -236214,8 +236244,8 @@ async function handleCancelBooking(req, res) {
         }
         for (const [code, count] of corporateCounts.entries()) {
           const cpRef = adminDb.collection("corporateCodes").doc(code);
-          const cpDoc = await transaction.get(cpRef);
-          if (cpDoc.exists) {
+          const cpDoc = corporateDocs.get(code);
+          if (cpDoc?.exists) {
             const cpData = cpDoc.data() || {};
             transaction.update(cpRef, {
               usageCount: Math.max((Number(cpData.usageCount) || 0) - count, 0),
@@ -236236,7 +236266,10 @@ async function handleCancelBooking(req, res) {
             today: todayKey,
             actorUid: cancelledBy,
             actorRole: isStaffCancellation ? "front-desk" : "guest",
-            policyRefunded: cancelPolicyRefunded
+            policyRefunded: cancelPolicyRefunded,
+            // Per FOL-03: resolved in the read phase (above), so the
+            // helper performs no read after the per-child writes.
+            paidAmount: paidAmountsByChild.get(child.id) ?? 0
           });
           transaction.update(child.ref, {
             breakfastSelections: redated.breakfastSelections,
@@ -236309,6 +236342,8 @@ async function handleCancelBooking(req, res) {
             }
           }
         }
+        const memberIdForClawbackRead = String(freshBooking.memberId || "").trim();
+        const clawbackMemberSnapshot = memberIdForClawbackRead ? await transaction.get(adminDb.collection("members").doc(memberIdForClawbackRead)) : null;
         const bookingReservationIdForLiability = String(freshBooking.reservationId || "").trim();
         let perChildReservationCancellationPolicySnapshot = null;
         if (bookingReservationIdForLiability.length > 0) {
@@ -236392,6 +236427,11 @@ async function handleCancelBooking(req, res) {
         const perChildCancelPolicyRefunded = Boolean(
           liabilitySnapshot && Number(liabilitySnapshot.policyResult?.policyRefund) > 0
         );
+        const perChildPaidAmount = await resolvePaidAmountForLiability({
+          transaction,
+          bookingId: bookingDocumentRef.id,
+          bookingData: freshBooking
+        });
         const perChildRedated = await redateAddOnsForCancel({
           transaction,
           bookingId: bookingDocumentRef.id,
@@ -236400,7 +236440,8 @@ async function handleCancelBooking(req, res) {
           today: todayKey,
           actorUid: cancelledBy,
           actorRole: isStaffCancellation ? "front-desk" : "guest",
-          policyRefunded: perChildCancelPolicyRefunded
+          policyRefunded: perChildCancelPolicyRefunded,
+          paidAmount: perChildPaidAmount
         });
         bookingUpdate.breakfastSelections = perChildRedated.breakfastSelections;
         bookingUpdate.breakfastTotal = perChildRedated.breakfastTotal;
@@ -236420,8 +236461,8 @@ async function handleCancelBooking(req, res) {
           const memberIdForClawback = String(freshBooking.memberId || "").trim();
           if (memberIdForClawback) {
             const clawbackMemberRef = adminDb.collection("members").doc(memberIdForClawback);
-            const clawbackMemberDoc = await transaction.get(clawbackMemberRef);
-            if (clawbackMemberDoc.exists) {
+            const clawbackMemberDoc = clawbackMemberSnapshot;
+            if (clawbackMemberDoc?.exists) {
               const clawbackPoints = -Number(freshBooking.pointsAwarded || 0);
               const clawbackHistoryRef = clawbackMemberRef.collection("pointsHistory").doc(`clawback-${bookingId}`);
               transaction.set(clawbackHistoryRef, {
@@ -247249,6 +247290,84 @@ async function handleReconciliationCron(req, res) {
 init_firestore();
 init_email();
 init_firebase_admin();
+
+// server/lib/voucherRelease.ts
+init_firebase_admin();
+function normalizeCode(code) {
+  return String(code || "").trim().toUpperCase();
+}
+async function readVoucherReleases(transaction, requests) {
+  const writes = [];
+  const byCode = /* @__PURE__ */ new Map();
+  for (const request of requests) {
+    const code = normalizeCode(request.code);
+    const count = Number(request.count);
+    if (!code || !Number.isFinite(count) || count <= 0) continue;
+    const existing = byCode.get(code);
+    if (existing) {
+      existing.count += count;
+    } else {
+      byCode.set(code, { count, now: request.now });
+    }
+  }
+  for (const [code, { count, now }] of byCode.entries()) {
+    const voucherRef = adminDb.collection("vouchers").doc(code);
+    const voucherDoc = await transaction.get(voucherRef);
+    if (!voucherDoc.exists) continue;
+    const data = voucherDoc.data() || {};
+    writes.push({
+      ref: voucherRef,
+      data: {
+        // The floor is the point of the whole release: a count that is
+        // already 0 must not go negative.
+        usageCount: Math.max((Number(data.usageCount) || 0) - count, 0),
+        updatedAt: now
+      }
+    });
+  }
+  return { writes };
+}
+function applyVoucherReleases(transaction, release) {
+  for (const write of release.writes) {
+    transaction.update(write.ref, write.data);
+  }
+}
+async function readCorporateCodeReleases(transaction, requests) {
+  const writes = [];
+  const byCode = /* @__PURE__ */ new Map();
+  for (const request of requests) {
+    const code = normalizeCode(request.code);
+    const count = Number(request.count);
+    if (!code || !Number.isFinite(count) || count <= 0) continue;
+    const existing = byCode.get(code);
+    if (existing) {
+      existing.count += count;
+    } else {
+      byCode.set(code, { count, now: request.now });
+    }
+  }
+  for (const [code, { count, now }] of byCode.entries()) {
+    const ref = adminDb.collection("corporateCodes").doc(code);
+    const doc = await transaction.get(ref);
+    if (!doc.exists) continue;
+    const data = doc.data() || {};
+    writes.push({
+      ref,
+      data: {
+        usageCount: Math.max((Number(data.usageCount) || 0) - count, 0),
+        updatedAt: now
+      }
+    });
+  }
+  return { writes };
+}
+function applyCorporateCodeReleases(transaction, release) {
+  for (const write of release.writes) {
+    transaction.update(write.ref, write.data);
+  }
+}
+
+// server/handlers/hold-expiry.ts
 init_shared();
 var SYSTEM_CANCELLATION_SOURCE = "system";
 var EXPIRY_BATCH_SIZE = 200;
@@ -247294,6 +247413,20 @@ async function handleHoldExpiryCron(req, res) {
           }, now)) {
             return null;
           }
+          const voucherRelease = await readVoucherReleases(transaction, [
+            {
+              code: String(freshData.voucherCode || ""),
+              count: 1,
+              now
+            }
+          ]);
+          const corporateRelease = await readCorporateCodeReleases(transaction, [
+            {
+              code: String(freshData.corporateCode || ""),
+              count: 1,
+              now
+            }
+          ]);
           transaction.update(doc.ref, {
             status: "cancelled",
             cancellationReason: EXPIRED_HOLD_CANCELLATION_REASON,
@@ -247309,30 +247442,8 @@ async function handleHoldExpiryCron(req, res) {
             cancelledAt: now,
             updatedAt: now
           });
-          const voucherCode = String(freshData.voucherCode || "").trim().toUpperCase();
-          const corporateCode = String(freshData.corporateCode || "").trim().toUpperCase();
-          if (voucherCode) {
-            const vRef = adminDb.collection("vouchers").doc(voucherCode);
-            const vDoc = await transaction.get(vRef);
-            if (vDoc.exists) {
-              const vData = vDoc.data() || {};
-              transaction.update(vRef, {
-                usageCount: Math.max((Number(vData.usageCount) || 0) - 1, 0),
-                updatedAt: now
-              });
-            }
-          }
-          if (corporateCode) {
-            const cpRef = adminDb.collection("corporateCodes").doc(corporateCode);
-            const cpDoc = await transaction.get(cpRef);
-            if (cpDoc.exists) {
-              const cpData = cpDoc.data() || {};
-              transaction.update(cpRef, {
-                usageCount: Math.max((Number(cpData.usageCount) || 0) - 1, 0),
-                updatedAt: now
-              });
-            }
-          }
+          applyVoucherReleases(transaction, voucherRelease);
+          applyCorporateCodeReleases(transaction, corporateRelease);
           return {
             bookingId: doc.id,
             bookingRef: String(freshData.bookingRef || doc.id),

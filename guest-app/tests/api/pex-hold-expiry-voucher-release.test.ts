@@ -55,6 +55,11 @@ const holdExpirySrc = readFileSync(
   "utf8"
 );
 
+const voucherReleaseSrc = readFileSync(
+  resolve(__dirname, "../../server/lib/voucherRelease.ts"),
+  "utf8"
+);
+
 const bookingsSrc = readFileSync(
   resolve(__dirname, "../../server/handlers/bookings.ts"),
   "utf8"
@@ -73,66 +78,88 @@ if (!retirementBlock) {
 const retirementSrc = retirementBlock[0];
 
 describe("MRB-13 — the hold-expiry cron releases the voucher it consumed", () => {
-  it("the retirement transaction reads the voucher's usageCount", () => {
-    // A decrement needs the current value. Without the read, the
-    // write would be a blind overwrite and could clobber a
-    // concurrent increment.
-    expect(retirementSrc).toMatch(/transaction\.get\(vRef\)/);
-    expect(retirementSrc).toMatch(/collection\("vouchers"\)/);
+  it("the cron calls the SHARED release helper", () => {
+    // One implementation of the release, called from every
+    // cancellation site. A second implementation is a second thing
+    // that can drift — and the drift is what shipped the missing
+    // release in the first place.
+    expect(holdExpirySrc).toMatch(/readVoucherReleases\(transaction, \[/);
+    expect(holdExpirySrc).toMatch(/readCorporateCodeReleases\(transaction, \[/);
+    expect(holdExpirySrc).toMatch(/applyVoucherReleases\(transaction, voucherRelease\)/);
+    expect(holdExpirySrc).toMatch(/applyCorporateCodeReleases\(transaction, corporateRelease\)/);
   });
 
-  it("the retirement transaction decrements the voucher usageCount", () => {
-    // The release, with the same `Math.max(..., 0)` floor the guest
-    // cancel path uses. Without the floor a double-release would
-    // drive the count negative.
-    expect(retirementSrc).toMatch(
-      /usageCount: Math\.max\(\(Number\(vData\.usageCount\) \|\| 0\) - 1, 0\)/
+  it("the release READ happens BEFORE the booking write (Firestore FOL-03)", () => {
+    // Firestore requires every read in a transaction to precede
+    // every write. A read after a write throws at commit time and
+    // the whole cancellation is lost — which is how a release can
+    // silently stop happening.
+    const readAt = holdExpirySrc.indexOf("const voucherRelease = await readVoucherReleases(");
+    const writeAt = holdExpirySrc.indexOf("transaction.update(doc.ref, {");
+    const applyAt = holdExpirySrc.indexOf("applyVoucherReleases(transaction, voucherRelease)");
+
+    expect(readAt, "the release read must exist").toBeGreaterThan(-1);
+    expect(writeAt, "the booking write must exist").toBeGreaterThan(-1);
+    expect(applyAt, "the release apply must exist").toBeGreaterThan(-1);
+
+    expect(readAt, "the release READ must come before the booking write").toBeLessThan(writeAt);
+    expect(applyAt, "the release APPLY must come after the booking write").toBeGreaterThan(writeAt);
+  });
+
+  it("the release releases ONE use per retired booking", () => {
+    // The cron retires exactly ONE booking, so it releases exactly one
+    // use. The count is the caller's, because the guest cancel path
+    // releases one use per cancelled CHILD.
+    expect(holdExpirySrc).toMatch(/code: String\(freshData\.voucherCode \|\| ""\),\s*\n\s*count: 1,/);
+  });
+});
+
+describe("MRB-13 — the shared release helper", () => {
+  it("decrements the usageCount, floored at zero", () => {
+    // The floor is the point of the whole release: a count that is
+    // already 0 must not go negative. Without it, a double-release
+    // drives the count below zero and the voucher looks like it has
+    // unlimited uses.
+    expect(voucherReleaseSrc).toMatch(
+      /usageCount: Math\.max\(\(Number\(data\.usageCount\) \|\| 0\) - count, 0\)/
     );
   });
 
-  it("the retirement transaction also releases the corporate code", () => {
+  it("stamps the released document with the caller's timestamp", () => {
+    expect(voucherReleaseSrc).toMatch(/updatedAt: now/);
+  });
+
+  it("sums repeated codes so two uses of one voucher release two", () => {
+    // Two bookings that used the SAME voucher consume two uses of it,
+    // so retiring both must release two — not one.
+    expect(voucherReleaseSrc).toMatch(/existing\.count \+= count/);
+  });
+
+  it("is a no-op for an unknown code or a zero count", () => {
+    // A booking that never had a voucher must release nothing, and
+    // must not throw — a caller can pass it unconditionally.
+    expect(voucherReleaseSrc).toMatch(
+      /if \(!code \|\| !Number\.isFinite\(count\) \|\| count <= 0\) continue;/
+    );
+    expect(voucherReleaseSrc).toMatch(/if \(!voucherDoc\.exists\) continue;/);
+  });
+
+  it("has the same corporate-code twin, with the same rules", () => {
     // A corporate booking consumes a corporate-code use the same way
-    // it consumes a voucher use. Releasing only the voucher would
-    // leave the same drift on the corporate-code counter.
-    expect(retirementSrc).toMatch(/collection\("corporateCodes"\)/);
-    expect(retirementSrc).toMatch(
-      /usageCount: Math\.max\(\(Number\(cpData\.usageCount\) \|\| 0\) - 1, 0\)/
+    // it consumes a voucher use, so it must be released the same way.
+    expect(voucherReleaseSrc).toMatch(/export async function readCorporateCodeReleases/);
+    expect(voucherReleaseSrc).toMatch(/export function applyCorporateCodeReleases/);
+    expect(voucherReleaseSrc).toMatch(/collection\("corporateCodes"\)/);
+    expect(voucherReleaseSrc).toMatch(
+      /usageCount: Math\.max\(\(Number\(data\.usageCount\) \|\| 0\) - count, 0\)/
     );
   });
 
-  it("the release happens INSIDE the cancellation transaction", () => {
-    // A release outside the transaction could fail while the
-    // cancellation committed — the same class of drift, just slower.
-    const releaseIndex = retirementSrc.indexOf('collection("vouchers")');
-    const cancelIndex = retirementSrc.indexOf('status: "cancelled"');
-    expect(releaseIndex).toBeGreaterThan(-1);
-    expect(cancelIndex).toBeGreaterThan(-1);
-    // Both are inside the same `runTransaction` block — the release
-    // is not a separate call after the transaction.
-    expect(retirementSrc).toContain("runTransaction");
-  });
-
-  it("the release mirrors the guest cancel path's shape", () => {
-    // The guest cancel path is the reference implementation. Both must
-    // floor at 0 and stamp `updatedAt`, so the two paths cannot drift
-    // into different arithmetic.
+  it("the guest cancel path uses the same floor, so the two cannot drift", () => {
     const cancelPath = bookingsSrc.match(
       /for \(const \[code, count\] of voucherCounts\.entries\(\)\) \{[\s\S]*?\n        \}/
     );
     expect(cancelPath, "the guest cancel path's voucher release must exist").toBeTruthy();
     expect(cancelPath![0]).toMatch(/Math\.max\(\(Number\(vData\.usageCount\) \|\| 0\) - count, 0\)/);
-    expect(cancelPath![0]).toMatch(/updatedAt: now/);
-
-    expect(retirementSrc).toMatch(/updatedAt: now/);
-  });
-
-  it("the cron does not double-release a booking that carries no code", () => {
-    // A booking with no voucher must not decrement anything — the
-    // release is guarded by the code being present.
-    expect(retirementSrc).toMatch(
-      /const voucherCode = String\(freshData\.voucherCode \|\| ""\)\.trim\(\)\.toUpperCase\(\)/
-    );
-    expect(retirementSrc).toMatch(/if \(voucherCode\) \{/);
-    expect(retirementSrc).toMatch(/if \(corporateCode\) \{/);
   });
 });

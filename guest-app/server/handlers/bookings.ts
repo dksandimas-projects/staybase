@@ -3639,6 +3639,38 @@ export async function handleCreateBooking(req: any, res: any) {
       // capture the value for the response.
       finalReservationRef = `R-${todayCompact}-${String(sequence).padStart(5, "0")}`;
 
+      // ── The points-redemption READ phase (per FOL-03) ──────────
+      //
+      // The member self-service points redemption (PR #9, 2026-10-13)
+      // needs two documents: the `settings/rewardsConfig` config and
+      // the member's own doc.
+      //
+      // The pre-FOL-03 code read them HERE — in the redemption
+      // block, AFTER the counter write had already been queued.
+      // Firestore's `runTransaction` REJECTS a read after a write
+      // ("Firestore transactions require all reads to be executed
+      // before all writes"), so every booking creation carrying
+      // `pointsToRedeem > 0` died with a 500 and the feature was
+      // unreachable in production.
+      //
+      // These reads are hoisted to the READ phase, above every
+      // write in this transaction. The validation and the writes
+      // stay where they were, so the guest-facing error messages
+      // are unchanged — only the TIMING of the two reads moved.
+      //
+      // The reads are skipped entirely when `pointsToRedeem` is 0,
+      // so an ordinary booking pays nothing for this.
+      let selfRcData: any = null;
+      let selfMemberDoc: any = null;
+      let selfMemberRef: any = null;
+      if (pointsToRedeem > 0 && detectedMemberId) {
+        const selfRcRef = adminDb.collection("settings").doc("rewardsConfig");
+        const selfRcSnap = await transaction.get(selfRcRef);
+        selfRcData = selfRcSnap.exists ? selfRcSnap.data() : null;
+        selfMemberRef = adminDb.collection("members").doc(detectedMemberId);
+        selfMemberDoc = await transaction.get(selfMemberRef);
+      }
+
       if (corporateCodeUsageUpdate) {
         transaction.update(corporateCodeUsageUpdate.ref, corporateCodeUsageUpdate.data);
       }
@@ -3683,15 +3715,10 @@ export async function handleCreateBooking(req: any, res: any) {
         if (!detectedMemberId) {
           throw new Error("Sign in is required to redeem points at booking creation. Please sign in or remove the points amount.");
         }
-        const selfRcRef = adminDb.collection("settings").doc("rewardsConfig");
-        const selfRcSnap = await transaction.get(selfRcRef);
-        const selfRcData = selfRcSnap.exists ? selfRcSnap.data() : null;
         if (selfRcData?.allowMemberPointsRedemption !== true) {
           throw new Error("Self-service points redemption is not enabled. Please contact the front desk.");
         }
-        const selfMemberRef = adminDb.collection("members").doc(detectedMemberId);
-        const selfMemberDoc = await transaction.get(selfMemberRef);
-        if (!selfMemberDoc.exists) {
+        if (!selfMemberDoc?.exists) {
           throw new Error("Member not found.");
         }
         const selfMemberData = selfMemberDoc.data()!;
@@ -7837,6 +7864,25 @@ async function redateAddOnsForCancel(input: {
   actorRole: "guest" | "front-desk" | "admin";
   // `true` when the cancellation policy already refunds the collected money.
   policyRefunded: boolean;
+  // Per FOL-03: the collected amount, RESOLVED BY THE CALLER.
+  //
+  // This parameter is REQUIRED, and it is required precisely so this
+  // helper can never read from the transaction. The collected amount
+  // comes from the ledger when the booking's denormalized `paidAmount`
+  // is not a positive number, and the ledger lives in Firestore — so
+  // resolving it is a READ.
+  //
+  // The reservation-scope cancel used to resolve it INSIDE this
+  // helper, which that branch calls AFTER the per-child status
+  // writes. The read therefore landed after a write, and Firestore's
+  // `runTransaction` rejected the whole transaction ("Firestore
+  // transactions require all reads to be executed before all writes")
+  // — the cancel died with a 500 and the status flip rolled back.
+  //
+  // Both callers now resolve the amount in their transaction's READ
+  // phase and pass it in, so this helper performs NO read at all and
+  // its position in the transaction stops mattering.
+  paidAmount: number;
 }): {
   breakfastSelections: Record<string, BreakfastSelectionEntry>;
   breakfastTotal: number;
@@ -7845,16 +7891,7 @@ async function redateAddOnsForCancel(input: {
   otherAddOnTotal: number;
   hasAnyOtherAddOns: boolean;
 } {
-  const { transaction, bookingId, bookingRef, booking, today, actorUid, actorRole } = input;
-  // Per FIN-PAID-AMOUNT-SOURCE (QA pass 2026-10-24): the denormalized
-  // `paidAmount` can be negative or absent, which reads as "nothing was
-  // paid" and silently suppresses the refund liability. Fall back to
-  // the ledger when it is not a positive number.
-  const paidAmount = await resolvePaidAmountForLiability({
-    transaction,
-    bookingId,
-    bookingData: booking
-  });
+  const { transaction, bookingId, bookingRef, booking, today, actorUid, actorRole, paidAmount } = input;
 
   const redatedBreakfast = redateBreakfastSelections({
     mode: "cancel",
@@ -8341,6 +8378,70 @@ export async function handleCancelBooking(req: any, res: any) {
           if (cp) corporateCounts.set(cp, (corporateCounts.get(cp) || 0) + 1);
         }
 
+        // ── The cancellation READ phase (per FOL-03) ──────────────
+        //
+        // The voucher documents, the corporate-code documents, and the
+        // members whose loyalty must be clawed back are all READ
+        // here — above the per-child status writes below.
+        //
+        // The pre-FOL-03 code read them in the WRITE phase, after the
+        // per-child `transaction.update(child.ref, ...)` had been
+        // queued. Firestore's `runTransaction` rejects a read after a
+        // write ("Firestore transactions require all reads to be
+        // executed before all writes"), so the whole cancellation
+        // died with a 500: the status flip rolled back, the voucher's
+        // use was NOT released, and the guest's points were NOT
+        // clawed back. Every one of those reads now happens before
+        // the first write.
+        const voucherDocs = new Map<string, any>();
+        for (const code of voucherCounts.keys()) {
+          voucherDocs.set(code, await transaction.get(adminDb.collection("vouchers").doc(code)));
+        }
+        const corporateDocs = new Map<string, any>();
+        for (const code of corporateCounts.keys()) {
+          corporateDocs.set(code, await transaction.get(adminDb.collection("corporateCodes").doc(code)));
+        }
+        const clawbackMemberDocs = new Map<string, any>();
+        for (const child of children) {
+          if (!cancellableIds.has(child.id)) continue;
+          if (child.data.loyaltyAwardStatus !== "awarded") continue;
+          if (!(Number(child.data.pointsAwarded || 0) > 0)) continue;
+          const memberId = String(child.data.memberId || "").trim();
+          if (!memberId || clawbackMemberDocs.has(memberId)) continue;
+          clawbackMemberDocs.set(memberId, await transaction.get(adminDb.collection("members").doc(memberId)));
+        }
+        // ── The collected-amount READ (per FOL-03) ─────────────────
+        //
+        // `redateAddOnsForCancel` needs each child's collected amount
+        // to decide which add-ons were paid for and therefore
+        // refundable. When the booking's denormalized `paidAmount` is
+        // not a positive number, that amount comes from the LEDGER —
+        // and the ledger lives in Firestore, so resolving it is a READ.
+        //
+        // The pre-FOL-03 code resolved it INSIDE the helper, which the
+        // reservation-scope cancel calls AFTER the per-child status
+        // writes. The read therefore landed after a write, and
+        // Firestore's `runTransaction` rejected the whole transaction
+        // ("Firestore transactions require all reads to be executed
+        // before all writes") — the cancel died with a 500 and the
+        // status flip rolled back.
+        //
+        // The amounts are resolved HERE, in the read phase, and handed
+        // to the helper so it performs no read of its own.
+        const paidAmountsByChild = new Map<string, number>();
+        for (const child of children) {
+          if (!cancellableIds.has(child.id)) continue;
+          if (paidAmountsByChild.has(child.id)) continue;
+          paidAmountsByChild.set(
+            child.id,
+            await resolvePaidAmountForLiability({
+              transaction,
+              bookingId: child.id,
+              bookingData: child.data
+            })
+          );
+        }
+
         // Per MRB-13: per-child status flip + audit
         // stamps + loyalty clawback. The audit
         // metadata is the same shape the per-child
@@ -8375,8 +8476,15 @@ export async function handleCancelBooking(req: any, res: any) {
             const memberId = String(child.data.memberId || "").trim();
             if (memberId) {
               const memberRef = adminDb.collection("members").doc(memberId);
-              const memberDoc = await transaction.get(memberRef);
-              if (memberDoc.exists) {
+              // Per FOL-03: the member document is READ in the read
+              // phase (see `clawbackMemberDocs` above). The pre-FOL-03
+              // code read it here, after the per-child status write
+              // had been queued — Firestore's `runTransaction`
+              // rejects a read after a write, so cancelling a
+              // reservation whose child had earned loyalty died with
+              // a 500 and the points were never clawed back.
+              const memberDoc = clawbackMemberDocs.get(memberId);
+              if (memberDoc?.exists) {
                 const clawbackPoints = -Number(child.data.pointsAwarded || 0);
                 const clawbackHistoryRef = memberRef.collection("pointsHistory").doc(`clawback-${child.id}`);
                 transaction.set(clawbackHistoryRef, {
@@ -8402,10 +8510,18 @@ export async function handleCancelBooking(req: any, res: any) {
         // One `transaction.update` per unique
         // voucher code, decremented by the count
         // of cancelled children that used it.
+        //
+        // Per FOL-03: the voucher / corporate-code documents are READ
+        // in the read phase (above the per-child status writes) and
+        // only WRITTEN here. The pre-FOL-03 code read them here,
+        // after the status write had been queued — and Firestore's
+        // `runTransaction` rejects a read after a write, so
+        // cancelling a reservation whose child used a voucher died
+        // with a 500 and the voucher's use was never released.
         for (const [code, count] of voucherCounts.entries()) {
           const vRef = adminDb.collection("vouchers").doc(code);
-          const vDoc = await transaction.get(vRef);
-          if (vDoc.exists) {
+          const vDoc = voucherDocs.get(code);
+          if (vDoc?.exists) {
             const vData = vDoc.data() || {};
             transaction.update(vRef, {
               usageCount: Math.max((Number(vData.usageCount) || 0) - count, 0),
@@ -8415,8 +8531,8 @@ export async function handleCancelBooking(req: any, res: any) {
         }
         for (const [code, count] of corporateCounts.entries()) {
           const cpRef = adminDb.collection("corporateCodes").doc(code);
-          const cpDoc = await transaction.get(cpRef);
-          if (cpDoc.exists) {
+          const cpDoc = corporateDocs.get(code);
+          if (cpDoc?.exists) {
             const cpData = cpDoc.data() || {};
             transaction.update(cpRef, {
               usageCount: Math.max((Number(cpData.usageCount) || 0) - count, 0),
@@ -8453,7 +8569,10 @@ export async function handleCancelBooking(req: any, res: any) {
             today: todayKey,
             actorUid: cancelledBy,
             actorRole: isStaffCancellation ? "front-desk" : "guest",
-            policyRefunded: cancelPolicyRefunded
+            policyRefunded: cancelPolicyRefunded,
+            // Per FOL-03: resolved in the read phase (above), so the
+            // helper performs no read after the per-child writes.
+            paidAmount: paidAmountsByChild.get(child.id) ?? 0
           });
           transaction.update(child.ref, {
             breakfastSelections: redated.breakfastSelections,
@@ -8562,6 +8681,28 @@ export async function handleCancelBooking(req: any, res: any) {
         }
       }
 
+      // ── The loyalty-clawback READ (per FOL-03) ───────────────
+      //
+      // The member document whose earned points must be clawed back
+      // is READ here — in the READ phase, above every write in this
+      // transaction.
+      //
+      // The pre-FOL-03 code read it in the WRITE phase, after the
+      // booking + reservation updates had been queued. Firestore's
+      // `runTransaction` rejects a read after a write ("Firestore
+      // transactions require all reads to be executed before all
+      // writes"), so cancelling a single booking that had earned
+      // loyalty died with a 500 and the points were never clawed
+      // back.
+      //
+      // (The reservation-scope branch reads the SAME document through
+      // its own `clawbackMemberDocs` map — one read per distinct
+      // member, hoisted above that branch's per-child writes.)
+      const memberIdForClawbackRead = String(freshBooking.memberId || "").trim();
+      const clawbackMemberSnapshot =
+        memberIdForClawbackRead
+          ? await transaction.get(adminDb.collection("members").doc(memberIdForClawbackRead))
+          : null;
       // Per CRL-07 (2026-08-03, per decision #173):
       // the per-child liability snapshot. Computed in
       // the same transaction as the status flip so
@@ -8709,9 +8850,18 @@ export async function handleCancelBooking(req: any, res: any) {
       // The re-dating runs AFTER the `liabilitySnapshot` (which
       // performs its own reads) and BEFORE the booking update, so
       // every read in this transaction precedes every write.
+      //
+      // Per FOL-03: the collected amount is resolved HERE, in the read
+      // phase, and handed to the helper — so the helper performs no
+      // read of its own and its position stops mattering.
       const perChildCancelPolicyRefunded = Boolean(
         liabilitySnapshot && Number(liabilitySnapshot.policyResult?.policyRefund) > 0
       );
+      const perChildPaidAmount = await resolvePaidAmountForLiability({
+        transaction,
+        bookingId: bookingDocumentRef.id,
+        bookingData: freshBooking
+      });
       const perChildRedated = await redateAddOnsForCancel({
         transaction,
         bookingId: bookingDocumentRef.id,
@@ -8720,7 +8870,8 @@ export async function handleCancelBooking(req: any, res: any) {
         today: todayKey,
         actorUid: cancelledBy,
         actorRole: isStaffCancellation ? "front-desk" : "guest",
-        policyRefunded: perChildCancelPolicyRefunded
+        policyRefunded: perChildCancelPolicyRefunded,
+        paidAmount: perChildPaidAmount
       });
       bookingUpdate.breakfastSelections = perChildRedated.breakfastSelections;
       bookingUpdate.breakfastTotal = perChildRedated.breakfastTotal;
@@ -8824,8 +8975,15 @@ export async function handleCancelBooking(req: any, res: any) {
         const memberIdForClawback = String(freshBooking.memberId || "").trim();
         if (memberIdForClawback) {
           const clawbackMemberRef = adminDb.collection("members").doc(memberIdForClawback);
-          const clawbackMemberDoc = await transaction.get(clawbackMemberRef);
-          if (clawbackMemberDoc.exists) {
+          // Per FOL-03: the member document is READ in the read phase
+          // (see `clawbackMemberDoc` above), not here. The pre-FOL-03
+          // code read it after the booking + reservation writes had
+          // been queued — Firestore's `runTransaction` rejects a read
+          // after a write, so cancelling a single booking that had
+          // earned loyalty died with a 500 and the points were never
+          // clawed back.
+          const clawbackMemberDoc = clawbackMemberSnapshot;
+          if (clawbackMemberDoc?.exists) {
             const clawbackPoints = -Number(freshBooking.pointsAwarded || 0);
             const clawbackHistoryRef = clawbackMemberRef.collection("pointsHistory").doc(`clawback-${bookingId}`);
             transaction.set(clawbackHistoryRef, {

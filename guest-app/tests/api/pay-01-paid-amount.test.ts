@@ -587,8 +587,16 @@ describe("PAY-01 — the `paidAmount` write sites are pinned", () => {
     // the denormalized field when it is a POSITIVE number and
     // otherwise falls back to the ledger.
     expect(bookingsSrc).toMatch(/async function resolvePaidAmountForLiability\(/);
+    // The call sites assign the resolved amount under different names
+    // (the reservation-scope cancel resolves one per cancellable child
+    // into a map; the single-room cancel resolves one for its booking).
+    // What matters is that EVERY cancel path goes through the resolver
+    // — never the raw denormalized field.
     expect(bookingsSrc).toMatch(
-      /const paidAmount = await resolvePaidAmountForLiability\(\{/
+      /await resolvePaidAmountForLiability\(\{/
+    );
+    expect(bookingsSrc).toMatch(
+      /paidAmount: await resolvePaidAmountForLiability\(\{/
     );
     // The helper must prefer a positive seeded field…
     expect(bookingsSrc).toMatch(

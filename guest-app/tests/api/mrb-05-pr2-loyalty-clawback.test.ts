@@ -178,8 +178,16 @@ describe("MRB-05 — loyalty clawback + relaxed terminal-status reject (PR #2 of
       expect(handlers).toMatch(
         /adminDb\.collection\(["']members["']\)\.doc\(memberIdForClawback\)/
       );
-      expect(handlers).toMatch(/await transaction\.get\(clawbackMemberRef\)/);
-      expect(handlers).toMatch(/clawbackMemberDoc\.exists/);
+      // Per FOL-03 the member doc is READ in the transaction's READ
+      // phase, into `clawbackMemberSnapshot` — and the clawback then
+      // consumes that snapshot. Reading it where it USED to be read
+      // (after the booking + reservation writes) made Firestore reject
+      // the whole cancel, so the points were never clawed back.
+      expect(handlers).toMatch(
+        /const clawbackMemberSnapshot =[\s\S]*?await transaction\.get\(/
+      );
+      expect(handlers).toMatch(/const clawbackMemberDoc = clawbackMemberSnapshot;/);
+      expect(handlers).toMatch(/clawbackMemberDoc\?\.exists/);
     });
   });
 
