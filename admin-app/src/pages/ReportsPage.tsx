@@ -256,6 +256,11 @@ export function ReportsPage() {
     // Subscribe via the same context every other admin
     // surface already consumes; no new collectionGroup read.
     reservations,
+    // Per F-A3: the Full Backup must carry the `testRuns` collection
+    // too — it is one of the 9 root collections a restore needs, and it
+    // is server-only (no client read rule), so it comes from the
+    // context's server-fetched list rather than a Firestore read.
+    testRuns,
     // Per NBS-08 (2026-07-31): the acquisition chart reads the
     // configured booking sources list, not a hardcoded array. An
     // unconfigured source (a new "agoda" / "OTA" entry) would
@@ -1969,10 +1974,111 @@ export function ReportsPage() {
 
       const wb = XLSX.utils.book_new();
 
+      // ── Per F-A2 (handoff Wave 3): the store tenders ──────────────────
+      //
+      // A direct-paid store order records its cash at
+      // `storeOrders/{id}/payments/delivery-tender`. The "Store Orders"
+      // sheet had NO column for it, so the till's money was invisible in
+      // the backup: 2 tenders totalling ₱180.00 existed in production
+      // and the export showed nothing. Anyone auditing the backup could
+      // not see the cash.
+      //
+      // The tender is read here so the sheet carries what was actually
+      // collected. `storeOrders` is staff-readable, and the generic
+      // `match /{path=**}/payments/{paymentId}` rule
+      // (firestore.rules:909) covers the subcollection.
+      const storeTenderByOrderId = new Map<string, any>();
+      await Promise.all(
+        storeOrders.map(async (o: any) => {
+          try {
+            const tenderSnap = await getDocs(collection(db, "storeOrders", o.id, "payments"));
+            tenderSnap.forEach((t) => {
+              const td = t.data() as any;
+              if (t.id === "delivery-tender" || td.source === "store-order") {
+                storeTenderByOrderId.set(o.id, { id: t.id, ...td });
+              }
+            });
+          } catch (error) {
+            // A missing tender is NORMAL — an unpaid or add-to-bill
+            // order has none. A failed READ is not: surface it rather
+            // than silently shipping a backup that under-reports the
+            // till.
+            console.error(`Failed to read the store tender for order ${o.id}:`, error);
+          }
+        })
+      );
+
+      // ── Per F-A3 / F-A5: the collections a restore needs ────────────
+      //
+      // The "full backup" omitted 9 ROOT collections and the Bookings
+      // sheet had no `reservationId` column, so a restore could not
+      // rebuild room inventory: the rooms, the reservations they came
+      // from, and the settings that describe the hotel were simply not
+      // in the file. `revenueAllocation` — the per-stream revenue split
+      // the MRB-11 audit depends on — was not exported either, so an
+      // auditor reading the backup could not see whether the streams
+      // reconciled.
+      //
+      // These are read HERE, at export time, from the same Firestore
+      // the rest of the backup reads. They are the collections the
+      // handoff named: rooms, reservations, corporateCodes, guests,
+      // addOns, roomBlocks, testRuns, settings, intercoms.
+      //
+      // `testRuns` has NO client read rule (it is server-only, exposed
+      // through `/api/test-runs/list`), so it is fetched from there
+      // instead. The rest are staff-readable.
+      const BACKUP_ROOT_COLLECTIONS = [
+        "rooms",
+        "reservations",
+        "corporateCodes",
+        "guests",
+        "addOns",
+        "roomBlocks",
+        "settings",
+        "intercoms"
+      ] as const;
+
+      const rootCollectionDocs = new Map<string, any[]>();
+      await Promise.all(
+        BACKUP_ROOT_COLLECTIONS.map(async (name) => {
+          try {
+            const snap = await getDocs(collection(db, name));
+            rootCollectionDocs.set(
+              name,
+              snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }))
+            );
+          } catch (error) {
+            console.error(`Failed to read ${name} for the backup:`, error);
+            rootCollectionDocs.set(name, []);
+          }
+        })
+      );
+
+      // `testRuns` is server-only. The admin app already has a
+      // `testRuns` list in the AdminContext, so read it from there
+      // rather than adding a second fetch.
+      const testRunRows = (testRuns || []).map((run: any) => ({
+        // "Doc ID" — the SAME column name every other root-collection
+        // sheet uses, so a restore reads one key column throughout.
+        "Doc ID": run.id,
+        name: run.name,
+        environment: run.environment,
+        status: run.status,
+        createdBy: run.createdBy,
+        createdAt: toDate(run.createdAt)?.toISOString() || "",
+        expiresAt: toDate(run.expiresAt)?.toISOString() || ""
+      }));
+
       const bookingRows = bookings.map((b: any) => {
         const occupancy = getReportOccupancySplit(b);
+        const alloc = (b as any).revenueAllocation || null;
         return {
       "Booking Ref": b.bookingRef,
+      // Per F-A3: without this column a restore cannot reconnect a
+      // booking to the reservation it came from — the two are separate
+      // collections and the booking was the only place the link lived.
+      "Reservation ID": b.reservationId || "",
+      "Reservation Ref": b.reservationRef || "",
       "Guest Name": b.guestName,
       "Guest Email": b.guestEmail,
       "Guest Phone": b.guestPhone,
@@ -1995,6 +2101,15 @@ export function ReportsPage() {
       "Points Redeemed": b.pointsRedeemed,
       "Points Value": b.pointsRedeemedValue,
       "Total Price": b.totalPrice,
+      // Per F-A5: the per-stream revenue split. Without it the backup
+      // shows the total but not WHERE it came from, so the MRB-11
+      // invariant (roomNet + breakfastNet + addOnNet − deductionNet ==
+      // totalNet) cannot be checked by whoever audits the file.
+      "Revenue Room Net": alloc ? alloc.roomNet : "",
+      "Revenue Breakfast Net": alloc ? alloc.breakfastNet : "",
+      "Revenue Add-On Net": alloc ? alloc.addOnNet : "",
+      "Revenue Deduction Net": alloc ? alloc.deductionNet : "",
+      "Revenue Total Net": alloc ? alloc.totalNet : "",
       "Incidental Charges": chargeRows
         .filter((charge) => charge["Booking Ref"] === b.bookingRef)
         .reduce((sum, charge) => sum + Number(charge.Amount || 0), 0),
@@ -2035,7 +2150,14 @@ export function ReportsPage() {
       "Member Since": toDate(m.memberSince)?.toISOString() || ""
     }))), "Members");
 
-      const orderRows = storeOrders.map((o: any) => ({
+      const orderRows = storeOrders.map((o: any) => {
+        // Per F-A2: what was ACTUALLY collected for this order. A
+        // direct-paid order carries a tender at
+        // `storeOrders/{id}/payments/delivery-tender`; an add-to-bill
+        // order has none (the money lands on the room folio instead).
+        const tender = storeTenderByOrderId.get(o.id);
+        const paid = tender ? Number(tender.amount || 0) : 0;
+        return {
       "Order Ref": o.orderRef,
       "Room Number": o.roomNumber,
       "Booking ID": o.bookingId || "",
@@ -2044,9 +2166,99 @@ export function ReportsPage() {
       Status: o.status,
       "Payment Method": o.paymentMethod,
       "Total Amount": o.totalAmount,
+      // The till's money, per order. The sum of this column is what the
+      // hotel actually took at the store — the number the backup used to
+      // omit entirely.
+      "Paid": paid,
+      "Paid At": tender ? toDate(tender.recordedAt)?.toISOString() || "" : "",
+      "Paid By": tender ? tender.recordedBy || "" : "",
+      "Tender Ref": tender ? tender.transactionReference || "" : "",
       "Created At": toDate(o.createdAt)?.toISOString() || ""
-    }));
+    };
+      });
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(orderRows), "Store Orders");
+
+      // ── Per F-A3: the 9 root collections a restore needs ────────────
+      //
+      // Each gets its own sheet, with the document id first (it IS the
+      // primary key — a restore needs it) and then the document's own
+      // fields. Nested objects are stringified so nothing is silently
+      // dropped on the way into a spreadsheet cell.
+      const backupRootSheetRows = (docs: any[]): Record<string, unknown>[] => {
+        const rows: Record<string, unknown>[] = [];
+        for (const d of docs) {
+          const row: Record<string, unknown> = { "Doc ID": d.id };
+          for (const [key, value] of Object.entries(d)) {
+            if (key === "id") continue;
+            row[key] =
+              value !== null && typeof value === "object"
+                ? JSON.stringify(value)
+                : value;
+          }
+          rows.push(row);
+        }
+        return rows;
+      };
+
+      const roomsDocs = rootCollectionDocs.get("rooms") || [];
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.json_to_sheet(backupRootSheetRows(roomsDocs)),
+        "Rooms"
+      );
+
+      const reservationsDocs = rootCollectionDocs.get("reservations") || [];
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.json_to_sheet(backupRootSheetRows(reservationsDocs)),
+        "Reservations"
+      );
+
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.json_to_sheet(
+          backupRootSheetRows(rootCollectionDocs.get("corporateCodes") || [])
+        ),
+        "Corporate Codes"
+      );
+
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.json_to_sheet(backupRootSheetRows(rootCollectionDocs.get("guests") || [])),
+        "Guests"
+      );
+
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.json_to_sheet(backupRootSheetRows(rootCollectionDocs.get("addOns") || [])),
+        "Add-Ons"
+      );
+
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.json_to_sheet(backupRootSheetRows(rootCollectionDocs.get("roomBlocks") || [])),
+        "Room Blocks"
+      );
+
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.json_to_sheet(backupRootSheetRows(rootCollectionDocs.get("settings") || [])),
+        "Settings"
+      );
+
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.json_to_sheet(backupRootSheetRows(rootCollectionDocs.get("intercoms") || [])),
+        "Intercoms"
+      );
+
+      // `testRuns` is server-only, so it comes from the AdminContext list
+      // rather than a client read.
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.json_to_sheet(testRunRows),
+        "Test Runs"
+      );
 
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(storeItems.map((item: any) => ({
       Name: item.name,
