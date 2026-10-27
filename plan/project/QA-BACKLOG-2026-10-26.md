@@ -30,7 +30,6 @@ Each of these was re-checked against the **live deployment** today, not read off
 | **F-D3** | `scripts/finance-integrity-scan.ts` covers the pricing invariants and **none of the ledger ones** — it never scans the `payments` / `refunds` / `charges` collections. | The scanner reads only the pricing side. (Note: the **nightly reconciliation cron** added in this session DOES cover the ledger — I05/I06/I07 all PASS against production. The gap is in this one script only.) | S2 |
 | **F-D4** | Bookings where money was taken but the books do not close. | The reconciliation's **I08** (over-collected) and **I14** (cancelled bookings holding money) both still WARN. All are QA fixtures — no real money is wrong — but the arithmetic is. | S3 |
 | **RPT-18** | A **₱0 store order can never be delivered** — `handleDeliverStoreOrder` rejects `totalAmount <= 0` with a 409. | Guard still present (`guest-app/server/handlers/store.ts:108`). | S3 |
-| **SEC-2** | A member can claim an **unlinked** booking — the claim path does not verify the booking belongs to the member. | The **staff** link path (`POST /api/members/link-booking`) IS admin-gated (`members.ts:1255`). The **member self-service** claim path is the unverified one — still open. | S1 |
 | **RPT-2** | "Charge after checkout" is **UI-only** — the server does not enforce it. | No `chargeAfterCheckout` reference exists anywhere under `guest-app/server/` — the server never reads the setting. | S2 |
 | **RPT-5** | The corporate path writes `paymentMethod:"chargeback"`. | Still there: the schema still `.default("chargeback")` (`corporate-inquiries.ts:76`) and the write still records `billingArrangement: "chargeback"` (`:585`). | S3 |
 | — | `booking-confirmed` returns 401 for guests (the email-link path is broken). | Confirmed live: `POST /api/email/booking-confirmed` with no auth → **HTTP 401**, while the public `booking-submitted` → **HTTP 400** (reaches validation). `"booking-confirmed"` is in BOTH `staffOnlyEmailActions` and `publicEmailActions`; staff-only wins. | S2 |
@@ -42,18 +41,18 @@ Each of these was re-checked against the **live deployment** today, not read off
 
 | Wave | Scope | Closed | Still open |
 |---|---|---|---|
-| **Wave 2** | role gates + payment semantics (8 items) | **SEC-3**, **SEC-4**, **RPT-3**, **RPT-6** | SEC-2, RPT-2, RPT-5, `booking-confirmed` |
+| **Wave 2** | role gates + payment semantics (8 items) | **SEC-2**, **SEC-3**, **SEC-4**, **RPT-3**, **RPT-6** | RPT-2, RPT-5, `booking-confirmed` |
 | **Wave 3** | backup + reporting cluster (15 items) | **F-A2**, **F-A3**, **F-A5**, **F-C1**, **F-C2**, **RPT-19** | F-A4, F-A6, F-B3, F-B5, F-C3, F-C4, F-D3, F-D4, RPT-18 |
 | **Wave 4** | data, misc + the nightly cron (5 items) | **H8**, **SR-05** | NO-ID-A67, NO-ID-A68, NO-ID-A69 |
 | **Wave 5** | owner-gated / physically impossible (10 items) | — | all 10 — **by design**; they need a real inbox, a physical printer, a real device, or the Firebase Console |
 
 \* **NO-ID-A68** is **partly** fixed: the schema layer now returns 400 (`bookings.ts:1725`); the in-transaction half is still open. **RPT-3**, **RPT-6**, **SR-05**, **F-C1**, **F-C2** and **RPT-19** were re-verified as **already fixed** — the earlier triage had simply not reached a verdict on them.
 
-**Net: 12 of 28 code-verifiable items are closed. 16 remain open. Wave 5 (10 items) is untouched by design.**
+**Net: 13 of 28 code-verifiable items are closed. 15 remain open. Wave 5 (10 items) is untouched by design.**
 
 The two closed items that were **live money-permission holes** (SEC-3, SEC-4) are the important ones: both are now enforced **on the server**, proven with a real front-desk token (HTTP 403) and a real admin token (reaching validation).
 
-**What is still open is still mostly BACKUP and REPORTING** — 9 of the 16 open items are in Wave 3. The remaining backup items are F-A4 (a negative outstanding balance on 3 QA-fixture bookings) and F-A6 (the staging-refresh import names a script that does not exist). **No open item can lose a guest's money or turn them away.** The one S1 (SEC-2, a member claiming an unlinked booking) is the only one worth prioritising on severity.
+**What is still open is still mostly BACKUP and REPORTING** — 9 of the 15 open items are in Wave 3. The remaining backup items are F-A4 (a negative outstanding balance on 3 QA-fixture bookings) and F-A6 (the staging-refresh import names a script that does not exist). **No open item can lose a guest's money, turn them away, or touch a guest's data** — the last S1 (SEC-2) is now closed and proved live.
 
 ### ✅ Closed since the QA report (re-verified 2026-10-26 against the live deployment)
 
@@ -70,6 +69,7 @@ These were already fixed; the earlier triage had simply not reached a verdict. N
 | **F-A2** | The **Full Backup** omits every store payment tender — the "Store Orders" sheet had no *Paid* column, so the cash at the till was invisible in the backup. | **FIXED.** The export now reads each order's tender at `storeOrders/{id}/payments/delivery-tender` and the "Store Orders" sheet carries **Paid**, **Paid At**, **Paid By** and **Tender Ref**. An add-to-bill order reads `Paid = 0` (its money is on the room folio — reporting the order total there would double-count it). Proven by `admin-app/src/__tests__/f-a2-f-a3-f-a5-full-backup-completeness.test.ts`. |
 | **F-A3** | The "full backup" omitted **9 root collections** and the Bookings sheet had no `reservationId` column — so a restore **could not rebuild room inventory**. | **FIXED.** The export now reads `rooms`, `reservations`, `corporateCodes`, `guests`, `addOns`, `roomBlocks`, `settings` and `intercoms` (8 client-readable collections) and carries `testRuns` from the server-only context list, each on its own sheet with the **Doc ID** first. The Bookings sheet now carries **Reservation ID** and **Reservation Ref**. |
 | **F-A5** | `revenueAllocation` was not exported — so the MRB-11 violations were **invisible to whoever audits the backup**. | **FIXED.** The Bookings sheet now carries **Revenue Room Net**, **Revenue Breakfast Net**, **Revenue Add-On Net**, **Revenue Deduction Net** and **Revenue Total Net**, so the MRB-11 invariant (roomNet + breakfastNet + addOnNet − deductionNet == totalNet) is checkable from the backup alone. A booking with no allocation exports BLANK, not zero — "no allocation recorded" is a different claim from "earned nothing from rooms". |
+| **SEC-2** | A member can claim an **unlinked** booking — the claim path does not verify the booking belongs to the member. | **FIXED** (commit `1055b836`, live in `v2.21.5`). The hole was NOT where the handoff said: `POST /api/members/redeem-points-self` accepted a booking ID and, if that booking carried no `memberId`, quietly wrote the CALLER's uid onto it — adopting a stranger's booking (with its public `lookupToken` cancel credential). The shared guard only fired when `booking.memberId` was ALREADY SET and different, so the comment described the intended behaviour and the code did not implement it. The SELF path now requires an exact match; the STAFF path keeps its documented auto-link behaviour (admin-only at the router, so not member-reachable). **Proved live**: a real member token against a real unlinked pre-check-in booking → **HTTP 400 `"Booking is not linked to this member."`**, and the booking's `memberId` was still unset afterwards. |
 
 
 ### The structural fix — a scope reconciliation gate
