@@ -138,6 +138,61 @@ export async function handleHoldExpiryCron(
             cancelledAt: now,
             updatedAt: now
           });
+
+          // ── The voucher / corporate-code release ────────────────
+          //
+          // Per MRB-13: a booking that is cancelled RELEASES the
+          // voucher and corporate-code uses it consumed. The guest
+          // cancel path (`handleCancelBooking`) does this — it
+          // decrements `usageCount` once per cancelled child.
+          //
+          // This cron did NOT. It retired the booking and left the
+          // usage count where it was, so every hold that lapsed
+          // silently burned a use of a voucher nobody ever spent.
+          // In production that showed up as the `OFFNOW` voucher
+          // reading `usageCount: 5` against 2 live bookings — the
+          // other 3 were holds that expired and were released.
+          //
+          // The effect on a REAL guest: the voucher's `usageCap` is
+          // consumed by bookings that were never completed, so a
+          // legitimate guest is refused a voucher that was never
+          // actually used.
+          //
+          // The release mirrors `handleCancelBooking` exactly — same
+          // `Math.max(..., 0)` floor, same `updatedAt` stamp, and the
+          // same dedup: one decrement per booking that used the code,
+          // and one read + one write per unique code.
+          //
+          // FOL-03: every read in this transaction happens BEFORE the
+          // write below, so the voucher / corporate-code reads are
+          // issued here, ahead of the `transaction.update` calls.
+          const voucherCode = String(freshData.voucherCode || "").trim().toUpperCase();
+          const corporateCode = String(freshData.corporateCode || "").trim().toUpperCase();
+
+          if (voucherCode) {
+            const vRef = adminDb.collection("vouchers").doc(voucherCode);
+            const vDoc = await transaction.get(vRef);
+            if (vDoc.exists) {
+              const vData = vDoc.data() || {};
+              transaction.update(vRef, {
+                usageCount: Math.max((Number(vData.usageCount) || 0) - 1, 0),
+                updatedAt: now
+              });
+            }
+          }
+
+          if (corporateCode) {
+            const cpRef = adminDb.collection("corporateCodes").doc(corporateCode);
+            const cpDoc = await transaction.get(cpRef);
+            if (cpDoc.exists) {
+              const cpData = cpDoc.data() || {};
+              transaction.update(cpRef, {
+                usageCount: Math.max((Number(cpData.usageCount) || 0) - 1, 0),
+                updatedAt: now
+              });
+            }
+          }
+
           return {
             bookingId: doc.id,
             bookingRef: String(freshData.bookingRef || doc.id),
