@@ -105,7 +105,24 @@ export async function handleDeliverStoreOrder(req: any, res: any) {
       }
 
       const totalAmount = Number(order.totalAmount);
-      if (!Number.isFinite(totalAmount) || totalAmount <= 0 || totalAmount > 1_000_000) {
+      // Per RPT-18 (2026-10-27): the guard rejected `totalAmount <= 0`,
+      // so a COMPLEMENTARY order (a ₱0 store item — e.g. the hotel's
+      // "Luggage Storage") could be PLACED but never DELIVERED: the
+      // desk got 409 "The store order total is invalid and cannot be
+      // recorded." and the order sat in `placed` forever.
+      //
+      // A ₱0 total is not a corrupt total — it is a legitimate
+      // complimentary order that collects no money. The guard's job
+      // is to catch a CORRUPT total (not-a-number, negative, absurdly
+      // large), so the bound is now `< 0`.
+      //
+      // The money is unaffected either way:
+      //   * an `add-to-bill` order writes NO tender at all, so a ₱0
+      //     add-to-bill order records nothing and settles nothing;
+      //   * a direct-paid ₱0 order writes a tender of `amount: 0`,
+      //     which adds 0 to BOTH sides of the store-revenue
+      //     reconciliation (I17) — the books do not move.
+      if (!Number.isFinite(totalAmount) || totalAmount < 0 || totalAmount > 1_000_000) {
         throw new Error("INVALID_ORDER_TOTAL");
       }
 

@@ -11,6 +11,10 @@ import { hasActiveStaffInventoryHoldConflict, isActiveStaffInventoryHold } from 
 import { Timestamp } from "firebase-admin/firestore";
 import { sendBookingTrigger, sendBookingConfirmedWithBalanceTrigger, sendStaffNewBookingTrigger, sendStaffNewPaymentTrigger, sendEarlyCheckinResolveTrigger, buildReservationEmailView } from "./email";
 import { writeNotification } from "../lib/notifications";
+// Per NO-ID-A68 (2026-10-27): a validation error raised inside the
+// create transaction must keep its own status instead of collapsing to
+// a 500. See `../lib/bookingValidationError.ts`.
+import { BookingValidationError } from "../lib/bookingValidationError";
 // Per BR-06 (Phase 13 — Breakfast Redesign, decision
 // #235, 2026-10-13): the unified refund-write helper.
 // `handleAddRefund` (CRL-01) routes the actual entry
@@ -3713,17 +3717,17 @@ export async function handleCreateBooking(req: any, res: any) {
       let selfRedeemedAt: Date | null = null;
       if (pointsToRedeem > 0) {
         if (!detectedMemberId) {
-          throw new Error("Sign in is required to redeem points at booking creation. Please sign in or remove the points amount.");
+          throw new BookingValidationError("Sign in is required to redeem points at booking creation. Please sign in or remove the points amount.", 401);
         }
         if (selfRcData?.allowMemberPointsRedemption !== true) {
-          throw new Error("Self-service points redemption is not enabled. Please contact the front desk.");
+          throw new BookingValidationError("Self-service points redemption is not enabled. Please contact the front desk.", 409);
         }
         if (!selfMemberDoc?.exists) {
-          throw new Error("Member not found.");
+          throw new BookingValidationError("Member not found.", 404);
         }
         const selfMemberData = selfMemberDoc.data()!;
         if (selfMemberData.isActive === false || selfMemberData.isMember === false) {
-          throw new Error("Member account is not active.");
+          throw new BookingValidationError("Member account is not active.", 409);
         }
         const pointsRedemptionRate = Number(selfRcData?.pointsRedemptionRate || 0);
         if (pointsRedemptionRate <= 0) {
@@ -3732,14 +3736,14 @@ export async function handleCreateBooking(req: any, res: any) {
         const minPointsToRedeem = Number(selfRcData?.minPointsToRedeem || 0);
         const billPct = Number(selfRcData?.pointsCanPayUpToBillPct ?? 100);
         if (minPointsToRedeem > 0 && pointsToRedeem < minPointsToRedeem) {
-          throw new Error(`Points redemption requires at least ${minPointsToRedeem} points.`);
+          throw new BookingValidationError(`Points redemption requires at least ${minPointsToRedeem} points.`);
         }
         if (Number.isFinite(billPct) && billPct < 100) {
           const reservationTotal = finalTotalPrice;
           const maxRedeemableCurrency = Math.floor((reservationTotal * Math.max(0, billPct)) / 100);
           const maxRedeemablePoints = Math.floor((maxRedeemableCurrency * 100) / pointsRedemptionRate);
           if (pointsToRedeem > maxRedeemablePoints) {
-            throw new Error(
+            throw new BookingValidationError(
               `Points redemption exceeds the ${billPct}% bill cap (max ${maxRedeemablePoints} points for this booking).`
             );
           }
@@ -3750,11 +3754,11 @@ export async function handleCreateBooking(req: any, res: any) {
           pointsRedemptionRate
         );
         if (!validation.valid) {
-          throw new Error(validation.error);
+          throw new BookingValidationError(validation.error);
         }
         const redemptionValue = Math.round(validation.value);
         if (redemptionValue <= 0 || redemptionValue > finalTotalPrice) {
-          throw new Error("Points redemption value exceeds the booking total.");
+          throw new BookingValidationError("Points redemption value exceeds the booking total.");
         }
         // Discount the reservation total. The newReservation
         // header below reads `finalTotalPrice` (already
@@ -4825,7 +4829,17 @@ export async function handleCreateBooking(req: any, res: any) {
       || code.includes("INTERNAL")
     );
     let status: number;
-    if (error.name === "BreakfastSelectionValidationError") {
+    if (error.name === "BookingValidationError") {
+      // Per NO-ID-A68 (2026-10-27): a validation error raised INSIDE
+      // the transaction carries its own status (400 / 401 / 404 / 409).
+      // It used to be a bare `Error`, so it fell through to the 500
+      // branch and the guest saw "An unexpected error occurred during
+      // booking creation" instead of the reason their request was
+      // refused.
+      status = (typeof error.status === "number" && error.status >= 400 && error.status < 600)
+        ? error.status
+        : 400;
+    } else if (error.name === "BreakfastSelectionValidationError") {
       // Per BR-03 (2026-10-12, decision #232): the new
       // `breakfastSelections` shape's validation errors
       // (locked date / non-existent meal / malformed

@@ -73,7 +73,34 @@ const convertInquirySchema = z.object({
   checkOut: z.string().trim().min(1).max(40),
   guests: z.coerce.number().int().min(1).max(20),
   hasBreakfast: z.boolean().optional().default(false),
-  paymentMethod: z.string().trim().min(1).max(40).optional().default("chargeback"),
+  // Per RPT-5 (2026-10-27): the default was `"chargeback"`.
+  //
+  // `"chargeback"` is NOT a payment method in this system:
+  //   - it is not in `SUPPORTED_PAYMENT_METHODS`
+  //     (gcash / maya / bank / paypal / pay-at-hotel)
+  //   - the hotel has NO `paymentMethods` entry for it, so no report
+  //     can group it and no label can render it
+  //   - and the system's own chargeback settlement trigger —
+  //     `handleSetLouReceived`, the LOU (Letter of Undertaking)
+  //     toggle that DECISIONS-FEATURES.md #99 defines as the trigger
+  //     for marking a corporate chargeback resolved — REJECTS any
+  //     booking whose `paymentMethod !== "pay-at-hotel"`:
+  //       "LOU flag only applies to chargeback bookings
+  //        (paymentMethod: 'pay-at-hotel')."
+  //     So a converted corporate booking could never have its LOU
+  //     marked received, which is exactly how the "Corporate AR"
+  //     receivables card ends up permanently inflated.
+  //
+  // `"pay-at-hotel"` is the documented default: the
+  // `PROTECTED_PAYMENT_METHODS` note in shared/constants says it is
+  // what "the walk-in flow, corporate inquiry conversion, and the
+  // booking step-3 fallback all default to".
+  //
+  // Note: `corporate.billingArrangement: "chargeback"` is a
+  // DIFFERENT field and stays "chargeback" — that one really is the
+  // billing arrangement (the company is invoiced). This is about the
+  // booking's `paymentMethod`.
+  paymentMethod: z.string().trim().min(1).max(40).optional().default("pay-at-hotel"),
   // Optional negotiated rate override. When omitted, the handler
   // uses the RoomType corporate/base rate. When a corporateCodes/{code}
   // already exists for this inquiry, the handler uses its
@@ -205,6 +232,47 @@ export async function handleConvertInquiryToBooking(req: any, res: any) {
   const numNights = Math.max(Math.round((checkOutDate.getTime() - checkInDate.getTime()) / 86400000), 0);
   if (numNights < 1) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
+  }
+
+  // Per RPT-5 (2026-10-27): validate the payment method against the
+  // hotel's CONFIGURED methods, outside the transaction.
+  //
+  // The schema only bounds the string's length, so any 1-40 character
+  // value was accepted and written onto the booking. A method the
+  // hotel does not offer cannot be grouped by any report, cannot be
+  // labelled, and — as the `"chargeback"` default proved — can silently
+  // disable the settlement workflow that depends on it.
+  //
+  // The read is here, BEFORE `runTransaction`, deliberately: a read
+  // inside the transaction after its first write is exactly the defect
+  // FOL-03 fixed (Firestore refuses reads after writes).
+  //
+  // `pay-at-hotel` and `add-to-bill` are always accepted: they are
+  // the protected internal methods and may not be present in the
+  // configured list.
+  const configuredPaymentMethods = await (async () => {
+    try {
+      const cfgDoc = await adminDb.collection("settings").doc("hotelConfig").get();
+      const arr = (cfgDoc.exists ? cfgDoc.data() : {})?.paymentMethods;
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      // A config read failure must not block a legitimate conversion.
+      // The schema default is still a known-good method.
+      return [];
+    }
+  })();
+
+  if (configuredPaymentMethods.length > 0) {
+    const isInternalMethod = paymentMethod === "pay-at-hotel" || paymentMethod === "add-to-bill";
+    const isConfigured = configuredPaymentMethods.some(
+      (m: any) => m && m.method === paymentMethod
+    );
+    if (!isInternalMethod && !isConfigured) {
+      return res.status(400).json({
+        success: false,
+        error: `Payment method "${paymentMethod}" is not offered by this hotel.`,
+      });
+    }
   }
 
   let finalBookingRef = "";

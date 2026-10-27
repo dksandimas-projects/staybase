@@ -5075,7 +5075,31 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
       isActive: formData.get("isActive") === "on"
     };
 
-    if (!itemData.name || itemData.price <= 0) return;
+    // Per RPT-18 (2026-10-27): a ₱0 price is a legitimate
+    // COMPLIMENTARY item — the hotel's live catalogue already has one
+    // ("Luggage Storage", price 0, active). The form refused to save
+    // it, so the operator could not edit that item without first
+    // inventing a price for it.
+    //
+    // The breakfast catalogue already sets the convention this
+    // follows: a zero-price item is a deliberate "complimentary"
+    // promotion, and the UI makes the consequence EXPLICIT with a
+    // warning rather than silently refusing it (see the breakfast
+    // "priced at ₱0" warning below).
+    //
+    // What is still refused is a CORRUPT price: not a number, or
+    // negative.
+    if (!itemData.name) return;
+    if (!Number.isFinite(itemData.price) || itemData.price < 0) {
+      toast.error("Invalid price", "The price must be zero or a positive number.");
+      return;
+    }
+    if (itemData.price === 0) {
+      toast.warning(
+        "Store item priced at ₱0",
+        `\"${itemData.name}\" is complimentary — guests will not be charged for it.`
+      );
+    }
 
     if (editingStoreItem) {
       updateStoreItem(editingStoreItem.id, itemData);
@@ -8029,12 +8053,20 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                     key={`modal-price-${editingStoreItem?.id ?? "new"}`}
                     name="price"
                     type="number"
-                    min="1"
+                    min="0"
+                    step="0.01"
                     required
                     defaultValue={editingStoreItem?.price ?? ""}
                     placeholder="80"
                     className="min-h-[44px] w-full rounded border border-gray-250 bg-white px-3 text-sm font-medium focus:bg-white"
                   />
+                  {/* Per RPT-18 (2026-10-27): ₱0 is allowed — a
+                      complimentary item (the hotel's live catalogue
+                      has one: "Luggage Storage"). The save handler
+                      warns explicitly rather than refusing. */}
+                  <span className="text-[10px] font-normal text-gray-500">
+                    Use 0 for a complimentary item (no charge to the guest).
+                  </span>
                 </label>
 
                 <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">

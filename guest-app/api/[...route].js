@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.21.7";
+    VERSION2 = "2.21.8";
   }
 });
 
@@ -230567,6 +230567,16 @@ init_firestore();
 init_email();
 init_notifications();
 
+// server/lib/bookingValidationError.ts
+var BookingValidationError = class extends Error {
+  status;
+  constructor(message, status = 400) {
+    super(message);
+    this.name = "BookingValidationError";
+    this.status = status;
+  }
+};
+
 // server/lib/refunds.ts
 init_firestore();
 function trimOrNull(input, maxLen) {
@@ -233102,17 +233112,17 @@ async function handleCreateBooking(req, res) {
       let selfRedeemedAt = null;
       if (pointsToRedeem > 0) {
         if (!detectedMemberId) {
-          throw new Error("Sign in is required to redeem points at booking creation. Please sign in or remove the points amount.");
+          throw new BookingValidationError("Sign in is required to redeem points at booking creation. Please sign in or remove the points amount.", 401);
         }
         if (selfRcData?.allowMemberPointsRedemption !== true) {
-          throw new Error("Self-service points redemption is not enabled. Please contact the front desk.");
+          throw new BookingValidationError("Self-service points redemption is not enabled. Please contact the front desk.", 409);
         }
         if (!selfMemberDoc?.exists) {
-          throw new Error("Member not found.");
+          throw new BookingValidationError("Member not found.", 404);
         }
         const selfMemberData = selfMemberDoc.data();
         if (selfMemberData.isActive === false || selfMemberData.isMember === false) {
-          throw new Error("Member account is not active.");
+          throw new BookingValidationError("Member account is not active.", 409);
         }
         const pointsRedemptionRate = Number(selfRcData?.pointsRedemptionRate || 0);
         if (pointsRedemptionRate <= 0) {
@@ -233121,14 +233131,14 @@ async function handleCreateBooking(req, res) {
         const minPointsToRedeem = Number(selfRcData?.minPointsToRedeem || 0);
         const billPct = Number(selfRcData?.pointsCanPayUpToBillPct ?? 100);
         if (minPointsToRedeem > 0 && pointsToRedeem < minPointsToRedeem) {
-          throw new Error(`Points redemption requires at least ${minPointsToRedeem} points.`);
+          throw new BookingValidationError(`Points redemption requires at least ${minPointsToRedeem} points.`);
         }
         if (Number.isFinite(billPct) && billPct < 100) {
           const reservationTotal = finalTotalPrice;
           const maxRedeemableCurrency = Math.floor(reservationTotal * Math.max(0, billPct) / 100);
           const maxRedeemablePoints = Math.floor(maxRedeemableCurrency * 100 / pointsRedemptionRate);
           if (pointsToRedeem > maxRedeemablePoints) {
-            throw new Error(
+            throw new BookingValidationError(
               `Points redemption exceeds the ${billPct}% bill cap (max ${maxRedeemablePoints} points for this booking).`
             );
           }
@@ -233139,11 +233149,11 @@ async function handleCreateBooking(req, res) {
           pointsRedemptionRate
         );
         if (!validation.valid) {
-          throw new Error(validation.error);
+          throw new BookingValidationError(validation.error);
         }
         const redemptionValue = Math.round(validation.value);
         if (redemptionValue <= 0 || redemptionValue > finalTotalPrice) {
-          throw new Error("Points redemption value exceeds the booking total.");
+          throw new BookingValidationError("Points redemption value exceeds the booking total.");
         }
         finalTotalPrice = Math.max(finalTotalPrice - redemptionValue, 0);
         if (rateBreakdown) {
@@ -234017,7 +234027,9 @@ async function handleCreateBooking(req, res) {
     const code = error?.code || "";
     const isInfraError = typeof code === "string" && (code.includes("UNAVAILABLE") || code.includes("DEADLINE_EXCEEDED") || code.includes("RESOURCE_EXHAUSTED") || code.includes("INTERNAL"));
     let status;
-    if (error.name === "BreakfastSelectionValidationError") {
+    if (error.name === "BookingValidationError") {
+      status = typeof error.status === "number" && error.status >= 400 && error.status < 600 ? error.status : 400;
+    } else if (error.name === "BreakfastSelectionValidationError") {
       status = typeof error.status === "number" && error.status > 0 ? error.status : 400;
     } else if (error.message === "Room no longer available" || error.message === ROOM_NOT_READY_PREVIOUS_GUEST_ERROR) {
       status = 409;
@@ -240383,7 +240395,34 @@ var convertInquirySchema = external_exports.object({
   checkOut: external_exports.string().trim().min(1).max(40),
   guests: external_exports.coerce.number().int().min(1).max(20),
   hasBreakfast: external_exports.boolean().optional().default(false),
-  paymentMethod: external_exports.string().trim().min(1).max(40).optional().default("chargeback"),
+  // Per RPT-5 (2026-10-27): the default was `"chargeback"`.
+  //
+  // `"chargeback"` is NOT a payment method in this system:
+  //   - it is not in `SUPPORTED_PAYMENT_METHODS`
+  //     (gcash / maya / bank / paypal / pay-at-hotel)
+  //   - the hotel has NO `paymentMethods` entry for it, so no report
+  //     can group it and no label can render it
+  //   - and the system's own chargeback settlement trigger —
+  //     `handleSetLouReceived`, the LOU (Letter of Undertaking)
+  //     toggle that DECISIONS-FEATURES.md #99 defines as the trigger
+  //     for marking a corporate chargeback resolved — REJECTS any
+  //     booking whose `paymentMethod !== "pay-at-hotel"`:
+  //       "LOU flag only applies to chargeback bookings
+  //        (paymentMethod: 'pay-at-hotel')."
+  //     So a converted corporate booking could never have its LOU
+  //     marked received, which is exactly how the "Corporate AR"
+  //     receivables card ends up permanently inflated.
+  //
+  // `"pay-at-hotel"` is the documented default: the
+  // `PROTECTED_PAYMENT_METHODS` note in shared/constants says it is
+  // what "the walk-in flow, corporate inquiry conversion, and the
+  // booking step-3 fallback all default to".
+  //
+  // Note: `corporate.billingArrangement: "chargeback"` is a
+  // DIFFERENT field and stays "chargeback" — that one really is the
+  // billing arrangement (the company is invoiced). This is about the
+  // booking's `paymentMethod`.
+  paymentMethod: external_exports.string().trim().min(1).max(40).optional().default("pay-at-hotel"),
   // Optional negotiated rate override. When omitted, the handler
   // uses the RoomType corporate/base rate. When a corporateCodes/{code}
   // already exists for this inquiry, the handler uses its
@@ -240474,6 +240513,27 @@ async function handleConvertInquiryToBooking(req, res) {
   const numNights = Math.max(Math.round((checkOutDate.getTime() - checkInDate.getTime()) / 864e5), 0);
   if (numNights < 1) {
     return res.status(400).json({ success: false, error: "Stay must be at least 1 night." });
+  }
+  const configuredPaymentMethods = await (async () => {
+    try {
+      const cfgDoc = await adminDb.collection("settings").doc("hotelConfig").get();
+      const arr = (cfgDoc.exists ? cfgDoc.data() : {})?.paymentMethods;
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
+    }
+  })();
+  if (configuredPaymentMethods.length > 0) {
+    const isInternalMethod = paymentMethod === "pay-at-hotel" || paymentMethod === "add-to-bill";
+    const isConfigured = configuredPaymentMethods.some(
+      (m2) => m2 && m2.method === paymentMethod
+    );
+    if (!isInternalMethod && !isConfigured) {
+      return res.status(400).json({
+        success: false,
+        error: `Payment method "${paymentMethod}" is not offered by this hotel.`
+      });
+    }
   }
   let finalBookingRef = "";
   let finalTotalPrice = 0;
@@ -242442,7 +242502,7 @@ async function handleDeliverStoreOrder(req, res) {
         throw new Error("ORDER_NOT_DELIVERABLE");
       }
       const totalAmount = Number(order.totalAmount);
-      if (!Number.isFinite(totalAmount) || totalAmount <= 0 || totalAmount > 1e6) {
+      if (!Number.isFinite(totalAmount) || totalAmount < 0 || totalAmount > 1e6) {
         throw new Error("INVALID_ORDER_TOTAL");
       }
       const deliveredAt = /* @__PURE__ */ new Date();
