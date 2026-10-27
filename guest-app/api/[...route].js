@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.21.4";
+    VERSION2 = "2.21.5";
   }
 });
 
@@ -247309,6 +247309,30 @@ async function handleHoldExpiryCron(req, res) {
             cancelledAt: now,
             updatedAt: now
           });
+          const voucherCode = String(freshData.voucherCode || "").trim().toUpperCase();
+          const corporateCode = String(freshData.corporateCode || "").trim().toUpperCase();
+          if (voucherCode) {
+            const vRef = adminDb.collection("vouchers").doc(voucherCode);
+            const vDoc = await transaction.get(vRef);
+            if (vDoc.exists) {
+              const vData = vDoc.data() || {};
+              transaction.update(vRef, {
+                usageCount: Math.max((Number(vData.usageCount) || 0) - 1, 0),
+                updatedAt: now
+              });
+            }
+          }
+          if (corporateCode) {
+            const cpRef = adminDb.collection("corporateCodes").doc(corporateCode);
+            const cpDoc = await transaction.get(cpRef);
+            if (cpDoc.exists) {
+              const cpData = cpDoc.data() || {};
+              transaction.update(cpRef, {
+                usageCount: Math.max((Number(cpData.usageCount) || 0) - 1, 0),
+                updatedAt: now
+              });
+            }
+          }
           return {
             bookingId: doc.id,
             bookingRef: String(freshData.bookingRef || doc.id),
