@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.21.0";
+    VERSION2 = "2.21.4";
   }
 });
 
@@ -241224,7 +241224,11 @@ async function applyPointsRedemption(transaction, args) {
     throw new Error("This booking already has a points redemption.");
   }
   const memberId = requestedMemberId || booking.memberId;
-  if (!memberId || booking.memberId && requestedMemberId && requestedMemberId !== booking.memberId) {
+  if (appliedByLabel === "self") {
+    if (!booking.memberId || booking.memberId !== requestedMemberId) {
+      throw new Error("Booking is not linked to this member.");
+    }
+  } else if (!memberId || booking.memberId && requestedMemberId && requestedMemberId !== booking.memberId) {
     throw new Error("Booking is not linked to this member.");
   }
   const memberRef = adminDb.collection("members").doc(memberId);

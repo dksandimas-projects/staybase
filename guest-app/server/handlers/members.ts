@@ -570,7 +570,35 @@ async function applyPointsRedemption(
   }
 
   const memberId = requestedMemberId || booking.memberId;
-  if (!memberId || (booking.memberId && requestedMemberId && requestedMemberId !== booking.memberId)) {
+  if (appliedByLabel === "self") {
+    // Per SEC-2 (QA-REPORT-2026-10-21 §SEC-2, fixed 2026-10-27):
+    // the MEMBER path may only redeem against a booking that is
+    // ALREADY linked to the caller. An unlinked booking is not the
+    // caller's to claim.
+    //
+    // The old shared guard was:
+    //
+    //     if (!memberId || (booking.memberId && requestedMemberId
+    //                       && requestedMemberId !== booking.memberId))
+    //
+    // Read it: the second clause only fires when `booking.memberId`
+    // is ALREADY SET and different. When it is UNSET — every
+    // anonymous booking — the clause is false, `memberId` fell back
+    // to the CALLER's uid, and the transaction then WROTE that uid
+    // onto the victim's booking. The victim's booking, with its
+    // public `lookupToken` cancel credential, moved into the
+    // attacker's portal.
+    //
+    // The SELF path therefore requires an EXACT match:
+    // `booking.memberId` must be set AND equal to the caller's uid.
+    // The STAFF path below keeps its documented auto-link behaviour
+    // (the front desk applying points to an anonymous booking is a
+    // deliberate operation) — but that path is admin-only at the
+    // router (SEC-3), so it is not a member-reachable claim.
+    if (!booking.memberId || booking.memberId !== requestedMemberId) {
+      throw new Error("Booking is not linked to this member.");
+    }
+  } else if (!memberId || (booking.memberId && requestedMemberId && requestedMemberId !== booking.memberId)) {
     throw new Error("Booking is not linked to this member.");
   }
 
