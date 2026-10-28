@@ -68,9 +68,32 @@ const PROOF_FILE = resolve(REPO_ROOT, "tmp/qa-2026-10-23/qa-gcash-proof.png");
  *
  * `QA_RW01_EMAIL` lets a re-run use a fresh alias (a signup cannot be
  * repeated on an address that already has an auth user).
+ *
+ * Two rules the alias has to follow, or the scenario fails for a reason
+ * that has nothing to do with the product:
+ *
+ *   1. It is read through `qaEnv()`, so it can come from the gitignored
+ *      `e2e/.qa.env.local` as well as from the process env. Reading
+ *      `process.env` directly would IGNORE the local file, and a re-run
+ *      would silently reuse the previous address — the signup is then
+ *      refused with "An account with this email already exists", which
+ *      is the product behaving correctly.
+ *   2. It must END with `+sparkinn.dev@gmail.com`. The QA email helper
+ *      (`scripts/qa/verify-qa-email.ts`) refuses any other address
+ *      ("refusing to touch a non-QA address"), so the PART THAT VARIES
+ *      is the local part BEFORE the `+` — e.g.
+ *      `qa.rw01b.signup+sparkinn.dev@gmail.com`.
+ *
+ * With neither set, the alias is generated per RUN. The fixed default
+ * this scenario used to carry has been consumed by an earlier pass, so
+ * a fixed default would make every later run fail with "An account with
+ * this email already exists" — the product refusing a duplicate signup,
+ * which is correct. A generated alias keeps the lane re-runnable and
+ * still identifies itself as QA (`qa.rw01.*`).
  */
 const RW01_EMAIL =
-  process.env.QA_RW01_EMAIL || "qa.rw01.signup+sparkinn.dev@gmail.com";
+  qaEnv("QA_RW01_EMAIL") ||
+  `qa.rw01.${Date.now().toString(36)}+sparkinn.dev@gmail.com`;
 /**
  * NEVER commit a password. The account password lives in the gitignored
  * `e2e/.qa.env.local` (or the process env) like every other QA credential.
