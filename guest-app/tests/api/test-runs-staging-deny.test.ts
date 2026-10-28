@@ -542,13 +542,23 @@ describe("ETR-S12 — Complete scope / ETR-S13 — Integrity scan", () => {
 });
 
 describe("AUD-02 — scoped test-run booking cleanup", () => {
-  it("deletes the real payment and incidental-charge ledger subcollections", async () => {
+  it("deletes EVERY subcollection of the booking, including the refunds ledger", async () => {
+    // The cleanup used to delete a FIXED list — `["payments",
+    // "charges"]` — and `refunds` was not on it, so every QA booking
+    // cleanup left its refund documents behind as orphans of a
+    // deleted booking. The desk dashboard counts pending refunds with
+    // `collectionGroup(db, "refunds")`, so a tenant whose bookings had
+    // all been cleaned up still showed pending refunds with nothing to
+    // refund. The cleanup now ENUMERATES the subcollections, so a
+    // future subcollection needs no code change.
     const deletedPaths: string[] = [];
-    const requestedSubcollections: string[] = [];
     const bookingRef = {
-      collection: vi.fn((name: string) => {
-        requestedSubcollections.push(name);
-        return {
+      collection: vi.fn((name: string) => ({
+        get: vi.fn().mockResolvedValue({ docs: [] })
+      })),
+      listCollections: vi.fn().mockResolvedValue(
+        ["payments", "charges", "refunds"].map((name) => ({
+          id: name,
           get: vi.fn().mockResolvedValue({
             docs: [{
               ref: {
@@ -558,14 +568,14 @@ describe("AUD-02 — scoped test-run booking cleanup", () => {
               }
             }]
           })
-        };
-      })
+        }))
+      )
     };
 
     await deleteTestRunBookingSubcollections(bookingRef);
 
-    expect(requestedSubcollections).toEqual(["payments", "charges"]);
-    expect(deletedPaths).toEqual(["payments", "charges"]);
+    expect(bookingRef.listCollections).toHaveBeenCalled();
+    expect(deletedPaths.sort()).toEqual(["charges", "payments", "refunds"]);
   });
 
   it("uses a refreshed 30-minute cleanup lease", async () => {
