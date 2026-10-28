@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.21.21";
+    VERSION2 = "2.21.23";
   }
 });
 
@@ -153256,8 +153256,9 @@ async function handleCloseTestRun(req, res) {
   }
 }
 async function deleteTestRunBookingSubcollections(bookingRef2) {
-  for (const subcollection of TEST_RUN_BOOKING_SUBCOLLECTIONS) {
-    const snapshot = await bookingRef2.collection(subcollection).get();
+  const subcollections = await bookingRef2.listCollections();
+  for (const sub of subcollections) {
+    const snapshot = await sub.get();
     await Promise.all(snapshot.docs.map((child) => child.ref.delete()));
   }
 }
@@ -153372,8 +153373,12 @@ async function handleDeleteTestRun(req, res) {
       lastDoc = snap.docs[snap.docs.length - 1];
       for (const doc of snap.docs) {
         try {
-          const subSnap = await adminDb.collection("storeOrders").doc(doc.id).collection("tenders").get();
-          await Promise.all(subSnap.docs.map((sd) => sd.ref.delete()));
+          const orderRef = adminDb.collection("storeOrders").doc(doc.id);
+          const orderSubs = await orderRef.listCollections();
+          for (const sub of orderSubs) {
+            const subSnap = await sub.get();
+            await Promise.all(subSnap.docs.map((sd) => sd.ref.delete()));
+          }
           await doc.ref.delete();
           storeOrderCount++;
         } catch (err) {
@@ -154864,7 +154869,7 @@ async function handleStagingRefreshDestroy(req, res) {
     });
   }
 }
-var import_node_crypto, createTestRunSchema, closeTestRunSchema, deleteTestRunSchema, CLEANUP_TIMEOUT_MS, TEST_RUN_BOOKING_SUBCOLLECTIONS, PREVIEW_TTL_MS, LOCK_TIMEOUT_MS, RESET_BATCH_SIZE, stagingResetConfirmSchema, PROTECTED_RESET_COLLECTIONS, REFRESH_MODES, stagingRefreshSchema, SANITIZATION_VERSION, STAFF_IDENTITY_FIELDS, STAFF_IDENTITY_FIELD_SET, STAFF_ROLE_SENTINELS, LEDGER_FREE_TEXT_FIELDS;
+var import_node_crypto, createTestRunSchema, closeTestRunSchema, deleteTestRunSchema, CLEANUP_TIMEOUT_MS, PREVIEW_TTL_MS, LOCK_TIMEOUT_MS, RESET_BATCH_SIZE, stagingResetConfirmSchema, PROTECTED_RESET_COLLECTIONS, REFRESH_MODES, stagingRefreshSchema, SANITIZATION_VERSION, STAFF_IDENTITY_FIELDS, STAFF_IDENTITY_FIELD_SET, STAFF_ROLE_SENTINELS, LEDGER_FREE_TEXT_FIELDS;
 var init_test_runs = __esm({
   "server/handlers/test-runs.ts"() {
     "use strict";
@@ -154884,7 +154889,6 @@ var init_test_runs = __esm({
       runId: external_exports.string().trim().min(1).max(64)
     }).strict();
     CLEANUP_TIMEOUT_MS = 30 * 60 * 1e3;
-    TEST_RUN_BOOKING_SUBCOLLECTIONS = ["payments", "charges"];
     PREVIEW_TTL_MS = 5 * 60 * 1e3;
     LOCK_TIMEOUT_MS = 30 * 60 * 1e3;
     RESET_BATCH_SIZE = 20;

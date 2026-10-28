@@ -209,11 +209,26 @@ export async function handleCloseTestRun(req: any, res: any) {
 
 const CLEANUP_TIMEOUT_MS = 30 * 60 * 1000; // 30-minute lease, refreshed after each cleanup page
 
-const TEST_RUN_BOOKING_SUBCOLLECTIONS = ["payments", "charges"] as const;
-
+/**
+ * Delete EVERY subcollection of a booking — not a fixed list.
+ *
+ * The list used to be `["payments", "charges"]`, and it was WRONG: the
+ * `refunds` subcollection was not on it, so every QA booking cleanup
+ * deleted the booking and LEFT ITS REFUNDS BEHIND as orphans. Those
+ * orphans are money records with no booking under them, and they are
+ * not inert: the desk's dashboard counts pending refunds with
+ * `collectionGroup(db, "refunds")`, so a tenant whose bookings were
+ * all cleaned up still showed "3 pending refunds" — with nothing to
+ * refund. The Full Backup's refund coverage (F-A4) made the same
+ * orphans visible there.
+ *
+ * A fixed list is a standing invitation for the next subcollection to
+ * be forgotten. Firestore can enumerate them, so enumerate them.
+ */
 export async function deleteTestRunBookingSubcollections(bookingRef: any) {
-  for (const subcollection of TEST_RUN_BOOKING_SUBCOLLECTIONS) {
-    const snapshot = await bookingRef.collection(subcollection).get();
+  const subcollections = await bookingRef.listCollections();
+  for (const sub of subcollections) {
+    const snapshot = await sub.get();
     await Promise.all(snapshot.docs.map((child: any) => child.ref.delete()));
   }
 }
@@ -352,8 +367,16 @@ export async function handleDeleteTestRun(req: any, res: any) {
 
       for (const doc of snap.docs) {
         try {
-          const subSnap = await adminDb.collection("storeOrders").doc(doc.id).collection("tenders").get();
-          await Promise.all(subSnap.docs.map(sd => sd.ref.delete()));
+          // Every subcollection, for the same reason the booking cleanup
+          // enumerates them: a store order's `payments` subcollection
+          // (the delivery tender) was not in the old fixed list, so the
+          // tender survived its order as an orphan money record.
+          const orderRef = adminDb.collection("storeOrders").doc(doc.id);
+          const orderSubs = await orderRef.listCollections();
+          for (const sub of orderSubs) {
+            const subSnap = await sub.get();
+            await Promise.all(subSnap.docs.map(sd => sd.ref.delete()));
+          }
           await doc.ref.delete();
           storeOrderCount++;
 

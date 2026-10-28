@@ -34,6 +34,7 @@
     "qa:matrix": "esbuild scripts/qa/verify-matrix.ts --bundle --platform=node --format=esm --outfile=tmp/qa/verify-matrix.mjs && node tmp/qa/verify-matrix.mjs",
     "qa:export": "esbuild scripts/qa/export-prod-data.ts --bundle --platform=node --format=esm --outfile=tmp/qa/export-prod-data.mjs --external:firebase-admin && node tmp/qa/export-prod-data.mjs --out tmp/qa/prod-export.json",
     "qa:scope": "esbuild scripts/qa/verify-scope.ts --bundle --platform=node --format=esm --outfile=tmp/qa/verify-scope.mjs && node tmp/qa/verify-scope.mjs",
+    "qa:identities": "esbuild scripts/qa/create-qa-identities.ts --bundle --platform=node --format=esm --outfile=tmp/qa/create-qa-identities.mjs --external:firebase-admin && node tmp/qa/create-qa-identities.mjs",
     "test:qa": "vitest run scripts/qa/__tests__",
     "preflight": "node scripts/preflight.mjs"
   },
