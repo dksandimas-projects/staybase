@@ -50,6 +50,8 @@ import {
   computeBookingFolio,
   isUnpaidRefund,
   sumCollectedPayments,
+  evaluateBookingClosure,
+  createCancellationPolicySnapshot,
   type FolioStoreOrder
 } from "@spark-inn/shared";
 
@@ -249,6 +251,18 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
   // and the nightly check never wrote a report — see `readLedgerIndex`.
   const ledgerIndex = await readLedgerIndex();
 
+  // The hotel's cancellation policy — the PRODUCT'S rule, read from the
+  // same settings documents the cancellation handler reads. It is the
+  // only way to tell a cancelled booking that legitimately retains the
+  // guest's money (a cancellation inside the free-cancellation window)
+  // from one whose money simply was never refunded.
+  const [websiteContentSnap, hotelConfigSnap] = await Promise.all([
+    adminDb.collection("settings").doc("websiteContent").get(),
+    adminDb.collection("settings").doc("hotelConfig").get()
+  ]);
+  const websiteContent = (websiteContentSnap.data() || {}) as any;
+  const hotelConfig = (hotelConfigSnap.data() || {}) as any;
+
   const findings: ReconciliationFinding[] = [];
 
   const add = (
@@ -304,6 +318,14 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
     status: string;
     /** The booking is a QA test-run fixture, not a real guest's booking. */
     isTestData: boolean;
+    /** When the booking was cancelled (epoch ms), or null. */
+    cancelledAtMs: number | null;
+    /** The check-in date, `YYYY-MM-DD`, or null. */
+    checkInDateKey: string | null;
+    /** The money the guest PAID, before refunds. */
+    grossCollected: number;
+    /** The money already refunded (settled refunds only). */
+    refundedPaid: number;
   }
 
   const models: MoneyModel[] = [];
@@ -327,9 +349,24 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
       }
     }
 
+    const grossCollected = r2(
+      ledger.filter((e) => e.amount > 0).reduce((sum, e) => sum + e.amount, 0)
+    );
+    const refundedPaid = r2(
+      ledger
+        .filter((e) => e.amount < 0 && !isUnpaidRefund(e))
+        .reduce((sum, e) => sum + Math.abs(e.amount), 0)
+    );
+    const cancelledAt = booking.cancelledAt?.toDate?.() ?? null;
+    const checkInRaw = booking.checkIn?.toDate?.() ?? null;
+
     models.push({
       ref: String(booking.bookingRef || booking.id),
       totalPrice: toNumber(booking.totalPrice),
+      grossCollected,
+      refundedPaid,
+      cancelledAtMs: cancelledAt ? cancelledAt.getTime() : null,
+      checkInDateKey: checkInRaw ? checkInRaw.toISOString().slice(0, 10) : null,
       paidAmountField:
         typeof booking.paidAmount === "number" ? booking.paidAmount : null,
       ledgerCollected,
@@ -498,28 +535,99 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
   }
 
   // -------------------------------------------------------------------------
-  // I14 — a cancelled booking must not still hold money.
+  // I08 — is any booking over-collected, and is the excess owed back?
+  //
+  // A negative outstanding balance is AMBIGUOUS on its face: it can be
+  // a guest who paid more than the stay was worth (a refund is due), or
+  // it can be a cancelled booking whose money the policy RETAINS (the
+  // guest paid, cancelled inside the free-cancellation window, and
+  // keeps what they paid — the hotel owes nothing back). The reader
+  // could not tell the two apart, which is exactly the ambiguity the
+  // backup's "negative Outstanding Balance" rows carried.
+  //
+  // The check now says which one it is. A retained over-collection is
+  // NOT a finding; an over-collection on a live booking IS one (the
+  // guest is owed money back).
+  // -------------------------------------------------------------------------
+  {
+    const overCollected: string[] = [];
+    const flagged: boolean[] = [];
+    for (const m of models) {
+      const closure = evaluateBookingClosure({
+        status: m.status,
+        cancelledAtMs: m.cancelledAtMs,
+        checkInDateKey: m.checkInDateKey,
+        grossCollected: m.grossCollected,
+        refundedPaid: m.refundedPaid,
+        totalPrice: m.totalPrice,
+        policySnapshot: m.checkInDateKey
+          ? createCancellationPolicySnapshot({
+              websiteContent,
+              hotelConfig,
+              checkInDateKey: m.checkInDateKey,
+              corporateCodeData: null
+            })
+          : null,
+        checkInTime: hotelConfig.checkInTime,
+        timeZone: hotelConfig.timezone
+      });
+      if (closure.overCollected <= 0.01) continue;
+      if (closure.overCollectionRetained) continue;
+      flagged.push(m.isTestData);
+      overCollected.push(mark(m.isTestData, `${m.ref} ${closure.reason}`));
+    }
+    add(
+      "I08",
+      "Over-collected bookings — a guest is owed money back",
+      overCollected.length === 0 ? "PASS" : "WARN",
+      `${overCollected.length} booking(s) are over-collected · ${split(flagged)}`,
+      overCollected
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // I14 — after a cancellation, does the booking's money close?
+  //
+  // A cancelled booking CAN legitimately still hold money: the hotel's
+  // policy makes a cancellation inside the free-cancellation window
+  // NON-REFUNDABLE, so the hotel keeps what the guest paid. The check
+  // therefore compares what the hotel holds against what THE POLICY
+  // says it should hold — using the product's own policy rule — and
+  // reports a finding only when the two disagree. That is the real
+  // meaning of "money was taken but the books do not close".
   // -------------------------------------------------------------------------
   {
     const holders: string[] = [];
     const flagged: boolean[] = [];
     for (const m of models) {
       if (m.status !== "cancelled") continue;
-      if (m.ledgerCollected > 0) {
-        flagged.push(m.isTestData);
-        holders.push(
-          mark(
-            m.isTestData,
-            `${m.ref} cancelled but collected=${m.ledgerCollected} pendingRefund=${m.pendingRefund}`
-          )
-        );
-      }
+      const closure = evaluateBookingClosure({
+        status: m.status,
+        cancelledAtMs: m.cancelledAtMs,
+        checkInDateKey: m.checkInDateKey,
+        grossCollected: m.grossCollected,
+        refundedPaid: m.refundedPaid,
+        totalPrice: m.totalPrice,
+        policySnapshot: m.checkInDateKey
+          ? createCancellationPolicySnapshot({
+              websiteContent,
+              hotelConfig,
+              checkInDateKey: m.checkInDateKey,
+              corporateCodeData: null
+            })
+          : null,
+        checkInTime: hotelConfig.checkInTime,
+        timeZone: hotelConfig.timezone
+      });
+      if (closure.closes) continue;
+      flagged.push(m.isTestData);
+      holders.push(mark(m.isTestData, `${m.ref} ${closure.reason}`));
     }
     add(
       "I14",
-      "A cancelled booking does not still hold money",
+      "A cancelled booking's money closes against the cancellation policy",
       holders.length === 0 ? "PASS" : "WARN",
-      `${holders.length} cancelled booking(s) hold money · ${split(flagged)}`,
+      `${holders.length} cancelled booking(s) do not close · ${split(flagged)}`,
       holders
     );
   }
