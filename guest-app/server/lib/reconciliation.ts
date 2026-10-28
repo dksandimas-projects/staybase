@@ -104,66 +104,131 @@ function toNumber(value: unknown): number {
  * what the hotel has collected, which is exactly how the QA pass's
  * independent arithmetic and the app's own folio disagreed.
  */
-async function readBookingLedger(booking: any): Promise<LedgerEntry[]> {
-  const entries: LedgerEntry[] = [];
+/**
+ * Every payment and refund in the project, indexed by their parent.
+ *
+ * WHY THIS EXISTS — THE NIGHTLY CHECK NEVER RAN
+ * ----------------------------------------------
+ * The reconciler used to read each booking's ledger with up to FOUR
+ * sequential Firestore round trips, and then read it AGAIN for the I07
+ * cross-check. On top of that, `readBookingStoreOrders` re-read the
+ * ENTIRE `storeOrders` collection once per booking.
+ *
+ * With 157 bookings that is roughly 1,250 SEQUENTIAL round trips, and
+ * the live serverless function died with `FUNCTION_INVOCATION_TIMEOUT`
+ * after 301 seconds. So the nightly money check had NEVER completed:
+ * the `reconciliationRuns` collection in production held **zero**
+ * documents. The cron fired every night at 04:30, the function started
+ * scanning, and Vercel killed it before it could write its report.
+ *
+ * A control that never produces a report is not a control.
+ *
+ * THE FIX
+ * -------
+ * Read the same documents in a handful of round trips instead of a
+ * thousand, and group them in memory. The ARITHMETIC IS UNCHANGED —
+ * only the way the documents are fetched changes:
+ *
+ *   * one `collectionGroup("payments")` read,
+ *   * one `collectionGroup("refunds")` read,
+ *   * one `storeOrders` read.
+ *
+ * The entries are kept in the SAME ORDER the old per-booking reads
+ * produced (reservation payments, reservation refunds, booking
+ * payments, booking refunds), so every sum is bit-for-bit the same.
+ */
+interface LedgerIndex {
+  /** `bookings/{id}` / `reservations/{id}` -> its payment entries. */
+  paymentsByParent: Map<string, LedgerEntry[]>;
+  /** `bookings/{id}` / `reservations/{id}` -> its refund entries. */
+  refundsByParent: Map<string, LedgerEntry[]>;
+  /** Every store order, read ONCE. */
+  storeOrders: Array<{ id: string; [key: string]: any }>;
+}
 
-  // A parent is read as `collection(<name>).doc(<id>).collection(<sub>)`.
-  // The Firestore Admin SDK rejects an EVEN-component path handed to
-  // `.collection()` ("must point to a collection... does not contain an
-  // odd number of components"), so the parent NAME and the parent ID are
-  // passed separately — never as one "a/b" string.
-  const readSub = async (parentName: string, parentId: string, sub: string) => {
-    if (!parentId) return;
-    try {
-      const snap = await adminDb.collection(parentName).doc(parentId).collection(sub).get();
-      for (const doc of snap.docs) {
-        const data = doc.data() as any;
-        entries.push({
-          amount: toNumber(data.amount),
-          type: String(data.type || (toNumber(data.amount) < 0 ? "refund" : "payment")),
-          status: String(data.status || "")
-        });
-      }
-    } catch (err) {
-      // A missing subcollection is not an error — it simply holds nothing.
-      // But a MALFORMED PATH is a bug, and swallowing it would make every
-      // booking look like it had no ledger at all — so the failure is
-      // logged loudly rather than hidden.
-      console.error(
-        `[reconciliation] could not read ${parentName}/${parentId}/${sub}:`,
-        err
-      );
-    }
+/** Turn one payment/refund document into a ledger entry. */
+function toLedgerEntry(data: any): LedgerEntry {
+  return {
+    amount: toNumber(data.amount),
+    type: String(data.type || (toNumber(data.amount) < 0 ? "refund" : "payment")),
+    status: String(data.status || "")
   };
+}
+
+/** The parent document path of a subcollection document. */
+function parentPathOf(docRef: any): string {
+  // `bookings/{id}/payments/{pid}` -> the parent of the `payments`
+  // collection is `bookings/{id}`.
+  return docRef.parent.parent.path;
+}
+
+/**
+ * Load every payment, every refund and every store order — in three
+ * round trips.
+ */
+async function readLedgerIndex(): Promise<LedgerIndex> {
+  const paymentsByParent = new Map<string, LedgerEntry[]>();
+  const refundsByParent = new Map<string, LedgerEntry[]>();
+
+  const bucket = (map: Map<string, LedgerEntry[]>, path: string, entry: LedgerEntry) => {
+    const list = map.get(path);
+    if (list) list.push(entry);
+    else map.set(path, [entry]);
+  };
+
+  const [paymentsSnap, refundsSnap, storeOrdersSnap] = await Promise.all([
+    adminDb.collectionGroup("payments").get(),
+    adminDb.collectionGroup("refunds").get(),
+    adminDb.collection("storeOrders").get()
+  ]);
+
+  for (const doc of paymentsSnap.docs) {
+    bucket(paymentsByParent, parentPathOf(doc.ref), toLedgerEntry(doc.data()));
+  }
+  for (const doc of refundsSnap.docs) {
+    bucket(refundsByParent, parentPathOf(doc.ref), toLedgerEntry(doc.data()));
+  }
+
+  return {
+    paymentsByParent,
+    refundsByParent,
+    storeOrders: storeOrdersSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as any) }))
+  };
+}
+
+/**
+ * A booking's ledger — the union of the reservation-scope and the
+ * booking-scope subcollections, in the same order as before.
+ */
+function readBookingLedger(booking: any, index: LedgerIndex): LedgerEntry[] {
+  const entries: LedgerEntry[] = [];
 
   const reservationId = String(booking.reservationId || "");
   if (reservationId) {
-    await readSub("reservations", reservationId, "payments");
-    await readSub("reservations", reservationId, "refunds");
+    const path = `reservations/${reservationId}`;
+    entries.push(...(index.paymentsByParent.get(path) || []));
+    entries.push(...(index.refundsByParent.get(path) || []));
   }
   const bookingId = String(booking.id || "");
-  await readSub("bookings", bookingId, "payments");
-  await readSub("bookings", bookingId, "refunds");
+  if (bookingId) {
+    const path = `bookings/${bookingId}`;
+    entries.push(...(index.paymentsByParent.get(path) || []));
+    entries.push(...(index.refundsByParent.get(path) || []));
+  }
 
   return entries;
 }
 
 /** The store orders that belong to a booking (add-to-bill charges). */
-async function readBookingStoreOrders(booking: any): Promise<FolioStoreOrder[]> {
-  try {
-    const snap = await adminDb.collection("storeOrders").get();
-    return snap.docs
-      .map((doc) => ({ id: doc.id, ...(doc.data() as any) }))
-      .filter((order) => String(order.bookingId || "") === String(booking.id))
-      .filter((order) => order.status === "delivered" && order.isBilled === true)
-      .map((order) => ({
-        id: order.id,
-        total: toNumber(order.total),
-        isBilled: order.isBilled === true
-      }));
-  } catch {
-    return [];
-  }
+function readBookingStoreOrders(booking: any, index: LedgerIndex): FolioStoreOrder[] {
+  return index.storeOrders
+    .filter((order) => String(order.bookingId || "") === String(booking.id))
+    .filter((order) => order.status === "delivered" && order.isBilled === true)
+    .map((order) => ({
+      id: order.id,
+      total: toNumber(order.total),
+      isBilled: order.isBilled === true
+    }));
 }
 
 /**
@@ -178,6 +243,11 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
 
   const bookingSnap = await adminDb.collection("bookings").get();
   const bookings = bookingSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as any) }));
+
+  // ONE bulk load of every payment, refund and store order. The old
+  // per-booking reads made this function exceed the serverless timeout
+  // and the nightly check never wrote a report — see `readLedgerIndex`.
+  const ledgerIndex = await readLedgerIndex();
 
   const findings: ReconciliationFinding[] = [];
 
@@ -239,7 +309,7 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
   const models: MoneyModel[] = [];
 
   for (const booking of bookings) {
-    const ledger = await readBookingLedger(booking);
+    const ledger = readBookingLedger(booking, ledgerIndex);
     const ledgerCollected = r2(sumCollectedPayments(ledger));
     const pendingRefund = r2(
       ledger.filter((e) => isUnpaidRefund(e)).reduce((sum, e) => sum + e.amount, 0)
@@ -459,26 +529,15 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
   // -------------------------------------------------------------------------
   {
     const offenders: string[] = [];
-    try {
-      const ordersSnap = await adminDb.collection("storeOrders").get();
-      for (const doc of ordersSnap.docs) {
-        const order = doc.data() as any;
-        if (String(order.status || "") !== "cancelled") continue;
-        const paymentsSnap = await adminDb
-          .collection("storeOrders")
-          .doc(doc.id)
-          .collection("payments")
-          .get();
-        if (!paymentsSnap.empty) {
-          const total = paymentsSnap.docs.reduce(
-            (sum, d) => sum + toNumber(d.data()?.amount),
-            0
-          );
-          offenders.push(`${String(order.orderRef || doc.id)} cancelled but holds a tender of ${r2(total)}`);
-        }
+    for (const order of ledgerIndex.storeOrders) {
+      if (String(order.status || "") !== "cancelled") continue;
+      // The store order's tenders are already in the bulk index — the
+      // same documents the old per-order read returned.
+      const tenders = ledgerIndex.paymentsByParent.get(`storeOrders/${order.id}`) || [];
+      if (tenders.length > 0) {
+        const total = tenders.reduce((sum, e) => sum + toNumber(e.amount), 0);
+        offenders.push(`${String(order.orderRef || order.id)} cancelled but holds a tender of ${r2(total)}`);
       }
-    } catch {
-      // A missing collection is not a failure of the check.
     }
     add(
       "F-C2",
@@ -497,8 +556,8 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
     const flagged: boolean[] = [];
     for (const booking of bookings) {
       try {
-        const ledger = await readBookingLedger(booking);
-        const storeOrders = await readBookingStoreOrders(booking);
+        const ledger = readBookingLedger(booking, ledgerIndex);
+        const storeOrders = readBookingStoreOrders(booking, ledgerIndex);
         const folio = computeBookingFolio({
           booking: { id: String(booking.id), totalPrice: toNumber(booking.totalPrice) },
           persistedPayments: ledger.map((e) => ({

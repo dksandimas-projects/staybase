@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.21.19";
+    VERSION2 = "2.21.20";
   }
 });
 
@@ -247285,54 +247285,70 @@ function toNumber(value) {
   const n2 = Number(value);
   return Number.isFinite(n2) ? n2 : 0;
 }
-async function readBookingLedger(booking) {
-  const entries = [];
-  const readSub = async (parentName, parentId, sub) => {
-    if (!parentId) return;
-    try {
-      const snap = await adminDb.collection(parentName).doc(parentId).collection(sub).get();
-      for (const doc of snap.docs) {
-        const data = doc.data();
-        entries.push({
-          amount: toNumber(data.amount),
-          type: String(data.type || (toNumber(data.amount) < 0 ? "refund" : "payment")),
-          status: String(data.status || "")
-        });
-      }
-    } catch (err) {
-      console.error(
-        `[reconciliation] could not read ${parentName}/${parentId}/${sub}:`,
-        err
-      );
-    }
+function toLedgerEntry(data) {
+  return {
+    amount: toNumber(data.amount),
+    type: String(data.type || (toNumber(data.amount) < 0 ? "refund" : "payment")),
+    status: String(data.status || "")
   };
+}
+function parentPathOf(docRef) {
+  return docRef.parent.parent.path;
+}
+async function readLedgerIndex() {
+  const paymentsByParent = /* @__PURE__ */ new Map();
+  const refundsByParent = /* @__PURE__ */ new Map();
+  const bucket = (map2, path, entry) => {
+    const list = map2.get(path);
+    if (list) list.push(entry);
+    else map2.set(path, [entry]);
+  };
+  const [paymentsSnap, refundsSnap, storeOrdersSnap] = await Promise.all([
+    adminDb.collectionGroup("payments").get(),
+    adminDb.collectionGroup("refunds").get(),
+    adminDb.collection("storeOrders").get()
+  ]);
+  for (const doc of paymentsSnap.docs) {
+    bucket(paymentsByParent, parentPathOf(doc.ref), toLedgerEntry(doc.data()));
+  }
+  for (const doc of refundsSnap.docs) {
+    bucket(refundsByParent, parentPathOf(doc.ref), toLedgerEntry(doc.data()));
+  }
+  return {
+    paymentsByParent,
+    refundsByParent,
+    storeOrders: storeOrdersSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+  };
+}
+function readBookingLedger(booking, index) {
+  const entries = [];
   const reservationId = String(booking.reservationId || "");
   if (reservationId) {
-    await readSub("reservations", reservationId, "payments");
-    await readSub("reservations", reservationId, "refunds");
+    const path = `reservations/${reservationId}`;
+    entries.push(...index.paymentsByParent.get(path) || []);
+    entries.push(...index.refundsByParent.get(path) || []);
   }
   const bookingId = String(booking.id || "");
-  await readSub("bookings", bookingId, "payments");
-  await readSub("bookings", bookingId, "refunds");
+  if (bookingId) {
+    const path = `bookings/${bookingId}`;
+    entries.push(...index.paymentsByParent.get(path) || []);
+    entries.push(...index.refundsByParent.get(path) || []);
+  }
   return entries;
 }
-async function readBookingStoreOrders(booking) {
-  try {
-    const snap = await adminDb.collection("storeOrders").get();
-    return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })).filter((order) => String(order.bookingId || "") === String(booking.id)).filter((order) => order.status === "delivered" && order.isBilled === true).map((order) => ({
-      id: order.id,
-      total: toNumber(order.total),
-      isBilled: order.isBilled === true
-    }));
-  } catch {
-    return [];
-  }
+function readBookingStoreOrders(booking, index) {
+  return index.storeOrders.filter((order) => String(order.bookingId || "") === String(booking.id)).filter((order) => order.status === "delivered" && order.isBilled === true).map((order) => ({
+    id: order.id,
+    total: toNumber(order.total),
+    isBilled: order.isBilled === true
+  }));
 }
 async function runReconciliation() {
   const startedAt = (/* @__PURE__ */ new Date()).toISOString();
   const startedMs = Date.now();
   const bookingSnap = await adminDb.collection("bookings").get();
   const bookings = bookingSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+  const ledgerIndex = await readLedgerIndex();
   const findings = [];
   const add = (id, title, status, summary, details = []) => {
     findings.push({ id, title, status, summary, details: details.slice(0, 50) });
@@ -247347,7 +247363,7 @@ async function runReconciliation() {
   };
   const models = [];
   for (const booking of bookings) {
-    const ledger = await readBookingLedger(booking);
+    const ledger = readBookingLedger(booking, ledgerIndex);
     const ledgerCollected = r22(sumCollectedPayments(ledger));
     const pendingRefund = r22(
       ledger.filter((e3) => isUnpaidRefund(e3)).reduce((sum, e3) => sum + e3.amount, 0)
@@ -247526,21 +247542,13 @@ async function runReconciliation() {
   }
   {
     const offenders = [];
-    try {
-      const ordersSnap = await adminDb.collection("storeOrders").get();
-      for (const doc of ordersSnap.docs) {
-        const order = doc.data();
-        if (String(order.status || "") !== "cancelled") continue;
-        const paymentsSnap = await adminDb.collection("storeOrders").doc(doc.id).collection("payments").get();
-        if (!paymentsSnap.empty) {
-          const total = paymentsSnap.docs.reduce(
-            (sum, d) => sum + toNumber(d.data()?.amount),
-            0
-          );
-          offenders.push(`${String(order.orderRef || doc.id)} cancelled but holds a tender of ${r22(total)}`);
-        }
+    for (const order of ledgerIndex.storeOrders) {
+      if (String(order.status || "") !== "cancelled") continue;
+      const tenders = ledgerIndex.paymentsByParent.get(`storeOrders/${order.id}`) || [];
+      if (tenders.length > 0) {
+        const total = tenders.reduce((sum, e3) => sum + toNumber(e3.amount), 0);
+        offenders.push(`${String(order.orderRef || order.id)} cancelled but holds a tender of ${r22(total)}`);
       }
-    } catch {
     }
     add(
       "F-C2",
@@ -247555,8 +247563,8 @@ async function runReconciliation() {
     const flagged = [];
     for (const booking of bookings) {
       try {
-        const ledger = await readBookingLedger(booking);
-        const storeOrders = await readBookingStoreOrders(booking);
+        const ledger = readBookingLedger(booking, ledgerIndex);
+        const storeOrders = readBookingStoreOrders(booking, ledgerIndex);
         const folio = computeBookingFolio({
           booking: { id: String(booking.id), totalPrice: toNumber(booking.totalPrice) },
           persistedPayments: ledger.map((e3) => ({

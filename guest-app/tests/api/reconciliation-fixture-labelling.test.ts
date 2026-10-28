@@ -42,34 +42,60 @@ const PAYMENTS: Record<string, Array<Record<string, unknown>>> = {
   "real-1": [{ amount: 3000, status: "confirmed", type: "payment" }]
 };
 
-function makeDoc(data: any): any {
-  return { id: data.id, data: () => data };
+/**
+ * A document with the `ref.parent.parent.path` the bulk index reads, so
+ * a payment can be attributed to the booking that owns it.
+ */
+function makeDoc(data: any, path: string): any {
+  const parts = path.split("/");
+  return {
+    id: data.id,
+    path,
+    ref: { path, parent: { parent: { path: parts.slice(0, 2).join("/") } } },
+    data: () => data
+  };
 }
 
 function makeSnapshot(docs: any[]): any {
   return { docs, size: docs.length, empty: docs.length === 0 };
 }
 
-/** A Firestore stand-in that answers only what the reconciler reads. */
+/**
+ * A Firestore stand-in that answers only what the reconciler reads.
+ *
+ * The reconciler reads every payment and every refund through
+ * `collectionGroup` (one bulk read each) rather than per booking, so
+ * the stand-in serves them that way.
+ */
 function fakeFirestore(bookings: any[]): any {
+  const paymentDocs: any[] = [];
+  const refundDocs: any[] = [];
+  for (const booking of bookings) {
+    const rows: Array<Record<string, unknown>> = PAYMENTS[booking.id] || [];
+    rows.forEach((row, i) => {
+      paymentDocs.push(makeDoc({ id: `p${i}`, ...row }, `bookings/${booking.id}/payments/p${i}`));
+    });
+  }
+
   return {
     collection: (name: string) => ({
       get: async () => {
-        if (name === "bookings") return makeSnapshot(bookings.map(makeDoc));
+        if (name === "bookings") {
+          return makeSnapshot(bookings.map((b) => makeDoc(b, `bookings/${b.id}`)));
+        }
         return makeSnapshot([]);
       },
       doc: (id: string) => ({
         id,
-        collection: (sub: string) => ({
-          get: async () => {
-            if (sub === "payments") {
-              const rows: Array<Record<string, unknown>> = PAYMENTS[id] || [];
-              return makeSnapshot(rows.map((r: Record<string, unknown>, i: number) => ({ id: `p${i}`, data: () => r })));
-            }
-            return makeSnapshot([]);
-          }
-        })
+        collection: () => ({ get: async () => makeSnapshot([]) })
       })
+    }),
+    collectionGroup: (name: string) => ({
+      get: async () => {
+        if (name === "payments") return makeSnapshot(paymentDocs);
+        if (name === "refunds") return makeSnapshot(refundDocs);
+        return makeSnapshot([]);
+      }
     })
   };
 }
@@ -80,6 +106,9 @@ vi.mock("../../server/lib/firebase-admin", () => ({
   adminDb: {
     get collection() {
       return mockDb.current.collection;
+    },
+    get collectionGroup() {
+      return mockDb.current.collectionGroup;
     }
   },
   adminAuth: {},
