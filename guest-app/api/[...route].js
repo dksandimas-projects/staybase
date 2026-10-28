@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.21.23";
+    VERSION2 = "2.21.24";
   }
 });
 
@@ -153769,9 +153769,17 @@ async function handleStagingResetExecute(req, res) {
       return lock.resumed ? expectedCount : counter.value;
     };
     bookingCount = await runDeletionPhase(
+      // `refunds` was missing from this list, and it is a MONEY
+      // subcollection: a booking's refund documents survived the reset
+      // as orphans of a deleted booking, and the integrity scan did
+      // not look for them because `refunds` was not in its group list
+      // either. The same shape was found on live production — 8
+      // orphaned refund documents — and the desk dashboard counted them
+      // with `collectionGroup(db, "refunds")`, so a tenant with no
+      // bookings still showed pending refunds with nothing to refund.
       "bookings",
       "bookings",
-      ["payments", "charges", "incidentalCharges", "notifications", "audit"],
+      ["payments", "charges", "incidentalCharges", "notifications", "audit", "refunds"],
       manifestBefore.bookings
     );
     storeOrderCount = await runDeletionPhase(
@@ -153862,7 +153870,10 @@ async function handleStagingResetExecute(req, res) {
       verifyCollectionGroup("audit"),
       verifyCollectionGroup("tenders"),
       verifyCollectionGroup("messages"),
-      verifyCollectionGroup("iceCandidates")
+      verifyCollectionGroup("iceCandidates"),
+      // `refunds` was missing here too, so the scan could not see the
+      // orphaned refund documents the deletion phase left behind.
+      verifyCollectionGroup("refunds")
     ]);
     for (const roomNumber of manifestBefore.affectedRooms) {
       if (!roomNumber) continue;

@@ -460,12 +460,18 @@ describe("ETR-S12 — Complete scope / ETR-S13 — Integrity scan", () => {
       "utf8"
     ));
 
-    expect(source).toContain('["payments", "charges", "incidentalCharges", "notifications", "audit"]');
+    // The booking phase's subcollection list must include `refunds`:
+    // it is a MONEY subcollection, and leaving it out orphaned a
+    // booking's refund documents when the reset deleted the booking —
+    // and the integrity scan below could not see them, because
+    // `refunds` was missing from its group list too.
+    expect(source).toContain('["payments", "charges", "incidentalCharges", "notifications", "audit", "refunds"]');
     expect(source).toContain('["payments", "tenders"]');
     expect(source).toContain('"calls", "calls", ["iceCandidates"]');
     expect(source).toContain('verifyCollectionGroup("payments")');
     expect(source).toContain('verifyCollectionGroup("charges")');
     expect(source).toContain('verifyCollectionGroup("iceCandidates")');
+    expect(source).toContain('verifyCollectionGroup("refunds")');
   });
 
   beforeEach(() => {
@@ -496,9 +502,12 @@ describe("ETR-S12 — Complete scope / ETR-S13 — Integrity scan", () => {
 
   it("returns 500 when integrity scan finds remaining data", async () => {
     // Setup consumes 21 reads; nine root deletion phases plus cleanup history
-    // consume ten more. Nine additional collection group reads are done for subcollections.
-    // The first integrity root read is call 41 (1-based).
-    const INTEGRITY_START = 41;
+    // consume ten more. Ten additional collection group reads are done for
+    // subcollections (the booking phase now clears SIX groups — payments,
+    // charges, incidentalCharges, notifications, audit and refunds — plus
+    // two for store orders, one for intercoms and one for calls).
+    // The first integrity root read is call 42 (1-based).
+    const INTEGRITY_START = 42;
     const setup = STEPS_FULL_SUCCESS;
     let callIdx = 0;
     mockGet.mockImplementation(async () => {
