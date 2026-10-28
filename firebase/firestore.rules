@@ -30,6 +30,39 @@ service cloud.firestore {
         || changed.hasAll(["audioRoutingUpdatedAt"]);
     }
 
+    // Per RPT-2 (2026-10-21, re-confirmed 2026-10-27): an
+    // incidental CHARGE cannot be added to a booking that has already
+    // been checked out.
+    //
+    // The admin app writes a charge DIRECTLY to Firestore
+    // (`addDoc(chargesRef, {...})` in `BookingsPage.tsx`), so no
+    // server handler sits in the path — hiding the "Add charge"
+    // button in `IncidentalChargeList.tsx` was the ONLY thing
+    // stopping it. The 2026-10-21 QA pass proved the gap against
+    // production: a client write after checkout SUCCEEDED (₱250 on a
+    // checked-out booking).
+    //
+    // WHY IT MATTERS: a charge lands in the booking's folio, so one
+    // added after checkout moves the settled balance of a stay whose
+    // guest has already left — and the reconciliation's I08/I14
+    // checks then see a booking whose books do not close.
+    //
+    // The rule is deliberately narrow. It refuses only a NEW charge
+    // (`amount > 0`, `voidOf == null`) on a booking that is already
+    // checked out. A VOID — the reversal of a charge made BEFORE
+    // checkout — stays ALLOWED on a checked-out booking, because that
+    // is exactly how the desk corrects the mistake once the guest has
+    // left; blocking it would strand the error in the folio forever.
+    //
+    // The reservation-level charges rule applies the same check to
+    // the booking the charge names (`request.resource.data.bookingId`),
+    // because the admin app picks the parent with
+    // `getSelectedChargeCollection()` and both rules are live paths.
+    function chargeAllowedOnBooking(bookingId) {
+      let booking = get(/databases/$(database)/documents/bookings/$(bookingId));
+      return booking != null && booking.data.status != "checked-out";
+    }
+
     match /rooms/{roomId} {
       allow read: if true;
       // Per W3.4 / `plan/features/ROOM-MANAGEMENT.md §Delete`: only
@@ -165,7 +198,14 @@ service cloud.firestore {
           && request.resource.data.addedBy == request.auth.uid
           && request.resource.data.addedAt == request.time
           && (
-            (request.resource.data.amount > 0 && request.resource.data.voidOf == null)
+            (request.resource.data.amount > 0
+              && request.resource.data.voidOf == null
+              // Per RPT-2: a NEW charge needs a booking that has not
+              // been checked out. A VOID (the second branch) is
+              // deliberately NOT subject to this check — reversing a
+              // charge made before checkout is how the desk corrects
+              // the mistake after the guest has left.
+              && chargeAllowedOnBooking(bookingId))
             || (
               request.resource.data.amount < 0
               && request.resource.data.voidOf is string
@@ -256,7 +296,13 @@ service cloud.firestore {
           && request.resource.data.bookingId.size() <= 128
           && get(/databases/$(database)/documents/bookings/$(request.resource.data.bookingId)).data.reservationId == reservationId
           && (
-            (request.resource.data.amount > 0 && request.resource.data.voidOf == null)
+            (request.resource.data.amount > 0
+              && request.resource.data.voidOf == null
+              // Per RPT-2: the same post-checkout guard, applied to
+              // the booking this charge names. The admin app picks
+              // the parent with `getSelectedChargeCollection()`, so
+              // this rule is a live path too.
+              && chargeAllowedOnBooking(request.resource.data.bookingId))
             || (
               request.resource.data.amount < 0
               && request.resource.data.voidOf is string
