@@ -112,6 +112,29 @@ describe("ETR-R — Refresh Staging From Production UI", () => {
     expect(settingsSrc).toMatch(/DESTROY SNAPSHOT/);
   });
 
+  it("a successful import leaves the snapshot destroyable", () => {
+    // Per D06 + ETR-R06: the snapshot the operator just imported
+    // can be destroyed on demand — that is the whole point of
+    // destroying a diagnostic snapshot instead of waiting for the
+    // TTL.
+    //
+    // The destroy button in the preview panel is enabled ONLY when
+    // the preview says `alreadyImported` is true, and the destroy
+    // handler needs the `refreshSnapshotId`. The import success
+    // path used to close the modal AND clear the preview AND clear
+    // the snapshot id, so the operator had no way at all to destroy
+    // what they had just imported: the control was gone.
+    //
+    // So the import success path must mark the preview as imported
+    // and must NOT drop the snapshot id.
+    const importHandler = settingsSrc.slice(
+      settingsSrc.indexOf("const handleRefreshImport"),
+      settingsSrc.indexOf("const handleRefreshDestroy")
+    );
+    expect(importHandler).toMatch(/alreadyImported: true/);
+    expect(importHandler).not.toMatch(/setRefreshSnapshotId\(null\)/);
+  });
+
   it("the preview modal shows the sanitization summary (mode + snapshotId + counts + source hash)", () => {
     // The preview modal displays
     // what the operator is about to

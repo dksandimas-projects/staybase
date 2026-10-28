@@ -182,7 +182,7 @@ const adminReq = (overrides: any = {}) => ({
   }
 });
 
-describe.skip("/api/test-runs/staging-refresh-preview (ETR-R foundation)", () => {
+describe("/api/test-runs/staging-refresh-preview (ETR-R foundation)", () => {
   beforeEach(() => {
     installDefaultMock();
     lastSnapshotSet = null;
@@ -201,7 +201,7 @@ describe.skip("/api/test-runs/staging-refresh-preview (ETR-R foundation)", () =>
 
   // ─── 1. Method + auth guards ─────────────────────────────────────
 
-  it.skip("rejects non-POST methods with 405", async () => {
+  it("rejects non-POST methods with 405", async () => {
     const res = mockResponse();
     await handleStagingRefreshPreview({ ...adminReq(), method: "GET" }, res);
 
@@ -209,7 +209,7 @@ describe.skip("/api/test-runs/staging-refresh-preview (ETR-R foundation)", () =>
     expect(mockSetSnapshots).not.toHaveBeenCalled();
   });
 
-  it.skip("rejects tokenless request with 401", async () => {
+  it("rejects tokenless request with 401", async () => {
     const res = mockResponse();
     await handleStagingRefreshPreview({ ...adminReq(), staff: {} }, res);
 
@@ -217,7 +217,7 @@ describe.skip("/api/test-runs/staging-refresh-preview (ETR-R foundation)", () =>
     expect(mockSetSnapshots).not.toHaveBeenCalled();
   });
 
-  it.skip("rejects front-desk caller with 403", async () => {
+  it("rejects front-desk caller with 403", async () => {
     const res = mockResponse();
     await handleStagingRefreshPreview({
       ...adminReq(),
@@ -230,7 +230,7 @@ describe.skip("/api/test-runs/staging-refresh-preview (ETR-R foundation)", () =>
 
   // ─── 2. One-way gate (R01) ───────────────────────────────────────
 
-  it.skip("refuses to run on a production project (403) — the production environment cannot trigger a refresh", async () => {
+  it("refuses to run on a production project (403) — the production environment cannot trigger a refresh", async () => {
     process.env.FIREBASE_PROJECT_ID = "spark-inn-prod-abc123";
     const res = mockResponse();
     await handleStagingRefreshPreview(adminReq(), res);
@@ -241,7 +241,7 @@ describe.skip("/api/test-runs/staging-refresh-preview (ETR-R foundation)", () =>
     expect(mockSetSnapshots).not.toHaveBeenCalled();
   });
 
-  it.skip("refuses to run on a staging project NOT on the allowlist (403)", async () => {
+  it("refuses to run on a staging project NOT on the allowlist (403)", async () => {
     process.env.FIREBASE_PROJECT_ID = "spark-inn-stg-not-allowlisted";
     const res = mockResponse();
     await handleStagingRefreshPreview(adminReq(), res);
@@ -252,7 +252,7 @@ describe.skip("/api/test-runs/staging-refresh-preview (ETR-R foundation)", () =>
 
   // ─── 3. Schema guard ─────────────────────────────────────────────
 
-  it.skip("rejects when the body is missing the export field (400)", async () => {
+  it("rejects when the body is missing the export field (400)", async () => {
     const res = mockResponse();
     await handleStagingRefreshPreview({
       ...adminReq(),
@@ -263,7 +263,7 @@ describe.skip("/api/test-runs/staging-refresh-preview (ETR-R foundation)", () =>
     expect(mockSetSnapshots).not.toHaveBeenCalled();
   });
 
-  it.skip("rejects when the mode is not in the allowlist (400)", async () => {
+  it("rejects when the mode is not in the allowlist (400)", async () => {
     const res = mockResponse();
     // Per ETR-R02 full impl: the
     // "unsanitized" alias normalizes
@@ -281,7 +281,7 @@ describe.skip("/api/test-runs/staging-refresh-preview (ETR-R foundation)", () =>
     expect(mockSetSnapshots).not.toHaveBeenCalled();
   });
 
-  it.skip("accepts a minimal empty-export payload (boundary case for the schema)", async () => {
+  it("accepts a minimal empty-export payload (boundary case for the schema)", async () => {
     const res = mockResponse();
     await handleStagingRefreshPreview({
       ...adminReq(),
@@ -296,7 +296,7 @@ describe.skip("/api/test-runs/staging-refresh-preview (ETR-R foundation)", () =>
 
   // ─── 4. Sanitization engine (R04) ────────────────────────────────
 
-  it.skip("replaces guest PII with deterministic synthetic values, per-snapshot", async () => {
+  it("replaces guest PII with deterministic synthetic values, per-snapshot", async () => {
     const res = mockResponse();
     await handleStagingRefreshPreview(adminReq(), res);
 
@@ -307,7 +307,7 @@ describe.skip("/api/test-runs/staging-refresh-preview (ETR-R foundation)", () =>
     const b1 = sanitized.bookings[0];
     expect(b1.guestName).toMatch(/^Guest-[0-9a-f]{8}@guests\.invalid$/);
     expect(b1.guestEmail).toMatch(/^guest-[0-9a-f]{8}@example\.invalid$/);
-    expect(b1.guestPhone).toMatch(/^\+63900000-[0-9a-f]{8}@phones\.invalid$/);
+    expect(b1.guestPhone).toMatch(/^\+639\*+0000-[0-9a-f]{8}@phones\.invalid$/);
     expect(b1.address).toBe("[REDACTED — sanitized for staging]");
     expect(b1.emergencyContactName).toBe("");
     expect(b1.emergencyContactPhone).toBe("");
@@ -332,7 +332,7 @@ describe.skip("/api/test-runs/staging-refresh-preview (ETR-R foundation)", () =>
     expect(b1.id).toBe("booking_1");
   });
 
-  it.skip("preserves relational integrity — same source email maps to the same synthetic email within one snapshot", async () => {
+  it("preserves relational integrity — same source email maps to the same synthetic email within one snapshot", async () => {
     // Maria Santos has two bookings (booking_1, booking_2) and one
     // store order, all with the same email. The sanitization engine
     // must produce the SAME synthetic email across all three so
@@ -351,7 +351,7 @@ describe.skip("/api/test-runs/staging-refresh-preview (ETR-R foundation)", () =>
     expect(m1Email).toBe(b1Email);
   });
 
-  it.skip("produces DIFFERENT synthetic values across snapshots (no cross-snapshot correlation)", async () => {
+  it("produces DIFFERENT synthetic values across snapshots (no cross-snapshot correlation)", async () => {
     // The salt is per-snapshot. Two snapshots of the same source
     // export must produce different synthetic values for the same
     // source field. This is the privacy guarantee — the same guest
@@ -371,7 +371,7 @@ describe.skip("/api/test-runs/staging-refresh-preview (ETR-R foundation)", () =>
     expect(synth2).toMatch(/^guest-[0-9a-f]{8}@example\.invalid$/);
   });
 
-  it.skip("scrubs the bookings[].payments[].transactionReference (real GCash ref must not leak)", async () => {
+  it("scrubs the bookings[].payments[].transactionReference (real GCash ref must not leak)", async () => {
     const res = mockResponse();
     await handleStagingRefreshPreview(adminReq(), res);
 
@@ -383,7 +383,7 @@ describe.skip("/api/test-runs/staging-refresh-preview (ETR-R foundation)", () =>
     expect(sanitized.bookings[0].payments[0].method).toBe("gcash");
   });
 
-  it.skip("scrubs the bookings[].addedCharges[].description and .notes (free-text PII surfaces)", async () => {
+  it("scrubs the bookings[].addedCharges[].description and .notes (free-text PII surfaces)", async () => {
     const res = mockResponse();
     await handleStagingRefreshPreview(adminReq(), res);
 
@@ -397,7 +397,7 @@ describe.skip("/api/test-runs/staging-refresh-preview (ETR-R foundation)", () =>
 
   // ─── 5. Audit row (R10, partial) ────────────────────────────────
 
-  it.skip("writes a janitor/refresh-snapshots/{snapshotId} audit row with the source + sanitized counts, the salt prefix, and the source hash", async () => {
+  it("writes a janitor/refresh-snapshots/{snapshotId} audit row with the source + sanitized counts, the salt prefix, and the source hash", async () => {
     const res = mockResponse();
     await handleStagingRefreshPreview(adminReq(), res);
 
@@ -423,7 +423,7 @@ describe.skip("/api/test-runs/staging-refresh-preview (ETR-R foundation)", () =>
     expect(auditRow.sourceHash).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it.skip("returns the snapshotId in the response so the operator can import the sanitized JSON into staging by reference", async () => {
+  it("returns the snapshotId in the response so the operator can import the sanitized JSON into staging by reference", async () => {
     const res = mockResponse();
     await handleStagingRefreshPreview(adminReq(), res);
 
@@ -435,7 +435,7 @@ describe.skip("/api/test-runs/staging-refresh-preview (ETR-R foundation)", () =>
 
   // ─── 6. Mode coverage ───────────────────────────────────────────
 
-  it.skip("config-only mode is a no-op pass-through for the sanitization engine but still writes the audit row", async () => {
+  it("config-only mode is a no-op pass-through for the sanitization engine but still writes the audit row", async () => {
     // config-only is for when the operator has ALREADY sanitized the
     // export offline and just wants the audit trail. The endpoint
     // should pass the data through unchanged and write the row with

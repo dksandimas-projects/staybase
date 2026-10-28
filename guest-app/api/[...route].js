@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.21.15";
+    VERSION2 = "2.21.16";
   }
 });
 
@@ -153961,6 +153961,36 @@ function syntheticFromSource(sourceValue, salt, prefix, domain) {
   const h3 = import_node_crypto.default.createHash("sha256").update(`${salt}:${domain}:${normalized}`).digest("hex").slice(0, 8);
   return `${prefix}-${h3}@${domain}`;
 }
+function looksLikeStaffIdentity(value) {
+  const raw = value.trim();
+  if (!raw) return false;
+  if (STAFF_ROLE_SENTINELS.has(raw.toLowerCase())) return false;
+  if (raw.includes("@")) return true;
+  return /^[A-Za-z0-9_-]{20,}$/.test(raw);
+}
+function sanitizeStaffIdentity(value, salt) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (!looksLikeStaffIdentity(raw)) return raw;
+  return syntheticFromSource(raw, salt, "staff", "staff.invalid");
+}
+function scrubStaffIdentities(value, salt, key) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => scrubStaffIdentities(entry, salt));
+  }
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const [childKey, childValue] of Object.entries(value)) {
+      if (STAFF_IDENTITY_FIELD_SET.has(childKey) && (typeof childValue === "string" || childValue === null || childValue === void 0)) {
+        out[childKey] = sanitizeStaffIdentity(childValue, salt);
+        continue;
+      }
+      out[childKey] = scrubStaffIdentities(childValue, salt, childKey);
+    }
+    return out;
+  }
+  return value;
+}
 function sanitizeBookingExport(booking, salt, snapshotId, importedAt) {
   const guestEmail = String(booking.guestEmail || "");
   const guestName = String(booking.guestName || "");
@@ -153992,6 +154022,11 @@ function sanitizeBookingExport(booking, salt, snapshotId, importedAt) {
     // + financial fields preserved (operational signal).
     notes: "",
     internalNotes: "",
+    // The guest-authored free text on the booking itself.
+    // `specialRequests` is a guest-supplied sentence — it is the
+    // most likely place for a guest to write their own phone number
+    // or email into a booking.
+    specialRequests: "",
     // Per ETR-R07 (staging isolation
     // metadata): every sanitized doc
     // carries a `sourceSanitization`
@@ -154011,24 +154046,106 @@ function sanitizeBookingExport(booking, salt, snapshotId, importedAt) {
       mode: "sanitized-snapshot"
     }
   };
+  if (sanitized.paymentReference) {
+    sanitized.paymentReference = syntheticFromSource(
+      String(sanitized.paymentReference),
+      salt,
+      "REF",
+      "staging.invalid"
+    );
+  }
+  if (sanitized.lookupToken) {
+    sanitized.lookupToken = import_node_crypto.default.createHash("sha256").update(`${salt}:lookupToken:${String(sanitized.lookupToken)}`).digest("hex").slice(0, 32);
+  }
+  if (sanitized.guestDetails && typeof sanitized.guestDetails === "object") {
+    const details = { ...sanitized.guestDetails };
+    if (details.firstName) details.firstName = "Guest";
+    if (details.lastName) {
+      const syntheticName = syntheticFromSource(guestName, salt, "Guest", "guests.invalid");
+      details.lastName = syntheticName.split("@")[0].split("-").slice(1).join("-") || "Guest";
+    }
+    if (details.email) {
+      details.email = syntheticFromSource(
+        String(details.email).trim().toLowerCase(),
+        salt,
+        "guest",
+        "example.invalid"
+      );
+    }
+    if (details.phone) {
+      details.phone = syntheticFromSource(String(details.phone), salt, "+639****0000", "phones.invalid");
+    }
+    sanitized.guestDetails = details;
+  }
+  if (sanitized.guestRegistration && typeof sanitized.guestRegistration === "object") {
+    const registration = { ...sanitized.guestRegistration };
+    if (registration.address) registration.address = "[REDACTED \u2014 sanitized for staging]";
+    if (registration.emergencyContact) registration.emergencyContact = "";
+    if (registration.idNumber) {
+      registration.idNumber = syntheticFromSource(
+        String(registration.idNumber),
+        salt,
+        "ID",
+        "staging.invalid"
+      );
+    }
+    if (registration.vehiclePlate) registration.vehiclePlate = "";
+    sanitized.guestRegistration = registration;
+  }
+  for (const field of ["paymentRejectionReason", "unpaidCheckoutReason", "discountRejectionReason"]) {
+    if (typeof sanitized[field] === "string") sanitized[field] = "";
+  }
   if (Array.isArray(sanitized.addedCharges)) {
-    sanitized.addedCharges = sanitized.addedCharges.map((c2) => ({
-      ...c2,
-      description: "[REDACTED]",
-      notes: ""
-    }));
+    sanitized.addedCharges = sanitized.addedCharges.map((c2) => {
+      const scrubbed = { ...c2, description: "[REDACTED]", notes: "" };
+      for (const field of LEDGER_FREE_TEXT_FIELDS) {
+        if (typeof scrubbed[field] === "string") scrubbed[field] = "";
+      }
+      if (scrubbed.transactionReference) {
+        scrubbed.transactionReference = syntheticFromSource(
+          String(scrubbed.transactionReference),
+          salt,
+          "PAY",
+          "staging.invalid"
+        );
+      }
+      return scrubbed;
+    });
   }
   if (Array.isArray(sanitized.payments)) {
-    sanitized.payments = sanitized.payments.map((p) => ({
-      ...p,
-      transactionReference: syntheticFromSource(p.transactionReference || "", salt, "PAY", "staging.invalid"),
-      notes: ""
-    }));
+    sanitized.payments = sanitized.payments.map((p) => {
+      const scrubbed = {
+        ...p,
+        transactionReference: syntheticFromSource(p.transactionReference || "", salt, "PAY", "staging.invalid"),
+        notes: ""
+      };
+      for (const field of LEDGER_FREE_TEXT_FIELDS) {
+        if (typeof scrubbed[field] === "string") scrubbed[field] = "";
+      }
+      return scrubbed;
+    });
   }
-  return sanitized;
+  if (Array.isArray(sanitized.onsitePayments)) {
+    sanitized.onsitePayments = sanitized.onsitePayments.map((p) => {
+      const scrubbed = { ...p };
+      for (const field of LEDGER_FREE_TEXT_FIELDS) {
+        if (typeof scrubbed[field] === "string") scrubbed[field] = "";
+      }
+      if (scrubbed.transactionReference !== void 0 && scrubbed.transactionReference) {
+        scrubbed.transactionReference = syntheticFromSource(
+          String(scrubbed.transactionReference),
+          salt,
+          "PAY",
+          "staging.invalid"
+        );
+      }
+      return scrubbed;
+    });
+  }
+  return scrubStaffIdentities(sanitized, salt);
 }
 function sanitizeStoreOrderExport(order, salt, snapshotId, importedAt) {
-  return {
+  const sanitized = {
     ...order,
     guestName: syntheticFromSource(order.guestName, salt, "Guest", "guests.invalid"),
     guestEmail: order.guestEmail ? syntheticFromSource(String(order.guestEmail).trim().toLowerCase(), salt, "guest", "example.invalid") : "",
@@ -154036,6 +154153,8 @@ function sanitizeStoreOrderExport(order, salt, snapshotId, importedAt) {
     paymentProofUrl: "",
     notes: "",
     internalNotes: "",
+    // The free-text the staff wrote about the order.
+    qaRepairNote: "",
     sourceSanitization: {
       applied: true,
       salt: salt.slice(0, 8) + "\u2026",
@@ -154043,9 +154162,10 @@ function sanitizeStoreOrderExport(order, salt, snapshotId, importedAt) {
       mode: "sanitized-snapshot"
     }
   };
+  return scrubStaffIdentities(sanitized, salt);
 }
 function sanitizeMemberExport(member, salt, snapshotId, importedAt) {
-  return {
+  const sanitized = {
     ...member,
     fullName: syntheticFromSource(member.fullName, salt, "Member", "members.invalid"),
     // The member's email is the SAME identity as a guest who booked
@@ -154055,7 +154175,7 @@ function sanitizeMemberExport(member, salt, snapshotId, importedAt) {
     // email but may have multiple display names over time), so it
     // uses its own "Member" prefix for `fullName`.
     email: member.email ? syntheticFromSource(String(member.email).trim().toLowerCase(), salt, "guest", "example.invalid") : "",
-    phone: member.phone ? syntheticFromSource(String(member.phone), salt, "+63900000", "phones.invalid") : "",
+    phone: member.phone ? syntheticFromSource(String(member.phone), salt, "+639****0000", "phones.invalid") : "",
     photoUrl: "",
     sourceSanitization: {
       applied: true,
@@ -154064,26 +154184,47 @@ function sanitizeMemberExport(member, salt, snapshotId, importedAt) {
       mode: "sanitized-snapshot"
     }
   };
+  return scrubStaffIdentities(sanitized, salt);
 }
 function runPreImportDenylistScan(exportPayload) {
   const productionEmailPattern = /(?:@gmail\.com|@yahoo\.com|@hotmail\.com|@outlook\.com|@icloud\.com)\b/i;
   const phonePattern = /\b(?:\+63|0)9\d{2}[\s-]?\d{3}[\s-]?\d{4}\b/;
   const productionStorageUrl = /(?:googleapis\.com|firebasestorage\.googleapis\.com|storage\.googleapis\.com)/i;
   const hits = [];
-  const scanDoc = (collection, doc) => {
-    const stringFields = Object.entries(doc || {}).filter(([_2, v6]) => typeof v6 === "string");
-    for (const [field, value] of stringFields) {
-      const str = String(value);
-      if (productionEmailPattern.test(str)) {
-        hits.push({ collection, field, value: str, pattern: "productionEmail" });
-        if (hits.length >= 5) return;
-      } else if (phonePattern.test(str)) {
-        hits.push({ collection, field, value: str, pattern: "phone" });
-        if (hits.length >= 5) return;
-      } else if (productionStorageUrl.test(str)) {
-        hits.push({ collection, field, value: str, pattern: "productionStorageUrl" });
-        if (hits.length >= 5) return;
+  const scanString = (collection, field, str) => {
+    if (productionEmailPattern.test(str)) {
+      hits.push({ collection, field, value: str, pattern: "productionEmail" });
+    } else if (phonePattern.test(str)) {
+      hits.push({ collection, field, value: str, pattern: "phone" });
+    } else if (productionStorageUrl.test(str)) {
+      hits.push({ collection, field, value: str, pattern: "productionStorageUrl" });
+    }
+  };
+  const scanValue = (collection, path, value, depth) => {
+    if (hits.length >= 5) return;
+    if (depth > 6) return;
+    if (typeof value === "string") {
+      scanString(collection, path, value);
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (let i2 = 0; i2 < value.length && hits.length < 5; i2++) {
+        scanValue(collection, `${path}[${i2}]`, value[i2], depth + 1);
       }
+      return;
+    }
+    if (value && typeof value === "object") {
+      for (const [key, nested] of Object.entries(value)) {
+        if (hits.length >= 5) return;
+        scanValue(collection, path ? `${path}.${key}` : key, nested, depth + 1);
+      }
+    }
+  };
+  const scanDoc = (collection, doc) => {
+    if (!doc || typeof doc !== "object") return;
+    for (const [field, value] of Object.entries(doc)) {
+      if (hits.length >= 5) return;
+      scanValue(collection, field, value, 0);
     }
   };
   for (const b3 of exportPayload?.export?.bookings || []) scanDoc("bookings", b3);
@@ -154092,26 +154233,74 @@ function runPreImportDenylistScan(exportPayload) {
   return hits;
 }
 function checkFinanceInvariant(exportPayload) {
+  const bookings = exportPayload?.export?.bookings || [];
+  const storeOrders = exportPayload?.export?.storeOrders || [];
   let sumPayments = 0;
   let sumRefunds = 0;
   let sumBalanceDue = 0;
-  for (const b3 of exportPayload?.export?.bookings || []) {
+  let drift = 0;
+  const driftingBookings = [];
+  for (const b3 of bookings) {
     const data = b3;
-    if (Array.isArray(data.payments)) {
-      for (const p of data.payments) {
-        const amt = Number(p.amount || 0);
-        if (p.type === "refund" || amt < 0) {
-          sumRefunds += Math.abs(amt);
-        } else {
-          sumPayments += amt;
-        }
-      }
+    const id = String(data.id ?? "");
+    const ledgerRows = Array.isArray(data.onsitePayments) ? data.onsitePayments : Array.isArray(data.payments) ? data.payments : [];
+    const chargeRows = Array.isArray(data.addedCharges) ? data.addedCharges : Array.isArray(data.charges) ? data.charges : [];
+    const persistedPayments = ledgerRows.map((p) => ({
+      amount: Number(p?.amount) || 0,
+      type: p?.type ?? (Number(p?.amount) < 0 ? "refund" : "payment"),
+      // The RAW status travels with the row: a refund that has not
+      // been paid out is a LIABILITY (the hotel still holds the
+      // money and owes it back), so it does not reduce the
+      // collected total. The shared helper owns that rule.
+      status: p?.status ?? ""
+    }));
+    const selectedBookingCharges = chargeRows.map((c2) => ({
+      amount: Number(c2?.amount) || 0,
+      label: c2?.label ?? ""
+    }));
+    for (const p of persistedPayments) {
+      if (p.type === "refund" || p.amount < 0) sumRefunds += Math.abs(p.amount);
+      else sumPayments += p.amount;
     }
-    sumBalanceDue += Number(data.balanceDue || data.totalPrice || 0);
+    const computed = Number(
+      computeBookingFolio({
+        booking: {
+          id,
+          totalPrice: Number(data.totalPrice) || 0,
+          otherAddOnTotal: Number(data.otherAddOnTotal) || 0
+        },
+        persistedPayments,
+        selectedBookingCharges,
+        folioBookingIds: [id],
+        storeOrders: storeOrders.map((o2) => ({
+          bookingId: typeof o2?.bookingId === "string" ? o2.bookingId : null,
+          paymentMethod: typeof o2?.paymentMethod === "string" ? o2.paymentMethod : null,
+          status: typeof o2?.status === "string" ? o2.status : null,
+          isBilled: o2?.isBilled === true,
+          totalAmount: Number(o2?.totalAmount) || 0
+        }))
+      }).balance
+    );
+    const declaredRaw = data.balanceDue;
+    const hasDeclared = declaredRaw !== void 0 && declaredRaw !== null && declaredRaw !== "";
+    const declared = hasDeclared ? Number(declaredRaw) || 0 : null;
+    if (declared === null) {
+      if (ledgerRows.length === 0 && chargeRows.length === 0) continue;
+      const ledgerDrift = Math.abs(computed);
+      if (ledgerDrift > 0.01) {
+        drift = Math.max(drift, ledgerDrift);
+        driftingBookings.push({ id, declared: computed, computed, drift: ledgerDrift });
+      }
+      continue;
+    }
+    sumBalanceDue += declared;
+    const bookingDrift = Math.abs(computed - declared);
+    if (bookingDrift > 0.01) {
+      drift = Math.max(drift, bookingDrift);
+      driftingBookings.push({ id, declared, computed, drift: bookingDrift });
+    }
   }
-  const expectedBalance = sumPayments - sumRefunds;
-  const drift = Math.abs(sumBalanceDue - expectedBalance);
-  return { sumPayments, sumRefunds, sumBalanceDue, drift };
+  return { sumPayments, sumRefunds, sumBalanceDue, drift, driftingBookings };
 }
 async function handleStagingRefreshPreview(req, res) {
   if (req.method !== "POST") {
@@ -154174,16 +154363,6 @@ async function handleStagingRefreshPreview(req, res) {
       });
     }
   }
-  if (mode === "sanitized-snapshot") {
-    const denylistHits = runPreImportDenylistScan(exportPayload);
-    if (denylistHits.length > 0) {
-      return res.status(422).json({
-        success: false,
-        error: "Pre-import denylist scan found production PII patterns. The sanitization engine should have scrubbed these \u2014 refusing the import to prevent a leak.",
-        denylistHits: denylistHits.slice(0, 5)
-      });
-    }
-  }
   try {
     const sanitizedBookings = mode === "sanitized-snapshot" ? exportPayload.bookings.map((b3) => sanitizeBookingExport(b3, salt, snapshotId, importedAt)) : exportPayload.bookings;
     const sanitizedStoreOrders = mode === "sanitized-snapshot" ? exportPayload.storeOrders.map((o2) => sanitizeStoreOrderExport(o2, salt, snapshotId, importedAt)) : exportPayload.storeOrders;
@@ -154193,6 +154372,21 @@ async function handleStagingRefreshPreview(req, res) {
       storeOrders: sanitizedStoreOrders.length,
       members: sanitizedMembers.length
     };
+    const sanitizedExport = {
+      bookings: sanitizedBookings,
+      storeOrders: sanitizedStoreOrders,
+      members: sanitizedMembers
+    };
+    if (mode === "sanitized-snapshot") {
+      const denylistHits = runPreImportDenylistScan({ export: sanitizedExport });
+      if (denylistHits.length > 0) {
+        return res.status(422).json({
+          success: false,
+          error: "Pre-import denylist scan found production PII patterns in the SANITIZED payload \u2014 the sanitization engine should have scrubbed these. Refusing the refresh to prevent a leak.",
+          denylistHits: denylistHits.slice(0, 5)
+        });
+      }
+    }
     const sourceHash = import_node_crypto.default.createHash("sha256").update(JSON.stringify(exportPayload)).digest("hex");
     await adminDb.collection("janitor").doc("refresh-snapshots").collection("items").doc(snapshotId).set({
       projectId: process.env.FIREBASE_PROJECT_ID || "unknown",
@@ -154231,11 +154425,34 @@ async function handleStagingRefreshPreview(req, res) {
         projectId: process.env.FIREBASE_PROJECT_ID || "unknown",
         sourceCounts,
         sanitizedCounts,
-        sanitized: {
-          bookings: sanitizedBookings,
-          storeOrders: sanitizedStoreOrders,
-          members: sanitizedMembers
-        }
+        // The chain-of-custody hash of the SOURCE export. The Admin
+        // UI shows it so the operator can prove which export a
+        // snapshot came from.
+        sourceHash,
+        // The version of the sanitization engine that produced this
+        // payload. The Admin UI shows it, and the import records it
+        // on the audit row so a payload can be traced to the engine
+        // that made it.
+        sanitizationVersion: SANITIZATION_VERSION,
+        // The Admin UI renders the counts from `sanitizedCounts` but
+        // falls back to the length of the payload itself, and it
+        // POSTS `sanitizedExport` back to the import endpoint. The
+        // payload is therefore returned under that key — the old
+        // response returned it as `sanitized`, so the import always
+        // received `undefined` and refused with a 400.
+        sanitizedExport,
+        // Kept under the old name too: it is the same object, and a
+        // client that reads either name gets the payload.
+        sanitized: sanitizedExport,
+        // The denylist hits on the sanitized payload. An empty array
+        // is the normal case (a genuine export); a non-empty one is
+        // refused above, so it is always empty here. The Admin UI
+        // reads it.
+        denylistHits: [],
+        // The snapshot has not been imported yet. The Admin UI reads
+        // this to enable the "Destroy snapshot" button only after an
+        // import.
+        alreadyImported: false
       }
     });
   } catch (error) {
@@ -154283,9 +154500,10 @@ async function handleStagingRefreshImport(req, res) {
     const snapshotData = snapshotDoc.data() || {};
     const financeCheck = checkFinanceInvariant({ export: sanitizedExport });
     if (financeCheck.drift > 0.01) {
+      const driftDetail = financeCheck.driftingBookings.slice(0, 5).map((d) => `${d.id}: declared ${d.declared} vs computed ${d.computed}`).join("; ");
       await snapshotRef.update({
         status: "incomplete",
-        failureReason: `Finance invariant drift: ${financeCheck.drift.toFixed(2)} (sumPayments=${financeCheck.sumPayments}, sumRefunds=${financeCheck.sumRefunds}, sumBalanceDue=${financeCheck.sumBalanceDue})`,
+        failureReason: `Finance invariant drift: ${financeCheck.drift.toFixed(2)} (sumPayments=${financeCheck.sumPayments}, sumRefunds=${financeCheck.sumRefunds}, sumBalanceDue=${financeCheck.sumBalanceDue}) \u2014 ${driftDetail}`,
         completedAt: /* @__PURE__ */ new Date(),
         completedBy: staff.email || staff.uid || ""
       });
@@ -154414,7 +154632,24 @@ async function handleStagingRefreshImport(req, res) {
         status: "complete",
         completedAt: completedAt.toISOString(),
         expiresAt: expiresAt ? expiresAt.toISOString() : null,
-        financeCheck
+        financeCheck,
+        // The write summary. The Admin UI reads it to tell the
+        // operator how much actually landed in staging (and how much
+        // the D03 scope manifest dropped). The old response did not
+        // include it, so the toast said "Import complete." with no
+        // counts.
+        writeSummary: {
+          bookingsWritten,
+          storeOrdersWritten,
+          membersWritten,
+          bookingsDropped,
+          membersDropped,
+          sensitiveFileOptIn,
+          scopeRestricted: hasScopeRestriction
+        },
+        // The snapshot is now imported, so the Admin UI can enable the
+        // "Destroy snapshot" button (it reads this field).
+        alreadyImported: true
       }
     });
   } catch (error) {
@@ -154568,13 +154803,14 @@ async function handleStagingRefreshDestroy(req, res) {
     });
   }
 }
-var import_node_crypto, createTestRunSchema, closeTestRunSchema, deleteTestRunSchema, CLEANUP_TIMEOUT_MS, TEST_RUN_BOOKING_SUBCOLLECTIONS, PREVIEW_TTL_MS, LOCK_TIMEOUT_MS, RESET_BATCH_SIZE, stagingResetConfirmSchema, PROTECTED_RESET_COLLECTIONS, REFRESH_MODES, stagingRefreshSchema;
+var import_node_crypto, createTestRunSchema, closeTestRunSchema, deleteTestRunSchema, CLEANUP_TIMEOUT_MS, TEST_RUN_BOOKING_SUBCOLLECTIONS, PREVIEW_TTL_MS, LOCK_TIMEOUT_MS, RESET_BATCH_SIZE, stagingResetConfirmSchema, PROTECTED_RESET_COLLECTIONS, REFRESH_MODES, stagingRefreshSchema, SANITIZATION_VERSION, STAFF_IDENTITY_FIELDS, STAFF_IDENTITY_FIELD_SET, STAFF_ROLE_SENTINELS, LEDGER_FREE_TEXT_FIELDS;
 var init_test_runs = __esm({
   "server/handlers/test-runs.ts"() {
     "use strict";
     init_zod();
     import_node_crypto = __toESM(require("node:crypto"));
     init_firebase_admin();
+    init_shared();
     createTestRunSchema = external_exports.object({
       name: external_exports.string().trim().min(1).max(120),
       environment: external_exports.enum(["staging", "production"]),
@@ -154677,6 +154913,43 @@ var init_test_runs = __esm({
         ttlHours: 24
       })
     }).strict();
+    SANITIZATION_VERSION = "2.0.0";
+    STAFF_IDENTITY_FIELDS = [
+      "discountVerifiedBy",
+      "discountRejectedBy",
+      "handledBy",
+      "confirmedBy",
+      "cancelledBy",
+      "updatedBy",
+      "createdByUid",
+      "createdBy",
+      "updatedByUid",
+      "checkedInBy",
+      "checkedOutBy",
+      "pointsRedeemedBy",
+      "unpaidCheckoutApprovedBy",
+      "specialRequestsUpdatedBy",
+      "approvedBy",
+      "recordedBy",
+      "recordedByUid",
+      "paidBy",
+      "addedBy",
+      "lastModifiedBy",
+      "removedBy",
+      "servedBy",
+      "taggedBy",
+      "markedBy",
+      "assignedBy",
+      "processedBy",
+      "reviewedBy",
+      "verifiedBy",
+      "performedBy",
+      "enteredBy",
+      "by"
+    ];
+    STAFF_IDENTITY_FIELD_SET = new Set(STAFF_IDENTITY_FIELDS);
+    STAFF_ROLE_SENTINELS = /* @__PURE__ */ new Set(["system", "guest", "front-desk", "frontdesk", "admin", "bot", "cron", "auto", "staff", "cashier"]);
+    LEDGER_FREE_TEXT_FIELDS = ["note", "reason", "guestName", "orderRef"];
   }
 });
 

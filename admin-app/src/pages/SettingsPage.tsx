@@ -3781,9 +3781,21 @@ export function SettingsPage() {
           if (summary.membersDropped) parts.push(`(${summary.membersDropped} members dropped)`);
         }
         toast.success("Refresh imported", parts.join(", ") || "Import complete.");
-        setShowRefreshModal(false);
-        setRefreshPreview(null);
-        setRefreshSnapshotId(null);
+        // The snapshot stays destroyable.
+        //
+        // The "Destroy snapshot" button in this panel is enabled
+        // ONLY when the preview says `alreadyImported` is true, and
+        // the destroy handler needs the `refreshSnapshotId`. This
+        // handler used to close the modal, clear the preview and
+        // clear the snapshot id — so the operator had no way at all
+        // to destroy the snapshot they had just imported (the
+        // control was gone, and the destroy confirmation modal had
+        // no other trigger). Marking the preview as imported keeps
+        // the panel open with the destroy control enabled, which is
+        // what the panel was already designed to do.
+        setRefreshPreview((prev: any) =>
+          prev ? { ...prev, alreadyImported: true } : prev
+        );
       } else {
         setRefreshError(data.error || "Import failed.");
       }
