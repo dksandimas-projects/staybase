@@ -17,7 +17,8 @@
     "preview:admin": "npm run preview -w admin-app",
     "typecheck": "npm run typecheck -w guest-app && npm run typecheck -w admin-app",
     "typecheck:server": "node scripts/check-server-typecheck.mjs",
-    "test": "npm run test -w shared && npm run test:api -w guest-app && npm run test -w admin-app && npm run test:infra && npm run test:rules",
+    "check:app-closure": "node scripts/check-app-dependency-closure.mjs",
+    "test": "npm run test -w shared && npm run test:api -w guest-app && npm run test -w admin-app && npm run test:infra && npm run test:rules && npm run test:qa && npm run check:app-closure",
     "test:shared": "npm run test -w shared",
     "test:guest:api": "npm run test:api -w guest-app",
     "test:infra": "vitest run firebase/tests/storage-cors.test.ts",
@@ -30,6 +31,9 @@
     "test:e2e:report": "playwright show-report e2e/.artifacts/report",
     "qa:reconcile": "esbuild scripts/qa/reconcile-production.ts --bundle --platform=node --format=esm --outfile=tmp/qa/reconcile.mjs --external:firebase-admin && node tmp/qa/reconcile.mjs --out=tmp/qa/reconciliation.json",
     "qa:matrix": "esbuild scripts/qa/verify-matrix.ts --bundle --platform=node --format=esm --outfile=tmp/qa/verify-matrix.mjs && node tmp/qa/verify-matrix.mjs",
+    "qa:export": "esbuild scripts/qa/export-prod-data.ts --bundle --platform=node --format=esm --outfile=tmp/qa/export-prod-data.mjs --external:firebase-admin && node tmp/qa/export-prod-data.mjs --out tmp/qa/prod-export.json",
+    "qa:scope": "esbuild scripts/qa/verify-scope.ts --bundle --platform=node --format=esm --outfile=tmp/qa/verify-scope.mjs && node tmp/qa/verify-scope.mjs",
+    "test:qa": "vitest run scripts/qa/__tests__",
     "preflight": "node scripts/preflight.mjs"
   },
   "devDependencies": {

@@ -1,6 +1,12 @@
 import { z } from "zod";
 import crypto from "node:crypto";
 import { adminDb } from "../lib/firebase-admin";
+// Per ETR-R06 (finance integrity): the staging-refresh gate
+// recomputes every booking's balance with the SAME canonical helper
+// the app's own money surfaces read (`computeBookingFolio`). Re-
+// implementing the money math here would be a second implementation
+// of a rule — and the second one is the one that drifts.
+import { computeBookingFolio } from "@spark-inn/shared";
 
 function getStaff(req: any) {
   return (req as any).staff || {};
@@ -1226,6 +1232,145 @@ function syntheticFromSource(sourceValue: string | null | undefined, salt: strin
   return `${prefix}-${h}@${domain}`;
 }
 
+// The version of the sanitization engine. It is returned by the
+// preview, shown in the Admin UI, and recorded on the audit row, so a
+// payload can be traced to the engine that produced it. Bump it when
+// the sanitizer's behaviour changes (a field that is newly scrubbed,
+// a field that is newly preserved, a change to the synthetic-value
+// format). The value is a plain string so the UI can print it
+// without knowing the shape.
+const SANITIZATION_VERSION = "2.0.0";
+
+// Per ETR-R04 (irreversible identity replacement) + ETR-R06 (relational
+// integrity): the fields below carry a PRODUCTION IDENTITY — a real
+// staff account or a real guest contact. They are replaced with
+// deterministic synthetic values.
+//
+// WHY THESE SPECIFICALLY: the production data has
+//   * `discountVerifiedBy` = a real Gmail address on 7 bookings
+//     (frontdeskbot@gmail.com on one of them) — it is a STAFF field
+//     that holds an EMAIL, so it trips the email denylist pattern;
+//   * `handledBy` / `confirmedBy` / `cancelledBy` / `updatedBy` /
+//     `pointsRedeemedBy` / `unpaidCheckoutApprovedBy` /
+//     `specialRequestsUpdatedBy` / `discountRejectedBy` /
+//     `createdByUid` — a real staff Firebase UID (74 bookings carry
+//     `handledBy`); it identifies a real person and it is not PII the
+//     staff-side operational signal needs in staging.
+//
+// ETR-R06 says the sanitized mode "maps production staff UIDs to
+// staging-safe actors". The old sanitizer mapped NONE of them, so a
+// real staff Gmail address was copied verbatim into staging.
+//
+// `cancelledBy: "system"` is a SENTINEL, not a person — it is
+// preserved so the cancellation-reason reports keep working.
+const STAFF_IDENTITY_FIELDS = [
+  "discountVerifiedBy",
+  "discountRejectedBy",
+  "handledBy",
+  "confirmedBy",
+  "cancelledBy",
+  "updatedBy",
+  "createdByUid",
+  "createdBy",
+  "updatedByUid",
+  "checkedInBy",
+  "checkedOutBy",
+  "pointsRedeemedBy",
+  "unpaidCheckoutApprovedBy",
+  "specialRequestsUpdatedBy",
+  "approvedBy",
+  "recordedBy",
+  "recordedByUid",
+  "paidBy",
+  "addedBy",
+  "lastModifiedBy",
+  "removedBy",
+  "servedBy",
+  "taggedBy",
+  "markedBy",
+  "assignedBy",
+  "processedBy",
+  "reviewedBy",
+  "verifiedBy",
+  "performedBy",
+  "enteredBy",
+  "by"
+] as const;
+
+const STAFF_IDENTITY_FIELD_SET: Set<string> = new Set(STAFF_IDENTITY_FIELDS as unknown as string[]);
+
+/** The staff sentinels that are ROLES, not people. */
+const STAFF_ROLE_SENTINELS = new Set(["system", "guest", "front-desk", "frontdesk", "admin", "bot", "cron", "auto", "staff", "cashier"]);
+
+/**
+ * Does this value look like an IDENTITY (a person), or like a ROLE?
+ *
+ * A production staff identity is either a Firebase UID (28
+ * alphanumeric characters) or an email address. A role is a short
+ * word: "system", "guest", "front-desk". The distinction matters —
+ * a role is operational signal that the staging reports need, an
+ * identity is a real person's handle and must not be copied.
+ */
+function looksLikeStaffIdentity(value: string): boolean {
+  const raw = value.trim();
+  if (!raw) return false;
+  if (STAFF_ROLE_SENTINELS.has(raw.toLowerCase())) return false;
+  if (raw.includes("@")) return true;
+  return /^[A-Za-z0-9_-]{20,}$/.test(raw);
+}
+
+function sanitizeStaffIdentity(value: unknown, salt: string): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (!looksLikeStaffIdentity(raw)) return raw;
+  return syntheticFromSource(raw, salt, "staff", "staff.invalid");
+}
+
+/**
+ * Walk a sanitized document and replace EVERY staff identity with a
+ * staging-safe actor, at ANY depth.
+ *
+ * Why a recursive walk and not a fixed list of top-level fields: the
+ * staff identity hides in nested structures too — production carries
+ * it at `breakfastSelections.<slot>.addedBy` / `.lastModifiedBy` /
+ * `.removedBy`, `breakfastServed.<slot>.servedBy`,
+ * `otherAddOnSelections.<date>[].addedBy` and `rescheduleHistory[].by`.
+ * A fixed top-level list left every one of those in place, so a real
+ * staff account id was still copied into staging.
+ */
+function scrubStaffIdentities(value: any, salt: string, key?: string): any {
+  if (Array.isArray(value)) {
+    return value.map((entry) => scrubStaffIdentities(entry, salt));
+  }
+  if (value && typeof value === "object") {
+    const out: any = {};
+    for (const [childKey, childValue] of Object.entries(value as Record<string, unknown>)) {
+      if (STAFF_IDENTITY_FIELD_SET.has(childKey) && (typeof childValue === "string" || childValue === null || childValue === undefined)) {
+        out[childKey] = sanitizeStaffIdentity(childValue, salt);
+        continue;
+      }
+      out[childKey] = scrubStaffIdentities(childValue, salt, childKey);
+    }
+    return out;
+  }
+  return value;
+}
+
+// Per ETR-R05 (content and files): when sanitization is on, the
+// free-text content of a ledger row is removed or synthesized. The
+// production payment rows carry a `note` ("A2 FD-10 full settlement")
+// and the production refunds carry a `reason` ("Guest removed paid
+// breakfast meal via Ma…") — the second one is free-text written by
+// staff about a guest, and it is the shape a name or a phone number
+// ends up in.
+//
+// `transactionReference` is NOT in this list: it is a payment
+// reference, and ETR-R04 says it is REPLACED (with a synthetic
+// reference), not dropped — the staging payment still shows a
+// reference, and the real GCash/bank trace does not travel. Each
+// ledger branch replaces it explicitly.
+const LEDGER_FREE_TEXT_FIELDS = ["note", "reason", "guestName", "orderRef"] as const;
+
 // R04 — sanitize a single booking record. PII fields are replaced
 // with deterministic synthetic values. Operational fields (status,
 // checkIn, checkOut, numNights, numGuests, totalPrice, financial
@@ -1286,6 +1431,11 @@ function sanitizeBookingExport(booking: any, salt: string, snapshotId: string, i
     // + financial fields preserved (operational signal).
     notes: "",
     internalNotes: "",
+    // The guest-authored free text on the booking itself.
+    // `specialRequests` is a guest-supplied sentence — it is the
+    // most likely place for a guest to write their own phone number
+    // or email into a booking.
+    specialRequests: "",
     // Per ETR-R07 (staging isolation
     // metadata): every sanitized doc
     // carries a `sourceSanitization`
@@ -1306,6 +1456,97 @@ function sanitizeBookingExport(booking: any, salt: string, snapshotId: string, i
     }
   };
 
+  // ETR-R06 — production staff identities become staging-safe actors.
+  // The scrub is RECURSIVE and runs LAST (below), so it also covers
+  // the nested structures and the ledger rows.
+
+  // The payment reference points at a real GCash / bank trace.
+  if (sanitized.paymentReference) {
+    sanitized.paymentReference = syntheticFromSource(
+      String(sanitized.paymentReference),
+      salt,
+      "REF",
+      "staging.invalid"
+    );
+  }
+
+  // The guest lookup token is a live per-booking credential for the
+  // production guest-lookup endpoint. It is a direct identifier
+  // (ETR-R04) AND a credential, so the snapshot gets its own
+  // deterministic token: the booking still resolves inside staging,
+  // and no production credential is copied across.
+  if (sanitized.lookupToken) {
+    sanitized.lookupToken = crypto
+      .createHash("sha256")
+      .update(`${salt}:lookupToken:${String(sanitized.lookupToken)}`)
+      .digest("hex")
+      .slice(0, 32);
+  }
+
+  // The NESTED guest identity. Production carries a `guestDetails`
+  // sub-object on all 157 bookings (firstName, lastName, email,
+  // phone) — the same guest as the top-level `guestName` /
+  // `guestEmail` / `guestPhone`. The old sanitizer only touched the
+  // TOP-LEVEL fields, so the nested copy of the same gmail address
+  // and the same phone number was copied verbatim into staging (155
+  // gmail addresses + 154 phone numbers that the old denylist scan
+  // never even looked at, because it only read top-level strings).
+  //
+  // The synthetic values are derived from the SAME source value with
+  // the SAME salt and domain as the top-level fields, so the guest
+  // still reads as ONE guest: `guestDetails.email` maps to the same
+  // synthetic email as `guestEmail`.
+  if (sanitized.guestDetails && typeof sanitized.guestDetails === "object") {
+    const details: any = { ...sanitized.guestDetails };
+    if (details.firstName) details.firstName = "Guest";
+    if (details.lastName) {
+      const syntheticName = syntheticFromSource(guestName, salt, "Guest", "guests.invalid");
+      details.lastName = syntheticName.split("@")[0].split("-").slice(1).join("-") || "Guest";
+    }
+    if (details.email) {
+      details.email = syntheticFromSource(
+        String(details.email).trim().toLowerCase(),
+        salt,
+        "guest",
+        "example.invalid"
+      );
+    }
+    if (details.phone) {
+      details.phone = syntheticFromSource(String(details.phone), salt, "+639****0000", "phones.invalid");
+    }
+    sanitized.guestDetails = details;
+  }
+
+  // The guest REGISTRATION block (20 production bookings). Per
+  // ETR-R04 it carries the identity fields — the home address, the
+  // emergency contact, and the government-ID value. Those are
+  // replaced. The categorical fields (nationality, gender,
+  // purposeOfStay, idType, signatureStatus) and the date of birth
+  // are KEPT: they are operational signal the age/discount flows
+  // need in order to be exercised against realistic data, and they
+  // name no one on their own.
+  if (sanitized.guestRegistration && typeof sanitized.guestRegistration === "object") {
+    const registration: any = { ...sanitized.guestRegistration };
+    if (registration.address) registration.address = "[REDACTED — sanitized for staging]";
+    if (registration.emergencyContact) registration.emergencyContact = "";
+    if (registration.idNumber) {
+      registration.idNumber = syntheticFromSource(
+        String(registration.idNumber),
+        salt,
+        "ID",
+        "staging.invalid"
+      );
+    }
+    if (registration.vehiclePlate) registration.vehiclePlate = "";
+    sanitized.guestRegistration = registration;
+  }
+
+  // The free-text the STAFF wrote about the guest. It is prose
+  // about a person, so it is cleared (ETR-R05).
+  for (const field of ["paymentRejectionReason", "unpaidCheckoutReason", "discountRejectionReason"]) {
+    if (typeof sanitized[field] === "string") sanitized[field] = "";
+  }
+
   // R06 (partial) — preserve the relational shape. If the booking
   // has an `addedCharges` array, scrub any free-text PII in the
   // charge descriptions but keep the amounts/tenders so the staging
@@ -1313,24 +1554,69 @@ function sanitizeBookingExport(booking: any, salt: string, snapshotId: string, i
   // transactionReference numbers (they reference real GCash/bank
   // traces) but keep the amounts.
   if (Array.isArray(sanitized.addedCharges)) {
-    sanitized.addedCharges = sanitized.addedCharges.map((c: any) => ({
-      ...c,
-      description: "[REDACTED]",
-      notes: ""
-    }));
+    sanitized.addedCharges = sanitized.addedCharges.map((c: any) => {
+      const scrubbed: any = { ...c, description: "[REDACTED]", notes: "" };
+      for (const field of LEDGER_FREE_TEXT_FIELDS) {
+        if (typeof scrubbed[field] === "string") scrubbed[field] = "";
+      }
+      if (scrubbed.transactionReference) {
+        scrubbed.transactionReference = syntheticFromSource(
+          String(scrubbed.transactionReference),
+          salt,
+          "PAY",
+          "staging.invalid"
+        );
+      }
+      return scrubbed;
+    });
   }
   if (Array.isArray(sanitized.payments)) {
-    sanitized.payments = sanitized.payments.map((p: any) => ({
-      ...p,
-      transactionReference: syntheticFromSource(p.transactionReference || "", salt, "PAY", "staging.invalid"),
-      notes: ""
-    }));
+    sanitized.payments = sanitized.payments.map((p: any) => {
+      const scrubbed: any = {
+        ...p,
+        transactionReference: syntheticFromSource(p.transactionReference || "", salt, "PAY", "staging.invalid"),
+        notes: ""
+      };
+      for (const field of LEDGER_FREE_TEXT_FIELDS) {
+        if (typeof scrubbed[field] === "string") scrubbed[field] = "";
+      }
+      return scrubbed;
+    });
   }
-  return sanitized;
+  // The production export carries the ledger under `onsitePayments`
+  // (the denormalized field the Admin app's own folio reads) — the
+  // free-text on those rows is scrubbed the same way. The AMOUNT, the
+  // type, the status and the method are preserved verbatim: they are
+  // the money, and the per-booking finance invariant is computed from
+  // them.
+  if (Array.isArray(sanitized.onsitePayments)) {
+    sanitized.onsitePayments = sanitized.onsitePayments.map((p: any) => {
+      const scrubbed: any = { ...p };
+      for (const field of LEDGER_FREE_TEXT_FIELDS) {
+        if (typeof scrubbed[field] === "string") scrubbed[field] = "";
+      }
+      if (scrubbed.transactionReference !== undefined && scrubbed.transactionReference) {
+        scrubbed.transactionReference = syntheticFromSource(
+          String(scrubbed.transactionReference),
+          salt,
+          "PAY",
+          "staging.invalid"
+        );
+      }
+      return scrubbed;
+    });
+  }
+  // ETR-R06 — the staff identity is replaced with a staging-safe
+  // actor, at EVERY depth. It runs last so it also covers the nested
+  // structures (breakfastSelections[].addedBy, breakfastServed[].servedBy,
+  // otherAddOnSelections[].lastModifiedBy, rescheduleHistory[].by) and
+  // the ledger rows. A fixed list of top-level fields left a real
+  // production staff account id in the staging payload.
+  return scrubStaffIdentities(sanitized, salt);
 }
 
 function sanitizeStoreOrderExport(order: any, salt: string, snapshotId: string, importedAt: string) {
-  return {
+  const sanitized: any = {
     ...order,
     guestName: syntheticFromSource(order.guestName, salt, "Guest", "guests.invalid"),
     guestEmail: order.guestEmail
@@ -1342,6 +1628,8 @@ function sanitizeStoreOrderExport(order: any, salt: string, snapshotId: string, 
     paymentProofUrl: "",
     notes: "",
     internalNotes: "",
+    // The free-text the staff wrote about the order.
+    qaRepairNote: "",
     sourceSanitization: {
       applied: true,
       salt: salt.slice(0, 8) + "…",
@@ -1349,10 +1637,12 @@ function sanitizeStoreOrderExport(order: any, salt: string, snapshotId: string, 
       mode: "sanitized-snapshot"
     }
   };
+  // ETR-R06 — the staff identity on the order, at any depth.
+  return scrubStaffIdentities(sanitized, salt);
 }
 
 function sanitizeMemberExport(member: any, salt: string, snapshotId: string, importedAt: string) {
-  return {
+  const sanitized: any = {
     ...member,
     fullName: syntheticFromSource(member.fullName, salt, "Member", "members.invalid"),
     // The member's email is the SAME identity as a guest who booked
@@ -1365,7 +1655,7 @@ function sanitizeMemberExport(member: any, salt: string, snapshotId: string, imp
       ? syntheticFromSource(String(member.email).trim().toLowerCase(), salt, "guest", "example.invalid")
       : "",
     phone: member.phone
-      ? syntheticFromSource(String(member.phone), salt, "+63900000", "phones.invalid")
+      ? syntheticFromSource(String(member.phone), salt, "+639****0000", "phones.invalid")
       : "",
     photoUrl: "",
     sourceSanitization: {
@@ -1375,6 +1665,8 @@ function sanitizeMemberExport(member: any, salt: string, snapshotId: string, imp
       mode: "sanitized-snapshot"
     }
   };
+  // ETR-R06 — the staff identity on the member record, at any depth.
+  return scrubStaffIdentities(sanitized, salt);
 }
 
 // Per ETR-R08 (pre-import denylist scan): the sanitization engine
@@ -1395,6 +1687,23 @@ function sanitizeMemberExport(member: any, salt: string, snapshotId: string, imp
 // so the error response can surface which docs were
 // detected. The list is capped at 5 to avoid a massive
 // error body for a fully-failed scan.
+//
+// WHY THE SCAN RUNS ON THE SANITIZED PAYLOAD (and not on the
+// source): the SOURCE of a real production export legitimately
+// contains 155 real gmail addresses, 154 real phone numbers and
+// 23 real production Storage URLs — they ARE the production data.
+// Scanning the source meant that EVERY genuine production export
+// was rejected with a 422 before the sanitizer ever ran, so the
+// workflow was unusable end to end. The scan's job is to prove
+// the SANITIZER did its job: the payload that is actually WRITTEN
+// to staging must contain no production pattern. A genuine export
+// therefore passes, and a leak in the sanitizer is still caught.
+//
+// The scan RECURSES: a nested ledger row (`onsitePayments[]`,
+// `addedCharges[]`, `payments[]`, `items[]`) is part of the
+// written payload, so a gmail address on a payment note would
+// land in staging. The old scan only looked at TOP-LEVEL string
+// fields, so it never saw them.
 function runPreImportDenylistScan(exportPayload: any): Array<{ collection: string; field: string; value: string; pattern: string }> {
   const productionEmailPattern = /(?:@gmail\.com|@yahoo\.com|@hotmail\.com|@outlook\.com|@icloud\.com)\b/i;
   const phonePattern = /\b(?:\+63|0)9\d{2}[\s-]?\d{3}[\s-]?\d{4}\b/;
@@ -1402,20 +1711,45 @@ function runPreImportDenylistScan(exportPayload: any): Array<{ collection: strin
 
   const hits: Array<{ collection: string; field: string; value: string; pattern: string }> = [];
 
-  const scanDoc = (collection: string, doc: any) => {
-    const stringFields = Object.entries(doc || {}).filter(([_, v]) => typeof v === "string");
-    for (const [field, value] of stringFields) {
-      const str = String(value);
-      if (productionEmailPattern.test(str)) {
-        hits.push({ collection, field, value: str, pattern: "productionEmail" });
-        if (hits.length >= 5) return;
-      } else if (phonePattern.test(str)) {
-        hits.push({ collection, field, value: str, pattern: "phone" });
-        if (hits.length >= 5) return;
-      } else if (productionStorageUrl.test(str)) {
-        hits.push({ collection, field, value: str, pattern: "productionStorageUrl" });
-        if (hits.length >= 5) return;
+  const scanString = (collection: string, field: string, str: string) => {
+    if (productionEmailPattern.test(str)) {
+      hits.push({ collection, field, value: str, pattern: "productionEmail" });
+    } else if (phonePattern.test(str)) {
+      hits.push({ collection, field, value: str, pattern: "phone" });
+    } else if (productionStorageUrl.test(str)) {
+      hits.push({ collection, field, value: str, pattern: "productionStorageUrl" });
+    }
+  };
+
+  // Walk a value: a string is scanned; an array or an object is
+  // descended into, with the field path recorded so the error
+  // names the exact offending field.
+  const scanValue = (collection: string, path: string, value: unknown, depth: number) => {
+    if (hits.length >= 5) return;
+    if (depth > 6) return;
+    if (typeof value === "string") {
+      scanString(collection, path, value);
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length && hits.length < 5; i++) {
+        scanValue(collection, `${path}[${i}]`, value[i], depth + 1);
       }
+      return;
+    }
+    if (value && typeof value === "object") {
+      for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+        if (hits.length >= 5) return;
+        scanValue(collection, path ? `${path}.${key}` : key, nested, depth + 1);
+      }
+    }
+  };
+
+  const scanDoc = (collection: string, doc: any) => {
+    if (!doc || typeof doc !== "object") return;
+    for (const [field, value] of Object.entries(doc)) {
+      if (hits.length >= 5) return;
+      scanValue(collection, field, value, 0);
     }
   };
 
@@ -1428,42 +1762,141 @@ function runPreImportDenylistScan(exportPayload: any): Array<{ collection: strin
 
 // Per ETR-R06 (relational + finance integrity): the
 // post-import scan asserts that the accounting
-// equation holds across the sanitized payload:
-// sum(payments) - sum(refunds) = sum(balanceDue)
+// equation holds across the sanitized payload.
 //
-// In a sanitized refresh, we don't have access to the
-// destination Firestore yet (the preview is a
-// pure-function transform). The integrity check
-// therefore runs on the SANITIZED payload — the
-// sanitized docs carry the `totalPrice` + `payments` +
-// `charges` fields verbatim (per the R04 spec), so
-// the math is the same as it would be on the
-// imported docs.
+// WHY THIS IS PER BOOKING (and why it uses the shared
+// helper): the old check compared two GLOBAL sums —
+// `sum(balanceDue || totalPrice)` against
+// `sum(payments) - sum(refunds)`. Two problems, both fatal for
+// a real production export:
 //
-// For the post-import version (the execute handler
-// below), the same function runs on the actual
-// Firestore state.
-function checkFinanceInvariant(exportPayload: any): { sumPayments: number; sumRefunds: number; sumBalanceDue: number; drift: number } {
+//   1. THE EQUATION WAS WRONG FOR THIS DATA SHAPE. The
+//      production ledger lives in Firestore SUBCOLLECTIONS, so
+//      the booking doc carries NO embedded `payments[]` array —
+//      the export delivers it as `onsitePayments[]`. The old
+//      check therefore read an empty `payments[]` (so
+//      `sumPayments` was 0) and compared it against a real
+//      `sum(balanceDue)`, which can never match. Every genuine
+//      export was refused.
+//
+//   2. TWO GLOBAL SUMS CANNOT SEE A PER-BOOKING ERROR. If
+//      booking A is short 100 and booking B is over 100, the
+//      global sums cancel and the drift is 0 — a tampered
+//      payload sails through. The check has to be per booking.
+//
+// The check now RECOMPUTES each booking's balance with the
+// SAME canonical helper the app's own money surfaces read
+// (`computeBookingFolio` from `@spark-inn/shared`) and compares
+// it with the balance the export DECLARED. The declared balance
+// and the recomputed balance are produced by the same rule, so
+// a genuine export reconciles exactly, and any edit to a
+// payment amount, a charge, or the declared balance is caught.
+//
+// A booking with no ledger and no declared balance contributes
+// no drift (there is nothing to reconcile). A booking that
+// declares a balance but carries no ledger is a DRIFT: the
+// export claims money it does not show.
+function checkFinanceInvariant(exportPayload: any): {
+  sumPayments: number;
+  sumRefunds: number;
+  sumBalanceDue: number;
+  drift: number;
+  driftingBookings: Array<{ id: string; declared: number; computed: number; drift: number }>;
+} {
+  const bookings: any[] = exportPayload?.export?.bookings || [];
+  const storeOrders: any[] = exportPayload?.export?.storeOrders || [];
+
   let sumPayments = 0;
   let sumRefunds = 0;
   let sumBalanceDue = 0;
-  for (const b of exportPayload?.export?.bookings || []) {
+  let drift = 0;
+  const driftingBookings: Array<{ id: string; declared: number; computed: number; drift: number }> = [];
+
+  for (const b of bookings) {
     const data = b as any;
-    if (Array.isArray(data.payments)) {
-      for (const p of data.payments) {
-        const amt = Number(p.amount || 0);
-        if (p.type === "refund" || amt < 0) {
-          sumRefunds += Math.abs(amt);
-        } else {
-          sumPayments += amt;
-        }
-      }
+    const id = String(data.id ?? "");
+
+    // The ledger, in the shape the canonical helper expects. The
+    // export delivers it as `onsitePayments[]`; a hand-made payload
+    // may use the legacy embedded `payments[]`.
+    const ledgerRows: any[] = Array.isArray(data.onsitePayments)
+      ? data.onsitePayments
+      : Array.isArray(data.payments)
+        ? data.payments
+        : [];
+    const chargeRows: any[] = Array.isArray(data.addedCharges)
+      ? data.addedCharges
+      : Array.isArray(data.charges)
+        ? data.charges
+        : [];
+
+    const persistedPayments = ledgerRows.map((p: any) => ({
+      amount: Number(p?.amount) || 0,
+      type: p?.type ?? (Number(p?.amount) < 0 ? "refund" : "payment"),
+      // The RAW status travels with the row: a refund that has not
+      // been paid out is a LIABILITY (the hotel still holds the
+      // money and owes it back), so it does not reduce the
+      // collected total. The shared helper owns that rule.
+      status: p?.status ?? ""
+    }));
+    const selectedBookingCharges = chargeRows.map((c: any) => ({
+      amount: Number(c?.amount) || 0,
+      label: c?.label ?? ""
+    }));
+
+    for (const p of persistedPayments) {
+      if (p.type === "refund" || p.amount < 0) sumRefunds += Math.abs(p.amount);
+      else sumPayments += p.amount;
     }
-    sumBalanceDue += Number(data.balanceDue || data.totalPrice || 0);
+
+    const computed = Number(
+      computeBookingFolio({
+        booking: {
+          id,
+          totalPrice: Number(data.totalPrice) || 0,
+          otherAddOnTotal: Number(data.otherAddOnTotal) || 0
+        },
+        persistedPayments,
+        selectedBookingCharges,
+        folioBookingIds: [id],
+        storeOrders: storeOrders.map((o: any) => ({
+          bookingId: typeof o?.bookingId === "string" ? o.bookingId : null,
+          paymentMethod: typeof o?.paymentMethod === "string" ? o.paymentMethod : null,
+          status: typeof o?.status === "string" ? o.status : null,
+          isBilled: o?.isBilled === true,
+          totalAmount: Number(o?.totalAmount) || 0
+        }))
+      }).balance
+    );
+
+    const declaredRaw = data.balanceDue;
+    const hasDeclared = declaredRaw !== undefined && declaredRaw !== null && declaredRaw !== "";
+    const declared = hasDeclared ? Number(declaredRaw) || 0 : null;
+
+    if (declared === null) {
+      // No declared balance. A booking with a ledger still has to be
+      // self-consistent: its ledger must reconcile to a zero
+      // balance, i.e. the guest owes exactly what the ledger says
+      // is still owed. If the ledger does not close, the export is
+      // inconsistent and the import is refused.
+      if (ledgerRows.length === 0 && chargeRows.length === 0) continue;
+      const ledgerDrift = Math.abs(computed);
+      if (ledgerDrift > 0.01) {
+        drift = Math.max(drift, ledgerDrift);
+        driftingBookings.push({ id, declared: computed, computed, drift: ledgerDrift });
+      }
+      continue;
+    }
+
+    sumBalanceDue += declared;
+    const bookingDrift = Math.abs(computed - declared);
+    if (bookingDrift > 0.01) {
+      drift = Math.max(drift, bookingDrift);
+      driftingBookings.push({ id, declared, computed, drift: bookingDrift });
+    }
   }
-  const expectedBalance = sumPayments - sumRefunds;
-  const drift = Math.abs(sumBalanceDue - expectedBalance);
-  return { sumPayments, sumRefunds, sumBalanceDue, drift };
+
+  return { sumPayments, sumRefunds, sumBalanceDue, drift, driftingBookings };
 }
 
 export async function handleStagingRefreshPreview(req: any, res: any) {
@@ -1561,30 +1994,6 @@ export async function handleStagingRefreshPreview(req: any, res: any) {
     }
   }
 
-  // Per ETR-R08 (pre-import denylist scan):
-  // for the sanitized mode, run a regex
-  // check across the entire export
-  // payload for production patterns
-  // (gmail/yahoo/hotmail email domains,
-  // PH phone formats, production Storage
-  // URLs). ANY match aborts the import
-  // (fail-closed). The unsanitized mode
-  // skips the denylist scan (the operator
-  // explicitly opted in to production
-  // data); the restricted mode gates
-  // (D01..D10) cover the security surface
-  // instead.
-  if (mode === "sanitized-snapshot") {
-    const denylistHits = runPreImportDenylistScan(exportPayload);
-    if (denylistHits.length > 0) {
-      return res.status(422).json({
-        success: false,
-        error: "Pre-import denylist scan found production PII patterns. The sanitization engine should have scrubbed these — refusing the import to prevent a leak.",
-        denylistHits: denylistHits.slice(0, 5)
-      });
-    }
-  }
-
   try {
     const sanitizedBookings = mode === "sanitized-snapshot"
       ? exportPayload.bookings.map((b) => sanitizeBookingExport(b, salt, snapshotId, importedAt))
@@ -1603,6 +2012,34 @@ export async function handleStagingRefreshPreview(req: any, res: any) {
       storeOrders: sanitizedStoreOrders.length,
       members: sanitizedMembers.length
     };
+
+    // Per ETR-R08 (pre-import denylist scan): the scan runs on the
+    // SANITIZED payload — the one that is actually written to
+    // staging. Scanning the SOURCE (as the old code did) rejected
+    // every genuine production export, because the source IS the
+    // production data: 155 real gmail addresses, 154 real phone
+    // numbers, 23 real production Storage URLs. The scan's job is to
+    // prove the SANITIZER did its job, and it must catch a leak in
+    // the sanitizer, so it also RECURSES into the nested ledger rows.
+    //
+    // The unsanitized mode skips the denylist scan (the operator
+    // explicitly opted in to production data); the restricted mode
+    // gates (D01..D10) cover the security surface instead.
+    const sanitizedExport = {
+      bookings: sanitizedBookings,
+      storeOrders: sanitizedStoreOrders,
+      members: sanitizedMembers
+    };
+    if (mode === "sanitized-snapshot") {
+      const denylistHits = runPreImportDenylistScan({ export: sanitizedExport });
+      if (denylistHits.length > 0) {
+        return res.status(422).json({
+          success: false,
+          error: "Pre-import denylist scan found production PII patterns in the SANITIZED payload — the sanitization engine should have scrubbed these. Refusing the refresh to prevent a leak.",
+          denylistHits: denylistHits.slice(0, 5)
+        });
+      }
+    }
 
     // R10 (partial) — write the audit row. We persist the SHA-256 of
     // the SOURCE export (chain-of-custody) but not the source PII
@@ -1653,11 +2090,34 @@ export async function handleStagingRefreshPreview(req: any, res: any) {
         projectId: process.env.FIREBASE_PROJECT_ID || "unknown",
         sourceCounts,
         sanitizedCounts,
-        sanitized: {
-          bookings: sanitizedBookings,
-          storeOrders: sanitizedStoreOrders,
-          members: sanitizedMembers
-        }
+        // The chain-of-custody hash of the SOURCE export. The Admin
+        // UI shows it so the operator can prove which export a
+        // snapshot came from.
+        sourceHash,
+        // The version of the sanitization engine that produced this
+        // payload. The Admin UI shows it, and the import records it
+        // on the audit row so a payload can be traced to the engine
+        // that made it.
+        sanitizationVersion: SANITIZATION_VERSION,
+        // The Admin UI renders the counts from `sanitizedCounts` but
+        // falls back to the length of the payload itself, and it
+        // POSTS `sanitizedExport` back to the import endpoint. The
+        // payload is therefore returned under that key — the old
+        // response returned it as `sanitized`, so the import always
+        // received `undefined` and refused with a 400.
+        sanitizedExport,
+        // Kept under the old name too: it is the same object, and a
+        // client that reads either name gets the payload.
+        sanitized: sanitizedExport,
+        // The denylist hits on the sanitized payload. An empty array
+        // is the normal case (a genuine export); a non-empty one is
+        // refused above, so it is always empty here. The Admin UI
+        // reads it.
+        denylistHits: [],
+        // The snapshot has not been imported yet. The Admin UI reads
+        // this to enable the "Destroy snapshot" button only after an
+        // import.
+        alreadyImported: false
       }
     });
   } catch (error: any) {
@@ -1772,8 +2232,14 @@ export async function handleStagingRefreshImport(req: any, res: any) {
     const snapshotData = snapshotDoc.data() || {};
 
     // 2. Run the post-import integrity
-    //    scan (R06). The finance invariant
-    //    must hold.
+    // scan (R06). The finance invariant
+    // must hold.
+    //
+    // The check is PER BOOKING and it RECOMPUTES each balance with
+    // the shared canonical folio helper, so it catches a payload
+    // whose declared balance no longer matches its own ledger (a
+    // payment amount edited in transit). Two global sums could not:
+    // an error in one booking cancels against an error in another.
     const financeCheck = checkFinanceInvariant({ export: sanitizedExport });
     if (financeCheck.drift > 0.01) {
       // Drift detected — abort the
@@ -1781,9 +2247,13 @@ export async function handleStagingRefreshImport(req: any, res: any) {
       // dropped a payment OR the source
       // export was inconsistent to begin
       // with. Either way, refuse.
+      const driftDetail = financeCheck.driftingBookings
+        .slice(0, 5)
+        .map((d) => `${d.id}: declared ${d.declared} vs computed ${d.computed}`)
+        .join("; ");
       await snapshotRef.update({
         status: "incomplete",
-        failureReason: `Finance invariant drift: ${financeCheck.drift.toFixed(2)} (sumPayments=${financeCheck.sumPayments}, sumRefunds=${financeCheck.sumRefunds}, sumBalanceDue=${financeCheck.sumBalanceDue})`,
+        failureReason: `Finance invariant drift: ${financeCheck.drift.toFixed(2)} (sumPayments=${financeCheck.sumPayments}, sumRefunds=${financeCheck.sumRefunds}, sumBalanceDue=${financeCheck.sumBalanceDue}) — ${driftDetail}`,
         completedAt: new Date(),
         completedBy: staff.email || staff.uid || ""
       });
@@ -2043,7 +2513,24 @@ export async function handleStagingRefreshImport(req: any, res: any) {
         status: "complete",
         completedAt: completedAt.toISOString(),
         expiresAt: expiresAt ? expiresAt.toISOString() : null,
-        financeCheck
+        financeCheck,
+        // The write summary. The Admin UI reads it to tell the
+        // operator how much actually landed in staging (and how much
+        // the D03 scope manifest dropped). The old response did not
+        // include it, so the toast said "Import complete." with no
+        // counts.
+        writeSummary: {
+          bookingsWritten,
+          storeOrdersWritten,
+          membersWritten,
+          bookingsDropped,
+          membersDropped,
+          sensitiveFileOptIn,
+          scopeRestricted: hasScopeRestriction
+        },
+        // The snapshot is now imported, so the Admin UI can enable the
+        // "Destroy snapshot" button (it reads this field).
+        alreadyImported: true
       }
     });
   } catch (error: any) {

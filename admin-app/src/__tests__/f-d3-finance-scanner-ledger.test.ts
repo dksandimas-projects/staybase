@@ -18,10 +18,31 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+// Per F-D3 (2026-10-27): the test imports the PURE half of the
+// scanner (`scripts/finance-scan-core.ts`), NOT the script itself.
+//
+// WHY: the script imports `firebase-admin` and `dotenv`, and the
+// admin app declares NEITHER. The admin Vercel project installs only
+// the `admin-app` workspace (rootDirectory=admin-app), so those two
+// packages are absent there — and a static import of the script put
+// it into the admin app's TypeScript program, which made EVERY admin
+// deployment fail with:
+//
+//     error TS2307: Cannot find module 'firebase-admin/app'
+//     error TS2307: Cannot find module 'firebase-admin/firestore'
+//     error TS2307: Cannot find module 'dotenv'
+//
+// The production admin app therefore stayed on v2.21.9 while the
+// guest app moved to v2.21.16. The pure core has NO imports, so it
+// can never drag an undeclared package into an app build again.
+//
+// The source-text assertions below still read the SCRIPT, because the
+// ledger SCAN LOOP lives there (the pure half is the rules; the
+// script is the loop that reads Firestore).
 import {
   scanLedgerRecord,
   scanRefundCoverage
-} from "../../../scripts/finance-integrity-scan";
+} from "../../../scripts/finance-scan-core";
 
 const scannerSrc = readFileSync(
   resolve(__dirname, "../../../scripts/finance-integrity-scan.ts"),

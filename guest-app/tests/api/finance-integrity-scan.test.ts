@@ -1,10 +1,23 @@
 import { describe, expect, test } from "vitest";
+// Per F-D3 (2026-10-27): the test imports the PURE half of the
+// scanner (`scripts/finance-scan-core.ts`), NOT the script itself.
+//
+// WHY: the script imports `firebase-admin` and `dotenv`. The guest
+// app declares `firebase-admin` but NOT `dotenv`, and the guest
+// Vercel project installs only the `guest-app` workspace
+// (rootDirectory=guest-app), so `dotenv` is absent there. A static
+// import of the script would put the script into the guest app's
+// TypeScript program and break the guest build the same way it broke
+// the admin build.
+//
+// The pure core has NO imports, so it can never drag an undeclared
+// package into an app build.
 import {
   findingsFromCsv,
   findingsToCsv,
   scanBookingRecord,
   scanStoreOrderRecord
-} from "../../../scripts/finance-integrity-scan";
+} from "../../../scripts/finance-scan-core";
 
 describe("FLR-01 finance integrity scanner", () => {
   test("flags a zeroed legacy booking with a reviewable breakdown repair", () => {
