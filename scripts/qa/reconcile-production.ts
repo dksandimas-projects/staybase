@@ -39,7 +39,11 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { initializeApp, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
-import { computeBookingFolio } from "@spark-inn/shared";
+import {
+  computeBookingFolio,
+  evaluateBookingClosure,
+  createCancellationPolicySnapshot
+} from "@spark-inn/shared";
 
 // ---------------------------------------------------------------------------
 // env
@@ -175,6 +179,59 @@ console.log(
 const FIXTURE_MARK = "[QA fixture]";
 const REAL_MARK = "[REAL guest]";
 
+// ---------------------------------------------------------------------------
+// The cancellation policy + the closure helper.
+//
+// A cancelled booking CAN legitimately still hold money: the hotel's
+// policy makes a cancellation inside the free-cancellation window
+// NON-REFUNDABLE. These helpers ask the PRODUCT'S OWN policy rule
+// (the shared `evaluateCancellation`, the same one the cancellation
+// handler calls) so there is exactly ONE implementation of the policy.
+//
+// `closureOf(b)` is the answer for a booking: how much the hotel
+// SHOULD hold after a cancellation, whether the money closes, and
+// whether an over-collection is money owed back or money the policy
+// retains.
+// ---------------------------------------------------------------------------
+
+const websiteContent = (await db.collection("settings").doc("websiteContent").get().then((s) => s.data() || {})) as any;
+const hotelConfig = (await db.collection("settings").doc("hotelConfig").get().then((s) => s.data() || {})) as any;
+
+function closureOf(b: any) {
+  const entries: any[] = ledgerByBooking.get(b.id) || [];
+  const gross = r2(entries.filter((e) => e.amount > 0).reduce((s: number, e: any) => s + e.amount, 0));
+  // Only a SETTLED refund is money that left the till. A PENDING refund
+  // is a LIABILITY — money the hotel still owes — so it does not reduce
+  // what the hotel holds. The ledger entries carry that as `pending`.
+  const refundedPaid = r2(
+    entries
+      .filter((e) => e.amount < 0 && e.pending !== true)
+      .reduce((s: number, e: any) => s + Math.abs(e.amount), 0)
+  );
+  // `b.checkIn` is already the `YYYY-MM-DD` string the AdminContext
+  // produces; `b.cancelledAtMs` is the epoch-ms cancellation stamp.
+  const cancelledAtMs = typeof b.cancelledAtMs === "number" ? b.cancelledAtMs : null;
+  const checkInDateKey = typeof b.checkIn === "string" && b.checkIn ? b.checkIn.slice(0, 10) : null;
+  return evaluateBookingClosure({
+    status: String(b.status || ""),
+    cancelledAtMs,
+    checkInDateKey,
+    grossCollected: gross,
+    refundedPaid,
+    totalPrice: r2(b.totalPrice),
+    policySnapshot: checkInDateKey
+      ? createCancellationPolicySnapshot({
+          websiteContent,
+          hotelConfig,
+          checkInDateKey,
+          corporateCodeData: null
+        })
+      : null,
+    checkInTime: hotelConfig.checkInTime,
+    timeZone: hotelConfig.timezone
+  });
+}
+
 /** "2 QA fixture(s), 1 real guest booking(s)" */
 const split = (flags: boolean[]): string => {
   const fixtures = flags.filter(Boolean).length;
@@ -189,6 +246,8 @@ interface Booking {
   source: string;
   checkIn: string;
   checkOut: string;
+  /** When the booking was cancelled (epoch ms), or null. */
+  cancelledAtMs: number | null;
   totalPrice: number;
   otherAddOnTotal: number;
   breakfastTotal: number;
@@ -218,6 +277,9 @@ const bookings: Booking[] = bookingSnap.docs.map((d) => {
     source: String(x.source || ""),
     checkIn: dateStr(x.checkIn || x.checkInDate),
     checkOut: dateStr(x.checkOut || x.checkOutDate),
+    // The cancellation stamp — the policy is judged against WHEN the
+    // booking was cancelled, so the reconciler needs it.
+    cancelledAtMs: x.cancelledAt?.toDate?.() ? x.cancelledAt.toDate().getTime() : null,
     totalPrice: num(x.totalPrice),
     otherAddOnTotal: num(x.otherAddOnTotal),
     breakfastTotal: num(x.breakfastTotal),
@@ -753,19 +815,28 @@ function peson(n: number) {
 // ---------------------------------------------------------------------------
 
 {
+  // A negative balance is ambiguous: it can be a guest who paid more
+  // than the stay was worth (a refund is DUE), or a cancelled booking
+  // whose money the policy RETAINS (the guest cancelled inside the
+  // free-cancellation window and keeps what they paid). The reader
+  // could not tell the two apart — that ambiguity was F-A4.
+  //
+  // The closure helper asks the PRODUCT'S policy rule, so there is one
+  // implementation of "what does the policy say".
   const negativeRows = bookings
-    .map((b) => ({ b, f: folioOf(b) }))
-    .filter((x) => x.f.balanceGross < 0);
+    .map((b) => ({ b, f: folioOf(b), c: closureOf(b) }))
+    .filter((x) => x.f.balanceGross < 0)
+    .filter((x) => !x.c.overCollectionRetained);
   const negative = negativeRows.map(
     (x) =>
       `${x.b.isTestData ? FIXTURE_MARK : REAL_MARK} ${x.b.ref} balance=${x.f.balanceGross} ` +
-      `(collected=${x.f.ledgerGross} grandTotal=${x.f.grandTotal})`
+      `(collected=${x.f.ledgerGross} grandTotal=${x.f.grandTotal}) — ${x.c.reason}`
   );
   check(
     "I08",
-    "Over-collected bookings — a negative outstanding balance",
+    "Over-collected bookings — a guest is owed money back",
     negative.length === 0 ? "PASS" : "WARN",
-    `${negative.length} booking(s) show a negative balance · ${split(
+    `${negative.length} booking(s) are over-collected · ${split(
       negativeRows.map((x) => x.b.isTestData)
     )}`,
     negative
@@ -1056,12 +1127,14 @@ function peson(n: number) {
       byCategory.set(k, (byCategory.get(k) || 0) + Math.abs(r.amount));
     }
     const cats = [...byCategory.entries()].map(([k, v]) => `${k}=${v}`).join(" ");
+    const closure = closureOf(b);
+    if (closure.closes) continue;
     flagged.push(b.isTestData);
     rows.push(
       `${b.isTestData ? FIXTURE_MARK : REAL_MARK} ${b.ref} collected ${peso(grossCollected)} · ` +
         `totalPrice ${peso(b.totalPrice)} · ` +
         `refunds ${peson(refunded)} [${cats || "NONE"}] · ` +
-        `unreturned ${peson(r2(grossCollected - refunded))}`
+        `unreturned ${peson(r2(grossCollected - refunded))} — ${closure.reason}`
     );
     // Per BREAKFAST.md §Cancellation: the breakfast/add-on liability opens
     // ONLY when the cancellation policy refunded NOTHING.
@@ -1077,7 +1150,7 @@ function peson(n: number) {
   }
   check(
     "I14",
-    "Cancelled bookings with collected money — refund coverage and liability composition",
+    "A cancelled booking's money closes against the cancellation policy",
     rows.length === 0 ? "PASS" : "WARN",
     `${rows.length} cancelled booking(s) hold money · ${policyRows.length} liability-composition problem(s) · ` +
       `${split(flagged)}`,

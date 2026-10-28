@@ -87,6 +87,15 @@ function fakeFirestore(bookings: any[]): any {
       },
       doc: (id: string) => ({
         id,
+        // The reconciler reads the hotel's cancellation-policy settings
+        // (websiteContent + hotelConfig) once, so the stand-in serves
+        // them as empty documents.
+        get: async () => ({
+          id,
+          exists: true,
+          data: () => ({}),
+          ref: { path: `settings/${id}`, parent: { parent: { path: "settings" } } }
+        }),
         collection: () => ({ get: async () => makeSnapshot([]) })
       })
     }),

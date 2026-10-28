@@ -97,6 +97,17 @@ function makeFakeDb(bookingCount: number) {
         doc(id: string) {
           return {
             id,
+            // The reconciler reads the hotel's cancellation-policy
+            // settings (websiteContent + hotelConfig) once.
+            async get() {
+              readCount += 1;
+              return {
+                id,
+                exists: true,
+                data: () => ({}),
+                ref: { path: `settings/${id}`, parent: { parent: { path: "settings" } } }
+              };
+            },
             collection: () => ({
               async get() {
                 readCount += 1;
@@ -163,9 +174,11 @@ describe("the nightly reconciliation's Firestore read budget", () => {
     const { result } = await runWith(500);
     const i14 = result.findings.find((f) => f.id === "I14");
     expect(i14).toBeDefined();
-    // Every third booking is cancelled holding money.
+    // Every third booking is cancelled holding money. The fake bookings
+    // carry no cancellation stamp, so the policy cannot be applied and
+    // the check reports that closure could not be confirmed.
     expect(i14!.status).toBe("WARN");
-    expect(i14!.summary).toContain(`${Math.ceil(500 / 3)} cancelled booking(s) hold money`);
+    expect(i14!.summary).toContain(`${Math.ceil(500 / 3)} cancelled booking(s) do not close`);
   });
 
   it("still separates a QA fixture from a real guest's money at scale", async () => {

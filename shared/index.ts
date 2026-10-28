@@ -40,6 +40,7 @@ export * from "./utils/corporate-codes";
 export * from "./utils/failureBackoff";
 export * from "./utils/financeInvariants";
 export * from "./utils/cancellation";
+export * from "./utils/bookingClosure";
 export * from "./utils/uploads";
 // Per SR-01..05 (2026-10-12): the booking-flow
 // preference helpers (`buildArrivalTimeOptions` for

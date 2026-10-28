@@ -1,7 +1,20 @@
 import { useEffect, useState, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAdmin } from "../context/AdminContext";
-import { getLatestPaymentReference, calculatePercentDiscount, calculateVoucherBase, calculateVatBreakdown, getBookingRevenueStreams, isVatEnabled, getEffectiveVatRate, buildDailyKitchenPrep } from "@spark-inn/shared";
+import {
+  getLatestPaymentReference,
+  calculatePercentDiscount,
+  calculateVoucherBase,
+  calculateVatBreakdown,
+  getBookingRevenueStreams,
+  isVatEnabled,
+  getEffectiveVatRate,
+  buildDailyKitchenPrep,
+  // Per F-A4: the backup labels what an Outstanding Balance MEANS,
+  // using the hotel's OWN cancellation policy.
+  evaluateBookingClosure,
+  createCancellationPolicySnapshot
+} from "@spark-inn/shared";
 import {
   AreaChart, Area,
   BarChart, Bar,
@@ -1891,6 +1904,114 @@ export function ReportsPage() {
       // XLSX Payments sheet is missing every verified /
       // add-payment / walk-in collection entry for every
       // N>1 reservation (RPT-05, 2026-08-14).
+      // Per F-A4: the Full Backup's Payments sheet only carried the
+      // LEGACY `bookings/{id}/payments` rows and the
+      // `reservations/{id}/payments` rows. The REFUNDS live in their own
+      // `refunds` subcollections — `bookings/{id}/refunds` (the BR-04
+      // shape) and `reservations/{id}/refunds` (the MRB-04 shape) — and
+      // NEITHER was read. So a refunded booking's "Outstanding Balance"
+      // counted money that had already gone back to the guest, and a
+      // negative balance could be a refunded booking OR a data error
+      // with nothing to tell the reader which.
+      //
+      // This reads BOTH refund scopes, adds them to the Payments sheet
+      // (so the Outstanding Balance is right) and records their settled
+      // vs pending state per booking (so a pending refund — a LIABILITY,
+      // money still owed — is not mistaken for money already returned).
+      const refundLedgerByBooking = new Map<string, { refundedPaid: number; pending: number }>();
+      const refundRowsSnap = await getDocs(collectionGroup(db, "refunds"));
+      refundRowsSnap.forEach((refundDoc) => {
+        const data = refundDoc.data() as any;
+        const parentDocumentId = refundDoc.ref.parent.parent?.id || "";
+        const bookingId = String(data.bookingId || parentDocumentId);
+        const booking = bookings.find((item) => item.id === bookingId);
+        if (!booking) return;
+        const amount = Number(data.amount || 0);
+        const isPending = String(data.status || "").trim().toLowerCase() !== "paid"
+          && String(data.status || "").trim().toLowerCase() !== "processed";
+        const entry = refundLedgerByBooking.get(booking.id) || { refundedPaid: 0, pending: 0 };
+        if (isPending) entry.pending += Math.abs(amount);
+        else entry.refundedPaid += Math.abs(amount);
+        refundLedgerByBooking.set(booking.id, entry);
+        paymentRows.push({
+          "Booking Ref": booking.bookingRef,
+          Type: "refund",
+          Amount: amount,
+          Method: data.method || "",
+          "Transaction Reference": data.transactionReference || "",
+          Note: data.note || "",
+          Reason: data.reason || "",
+          "Approved By": data.approvedBy || "",
+          "Recorded By": data.recordedBy || "",
+          "Recorded At": toDate(data.recordedAt)?.toISOString() || ""
+        });
+      });
+
+      // ── The Outstanding Balance + its status ─────────────────────
+      //
+      // The balance the backup has always shown: the billed total plus
+      // incidental charges, less every payment row on the sheet (which
+      // now includes the refunds it used to omit).
+      const r2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
+      const outstandingBalanceFor = (b: any): number => {
+        const charges = chargeRows
+          .filter((charge) => charge["Booking Ref"] === b.bookingRef)
+          .reduce((sum, charge) => sum + Number(charge.Amount || 0), 0);
+        const paid = paymentRows
+          .filter((p) => p["Booking Ref"] === b.bookingRef)
+          .reduce((sum, p) => sum + Number(p.Amount || 0), 0);
+        return r2((b.totalPrice || 0) + charges - paid);
+      };
+
+      /**
+       * What the balance MEANS, in plain words.
+       *
+       * A negative balance is the case the finding was about: it can be
+       * a guest who paid more than the stay was worth (a refund is
+       * DUE), or a cancelled booking whose money the policy RETAINS
+       * (the guest cancelled inside the free-cancellation window and
+       * keeps what they paid — the hotel owes nothing back). The
+       * policy is the hotel's own rule, read from the settings the
+       * backup already exports.
+       */
+      const balanceStatusFor = (b: any, balance: number): string => {
+        if (Math.abs(balance) < 0.01) return "Settled";
+        if (balance > 0) return "Outstanding — the guest owes this much";
+        const settingsRows = rootCollectionDocs.get("settings") || [];
+        const websiteContent = settingsRows.find((s: any) => s.id === "websiteContent") || {};
+        const hotelConfig = settingsRows.find((s: any) => s.id === "hotelConfig") || {};
+        const cancelledAtMs = b.cancelledAt ? new Date(b.cancelledAt).getTime() : null;
+        const checkInDateKey = typeof b.checkIn === "string" ? b.checkIn.slice(0, 10) : null;
+        if (!cancelledAtMs || !checkInDateKey) {
+          return "Over-collected — refund due to the guest (or a data error — investigate)";
+        }
+        const policySnapshot = createCancellationPolicySnapshot({
+          websiteContent,
+          hotelConfig,
+          checkInDateKey,
+          corporateCodeData: null
+        });
+        const ledger = refundLedgerByBooking.get(b.id) || { refundedPaid: 0, pending: 0 };
+        const gross = paymentRows
+          .filter((p) => p["Booking Ref"] === b.bookingRef && Number(p.Amount || 0) > 0)
+          .reduce((sum, p) => sum + Number(p.Amount || 0), 0);
+        const closure = evaluateBookingClosure({
+          status: String(b.status || ""),
+          cancelledAtMs,
+          checkInDateKey,
+          grossCollected: gross,
+          refundedPaid: ledger.refundedPaid,
+          totalPrice: Number(b.totalPrice || 0),
+          policySnapshot,
+          checkInTime: hotelConfig.checkInTime,
+          timeZone: hotelConfig.timezone
+        });
+        if (closure.overCollectionRetained) {
+          return "Over-collected — RETAINED per the cancellation policy (not money owed back)";
+        }
+        return "Over-collected — refund due to the guest";
+      };
+
       const allReservationPaymentsSnap = await getDocs(collectionGroup(db, "payments"));
       allReservationPaymentsSnap.forEach((paymentDoc) => {
         if (!paymentDoc.ref.path.startsWith("reservations/")) return; // legacy handled by per-booking loop above
@@ -2129,11 +2250,14 @@ export function ReportsPage() {
       "Total Collected Onsite": paymentRows
         .filter((p) => p["Booking Ref"] === b.bookingRef)
         .reduce((sum, p) => sum + Number(p.Amount || 0), 0),
-      "Outstanding Balance": (b.totalPrice || 0) + chargeRows
-        .filter((charge) => charge["Booking Ref"] === b.bookingRef)
-        .reduce((sum, charge) => sum + Number(charge.Amount || 0), 0) - paymentRows
-        .filter((p) => p["Booking Ref"] === b.bookingRef)
-        .reduce((sum, p) => sum + Number(p.Amount || 0), 0),
+      "Outstanding Balance": outstandingBalanceFor(b),
+      // Per F-A4: a negative Outstanding Balance used to be ambiguous —
+      // "over-collection vs data error is indistinguishable to the
+      // reader". This says which one it is, using the HOTEL'S OWN
+      // cancellation policy (the same shared rule the reconciliation
+      // and the cancellation handler use), so a retained amount is
+      // never mistaken for money owed back to a guest.
+      "Balance Status": balanceStatusFor(b, outstandingBalanceFor(b)),
       "Payment Method": b.paymentMethod,
       "Payment Reference (latest ledger entry)": getLatestPaymentReference(b) || "",
       Source: b.source,
