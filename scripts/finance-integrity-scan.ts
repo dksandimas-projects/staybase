@@ -39,9 +39,8 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
-import { config as dotenv } from "dotenv";
 import {
-  FinanceIntegrityFinding,
+  type FinanceIntegrityFinding,
   CSV_COLUMNS,
   finiteNumber,
   money,
@@ -51,18 +50,52 @@ import {
   scanRefundCoverage,
   findingsToCsv,
   findingsFromCsv
-} from "./finance-scan-core";
+} from "./finance-scan-core.ts";
 
 // Re-export the pure half so the existing importers
 // (`guest-app/tests/api/finance-integrity-scan.test.ts`)
 // keep working against one entry point.
-export * from "./finance-scan-core";
+export * from "./finance-scan-core.ts";
+
+/**
+ * Load the env file WITHOUT `dotenv`.
+ *
+ * Per the admin-build fix (2026-10-27): `dotenv` is not reachable
+ * from the admin app's dependency closure, so importing it here put
+ * the script into the admin app's TypeScript program and broke every
+ * admin deployment with `error TS2307: Cannot find module 'dotenv'`.
+ *
+ * This loader is the same one `scripts/qa/reconcile-production.ts`
+ * and `scripts/qa/export-prod-data.ts` already use — a flat
+ * KEY=VALUE file with `#` comments, optional surrounding quotes and
+ * `\n` escapes. Keeping the script's dependency surface to
+ * `firebase-admin` alone means it can no longer pull an undeclared
+ * package into an app build even by accident.
+ */
+function loadEnv(file: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const raw of readFileSync(resolve(process.cwd(), file), "utf8").split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq === -1) continue;
+    let value = line.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    out[line.slice(0, eq).trim()] = value.replace(/\\n/g, "\n");
+  }
+  return out;
+}
 
 function initializeAdmin() {
-  dotenv({ path: resolve(process.cwd(), "guest-app/.env") });
-  const { FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY } = process.env;
+  const env = loadEnv(process.env.ENV_FILE || "guest-app/.env.spark-inn-prod");
+  const { FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY } = env;
   if (!FIREBASE_PROJECT_ID || !FIREBASE_CLIENT_EMAIL || !FIREBASE_PRIVATE_KEY) {
-    throw new Error("Missing Firebase Admin variables in guest-app/.env.");
+    throw new Error("Missing Firebase Admin variables in guest-app/.env.spark-inn-prod.");
   }
   if (!getApps().length) {
     initializeApp({

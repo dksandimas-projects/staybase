@@ -18,6 +18,7 @@
     "typecheck": "npm run typecheck -w guest-app && npm run typecheck -w admin-app",
     "typecheck:server": "node scripts/check-server-typecheck.mjs",
     "check:app-closure": "node scripts/check-app-dependency-closure.mjs",
+    "typecheck:scripts": "tsc --noEmit -p scripts/tsconfig.finance-scan.json",
     "test": "npm run test -w shared && npm run test:api -w guest-app && npm run test -w admin-app && npm run test:infra && npm run test:rules && npm run test:qa && npm run check:app-closure",
     "test:shared": "npm run test -w shared",
     "test:guest:api": "npm run test:api -w guest-app",
