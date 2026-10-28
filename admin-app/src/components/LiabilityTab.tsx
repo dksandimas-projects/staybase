@@ -50,6 +50,7 @@ import { useAdmin } from "../context/AdminContext";
 import { computeCancellationLiabilityState } from "@spark-inn/shared";
 import { formatPrice } from "../utils/format";
 import { cn } from "../utils/cn";
+import { buildFixtureBookingIds, isFixtureRefund, fixtureNote } from "../utils/qaFixtures";
 
 interface LiabilityRow {
   id: string;
@@ -68,6 +69,8 @@ interface LiabilityRow {
   stateLabel: string;
   policyRefund: number;
   approvedAmount: number;
+  /** The booking belongs to a QA test run — rehearsal data, not guest money. */
+  isTestData: boolean;
 }
 
 interface LiabilityTabProps {
@@ -91,7 +94,10 @@ export function LiabilityTab({ rangeStart, rangeEnd, refreshKey = 0 }: Liability
   const [breakfastPendingState, setBreakfastPendingState] = useState<{
     count: number;
     amount: number;
-  }>({ count: 0, amount: 0 });
+    /** How many of the pending breakfast refunds are QA test fixtures. */
+    fixtureCount: number;
+    fixtureAmount: number;
+  }>({ count: 0, amount: 0, fixtureCount: 0, fixtureAmount: 0 });
 
   // Fetch every liability + its live `processedAmount`.
   // The fetch is async + per-document; for a 14-room
@@ -134,6 +140,13 @@ export function LiabilityTab({ rangeStart, rangeEnd, refreshKey = 0 }: Liability
         // re-reads via the same collectionGroup).
         let breakfastPendingCount = 0;
         let breakfastPendingAmount = 0;
+        let breakfastFixtureCount = 0;
+        let breakfastFixtureAmount = 0;
+        // The QA-fixture lookup: a refund whose booking carries
+        // `isTestData: true` is rehearsal data. A refund we cannot
+        // attribute to a booking is treated as REAL guest money — the
+        // safe direction to be wrong in.
+        const fixtureBookingIds = buildFixtureBookingIds(bookings);
         for (const refundDoc of refundsGroup.docs) {
           // The collectionGroup path is
           // `reservations/{reservationId}/refunds/{refundId}`
@@ -163,8 +176,14 @@ export function LiabilityTab({ rangeStart, rangeEnd, refreshKey = 0 }: Liability
             String(data.category || "") === "breakfast" &&
             String(data.status || "pending") === "pending"
           ) {
-            breakfastPendingCount += 1;
-            breakfastPendingAmount += Math.abs(Number(data.amount || 0));
+            const amount = Math.abs(Number(data.amount || 0));
+            if (isFixtureRefund(refundDoc as any, fixtureBookingIds)) {
+              breakfastFixtureCount += 1;
+              breakfastFixtureAmount += amount;
+            } else {
+              breakfastPendingCount += 1;
+              breakfastPendingAmount += amount;
+            }
           }
         }
         // Stash for the metrics useMemo below. The
@@ -179,7 +198,9 @@ export function LiabilityTab({ rangeStart, rangeEnd, refreshKey = 0 }: Liability
         if (!cancelled) {
           setBreakfastPendingState({
             count: breakfastPendingCount,
-            amount: breakfastPendingAmount
+            amount: breakfastPendingAmount,
+            fixtureCount: breakfastFixtureCount,
+            fixtureAmount: breakfastFixtureAmount
           });
         }
         for (const resDoc of reservationsSnap.docs) {
@@ -205,7 +226,8 @@ export function LiabilityTab({ rangeStart, rangeEnd, refreshKey = 0 }: Liability
             state: projection.state,
             stateLabel: projection.stateLabel,
             policyRefund: Number(liability.policyResult?.policyRefund || 0),
-            approvedAmount: projection.liability?.approvedAmount || 0
+            approvedAmount: projection.liability?.approvedAmount || 0,
+            isTestData: data.isTestData === true
           });
         }
         // 2. Per-child + legacy null-`reservationId`
@@ -254,7 +276,8 @@ export function LiabilityTab({ rangeStart, rangeEnd, refreshKey = 0 }: Liability
             state: projection.state,
             stateLabel: projection.stateLabel,
             policyRefund: Number(liability.policyResult?.policyRefund || 0),
-            approvedAmount: projection.liability?.approvedAmount || 0
+            approvedAmount: projection.liability?.approvedAmount || 0,
+            isTestData: booking.isTestData === true
           });
         }
         if (!cancelled) setRows(result);
@@ -311,7 +334,9 @@ export function LiabilityTab({ rangeStart, rangeEnd, refreshKey = 0 }: Liability
       // pushes it through to the metric card +
       // the parent page's dashboard badge.
       breakfastPendingCount: breakfastPendingState.count,
-      breakfastPendingAmount: breakfastPendingState.amount
+      breakfastPendingAmount: breakfastPendingState.amount,
+      breakfastPendingFixtureCount: breakfastPendingState.fixtureCount,
+      breakfastPendingFixtureAmount: breakfastPendingState.fixtureAmount
     };
   }, [rows, rangeStart, rangeEnd, breakfastPendingState]);
 
@@ -356,6 +381,10 @@ export function LiabilityTab({ rangeStart, rangeEnd, refreshKey = 0 }: Liability
           value={metrics.breakfastPendingCount}
           sublabel={formatPrice(metrics.breakfastPendingAmount)}
           accent="amber"
+          // The headline is REAL guest money only. The QA-fixture part
+          // is reported underneath, never dropped — the desk must be
+          // able to see both without confusing the two.
+          note={fixtureNote(metrics.breakfastPendingFixtureCount, metrics.breakfastPendingFixtureAmount)}
         />
         <MetricCard
           icon={AlertTriangle}
@@ -489,12 +518,14 @@ function toDate(value: any): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function MetricCard({ icon: Icon, label, value, sublabel, accent }: {
+function MetricCard({ icon: Icon, label, value, sublabel, accent, note }: {
   icon: any;
   label: string;
   value: string | number;
   sublabel: string;
   accent: "amber" | "emerald" | "violet" | "rose";
+  /** An optional plain-language line under the sublabel. */
+  note?: string;
 }) {
   const accentClass = {
     amber: "bg-amber-50 text-amber-700",
@@ -512,6 +543,11 @@ function MetricCard({ icon: Icon, label, value, sublabel, accent }: {
       </div>
       <p className="mt-1.5 text-lg font-bold text-gray-900">{value}</p>
       <p className="text-[10px] text-gray-500">{sublabel}</p>
+      {note ? (
+        <p className="mt-1 text-[10px] leading-snug text-gray-400" data-testid="liability-metric-fixture-note">
+          {note}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -563,6 +599,16 @@ function PendingRow({ row }: { row: LiabilityRow }) {
             {" · "}
             <span className="text-gray-400">{ageLabel}</span>
           </p>
+          {/* A QA test-run row. It is a rehearsal entry, not a guest the
+              desk owes money to — so it says so, plainly, right here. */}
+          {row.isTestData && (
+            <p
+              className="mt-1 inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-600"
+              data-testid="liability-row-fixture-badge"
+            >
+              QA test fixture — rehearsal data, not guest money
+            </p>
+          )}
         </div>
         <div className="text-right">
           <p className="text-sm font-bold text-gray-900">{formatPrice(row.outstandingAmount)}</p>
