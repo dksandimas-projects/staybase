@@ -192,6 +192,34 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
   };
 
   // -------------------------------------------------------------------------
+  // QA FIXTURES vs REAL GUEST MONEY.
+  //
+  // A finding that names a booking is only actionable if the reader can
+  // tell whether the money involved is a REAL guest's. Without this
+  // marker the nightly report mixes the hotel's own rehearsal bookings
+  // in with live guest bookings in exactly the same format — which is
+  // how two findings (F-A4, F-D4) sat "open" for a week: nobody could
+  // tell that every flagged booking was the owner's own test run.
+  //
+  // The marker NEVER suppresses a finding and NEVER downgrades a status.
+  // A real guest's booking is still reported, still FAILs or WARNs the
+  // same way. Only the LABEL is added, plus a count in the summary, so
+  // the desk can see at a glance whether any REAL money is involved.
+  const FIXTURE_MARK = "[QA fixture]";
+  const REAL_MARK = "[REAL guest]";
+
+  /** Prefix a per-booking finding with whether the money is a real guest's. */
+  const mark = (isTestData: boolean, text: string): string =>
+    `${isTestData ? FIXTURE_MARK : REAL_MARK} ${text}`;
+
+  /** "3 finding(s) — 2 are QA fixtures, 1 is a real guest booking" */
+  const split = (flags: boolean[]): string => {
+    const fixtures = flags.filter(Boolean).length;
+    const real = flags.length - fixtures;
+    return `${fixtures} QA fixture(s), ${real} real guest booking(s)`;
+  };
+
+  // -------------------------------------------------------------------------
   // The per-booking money model.
   // -------------------------------------------------------------------------
   interface MoneyModel {
@@ -204,6 +232,8 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
     hasAnyBreakfast: boolean;
     liveBreakfastSlots: number;
     status: string;
+    /** The booking is a QA test-run fixture, not a real guest's booking. */
+    isTestData: boolean;
   }
 
   const models: MoneyModel[] = [];
@@ -237,7 +267,8 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
       allocation: booking.revenueAllocation || null,
       hasAnyBreakfast: booking.hasAnyBreakfast === true,
       liveBreakfastSlots: liveSlots,
-      status: String(booking.status || "")
+      status: String(booking.status || ""),
+      isTestData: booking.isTestData === true
     });
   }
 
@@ -247,18 +278,27 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
   {
     const mismatched: string[] = [];
     const negative: string[] = [];
+    const flagged: boolean[] = [];
     for (const m of models) {
       if (m.paidAmountField === null) continue;
       if (m.paidAmountField < 0) {
+        flagged.push(m.isTestData);
         negative.push(
-          `${m.ref} paidAmount=${r2(m.paidAmountField)} (NEGATIVE) collected=${m.ledgerCollected}`
+          mark(
+            m.isTestData,
+            `${m.ref} paidAmount=${r2(m.paidAmountField)} (NEGATIVE) collected=${m.ledgerCollected}`
+          )
         );
       }
       if (r2(m.paidAmountField) !== m.ledgerCollected) {
+        flagged.push(m.isTestData);
         mismatched.push(
-          `${m.ref} paidAmount=${r2(m.paidAmountField)} ledger=${m.ledgerCollected} Δ=${r2(
-            m.paidAmountField - m.ledgerCollected
-          )}`
+          mark(
+            m.isTestData,
+            `${m.ref} paidAmount=${r2(m.paidAmountField)} ledger=${m.ledgerCollected} Δ=${r2(
+              m.paidAmountField - m.ledgerCollected
+            )}`
+          )
         );
       }
     }
@@ -266,7 +306,7 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
       "I06",
       "PAY-01 — booking.paidAmount agrees with the independently summed ledger",
       mismatched.length === 0 && negative.length === 0 ? "PASS" : "FAIL",
-      `${mismatched.length} mismatch(es) · ${negative.length} negative paidAmount`,
+      `${mismatched.length} mismatch(es) · ${negative.length} negative paidAmount · ${split(flagged)}`,
       [...negative, ...mismatched]
     );
   }
@@ -276,6 +316,7 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
   // -------------------------------------------------------------------------
   {
     const offenders: string[] = [];
+    const flagged: boolean[] = [];
     for (const m of models) {
       if (m.paidAmountField === null) continue;
       // A pending refund must not reduce the amount the hotel has collected.
@@ -284,8 +325,12 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
       if (m.pendingRefund !== 0) {
         const netted = r2(m.ledgerCollected + m.pendingRefund);
         if (r2(m.paidAmountField) === netted && netted !== m.ledgerCollected) {
+          flagged.push(m.isTestData);
           offenders.push(
-            `${m.ref} paidAmount=${r2(m.paidAmountField)} = collected ${m.ledgerCollected} + pending refund ${m.pendingRefund}`
+            mark(
+              m.isTestData,
+              `${m.ref} paidAmount=${r2(m.paidAmountField)} = collected ${m.ledgerCollected} + pending refund ${m.pendingRefund}`
+            )
           );
         }
       }
@@ -294,7 +339,7 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
       "I06b",
       "A pending refund liability must not be netted against collected money",
       offenders.length === 0 ? "PASS" : "FAIL",
-      `${offenders.length} booking(s) net a pending refund against collected money`,
+      `${offenders.length} booking(s) net a pending refund against collected money · ${split(flagged)}`,
       offenders
     );
   }
@@ -387,11 +432,16 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
   // -------------------------------------------------------------------------
   {
     const holders: string[] = [];
+    const flagged: boolean[] = [];
     for (const m of models) {
       if (m.status !== "cancelled") continue;
       if (m.ledgerCollected > 0) {
+        flagged.push(m.isTestData);
         holders.push(
-          `${m.ref} cancelled but collected=${m.ledgerCollected} pendingRefund=${m.pendingRefund}`
+          mark(
+            m.isTestData,
+            `${m.ref} cancelled but collected=${m.ledgerCollected} pendingRefund=${m.pendingRefund}`
+          )
         );
       }
     }
@@ -399,7 +449,7 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
       "I14",
       "A cancelled booking does not still hold money",
       holders.length === 0 ? "PASS" : "WARN",
-      `${holders.length} cancelled booking(s) hold money`,
+      `${holders.length} cancelled booking(s) hold money · ${split(flagged)}`,
       holders
     );
   }
@@ -444,6 +494,7 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
   // -------------------------------------------------------------------------
   {
     const disagreements: string[] = [];
+    const flagged: boolean[] = [];
     for (const booking of bookings) {
       try {
         const ledger = await readBookingLedger(booking);
@@ -460,8 +511,12 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
         });
         const independent = r2(sumCollectedPayments(ledger));
         if (r2(folio.paymentsTotal) !== independent) {
+          flagged.push(booking.isTestData === true);
           disagreements.push(
-            `${String(booking.bookingRef || booking.id)} folio=${r2(folio.paymentsTotal)} independent=${independent}`
+            mark(
+              booking.isTestData === true,
+              `${String(booking.bookingRef || booking.id)} folio=${r2(folio.paymentsTotal)} independent=${independent}`
+            )
           );
         }
       } catch {
@@ -472,7 +527,7 @@ export async function runReconciliation(): Promise<ReconciliationRunResult> {
       "I07",
       "Two independent implementations agree on the collected total",
       disagreements.length === 0 ? "PASS" : "FAIL",
-      `${disagreements.length} disagreement(s)`,
+      `${disagreements.length} disagreement(s) · ${split(flagged)}`,
       disagreements
     );
   }

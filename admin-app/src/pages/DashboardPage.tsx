@@ -25,6 +25,7 @@ import { BedDouble, Building2, CalendarDays, CalendarClock, Check, RefreshCw, Al
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import config from "@config";
 import { formatPrice } from "../utils/format";
+import { buildFixtureBookingIds, isFixtureRefund } from "../utils/qaFixtures";
 import { db } from "../firebase/config";
 
 
@@ -144,6 +145,11 @@ type PendingPaymentItem = {
   paidAmount: number;
   dueAmount: number;
   rooms: PendingPaymentRoom[];
+  /**
+   * The item belongs to a QA test run — a rehearsal payment proof, not
+   * a real guest waiting for their money to be verified.
+   */
+  isTestData: boolean;
 };
 
 export function DashboardPage() {
@@ -358,7 +364,21 @@ export function DashboardPage() {
     ? 0
     : Math.round((occupiedRoomsCount / totalRoomsCount) * 100);
 
-  const monthlyBookingsCount = bookings.filter((b) => b.createdAt?.startsWith(monthKey)).length;
+  // QA TEST FIXTURES vs REAL GUEST ACTIVITY.
+  //
+  // The "Bookings" and "Revenue" cards are the owner's headline
+  // numbers. On 2026-10-27 a live check found the "Revenue" card was
+  // showing ₱42,800.00 for the month — of which **100% was the owner's
+  // own rehearsal run**. The real guest revenue was ₱0.00. A headline
+  // the owner cannot trust is worse than no headline, so the REAL
+  // figure is the headline and the rehearsal part is reported next to
+  // it, never hidden.
+  const monthlyBookingsCount = bookings.filter(
+    (b) => b.createdAt?.startsWith(monthKey) && b.isTestData !== true
+  ).length;
+  const monthlyBookingsFixtures = bookings.filter(
+    (b) => b.createdAt?.startsWith(monthKey) && b.isTestData === true
+  ).length;
   // Per BR-06 (#235, 2026-10-13): the dashboard's
   // "Pending refunds" counter — union of cancellation
   // pending (CRL-01) + breakfast pending (BR-04). The
@@ -370,25 +390,37 @@ export function DashboardPage() {
   // `partially-processed` so the union is the
   // "money we still owe guests" figure.
   const [breakfastPendingRefunds, setBreakfastPendingRefunds] = useState<number>(0);
+  // How many of those pending breakfast refunds belong to a QA test run
+  // rather than to a real guest. The desk's headline shows the REAL
+  // count; the fixture count is reported alongside it, never hidden.
+  // See `utils/qaFixtures.ts` for why the default is "treat it as real".
+  const [breakfastPendingFixtures, setBreakfastPendingFixtures] = useState<number>(0);
   useEffect(() => {
     let cancelled = false;
     const fetchBreakfastPending = async () => {
       try {
         const refundsGroup = await getDocs(collectionGroup(db, "refunds"));
         if (cancelled) return;
+        const fixtureIds = buildFixtureBookingIds(bookings);
         let count = 0;
+        let fixtureCount = 0;
         for (const refundDoc of refundsGroup.docs) {
           const data: any = refundDoc.data() || {};
           if (
             String(data.category || "") === "breakfast" &&
             String(data.status || "pending") === "pending"
           ) {
-            count += 1;
+            if (isFixtureRefund(refundDoc as any, fixtureIds)) fixtureCount += 1;
+            else count += 1;
           }
         }
         setBreakfastPendingRefunds(count);
+        setBreakfastPendingFixtures(fixtureCount);
       } catch {
-        if (!cancelled) setBreakfastPendingRefunds(0);
+        if (!cancelled) {
+          setBreakfastPendingRefunds(0);
+          setBreakfastPendingFixtures(0);
+        }
       }
     };
     fetchBreakfastPending();
@@ -400,8 +432,9 @@ export function DashboardPage() {
   // states are `pending-processing` +
   // `partially-processed` — the same states the
   // LiabilityTab metric filters on.
-  const cancellationPendingRefunds = useMemo(() => {
+  const { cancellationPendingRefunds, cancellationPendingFixtures } = useMemo(() => {
     let count = 0;
+    let fixtureCount = 0;
     for (const b of bookings) {
       const liability: any = (b as any).cancellationLiability;
       if (!liability || !liability.policyResult) continue;
@@ -410,14 +443,19 @@ export function DashboardPage() {
       const outstanding = Math.max(policyRefund - processed, 0);
       const state: string = String(liability.state || "");
       if (outstanding > 0 || state === "pending-processing" || state === "partially-processed") {
-        count += 1;
+        if (b.isTestData === true) fixtureCount += 1;
+        else count += 1;
       }
     }
-    return count;
+    return { cancellationPendingRefunds: count, cancellationPendingFixtures: fixtureCount };
   }, [bookings]);
   const pendingRefundsTotal = cancellationPendingRefunds + breakfastPendingRefunds;
+  const pendingRefundFixtures = cancellationPendingFixtures + breakfastPendingFixtures;
   const monthlyRevenue = bookings
-    .filter((b) => b.checkIn?.startsWith(monthKey) && ["payment-confirmed", "confirmed", "checked-in", "checked-out"].includes(b.status))
+    .filter((b) => b.checkIn?.startsWith(monthKey) && ["payment-confirmed", "confirmed", "checked-in", "checked-out"].includes(b.status) && b.isTestData !== true)
+    .reduce((sum, booking) => sum + Number(booking.totalPrice || 0), 0);
+  const monthlyRevenueFixtures = bookings
+    .filter((b) => b.checkIn?.startsWith(monthKey) && ["payment-confirmed", "confirmed", "checked-in", "checked-out"].includes(b.status) && b.isTestData === true)
     .reduce((sum, booking) => sum + Number(booking.totalPrice || 0), 0);
   const occupancyHelpText = "Occupancy is based on rooms currently marked occupied divided by all rooms in the room list.";
   const bookingsHelpText = "Bookings counts reservations created during the current month, based on each booking's createdAt month.";
@@ -499,6 +537,7 @@ export function DashboardPage() {
           totalPrice: Number(booking.totalPrice || 0),
           paidAmount: paid,
           dueAmount: Math.max(0, Number(booking.totalPrice || 0) - paid),
+          isTestData: booking.isTestData === true,
           rooms: [
             {
               bookingId: booking.id,
@@ -578,6 +617,9 @@ export function DashboardPage() {
         totalPrice: scopedTotal,
         paidAmount,
         dueAmount: Math.max(0, scopedTotal - paidAmount),
+        // A reservation group is a fixture only if EVERY child is one —
+        // a mixed group still involves a real guest, so it stays real.
+        isTestData: sorted.length > 0 && sorted.every((c) => c.isTestData === true),
         rooms: sorted.map((c) => ({
           bookingId: c.id,
           roomNumber: c.roomNumber || "TBD",
@@ -604,6 +646,11 @@ export function DashboardPage() {
     return items;
   }, [bookings, reservations, reservationPaidAmount]);
   const pendingPayments = pendingPaymentItems;
+  // Split the queue into real guest proofs and QA rehearsal proofs. A
+  // mixed reservation group (some real children, some fixture children)
+  // stays REAL, because it involves a real guest.
+  const pendingPaymentRealCount = pendingPayments.filter((item) => !item.isTestData).length;
+  const pendingPaymentFixtureCount = pendingPayments.filter((item) => item.isTestData).length;
   const newCorporateInquiries = corporateInquiries.filter(inquiry => inquiry.status === "new");
   const todaysArrivals = bookings.filter(b => b.checkIn === todayKey && b.status === "confirmed");
   const overdueCheckouts = selectOverdueCheckouts(bookings, todayKey, currentManilaMinutes, configuredCheckOutTime);
@@ -1018,7 +1065,11 @@ export function DashboardPage() {
         <StatsCard
           label="Bookings"
           value={String(monthlyBookingsCount)}
-          context={`${monthKey} check-in activity`}
+          context={
+            monthlyBookingsFixtures > 0
+              ? `${monthKey} check-in activity — ${monthlyBookingsFixtures} QA test fixture${monthlyBookingsFixtures === 1 ? "" : "s"} excluded`
+              : `${monthKey} check-in activity`
+          }
           icon={<CalendarDays size={18} />}
           tone={monthlyBookingsCount > 0 ? "info" : "neutral"}
           helpText={bookingsHelpText}
@@ -1026,7 +1077,11 @@ export function DashboardPage() {
         <StatsCard
           label="Revenue"
           value={showRevenue ? formatPrice(monthlyRevenue) : `${config.currencySymbol}•••••`}
-          context="Booking value this month"
+          context={
+            monthlyRevenueFixtures > 0
+              ? `Real guest bookings this month — ${formatPrice(monthlyRevenueFixtures)} is QA test data`
+              : "Booking value this month"
+          }
           icon={<PhilippinePeso size={18} />}
           tone={monthlyRevenue > 0 ? "success" : "neutral"}
           helpText={revenueHelpText}
@@ -1044,10 +1099,16 @@ export function DashboardPage() {
         />
         <StatsCard
           label="Pending Payments"
-          value={String(pendingPayments.length)}
-          context={pendingPayments.length > 0 ? `${pendingPayments.length} proof${pendingPayments.length === 1 ? "" : "s"} queued` : "No payment proofs queued"}
+          value={String(pendingPaymentRealCount)}
+          context={
+            pendingPaymentRealCount > 0
+              ? `${pendingPaymentRealCount} proof${pendingPaymentRealCount === 1 ? "" : "s"} queued`
+              : pendingPaymentFixtureCount > 0
+                ? `No guest proof queued — ${pendingPaymentFixtureCount} QA test fixture${pendingPaymentFixtureCount === 1 ? "" : "s"} only`
+                : "No payment proofs queued"
+          }
           icon={<CreditCard size={18} />}
-          tone={pendingPayments.length > 0 ? "warning" : "neutral"}
+          tone={pendingPaymentRealCount > 0 ? "warning" : "neutral"}
         />
         {/* Per BR-06 (#235, 2026-10-13): the Pending
             Refunds aggregate card. Count = union of
@@ -1061,7 +1122,9 @@ export function DashboardPage() {
           context={
             pendingRefundsTotal > 0
               ? `${cancellationPendingRefunds} cancellation + ${breakfastPendingRefunds} breakfast`
-              : "No refunds pending"
+              : pendingRefundFixtures > 0
+                ? `No guest refunds pending — ${pendingRefundFixtures} QA test fixture${pendingRefundFixtures === 1 ? "" : "s"} only`
+                : "No refunds pending"
           }
           onClick={
             // Per RPT-04 the Liability tab is admin-only, and the
@@ -1075,6 +1138,18 @@ export function DashboardPage() {
           tone={pendingRefundsTotal > 0 ? "warning" : "neutral"}
           data-testid="dashboard-pending-refunds-card"
         />
+        {/* The QA-fixture note. It is its own line so the headline card
+            stays a clean number, and it says plainly that the fixture
+            money is NOT a guest's. */}
+        {pendingRefundFixtures > 0 && (
+          <p
+            className="col-span-full -mt-2 text-xs text-gray-500"
+            data-testid="dashboard-pending-refunds-fixture-note"
+          >
+            {pendingRefundFixtures} QA test fixture{pendingRefundFixtures === 1 ? "" : "s"} also pending
+            {" — "}rehearsal data, not guest money.
+          </p>
+        )}
         <StatsCard
           label="Unread Messages"
           value={String(unreadIntercomCount)}
@@ -1092,23 +1167,24 @@ export function DashboardPage() {
             : ""
         }`}>
           <div className={`rounded-card p-5 shadow-sm ring-1 ${
-            pendingPayments.length > 0
+            pendingPaymentRealCount > 0
               ? "border border-amber-200 bg-amber-50 ring-amber-100"
               : "bg-white ring-gray-200"
           }`}>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <h2 className={`flex items-center gap-2 text-lg font-heading lowercase tracking-tight ${
-                pendingPayments.length > 0 ? "text-amber-950" : "text-gray-950"
+                pendingPaymentRealCount > 0 ? "text-amber-950" : "text-gray-950"
               }`}>
-                <CreditCard size={18} className={pendingPayments.length > 0 ? "text-amber-700" : "text-primary"} />
+                <CreditCard size={18} className={pendingPaymentRealCount > 0 ? "text-amber-700" : "text-primary"} />
                 pending payment alerts
               </h2>
               <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
-                pendingPayments.length > 0
+                pendingPaymentRealCount > 0
                   ? "bg-amber-100 text-amber-800"
                   : "bg-gray-100 text-gray-500"
               }`}>
-                {pendingPayments.length} queued
+                {pendingPaymentRealCount} queued
+                {pendingPaymentFixtureCount > 0 ? ` (+${pendingPaymentFixtureCount} QA fixtures)` : ""}
               </span>
             </div>
             <div className="space-y-3">
@@ -1179,6 +1255,17 @@ export function DashboardPage() {
                       </div>
                       <p className="truncate text-xs text-gray-600">{item.guestName} · {roomChip}</p>
                       <p className="text-[10px] font-semibold text-gray-400">{item.checkIn} to {item.checkOut} · {formatPrice(item.totalPrice)} total · {formatPrice(idgDueAmount)} {dueLabel.toLowerCase()}</p>
+                      {/* A rehearsal payment proof. It is NOT a guest
+                          waiting — so it says so, right on the row the
+                          desk is about to act on. */}
+                      {item.isTestData && (
+                        <p
+                          className="mt-0.5 inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-600"
+                          data-testid="dashboard-payment-fixture-badge"
+                        >
+                          QA test fixture — rehearsal data, not a guest payment
+                        </p>
+                      )}
                       {item.latestReference && (
                         <p className="mt-0.5 inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-mono font-bold text-amber-800">
                           Ref: {item.latestReference}

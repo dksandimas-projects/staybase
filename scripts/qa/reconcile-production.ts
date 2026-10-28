@@ -155,6 +155,33 @@ console.log(
     `storeOrders=${storeOrderSnap.size}`
 );
 
+// ---------------------------------------------------------------------------
+// QA FIXTURES vs REAL GUEST MONEY.
+//
+// A finding that names a booking is only actionable if the reader can tell
+// whether the money involved is a REAL guest's. Without this marker the
+// report mixes the hotel's own rehearsal bookings in with live guest
+// bookings in exactly the same format — which is how two findings (F-A4,
+// F-D4) sat "open" for a week: nobody could tell that every flagged
+// booking was the owner's own test run.
+//
+// The marker NEVER suppresses a finding and NEVER downgrades a status. A
+// real guest's booking is still reported, and still FAILs or WARNs the same
+// way. Only the LABEL is added, plus a count in the summary, so the desk
+// can see at a glance whether any REAL money is involved.
+//
+// These markers must match the nightly server-side reconciler
+// (`guest-app/server/lib/reconciliation.ts`) exactly.
+const FIXTURE_MARK = "[QA fixture]";
+const REAL_MARK = "[REAL guest]";
+
+/** "2 QA fixture(s), 1 real guest booking(s)" */
+const split = (flags: boolean[]): string => {
+  const fixtures = flags.filter(Boolean).length;
+  const real = flags.length - fixtures;
+  return `${fixtures} QA fixture(s), ${real} real guest booking(s)`;
+};
+
 interface Booking {
   id: string;
   ref: string;
@@ -602,21 +629,30 @@ check(
   const mismatched: string[] = [];
   const absent: string[] = [];
   const negativePaid: string[] = [];
+  const flagged: boolean[] = [];
   for (const b of bookings) {
     const f = folioOf(b);
     if (b.paidAmountField === null) {
-      if (f.ledgerCount > 0) absent.push(`${b.ref} ledger=${f.ledgerGross} paidAmount=<absent>`);
+      if (f.ledgerCount > 0) {
+        flagged.push(b.isTestData);
+        absent.push(
+          `${b.isTestData ? FIXTURE_MARK : REAL_MARK} ${b.ref} ledger=${f.ledgerGross} paidAmount=<absent>`
+        );
+      }
       continue;
     }
     if (b.paidAmountField < 0) {
+      flagged.push(b.isTestData);
       negativePaid.push(
-        `${b.ref} paidAmount=${b.paidAmountField} (NEGATIVE) collected=${f.ledgerGross} ` +
-          `totalPrice=${b.totalPrice} — the refund path decremented a base that was never seeded`
+        `${b.isTestData ? FIXTURE_MARK : REAL_MARK} ${b.ref} paidAmount=${b.paidAmountField} (NEGATIVE) ` +
+          `collected=${f.ledgerGross} totalPrice=${b.totalPrice} — the refund path decremented a base that was never seeded`
       );
     }
     if (r2(b.paidAmountField) !== f.ledgerGross) {
+      flagged.push(b.isTestData);
       mismatched.push(
-        `${b.ref} paidAmount=${b.paidAmountField} collected=${f.ledgerGross} Δ=${r2(b.paidAmountField - f.ledgerGross)}`
+        `${b.isTestData ? FIXTURE_MARK : REAL_MARK} ${b.ref} paidAmount=${b.paidAmountField} ` +
+          `collected=${f.ledgerGross} Δ=${r2(b.paidAmountField - f.ledgerGross)}`
       );
     }
   }
@@ -625,7 +661,7 @@ check(
     "PAY-01 — booking.paidAmount agrees with the independently summed ledger",
     mismatched.length === 0 ? "PASS" : "FAIL",
     `${mismatched.length} mismatch(es) · ${absent.length} booking(s) with ledger entries but no paidAmount field · ` +
-      `${negativePaid.length} NEGATIVE paidAmount`,
+      `${negativePaid.length} NEGATIVE paidAmount · ${split(flagged)}`,
     [...negativePaid, ...mismatched, ...absent.map((a) => `ABSENT (legacy): ${a}`)]
   );
 }
@@ -717,18 +753,21 @@ function peson(n: number) {
 // ---------------------------------------------------------------------------
 
 {
-  const negative = bookings
+  const negativeRows = bookings
     .map((b) => ({ b, f: folioOf(b) }))
-    .filter((x) => x.f.balanceGross < 0)
-    .map(
-      (x) =>
-        `${x.b.ref} balance=${x.f.balanceGross} (collected=${x.f.ledgerGross} grandTotal=${x.f.grandTotal})`
-    );
+    .filter((x) => x.f.balanceGross < 0);
+  const negative = negativeRows.map(
+    (x) =>
+      `${x.b.isTestData ? FIXTURE_MARK : REAL_MARK} ${x.b.ref} balance=${x.f.balanceGross} ` +
+      `(collected=${x.f.ledgerGross} grandTotal=${x.f.grandTotal})`
+  );
   check(
     "I08",
     "Over-collected bookings — a negative outstanding balance",
     negative.length === 0 ? "PASS" : "WARN",
-    `${negative.length} booking(s) show a negative balance`,
+    `${negative.length} booking(s) show a negative balance · ${split(
+      negativeRows.map((x) => x.b.isTestData)
+    )}`,
     negative
   );
 }
@@ -1002,6 +1041,7 @@ function peson(n: number) {
 {
   const rows: string[] = [];
   const policyRows: string[] = [];
+  const flagged: boolean[] = [];
   for (const b of bookings) {
     if (b.status !== "cancelled") continue;
     const f = folioOf(b);
@@ -1016,8 +1056,10 @@ function peson(n: number) {
       byCategory.set(k, (byCategory.get(k) || 0) + Math.abs(r.amount));
     }
     const cats = [...byCategory.entries()].map(([k, v]) => `${k}=${v}`).join(" ");
+    flagged.push(b.isTestData);
     rows.push(
-      `${b.ref} collected ${peso(grossCollected)} · totalPrice ${peso(b.totalPrice)} · ` +
+      `${b.isTestData ? FIXTURE_MARK : REAL_MARK} ${b.ref} collected ${peso(grossCollected)} · ` +
+        `totalPrice ${peso(b.totalPrice)} · ` +
         `refunds ${peson(refunded)} [${cats || "NONE"}] · ` +
         `unreturned ${peson(r2(grossCollected - refunded))}`
     );
@@ -1026,9 +1068,10 @@ function peson(n: number) {
     const policyRefund = refunds.filter((r) => (r.category ?? "cancellation") === "cancellation");
     const breakfastRefund = refunds.filter((r) => r.category === "breakfast");
     if (policyRefund.length > 0 && breakfastRefund.length > 0) {
+      flagged.push(b.isTestData);
       policyRows.push(
-        `${b.ref} has BOTH a cancellation-policy refund and a breakfast liability — ` +
-          `the add-on liability should only open when the policy refunded nothing`
+        `${b.isTestData ? FIXTURE_MARK : REAL_MARK} ${b.ref} has BOTH a cancellation-policy refund ` +
+          `and a breakfast liability — the add-on liability should only open when the policy refunded nothing`
       );
     }
   }
@@ -1036,7 +1079,8 @@ function peson(n: number) {
     "I14",
     "Cancelled bookings with collected money — refund coverage and liability composition",
     rows.length === 0 ? "PASS" : "WARN",
-    `${rows.length} cancelled booking(s) hold money · ${policyRows.length} liability-composition problem(s)`,
+    `${rows.length} cancelled booking(s) hold money · ${policyRows.length} liability-composition problem(s) · ` +
+      `${split(flagged)}`,
     [...rows, ...policyRows]
   );
 }
