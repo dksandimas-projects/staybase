@@ -1,7 +1,7 @@
 # Gotchas
 > Requires: CLAUDE.md
 
-Things agents must never do. **Read only the sections that match your task** — see the §GOTCHAS map in `CLAUDE.md`. This file is ~18k tokens; do not read it whole.
+Things agents must never do. Check this file before implementing any feature.
 
 ---
 
