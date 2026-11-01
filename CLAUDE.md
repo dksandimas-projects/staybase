@@ -85,7 +85,7 @@ Load only the bundle for your task type — do not read all MDs.
 - `plan/docs/VERCEL-FUNCTION-LIMIT.md` — Hobby plan 12-function cap: layout rules, what counts, how to verify, what NOT to do
 - `plan/docs/DECISIONS-ARCH.md` — Architecture, stack, tooling, security, white-label decisions
 - `plan/docs/DECISIONS-FEATURES.md` — Feature scope, product, business rules, compliance decisions
-- `plan/docs/GOTCHAS.md` — What agents must never do (read by section — see §GOTCHAS map)
+- `plan/docs/GOTCHAS.md` — What agents must never do
 - `plan/docs/CONTRIBUTING.md` — How to update MDs, sync protocol, deploy checklist, **feature intake & spec workflow** (how a request becomes a roadmap block)
 - `plan/docs/SECURITY.md` — Firestore/Storage rules, PII handling, RA 10173 compliance, session management, CSP headers
 - `plan/docs/LEGAL.md` — IP ownership, guest ToS, GDPR awareness, accessibility commitment, white-label licensing, post-launch support
@@ -207,38 +207,11 @@ Merge `dev → main` only at milestones: staging demo, production launch.
    - Docs-only → `git checkout -b docs/<task-name>`
    - Never work directly on `dev` or `main`
 2. **Load read bundle** — identify your task type in the Read Bundles table above and load only those MDs. Do not load all MDs.
-3. **Read the matching GOTCHAS.md sections** — never the whole file (it is ~18k tokens). Use the §GOTCHAS map below.
-4. **Build** — implement against the feature MD checklist. Apply `plan/docs/FRONTEND.md §UX Philosophy` to every UI screen. Verify at the lightest tier that covers the change (§Verification tiers).
+3. **Read GOTCHAS.md** — always, every task. Check for rules that apply to this specific feature area before writing any code.
+4. **Build** — implement against the feature MD checklist. Apply `plan/docs/FRONTEND.md §UX Philosophy` to every UI screen.
 5. **Update MDs** — if you made any decision that changes or extends an MD (schema field, new edge case, new rule), update the relevant MD before closing the task. Never drift from the docs.
 
 Do not skip steps 2–3 even if the task seems simple — they exist to prevent the most common and most expensive agent mistakes.
-
-### GOTCHAS map — read only the sections you touch
-
-`plan/docs/GOTCHAS.md` is ~18k tokens. Read the rows that apply; never read the whole file.
-
-| Task touches | Read |
-|---|---|
-| Every task | `## General`, `## npm Workspaces & Shared Code` |
-| Firestore listeners, transactions, collections | `## Firebase` |
-| Login, roles, staff access, admin gating | `## Auth & Security` |
-| Booking create / edit / hold / cancel / availability | `## Booking Flow` |
-| PII, uploads, Storage rules, compliance | `## Security & PII` |
-| Receipts, PDFs, print | `## jsPDF (Receipts & PDFs)` |
-| Payment methods, GCash / bank transfer, proof upload | `## Payments & Uploads` |
-| Chat threads, calls, notification sounds | `## Intercom (Web Audio API)` |
-| Branding, per-client colors / logos / config | `## White-Label` |
-| Components, layout, spacing, tokens | `## React 19`, `## Tailwind & Layout`, `## Vite & TypeScript` |
-
-### Verification tiers — use the lightest tier that covers the change
-
-| Tier | When | Command | ~Cost |
-|---|---|---|---|
-| 0 · edit | after each edit | `npm run typecheck` + the touched test file (`npx vitest run <file>`) | 10–60s |
-| 1 · branch ready | before the branch lands on `dev` | `npm run test:fast` | ~4 min |
-| 2 · merge | before `dev → main`; **always** after a `firestore.rules` / `storage.rules` change | `npm test` (adds the Firestore emulator) | ~6 min |
-
-`npm run docs:audit` when you edited MDs. **No CI exists** — every gate is local, so tier 2 is never optional. Detail: `plan/docs/CONTRIBUTING.md §Testing`.
 
 ---
 

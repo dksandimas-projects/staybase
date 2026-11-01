@@ -16,7 +16,7 @@ For feature/product decisions see `plan/docs/DECISIONS-FEATURES.md`.
 | 4 | Email: Resend via Vercel API routes (not Firebase Cloud Functions) |
 | 5 | Shared code: `shared/` is an npm workspace package (`@spark-inn/shared`) — imported by both apps and api/ without path alias hacks |
 | 6 | Two separate React + Vite apps — `guest-app/` and `admin-app/` — sharing one Firebase project |
-| 7 | Targeted tests only — manual QA for everything except 10 critical logic areas (see below); no full test suite — **the "no full test suite" posture is superseded by #60**; the manual-QA scope for UI and flows still stands |
+| 7 | Targeted tests only — manual QA for everything except 10 critical logic areas (see below); no full test suite |
 | 8 | Data fetching: TanStack Query for API routes; custom Firebase hooks for Firestore real-time |
 | 9 | Validation: Zod for all form and data validation |
 | 10 | State management: React state + Context only — no Zustand or Jotai |
@@ -69,7 +69,6 @@ For feature/product decisions see `plan/docs/DECISIONS-FEATURES.md`.
 | 57 | Post-launch support: DK offers a monthly maintenance retainer — critical bugs fixed within 24 hours, minor bugs within 5 business days; full terms in `plan/docs/LEGAL.md` |
 | 58 | UX Philosophy: "It Just Works" — Apple-inspired approach applied to every screen. 10 tenets: zero friction, progressive disclosure, smart defaults, optimistic UI, skeleton loaders, inline validation, no dead ends, purposeful delight, consistency, and forgiving interactions. Full spec + per-app checklists in `FRONTEND.md §UX Philosophy` |
 | 59 | PDF and screen capture: jsPDF generates downloadable receipts and forms; html2canvas captures DOM-rendered layouts when a visual snapshot is needed |
-| 60 | Verification is **tiered by cost, never skipped**. Tier 0 (after each edit) = `npm run typecheck` + the touched test file; tier 1 (before the branch lands on `dev`) = `npm run test:fast`; tier 2 (before `dev → main`, and **always** after a `firestore.rules` / `storage.rules` change) = `npm test`. Measured 2026-11-01: tier 1 ≈ 4 min, tier 2 ≈ 6 min, `test:rules` ≈ 2 min (15 files / 139 tests) — the old "sub-30s" figure for `test:fast` was wrong by 7×. **There is no CI in this repo** — no `.github/workflows/`, no Vercel `testCommand` — so tier 2 is a *local* gate that only runs if a human or an agent runs it; nothing catches a rules regression behind it. Agent context is scoped the same way: `plan/docs/GOTCHAS.md` (~18k tokens whole-file) is read **by section**, never whole — the always-read bundle was 21,958 tokens against a 10,000-token ceiling. Full detail: `plan/docs/CONTRIBUTING.md §Testing`. Supersedes the "no full test suite" posture of #7. |
 
 ---
 

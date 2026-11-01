@@ -112,29 +112,14 @@ Three test layers, each with a different purpose. **Pick the right one for the b
 - **Default to source-text.** It is fast and catches the common case. Do not write emulator tests for things source-text already covers (string presence, import paths, function signatures).
 - **Promote to emulator when the bug class is "looks right, behaves wrong."** A behavioral test for a write race, a money math path, an availability transaction, a discount calculation, an idempotency key, a timestamp invariant — any contract that Firestore evaluates at runtime, not at parse time. The first such test is `firebase/tests/room-types-array-write.emulator.test.ts` (PMH-03, 2026-07-31) — pins the RTS-01 fix at the Firestore layer.
 - **Test pattern for `*.emulator.test.ts` files** — seed via the admin context, exercise the write pattern, assert the contract. Do not import `AdminContext` or other React-context code; replicate the write semantics directly. The harness loads `firestore.rules` automatically, so any rule change that breaks a write will surface here too.
-- **The Java requirement is real.** `npm run test:rules` boots the Firestore emulator, which needs Java. `npm run test:fast` skips it. **There is no CI in this repo** — no `.github/workflows/` directory, and Vercel has no `testCommand` — so the full chain runs only when a human or an agent runs it locally. The merge gate *is* the local `npm test`; nothing catches a rules regression behind it.
-- **The emulator leaves orphaned JVMs behind.** A failed or interrupted `npm run test:rules` can leave `cloud-firestore-emulator` / `cloud-storage-rules-runtime` holding port 8080, and the *next* run then dies with `Could not start Firestore Emulator, port taken`. Check for stray `java` processes before re-running.
+- **The Java requirement is real.** `npm run test:rules` boots the Firestore emulator, which needs Java. `npm run test:fast` skips it. CI uses `npm test` (full chain) so emulator tests must pass before merge.
 
-**Scripts (measured 2026-11-01 on Windows — order-of-magnitude, not targets):**
+**Scripts:**
 
-- `npm test` — full chain: shared + api + admin + infra + rules + qa + app-closure. Includes the emulator. Requires Java. **~6 min.**
-- `npm run test:fast` — source-text only: shared + api + admin + infra. No Java required. **~4 min** (previously documented as "sub-30s" — that was wrong).
-- `npm run test:rules` — emulator only (`firebase emulators:exec --only firestore` + `vitest run --config vitest.rules.config.ts`). Includes both `*.rules.test.ts` and `*.emulator.test.ts`. **~2 min** (15 files / 139 tests).
+- `npm test` — full chain: shared + api + admin + infra + rules. Includes the emulator. Requires Java.
+- `npm run test:fast` — source-text only: shared + api + admin + infra. Sub-30s. No Java required.
+- `npm run test:rules` — emulator only (`firebase emulators:exec --only firestore` + `vitest run --config vitest.rules.config.ts`). Includes both `*.rules.test.ts` and `*.emulator.test.ts`.
 - `npm run test:shared` / `test:guest:api` / `test:infra` — individual layers.
-- `npm run typecheck` — `tsc -b` across both apps. **~60s cold**, fast incrementally once the build cache is warm.
-
-### When to run what
-
-| Tier | When | Command |
-|---|---|---|
-| 0 · edit | after each edit, while iterating | `npm run typecheck` + the one test file you touched (`npx vitest run <path>`) |
-| 1 · branch ready | before the branch lands on `dev` | `npm run test:fast` |
-| 2 · merge | before `dev → main`; **always** after a `firestore.rules` / `storage.rules` change | `npm test` |
-| docs | after editing any MD | `npm run docs:audit` |
-
-Deferring tier 1 and tier 2 to the end of a task is the intended workflow — running the full chain after every edit is not. What is **not** deferrable is tier 2 for a rules change: the emulator catches a bug class (NC-02c, RTS-01) that no source-text test can see, and per `plan/project/ROADMAP.md` the first ever emulator run found four defects that no other gate could see.
-
-**`docs:audit` is currently red.** It fails with a pre-existing baseline of 18 errors (over-budget MDs, the always-read bundle over its ceiling, and one missing historical marker). Compare the error count against that baseline rather than treating unrelated errors as regressions: a *new* error is a regression, the baseline ones are tracked separately. `npm run preflight` inherits this failure and cannot pass until the baseline is cleared (see `plan/project/ROADMAP.md`).
 
 **Naming convention:**
 
