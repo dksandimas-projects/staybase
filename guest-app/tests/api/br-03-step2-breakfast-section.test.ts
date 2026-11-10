@@ -27,11 +27,26 @@
 // "breakfast section lives in Step 2" assertion is
 // superseded. The breakfast grid now lives in the
 // new "Add-ons" step (new Step 2 in the 5-step
-// model). The tripwires here stay skipped (the file
-// predates the BR-09 refactor + would need rewrites
-// to assert the new step model); the BR-09 active
-// tripwires live in
-// `br-09-step-flow.test.ts`.
+// model). The BR-09 active tripwires for the step
+// model live in `br-09-step-flow.test.ts`; THIS
+// file pins the breakfast GRID itself (the per-slot
+// `<select>`, the cut-off lock, the sidebar's
+// per-date lines, the create-payload shape), which
+// is independent of which step renders it.
+//
+// The tripwires here were re-enabled on 2026-11-10
+// after being repointed at the current source. They
+// had been left skipped since the BR-09 refactor,
+// and by then 5 of them were failing against the
+// live source (the grid's markup was restructured,
+// the locked card moved from the "Ordering closed"
+// string to the "Past cut-off" pill, the sidebar's
+// `useNewBreakfastShape` flag was removed by BR-08,
+// and the `<BookingReviewAside>` regex window was
+// ~140 chars too tight). A skipped-but-failing
+// tripwire is a trap: it hides a stale assertion
+// behind a skip marker. The grid logic itself was
+// intact throughout — only the anchors had drifted.
 //
 // The data model in `shared/types/index.ts` is
 // locked per BR-01 — the `PublicRoomSelection` type
@@ -55,9 +70,9 @@ const apiRouterSrc = readFileSync(
   "utf8"
 );
 
-describe.skip("BR-03 — Step 2 breakfast section source-text tripwires", () => {
-  describe.skip("Step 1 — Room + Breakfast toggle is GONE", () => {
-    it.skip("the Step 1 room-type card no longer renders a `Room + Breakfast` rate option", () => {
+describe("BR-03 — Step 2 breakfast section source-text tripwires", () => {
+  describe("Step 1 — Room + Breakfast toggle is GONE", () => {
+    it("the Step 1 room-type card no longer renders a `Room + Breakfast` rate option", () => {
       // The legacy flat-rate toggle was a
       // `<RateOption label="Room + Breakfast" ... />`
       // block in the per-type card. The new
@@ -67,7 +82,7 @@ describe.skip("BR-03 — Step 2 breakfast section source-text tripwires", () => 
       expect(bookingPageSrc).not.toMatch(/<RateOption[\s\S]{0,500}?label="Room \+ Breakfast"/);
     });
 
-    it.skip("the Step 1 room-type card no longer calls `selectRoomType` with the `room-breakfast` rate choice", () => {
+    it("the Step 1 room-type card no longer calls `selectRoomType` with the `room-breakfast` rate choice", () => {
       // The `selectRoomType(type.value, "room-breakfast")`
       // call is gone with the toggle. The
       // function still exists (back-compat for
@@ -78,7 +93,7 @@ describe.skip("BR-03 — Step 2 breakfast section source-text tripwires", () => 
       );
     });
 
-    it.skip("the create-payload builder no longer sends the per-room `hasBreakfast` field", () => {
+    it("the create-payload builder no longer sends the per-room `hasBreakfast` field", () => {
       // The new path uses `breakfastSelections`
       // instead. The per-room `hasBreakfast` is
       // gone from the create payload.
@@ -87,7 +102,7 @@ describe.skip("BR-03 — Step 2 breakfast section source-text tripwires", () => 
       );
     });
 
-    it.skip("the create-payload builder no longer sends the per-room `breakfastIncludesChildren` field", () => {
+    it("the create-payload builder no longer sends the per-room `breakfastIncludesChildren` field", () => {
       // The new path uses `breakfastSelections`
       // instead. The per-room
       // `breakfastIncludesChildren` is gone from
@@ -98,8 +113,8 @@ describe.skip("BR-03 — Step 2 breakfast section source-text tripwires", () => 
     });
   });
 
-  describe.skip("Step 2 — the new Breakfast section is present", () => {
-    it.skip("the Step 2 form imports the new helpers from @spark-inn/shared", () => {
+  describe("Step 2 — the new Breakfast section is present", () => {
+    it("the Step 2 form imports the new helpers from @spark-inn/shared", () => {
       // The new shape requires
       // `computeBreakfastCutoffState` (per-date
       // locked state) +
@@ -123,31 +138,36 @@ describe.skip("BR-03 — Step 2 breakfast section source-text tripwires", () => 
       );
     });
 
-    it.skip("the Step 2 form renders a `<select>` per breakfast date × per-guest slot", () => {
-      // The per-date × per-guest meal grid is the
-      // core of the new shape. The pin asserts
-      // the `<select>` is inside the Step 2 form
-      // (after the breakfast section heading
-      // and before the guest details).
-      const breakfastSection = bookingPageSrc.match(
-        /<motion\.div[^>]*>[\s\S]{0,200}?Breakfast[\s\S]{0,15000}?<\/motion\.div>/
-      );
-      expect(breakfastSection, "breakfast section not found").toBeTruthy();
-      expect(breakfastSection![0]).toMatch(/<select/);
-      expect(breakfastSection![0]).toMatch(/<option value="">No meal — skip breakfast for this guest on this day<\/option>/);
+    it("the Step 2 form renders a `<select>` per breakfast date × per-guest slot", () => {
+      // The per-date × per-guest meal grid is the core of the new
+      // shape. Per BR-09 the grid now lives in the "Add-ons" step
+      // (the new Step 2 in the 5-step model) — the tripwire pins the
+      // grid itself, not the step it renders in.
+      //
+      // The pin is on the per-slot `<select>` (stable `data-testid`
+      // per slot key) + the empty option. The earlier anchor was a
+      // `<motion.div>…Breakfast…</motion.div>` regex, which broke
+      // when the card's markup was restructured.
+      expect(bookingPageSrc).toMatch(/data-testid=\{`breakfast-select-\$\{key\}`\}/);
+      expect(bookingPageSrc).toMatch(/<option value="">No breakfast<\/option>/);
     });
 
-    it.skip("the Step 2 form uses `computeBreakfastCutoffState` for the per-date locked state", () => {
-      // The locked state is the
-      // `cutoff.isLocked` boolean. The select
-      // is `disabled={cutoff.isLocked}` and
-      // the row shows "Ordering closed".
+    it("the Step 2 form uses `computeBreakfastCutoffState` for the per-date locked state", () => {
+      // The locked state is the `cutoff.isLocked` boolean. The select
+      // is `disabled={cutoff.isLocked}` and the date card shows the
+      // "Past cut-off" pill.
+      //
+      // Per BR-03's later revision the locked breakfast card renders
+      // the "Past cut-off" pill — the older "Ordering closed" string
+      // belongs to the OTHER add-ons grid
+      // (`OtherAddOnsStep2Section.tsx`), not to the breakfast card.
       expect(bookingPageSrc).toMatch(/computeBreakfastCutoffState\(\{/);
       expect(bookingPageSrc).toMatch(/disabled=\{cutoff\.isLocked\}/);
-      expect(bookingPageSrc).toMatch(/Ordering closed/);
+      expect(bookingPageSrc).toMatch(/data-testid="breakfast-cutoff-pill"/);
+      expect(bookingPageSrc).toMatch(/Past cut-off/);
     });
 
-    it.skip("the Step 2 form holds the `breakfastSelections` state", () => {
+    it("the Step 2 form holds the `breakfastSelections` state", () => {
       // The new state is a
       // `Record<string, BreakfastSelectionEntry>`
       // — the guest picks the meals and the
@@ -157,7 +177,7 @@ describe.skip("BR-03 — Step 2 breakfast section source-text tripwires", () => 
       );
     });
 
-    it.skip("the Step 2 form's create-payload builder sends the new `breakfastSelections` field", () => {
+    it("the Step 2 form's create-payload builder sends the new `breakfastSelections` field", () => {
       // The create body now carries the rich
       // shape (instead of the per-room
       // `hasBreakfast` boolean). The new field
@@ -168,8 +188,8 @@ describe.skip("BR-03 — Step 2 breakfast section source-text tripwires", () => 
     });
   });
 
-  describe.skip("Step 2 sidebar — per-date breakfast breakdown", () => {
-    it.skip("the sidebar accepts the new `breakfastSelections` prop", () => {
+  describe("Step 2 sidebar — per-date breakfast breakdown", () => {
+    it("the sidebar accepts the new `breakfastSelections` prop", () => {
       // The sidebar thread now reads the
       // rich shape (instead of the
       // `hasBreakfast` boolean). The
@@ -180,26 +200,26 @@ describe.skip("BR-03 — Step 2 breakfast section source-text tripwires", () => 
       );
     });
 
-    it.skip("the sidebar uses `recomputeBreakfastTotal` for the live breakfast total", () => {
-      // The new path recomputes from the
-      // selections via the shared helper. The
-      // sidebar's `breakfastTotal` variable
-      // now uses the ternary.
+    it("the sidebar uses `recomputeBreakfastTotal` for the live breakfast total", () => {
+      // The new path recomputes from the selections via the shared
+      // helper. The sidebar's `breakfastTotal` variable now reads
+      // the rich shape directly — the older `useNewBreakfastShape`
+      // flag is gone (BR-08 removed the legacy fallback entirely, so
+      // the shape IS the only source of truth).
       expect(bookingPageSrc).toMatch(
-        /const\s+breakfastTotal\s*=\s*useNewBreakfastShape\s*\?\s*recomputeBreakfastTotal/
+        /const\s+breakfastTotal\s*=\s*breakfastSelections\s*\?\s*recomputeBreakfastTotal/
       );
     });
 
-    it.skip("the sidebar uses `buildBreakfastRateBreakdownLines` for the per-date lines", () => {
-      // The sidebar renders the per-date
-      // lines (one per date) instead of the
-      // single "Breakfast add-on" line.
+    it("the sidebar uses `buildBreakfastRateBreakdownLines` for the per-date lines", () => {
+      // The sidebar renders the per-date lines (one per date) instead
+      // of the single "Breakfast add-on" line.
       expect(bookingPageSrc).toMatch(
-        /const\s+perDateBreakfastLines\s*=\s*useNewBreakfastShape\s*\?\s*buildBreakfastRateBreakdownLines/
+        /const\s+perDateBreakfastLines\s*=\s*breakfastSelections\s*\?\s*buildBreakfastRateBreakdownLines/
       );
     });
 
-    it.skip("the sidebar renders the per-date `Breakfast (Mon DD, N meals)` line", () => {
+    it("the sidebar renders the per-date `Breakfast (Mon DD, N meals)` line", () => {
       // The label format is the spec's
       // example. The sidebar's
       // `perDateBreakfastLines.map(...)`
@@ -208,15 +228,17 @@ describe.skip("BR-03 — Step 2 breakfast section source-text tripwires", () => 
     });
   });
 
-  describe.skip("Step 3 review — the same sidebar shape is threaded through", () => {
-    it.skip("Step 3's `<BookingReviewAside>` call site threads the new `breakfastSelections` prop", () => {
-      // The Step 3 review reads the same cart
-      // state, so the per-date breakdown is
-      // identical.
-      // Both Step 2 and Step 3 call sites
+  describe("Step 3 review — the same sidebar shape is threaded through", () => {
+    it("Step 3's `<BookingReviewAside>` call site threads the new `breakfastSelections` prop", () => {
+      // The Step 3 review reads the same cart state, so the per-date
+      // breakdown is identical. Every `<BookingReviewAside>` call site
       // must thread the prop.
+      //
+      // The window was widened from 3000 to 6000 chars: the gap
+      // between a call site and its prop is ~3140 chars, so the old
+      // window missed all three even though every site threads it.
       const matches = bookingPageSrc.match(
-        /<BookingReviewAside[\s\S]{0,3000}?breakfastSelections=\{breakfastSelections\}/g
+        /<BookingReviewAside[\s\S]{0,6000}?breakfastSelections=\{breakfastSelections\}/g
       );
       expect(matches, "BookingReviewAside call sites with breakfastSelections prop not found").toBeTruthy();
       // At minimum Step 2 + Step 3 both thread it.
@@ -224,8 +246,8 @@ describe.skip("BR-03 — Step 2 breakfast section source-text tripwires", () => 
     });
   });
 
-  describe.skip("api-router — the new public endpoint", () => {
-    it.skip("the new `GET /api/bookings/breakfast/config` route is registered", () => {
+  describe("api-router — the new public endpoint", () => {
+    it("the new `GET /api/bookings/breakfast/config` route is registered", () => {
       // The route is `domain === "bookings" &&
       // action === "breakfast" && req.method ===
       // "GET"`. The third URL segment (`config`)

@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.22.0";
+    VERSION2 = "2.22.1";
   }
 });
 
@@ -231779,6 +231779,14 @@ function buildValidArrivalTimeOptions(checkInTimeStr) {
 function getConfiguredBookingRefPrefix() {
   return hotel_config_default.bookingRefPrefix || "SI";
 }
+function projectBreakfastSelectionsForFingerprint(selections) {
+  if (!selections || typeof selections !== "object" || Array.isArray(selections)) return [];
+  return Object.entries(selections).map(([key, entry]) => ({
+    key: String(key || "").trim(),
+    mealId: String(entry?.mealId || "").trim(),
+    price: Math.max(0, Number(entry?.price) || 0)
+  }));
+}
 async function computeCancellationLiabilityInTransaction(transaction, params) {
   let reservationNetCollected = 0;
   if (params.reservation) {
@@ -232756,6 +232764,9 @@ async function handleCreateBooking(req, res) {
   }
   const isCorporateIntent = Boolean(corporateCode) || corporateFlatRate === true;
   const guestNameForFingerprint = `${rawGuestDetails.firstName.trim()} ${rawGuestDetails.lastName.trim()}`;
+  const fingerprintBreakfastSelections = projectBreakfastSelectionsForFingerprint(
+    body.breakfastSelections
+  );
   const reservationRequestFingerprint = computeRequestFingerprint({
     reservationId: String(body.reservationId || "").trim(),
     roomLines: normalizedRoomSelections.map((selection) => ({
@@ -232763,7 +232774,8 @@ async function handleCreateBooking(req, res) {
       quantity: 1,
       adults: selection.numAdults,
       children: selection.numChildren,
-      extraBeds: selection.extraBedCount
+      extraBeds: selection.extraBedCount,
+      breakfastSelections: fingerprintBreakfastSelections
     })),
     checkIn: String(checkIn || "").trim(),
     checkOut: String(checkOut || "").trim(),
@@ -234718,12 +234730,16 @@ async function handleCreateWalkin(req, res) {
           throw new Error("Selected rooms no longer match the front-desk room hold.");
         }
       }
+      const walkinFingerprintBreakfastSelections = projectBreakfastSelectionsForFingerprint(
+        requestedBreakfastSelections
+      );
       const walkinFingerprintRoomLines = walkinAssignedRooms.map((assigned) => ({
         type: String(assigned.data.type || "").trim(),
         quantity: 1,
         adults: assigned.numAdults,
         children: assigned.numChildren,
-        extraBeds: assigned.extraBedCount
+        extraBeds: assigned.extraBedCount,
+        breakfastSelections: walkinFingerprintBreakfastSelections
       }));
       const buildWalkinFingerprint = (leadGuestName) => computeRequestFingerprint({
         reservationId: effectiveReservationId,
