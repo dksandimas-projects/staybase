@@ -1,6 +1,6 @@
 # Environment Test Runs & Controlled Data Reset
 > Requires: CLAUDE.md, plan/docs/BACKEND.md, plan/docs/API-ROUTES.md
-> Status: Phase 1 core shipped (ETR-01..14, ETR-S01..S15) · Production refresh / restricted mode / pre-live reset are open spec
+> Status: Phase 1 core shipped (ETR-01..14 + ETR-01a, ETR-S01..S15) · Production refresh / restricted mode / pre-live reset are open spec
 > Moved from `plan/project/ROADMAP.md §Environment Test Runs & Controlled Data Reset` (2026-07-17); the original roadmap text is archived in `plan/project/archive/ROADMAP-ARCHIVE-2026-07-17.md`.
 
 ---
@@ -22,6 +22,8 @@ Production receives final end-to-end testing before real hotel operations begin.
 - ✅ **ETR-03 — Temporary public-flow access.** The token is validated in `POST /api/bookings/create`: when a `testToken` is present in the body, the server hashes it, looks up the matching active test run, checks expiry, and stamps `isTestData: true` + `testRunId` on the booking document. Invalid/expired tokens return 403 with a clear message. `hashToken` exported from `test-runs.ts` for reuse.
 - ✅ **ETR-04 — Server-side test run creation.** Admin creates a named run through the authenticated server route; the returned token is server-owned. Walk-in/other staff-side test records can be associated server-side via the active run.
 - ✅ **ETR-05 — Persistent visual distinction.** **TEST DATA** badges on booking/order rows (desktop + mobile), booking drawer header, and store order drawer header. Active run warning banner on BookingsPage.
+- ✅ **ETR-01a — Combined "Close & Delete" action.** Shipped 2026-11-10. The run history's active-run row carries a **Close & Delete** button alongside the plain **Close** button. Clicking it closes the run (which is what collects the manifest) and then opens the SAME cleanup confirmation modal as the plain **Clean up** button — the delete only fires after the operator confirms. **ETR-10 is unchanged: the manifest is always reviewed before anything is deleted.** Cancelling the modal leaves the run `closed` and the data untouched, so the action degrades to the plain two-step flow instead of stranding the run. The plain **Close** and **Clean up** buttons remain — the combined action is additive. Client-only change; no server contract or schema change.
+  - **Mobile:** a third button on the run row would have overflowed the 375px viewport (per `ADMIN-MOBILE.md` — no horizontal page scroll), so the row now stacks vertically on mobile and returns to the inline layout at `sm:`, the button cluster wraps, and all three row buttons meet the 44px touch-target minimum (per `CLAUDE.md` hard rule). The two pre-existing buttons were 28px tall before this change.
 
 ### Canonical classification and propagation
 

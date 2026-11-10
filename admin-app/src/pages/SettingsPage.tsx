@@ -3300,6 +3300,12 @@ export function SettingsPage() {
   const [newRunEnv, setNewRunEnv] = useState<"staging" | "production">("staging");
   const [newRunDuration, setNewRunDuration] = useState(60);
   const [confirmDeleteRun, setConfirmDeleteRun] = useState<TestRun | null>(null);
+  // Per ETR-01a (2026-11-10): the cleanup confirmation modal is
+  // reachable two ways — "Clean up" on an already-closed run, or
+  // the combined "Close & Delete" on an active run. The mode
+  // only changes the modal's title + copy so the operator always
+  // knows which of the two paths they are on.
+  const [confirmDeleteMode, setConfirmDeleteMode] = useState<"cleanup" | "close-and-delete">("cleanup");
 
   // Staging Reset (ETR-S)
   const [stagingResetPreview, setStagingResetPreview] = useState<any>(null);
@@ -3624,6 +3630,34 @@ export function SettingsPage() {
       toast.error("Failed to clean up", result.error || "Unknown error");
     }
     setConfirmDeleteRun(null);
+  };
+
+  // Per ETR-01a (2026-11-10): the combined "Close & Delete" action.
+  //
+  // The operator asked for ONE option in Settings that ends a test
+  // run AND removes its data, instead of clicking "Close", waiting
+  // for the row to move to the `closed` state, then hunting for the
+  // "Clean up" button.
+  //
+  // The review gate is NOT skipped. Closing happens FIRST (that is
+  // what collects the manifest), then the SAME confirmation modal
+  // shows the manifest, and the delete only fires after the
+  // operator confirms. So ETR-10 still holds — nothing is deleted
+  // before the manifest has been seen.
+  //
+  // Cancelling the modal leaves the run `closed` (not deleted). That
+  // is recoverable by design: the row shows the "Clean up" button
+  // again, so a cancelled combined action degrades to the plain
+  // two-step flow rather than stranding the run.
+  const handleCloseAndDeleteRun = async (run: TestRun) => {
+    const result = await closeTestRun(run.id);
+    if (!result.success) {
+      toast.error("Failed to close test run", result.error || "Unknown error");
+      return;
+    }
+    setConfirmDeleteMode("close-and-delete");
+    setConfirmDeleteRun({ ...run, status: "closed", manifest: result.manifest ?? null });
+    toast.success("Test run closed", "Review the manifest, then confirm to delete the test data.");
   };
 
   // Staging Reset handlers (ETR-S)
@@ -9632,17 +9666,17 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                       <h4 className="font-bold text-gray-900">Run History</h4>
                       <div className="divide-y divide-gray-100 rounded-lg border border-gray-200">
                         {testRuns.map(run => (
-                          <div key={run.id} className="flex items-center justify-between px-4 py-3">
-                            <div className="flex items-center gap-3">
+                          <div key={run.id} className="flex flex-col items-start gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex min-w-0 items-center gap-3">
                               <FlaskConical size={14} className={run.status === "active" ? "text-amber-500" : run.status === "closed" ? "text-blue-500" : "text-gray-400"} />
-                              <div>
+                              <div className="min-w-0">
                                 <p className="font-bold text-gray-900">{run.name}</p>
                                 <p className="text-[10px] text-gray-500">
                                   {run.environment} · Created {new Date(run.createdAt).toLocaleDateString()}
                                 </p>
                               </div>
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
                                 run.status === "active"
                                   ? "border-amber-100 bg-amber-50 text-amber-700"
@@ -9655,19 +9689,38 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                                 {run.status === "cleanup-in-progress" ? "Cleaning..." : run.status}
                               </span>
                               {run.status === "active" && (
-                                <button
-                                  onClick={() => handleCloseRun(run.id)}
-                                  disabled={testRunsLoading}
-                                  className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-[10px] font-bold text-blue-700 hover:bg-blue-100 disabled:opacity-50 transition"
-                                >
-                                  Close
-                                </button>
+                                <>
+                                  <button
+                                    onClick={() => handleCloseRun(run.id)}
+                                    disabled={testRunsLoading}
+                                    className="min-h-[44px] rounded-lg border border-blue-200 bg-blue-50 px-3 text-[10px] font-bold text-blue-700 hover:bg-blue-100 disabled:opacity-50 transition"
+                                  >
+                                    Close
+                                  </button>
+                                  {/* Per ETR-01a (2026-11-10): the combined
+                                      close + delete action. It closes the run
+                                      (collecting the manifest), then opens the
+                                      SAME review modal as "Clean up" — so the
+                                      operator still sees the manifest before
+                                      anything is deleted. */}
+                                  <button
+                                    onClick={() => handleCloseAndDeleteRun(run)}
+                                    disabled={testRunsLoading}
+                                    className="inline-flex min-h-[44px] items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-3 text-[10px] font-bold text-red-700 hover:bg-red-100 disabled:opacity-50 transition"
+                                  >
+                                    <Trash2 size={11} />
+                                    Close &amp; Delete
+                                  </button>
+                                </>
                               )}
                               {run.status === "closed" && (
                                 <button
-                                  onClick={() => setConfirmDeleteRun(run)}
+                                  onClick={() => {
+                                    setConfirmDeleteMode("cleanup");
+                                    setConfirmDeleteRun(run);
+                                  }}
                                   disabled={testRunsLoading}
-                                  className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-[10px] font-bold text-red-700 hover:bg-red-100 disabled:opacity-50 transition"
+                                  className="min-h-[44px] rounded-lg border border-red-200 bg-red-50 px-3 text-[10px] font-bold text-red-700 hover:bg-red-100 disabled:opacity-50 transition"
                                 >
                                   Clean up
                                 </button>
@@ -10931,9 +10984,12 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
 
       {/* Cleanup confirmation modal */}
       <Modal
-        title="Clean up test data?"
+        title={confirmDeleteMode === "close-and-delete" ? "Close and delete test data?" : "Clean up test data?"}
         open={confirmDeleteRun !== null}
-        onClose={() => setConfirmDeleteRun(null)}
+        onClose={() => {
+          setConfirmDeleteRun(null);
+          setConfirmDeleteMode("cleanup");
+        }}
       >
         <div className="space-y-4 text-xs">
           <div className="rounded-lg bg-red-50 border border-red-200 p-4 text-red-800">
@@ -10947,6 +11003,17 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
               )}
             </p>
           </div>
+          {/* Per ETR-01a: the combined path closes the run BEFORE this
+              modal opens (that is what builds the manifest), so the
+              operator needs to know what cancelling does — the run
+              stays closed and the data stays put, with "Clean up"
+              still available from the run list. */}
+          {confirmDeleteMode === "close-and-delete" && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800">
+              The test run was closed to build this manifest. Cancelling leaves the run closed and the
+              data untouched — you can still clean it up later from the run list.
+            </p>
+          )}
           <p>
             Rooms affected by the test run will be reset to available/clean.
             Reference counters are preserved.
@@ -10954,7 +11021,10 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
           <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
             <button
               type="button"
-              onClick={() => setConfirmDeleteRun(null)}
+              onClick={() => {
+                setConfirmDeleteRun(null);
+                setConfirmDeleteMode("cleanup");
+              }}
               className="min-h-[40px] rounded-lg border border-gray-250 px-5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
             >
               Cancel
@@ -10966,7 +11036,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
               className="inline-flex min-h-[40px] items-center gap-1.5 rounded-lg bg-red-600 px-5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700 disabled:opacity-50 active:scale-95"
             >
               <Trash2 size={14} />
-              Clean up data
+              {confirmDeleteMode === "close-and-delete" ? "Close & delete data" : "Clean up data"}
             </button>
           </div>
         </div>
