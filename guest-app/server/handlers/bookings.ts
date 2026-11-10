@@ -371,6 +371,48 @@ export function getConfiguredBookingRefPrefix() {
   return config.bookingRefPrefix || "SI";
 }
 
+// Per BR-08 (decision #238, 2026-10-14 — close-out): the legacy
+// flat-rate `hasBreakfast: boolean` + `breakfastIncludesChildren:
+// boolean` pair is deleted from the reservation request
+// fingerprint. The shared helper (`computeRequestFingerprint` in
+// `shared/utils/reservationFingerprint.ts`) now fingerprints the
+// rich `breakfastSelections` map instead — its presence + the
+// sorted `key|mealId|price` triples are what make two requests
+// "the same breakfast choice".
+//
+// The shared helper stays deliberately oblivious to the selection
+// shape (it normalizes a flat array of `{ key, mealId, price }`).
+// The HOST code has to project the request's record into that
+// array form — this helper is that projection, shared by the
+// public create path and the walk-in path so the two cannot
+// drift.
+//
+// WHY THIS MATTERS: without the projection the fingerprint is
+// blind to meal choices. A guest who submits, loses the response,
+// goes back to Step 2, changes their meal, and resubmits with the
+// same preallocated `reservationId` would get a REPLAY of the
+// original booking — their new selection silently dropped and the
+// ORIGINAL amount charged. The legacy flat-rate flags used to
+// prevent that; BR-08 removed them from the fingerprint, so this
+// projection is what restores the guarantee.
+//
+// The `price` here is the CLIENT-supplied wire value, which the
+// catalog-authoritative write path (OCT-C1) later replaces with the
+// live catalog price. Hashing the wire value is safe for
+// idempotency: the client replays the SAME body, so the fingerprint
+// matches. A tampered price can at worst turn a replay into a 409
+// conflict — never into a different charge.
+function projectBreakfastSelectionsForFingerprint(
+  selections: unknown
+): Array<{ key: string; mealId: string; price: number }> {
+  if (!selections || typeof selections !== "object" || Array.isArray(selections)) return [];
+  return Object.entries(selections as Record<string, any>).map(([key, entry]) => ({
+    key: String(key || "").trim(),
+    mealId: String(entry?.mealId || "").trim(),
+    price: Math.max(0, Number(entry?.price) || 0)
+  }));
+}
+
 // Per CRL-07 (2026-08-03, per decision #173): the
 // in-transaction liability snapshot helper. Called by
 // both cancel branches (the per-child path and the
@@ -2046,6 +2088,15 @@ export async function handleCreateBooking(req: any, res: any) {
   // for both corporate paths.
   const isCorporateIntent = Boolean(corporateCode) || corporateFlatRate === true;
   const guestNameForFingerprint = `${rawGuestDetails.firstName.trim()} ${rawGuestDetails.lastName.trim()}`;
+  // Per BR-08: the fingerprint's per-room lines carry the rich
+  // `breakfastSelections` map (projected into the flat array form
+  // the shared helper normalizes) so two requests with different
+  // meal choices produce different fingerprints. The selections are
+  // a ROOT-level field applied uniformly to every room, so every
+  // line carries the same projection.
+  const fingerprintBreakfastSelections = projectBreakfastSelectionsForFingerprint(
+    (body as any).breakfastSelections
+  );
   const reservationRequestFingerprint = computeRequestFingerprint({
     reservationId: String(body.reservationId || "").trim(),
     roomLines: normalizedRoomSelections.map((selection) => ({
@@ -2054,6 +2105,7 @@ export async function handleCreateBooking(req: any, res: any) {
       adults: selection.numAdults,
       children: selection.numChildren,
       extraBeds: selection.extraBedCount,
+      breakfastSelections: fingerprintBreakfastSelections,
     })),
     checkIn: String(checkIn || "").trim(),
     checkOut: String(checkOut || "").trim(),
@@ -5261,12 +5313,18 @@ export async function handleCreateWalkin(req: any, res: any) {
       // fingerprint. The builder is hoisted here so the idempotency
       // check below and the reservation header write further down
       // cannot drift apart.
+      // Per BR-08: same projection as the public create path — the
+      // walk-in fingerprint is blind to meal choices without it.
+      const walkinFingerprintBreakfastSelections = projectBreakfastSelectionsForFingerprint(
+        requestedBreakfastSelections
+      );
       const walkinFingerprintRoomLines = walkinAssignedRooms.map((assigned) => ({
         type: String(assigned.data.type || "").trim(),
         quantity: 1,
         adults: assigned.numAdults,
         children: assigned.numChildren,
-        extraBeds: assigned.extraBedCount
+        extraBeds: assigned.extraBedCount,
+        breakfastSelections: walkinFingerprintBreakfastSelections
       }));
       // The walk-in fingerprint is the same canonical shape as the
       // public path — same byte-equivalence rules, same placeholder

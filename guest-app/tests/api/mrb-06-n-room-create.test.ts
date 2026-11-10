@@ -22,9 +22,9 @@ const schemas = readFileSync(
   "utf8"
 );
 
-describe.skip("MRB-06 N>1 generalization — Phase 1 (schema + auto-assignment + header)", () => {
-  describe.skip("createBookingSchema — accepts roomCount", () => {
-    it.skip("declares roomCount as an optional integer (default 1, max 50)", () => {
+describe("MRB-06 N>1 generalization — Phase 1 (schema + auto-assignment + header)", () => {
+  describe("createBookingSchema — accepts roomCount", () => {
+    it("declares roomCount as an optional integer (default 1, max 50)", () => {
       // The N>1 field. Default 1 (the historical
       // single-room case — byte-equivalent to
       // pre-MRB-06 for callers that don't supply the
@@ -46,8 +46,8 @@ describe.skip("MRB-06 N>1 generalization — Phase 1 (schema + auto-assignment +
   // field to the create body (and the server's strict
   // schema is not updated, the v0.264.5 class of bug)
   // would fail this test in <100ms.
-  describe.skip("RUNTIME — createBookingSchema.safeParse on an N>1 body", () => {
-    it.skip("accepts the representative N=2 body shape (2 rooms, mixed occupancy)", async () => {
+  describe("RUNTIME — createBookingSchema.safeParse on an N>1 body", () => {
+    it("accepts the representative N=2 body shape (2 rooms, mixed occupancy)", async () => {
       const { createBookingSchema } = await import("../../server/handlers/bookings");
       const result = createBookingSchema.safeParse({
         bookingId: "abc123def456ghi789",
@@ -61,20 +61,17 @@ describe.skip("MRB-06 N>1 generalization — Phase 1 (schema + auto-assignment +
             numAdults: 2,
             numChildren: 0,
             extraBedCount: 0,
-            hasBreakfast: false
           },
           {
             roomType: "Deluxe Queen",
             numAdults: 1,
             numChildren: 1,
             extraBedCount: 0,
-            hasBreakfast: false
           }
         ],
         checkIn: "2099-01-01",
         checkOut: "2099-01-03",
         guests: 4,
-        hasBreakfast: false,
         guestDetails: {
           firstName: "Maria",
           lastName: "Santos",
@@ -97,8 +94,8 @@ describe.skip("MRB-06 N>1 generalization — Phase 1 (schema + auto-assignment +
     });
   });
 
-  describe.skip("Fingerprint — uses the normalized room selections", () => {
-    it.skip("fingerprints one canonical line per requested room", () => {
+  describe("Fingerprint — uses the normalized room selections", () => {
+    it("fingerprints one canonical line per requested room", () => {
       // The fingerprint is N-aware — a retry with
       // a different `roomCount` is a different
       // request (409 conflict), a retry with the
@@ -113,8 +110,8 @@ describe.skip("MRB-06 N>1 generalization — Phase 1 (schema + auto-assignment +
     });
   });
 
-  describe.skip("Auto-assignment — picks N distinct rooms (same-room-twice guard)", () => {
-    it.skip("iterates once for every normalized room selection", () => {
+  describe("Auto-assignment — picks N distinct rooms (same-room-twice guard)", () => {
+    it("iterates once for every normalized room selection", () => {
       // The outer loop iterates `roomCount` times
       // to assign N distinct rooms of the requested
       // `roomType`. For N=1 (the default) the outer
@@ -127,7 +124,7 @@ describe.skip("MRB-06 N>1 generalization — Phase 1 (schema + auto-assignment +
       );
     });
 
-    it.skip("skips already-assigned rooms in the same reservation (same-room-twice guard)", () => {
+    it("skips already-assigned rooms in the same reservation (same-room-twice guard)", () => {
       // The same-room-twice guard is implicit in
       // the iteration order — once a candidate is
       // assigned, it's pushed to `assignedRoomIds`
@@ -141,7 +138,7 @@ describe.skip("MRB-06 N>1 generalization — Phase 1 (schema + auto-assignment +
       );
     });
 
-    it.skip("throws 'Room no longer available' when the inner loop can't find a non-conflicting room", () => {
+    it("throws 'Room no longer available' when the inner loop can't find a non-conflicting room", () => {
       // If the inner loop runs out of
       // non-conflicting candidates before
       // `roomCount` is satisfied, the entire
@@ -152,8 +149,8 @@ describe.skip("MRB-06 N>1 generalization — Phase 1 (schema + auto-assignment +
     });
   });
 
-  describe.skip("Header — roomCount reflects the N assignments", () => {
-    it.skip("stamps reservationRoomCount as assignedRooms.length (not the hardcoded 1)", () => {
+  describe("Header — roomCount reflects the N assignments", () => {
+    it("stamps reservationRoomCount as assignedRooms.length (not the hardcoded 1)", () => {
       // The header's `reservationRoomCount` is
       // the total number of rooms in the
       // reservation — `assignedRooms.length` for
@@ -166,8 +163,8 @@ describe.skip("MRB-06 N>1 generalization — Phase 1 (schema + auto-assignment +
     });
   });
 
-  describe.skip("Per-room fields are sourced from the FIRST assigned room (backward compat for the success response)", () => {
-    it.skip("exposes the FIRST assigned room as roomId + roomData for the response payload", () => {
+  describe("Per-room fields are sourced from the FIRST assigned room (backward compat for the success response)", () => {
+    it("exposes the FIRST assigned room as roomId + roomData for the response payload", () => {
       // For N=1 (the default) this is byte-equivalent
       // to the pre-MRB-06 `roomId` + `roomData`. For
       // N>1 the success response echoes the FIRST
