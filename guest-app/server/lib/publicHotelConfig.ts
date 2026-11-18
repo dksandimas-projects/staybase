@@ -137,8 +137,14 @@ function buildSeasonalRateOverrides(raw: unknown): SeasonalRateOverride[] {
   return out;
 }
 
-function buildBedSetups(raw: unknown): PublicBedSetupOption[] {
-  if (!Array.isArray(raw)) return [];
+function buildBedSetups(raw: unknown): PublicBedSetupOption[] | undefined {
+  // Per SR-01 follow-up (2026-11-18): an ABSENT field projects as
+  // `undefined` (the hotel never configured the list → the guest
+  // renders the shipped defaults), while an explicitly EMPTY array
+  // projects as `[]` (the hotel cleared the list → the guest renders
+  // nothing). Flattening both into `[]` made "delete every entry" a
+  // no-op on the public booking form.
+  if (!Array.isArray(raw)) return undefined;
   const out: PublicBedSetupOption[] = [];
   for (const entry of raw) {
     const option = asRecord(entry);
@@ -151,8 +157,12 @@ function buildBedSetups(raw: unknown): PublicBedSetupOption[] {
   return out;
 }
 
-function buildBookingPreferences(raw: unknown): PublicBookingPreferenceOption[] {
-  if (!Array.isArray(raw)) return [];
+function buildBookingPreferences(
+  raw: unknown
+): PublicBookingPreferenceOption[] | undefined {
+  // Per SR-01 follow-up (2026-11-18): same absent-vs-empty rule as
+  // `buildBedSetups` above.
+  if (!Array.isArray(raw)) return undefined;
   const out: PublicBookingPreferenceOption[] = [];
   for (const entry of raw) {
     const option = asRecord(entry);

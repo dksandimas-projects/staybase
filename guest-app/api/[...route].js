@@ -151823,6 +151823,48 @@ function resolveBookingPreferenceValues(raw) {
   }
   return values.length > 0 ? values : DEFAULT_BOOKING_PREFERENCES.map((option2) => option2.value);
 }
+function resolveBookingPreferenceOptions(raw) {
+  if (!Array.isArray(raw)) {
+    return DEFAULT_BOOKING_PREFERENCES.map((option2) => ({ ...option2 }));
+  }
+  const out = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const value = entry.value;
+    const label = entry.label;
+    if (typeof value !== "string" || !value) continue;
+    if (typeof label !== "string") continue;
+    const icon = entry.icon;
+    const surchargeNote = entry.surchargeNote;
+    out.push({
+      value,
+      label,
+      icon: typeof icon === "string" ? icon : void 0,
+      surchargeNote: typeof surchargeNote === "string" ? surchargeNote : void 0
+    });
+  }
+  return out;
+}
+function resolveBedSetupOptions(raw) {
+  if (!Array.isArray(raw)) {
+    return DEFAULT_BED_SETUPS.map((option2) => ({ ...option2 }));
+  }
+  const out = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const value = entry.value;
+    const label = entry.label;
+    if (typeof value !== "string" || !value) continue;
+    if (typeof label !== "string") continue;
+    const icon = entry.icon;
+    out.push({
+      value,
+      label,
+      icon: typeof icon === "string" ? icon : void 0
+    });
+  }
+  return out;
+}
 function parseCheckInTimeToPair(timeStr) {
   const normalized = timeStr.trim().toLowerCase();
   if (!normalized) return { hours: 14, minutes: 0 };
@@ -153008,6 +153050,8 @@ __export(shared_exports, {
   redateBreakfastSelections: () => redateBreakfastSelections,
   redateOtherAddOnSelections: () => redateOtherAddOnSelections,
   requiredExtraBedsFor: () => requiredExtraBedsFor,
+  resolveBedSetupOptions: () => resolveBedSetupOptions,
+  resolveBookingPreferenceOptions: () => resolveBookingPreferenceOptions,
   resolveBookingPreferenceValues: () => resolveBookingPreferenceValues,
   resolveBreakfastSlotGuestIndex: () => resolveBreakfastSlotGuestIndex,
   resolveCurrentLevel: () => resolveCurrentLevel,
@@ -248205,7 +248249,7 @@ function buildSeasonalRateOverrides(raw) {
   return out;
 }
 function buildBedSetups(raw) {
-  if (!Array.isArray(raw)) return [];
+  if (!Array.isArray(raw)) return void 0;
   const out = [];
   for (const entry of raw) {
     const option2 = asRecord(entry);
@@ -248218,7 +248262,7 @@ function buildBedSetups(raw) {
   return out;
 }
 function buildBookingPreferences(raw) {
-  if (!Array.isArray(raw)) return [];
+  if (!Array.isArray(raw)) return void 0;
   const out = [];
   for (const entry of raw) {
     const option2 = asRecord(entry);

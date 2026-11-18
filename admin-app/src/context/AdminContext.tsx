@@ -7893,8 +7893,8 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
   // with the same "absent → seed default" permissive
   // pattern used for roomTypes. Settings writes use the
   // `updateBedSetups` + `updateBookingPreferences` helpers
-  // below — both go through `updateSettings("hotelConfig",
-  // …)` for the one-write-per-save guarantee.
+  // below — both go through `updateSettings("hotelConfig", ...)`
+  // for the one-write-per-save guarantee.
   const [bedSetupsCatalog, setBedSetupsCatalog] = useState<BedSetupOption[]>(
     () => DEFAULT_BED_SETUPS.map((o) => ({ ...o }))
   );
@@ -7902,61 +7902,97 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
     BookingPreferenceOption[]
   >(() => DEFAULT_BOOKING_PREFERENCES.map((o) => ({ ...o })));
 
-  // Hydrate from the live `hotelConfig` snapshot. The
-  // `bedSetupsLoaded` / `bookingPreferencesLoaded` flags
-  // follow the RTS-06 pattern: a fresh project has no
-  // `bedSetups` field, and we want to keep the seeded
-  // defaults until the snapshot explicitly says otherwise
-  // (avoids the "deleted everything → snapshot echo
-  // resurrects defaults" bug RTS-06 documented).
+  // Per SR-01 follow-up (2026-11-18): the "loaded" flags now flip from
+  // the LIVE SNAPSHOT — not only after an admin write.
+  //
+  // THE DEFECT THIS FIXES
+  // ---------------------
+  // `bedSetupsLoaded` / `bookingPreferencesLoaded` were flipped ONLY
+  // inside `updateBedSetups` / `updateBookingPreferences` (i.e. after
+  // the admin had already saved something). Nothing in the
+  // `settings/hotelConfig` subscription ever flipped them, so the
+  // hydration effect below bailed out on EVERY fresh page load and the
+  // Booking Preferences tab rendered the SEED catalogs
+  // (`DEFAULT_BED_SETUPS` / `DEFAULT_BOOKING_PREFERENCES`) instead of
+  // the hotel's live lists.
+  //
+  // Measured on production (2026-11-18): the live
+  // `hotelConfig.bookingPreferences` held 7 entries (two had been
+  // deleted) and `hotelConfig.bedSetups` was `[]` (both had been
+  // deleted), while the tab showed the 9 seeded preferences and the 2
+  // seeded bed set-ups.
+  //
+  // Consequences:
+  //   1. The delete filtered the SEED list, not the live one, so the
+  //      write replaced the hotel's catalog with a seed-derived list --
+  //      a previously deleted entry RESURRECTED and any custom entry
+  //      was silently dropped.
+  //   2. On the next page load the seed rendered again, so the deleted
+  //      row came back: "I can't delete entries".
+  //
+  // THE FIX
+  // -------
+  // Mirror the room-types pattern (RTS-06, `roomTypesLoaded` — the
+  // flag flips INSIDE the snapshot effect): the flag flips as soon as
+  // the live field is an array — whatever its length, INCLUDING `[]`.
+  // An explicitly empty array means "the admin cleared this catalog",
+  // so the tab renders the empty state instead of resurrecting the
+  // seed. An ABSENT field (a fresh project) keeps the seed.
   const [bedSetupsLoaded, setBedSetupsLoaded] = useState(false);
   const [bookingPreferencesLoaded, setBookingPreferencesLoaded] = useState(false);
 
-  useEffect(() => {
-    // `bedSetups` lives on `settings/hotelConfig` alongside
-    // the room types + discount scope + payment-hold window.
-    // The hydration runs after the first `settings/hotelConfig`
-    // snapshot; before that the state holds the seed defaults.
-    if (!bedSetupsLoaded) return;
-    const raw = (hotelConfig as Record<string, unknown>).bedSetups;
-    if (Array.isArray(raw)) {
-      setBedSetupsCatalog(
-        raw
-          .filter((v: unknown): v is BedSetupOption =>
-            typeof v === "object" && v !== null &&
-            typeof (v as BedSetupOption).value === "string" &&
-            typeof (v as BedSetupOption).label === "string"
-          )
-          .map((v: BedSetupOption) => ({
-            value: v.value,
-            label: v.label,
-            icon: typeof v.icon === "string" ? v.icon : undefined
-          }))
-      );
-    }
-  }, [hotelConfig, bedSetupsLoaded]);
+  // A catalog write in flight OWNS the local state. The Firestore
+  // snapshot that echoes the PRE-write value can land while the write
+  // is still in flight; hydrating from it would resurrect the row the
+  // admin just deleted (the classic "the toast fired and the row came
+  // back"). While the flag is set the snapshot is ignored — the
+  // optimistic local state IS the written value.
+  const bedSetupsWriteInFlight = useRef(false);
+  const bookingPreferencesWriteInFlight = useRef(false);
+
+  const liveBedSetups = (hotelConfig as Record<string, unknown>).bedSetups;
+  const liveBookingPreferences = (hotelConfig as Record<string, unknown>)
+    .bookingPreferences;
 
   useEffect(() => {
-    if (!bookingPreferencesLoaded) return;
-    const raw = (hotelConfig as Record<string, unknown>).bookingPreferences;
-    if (Array.isArray(raw)) {
-      setBookingPreferencesCatalog(
-        raw
-          .filter((v: unknown): v is BookingPreferenceOption =>
-            typeof v === "object" && v !== null &&
-            typeof (v as BookingPreferenceOption).value === "string" &&
-            typeof (v as BookingPreferenceOption).label === "string"
-          )
-          .map((v: BookingPreferenceOption) => ({
-            value: v.value,
-            label: v.label,
-            icon: typeof v.icon === "string" ? v.icon : undefined,
-            surchargeNote:
-              typeof v.surchargeNote === "string" ? v.surchargeNote : undefined
-          }))
-      );
-    }
-  }, [hotelConfig, bookingPreferencesLoaded]);
+    if (!Array.isArray(liveBedSetups)) return;
+    if (bedSetupsWriteInFlight.current) return;
+    setBedSetupsCatalog(
+      liveBedSetups
+        .filter((v: unknown): v is BedSetupOption =>
+          typeof v === "object" && v !== null &&
+          typeof (v as BedSetupOption).value === "string" &&
+          typeof (v as BedSetupOption).label === "string"
+        )
+        .map((v: BedSetupOption) => ({
+          value: v.value,
+          label: v.label,
+          icon: typeof v.icon === "string" ? v.icon : undefined
+        }))
+    );
+    setBedSetupsLoaded(true);
+  }, [liveBedSetups]);
+
+  useEffect(() => {
+    if (!Array.isArray(liveBookingPreferences)) return;
+    if (bookingPreferencesWriteInFlight.current) return;
+    setBookingPreferencesCatalog(
+      liveBookingPreferences
+        .filter((v: unknown): v is BookingPreferenceOption =>
+          typeof v === "object" && v !== null &&
+          typeof (v as BookingPreferenceOption).value === "string" &&
+          typeof (v as BookingPreferenceOption).label === "string"
+        )
+        .map((v: BookingPreferenceOption) => ({
+          value: v.value,
+          label: v.label,
+          icon: typeof v.icon === "string" ? v.icon : undefined,
+          surchargeNote:
+            typeof v.surchargeNote === "string" ? v.surchargeNote : undefined
+        }))
+    );
+    setBookingPreferencesLoaded(true);
+  }, [liveBookingPreferences]);
 
   // Per SR-01..05 (2026-10-12): dedupe + intersect the per-type
   // `bedSetupValues` subset against the live catalog. Used by
@@ -8020,6 +8056,11 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
   // to validate the per-booking `bedSetup` choice.
   const updateBedSetups = async (next: BedSetupOption[]) => {
     const previous = bedSetupsCatalog;
+    // Per SR-01 follow-up (2026-11-18): the in-flight flag is set
+    // BEFORE the optimistic update so a snapshot that lands mid-write
+    // cannot clobber the local state with the pre-write value (that
+    // is what made a deleted row reappear).
+    bedSetupsWriteInFlight.current = true;
     setBedSetupsCatalog(next);
     try {
       const success = await updateSettings("hotelConfig", {
@@ -8030,14 +8071,12 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         setBedSetupsCatalog(previous);
         throw new Error("Failed to persist bed set-ups to settings.");
       }
-      // Mark the hydration flag so subsequent snapshots
-      // overwrite the seed defaults (the same RTS-06
-      // pattern documented on `roomTypesLoaded`).
-      setBedSetupsLoaded(true);
     } catch (error) {
       setBedSetupsCatalog(previous);
       console.error("Failed to save bed set-ups to Firestore:", error);
       throw error;
+    } finally {
+      bedSetupsWriteInFlight.current = false;
     }
   };
 
@@ -8049,6 +8088,9 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
   // preferences catalog is independent.
   const updateBookingPreferences = async (next: BookingPreferenceOption[]) => {
     const previous = bookingPreferencesCatalog;
+    // Per SR-01 follow-up (2026-11-18): same in-flight guard as
+    // `updateBedSetups` above.
+    bookingPreferencesWriteInFlight.current = true;
     setBookingPreferencesCatalog(next);
     try {
       const success = await updateSettings("hotelConfig", {
@@ -8059,11 +8101,12 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         setBookingPreferencesCatalog(previous);
         throw new Error("Failed to persist booking preferences to settings.");
       }
-      setBookingPreferencesLoaded(true);
     } catch (error) {
       setBookingPreferencesCatalog(previous);
       console.error("Failed to save booking preferences to Firestore:", error);
       throw error;
+    } finally {
+      bookingPreferencesWriteInFlight.current = false;
     }
   };
 
