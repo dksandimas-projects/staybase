@@ -28,9 +28,10 @@ A dedicated booking route at `/corporate/book` for corporate clients. Reuses all
 - [x] Access code input field + Validate button — shown on landing before entering the flow
 - [x] "Continue without code" option — proceeds with flat corporate rate
 - [x] Code validation feedback — valid (show company name + unlocked rate), expired, usage cap reached, inactive, invalid
-- [x] Persistent "Corporate Rate — [Company Name or Flat Rate]" badge throughout all 4 steps
+- [x] Persistent "Corporate Rate — [Company Name or Flat Rate]" badge throughout all steps
 - [x] Dark header/hero treatment maintained across all steps (distinct from standard booking flow)
 - [x] Step 2 — Guest Details: additional corporate fields (see `plan/features/BOOKING-FLOW.md §Step 2`)
+- [x] **Four steps — the Add-ons step is skipped** *(per AO-SKIP-01, decision #317, shipped 2026-11-18)*. The corporate rate is a flat rate with no per-date breakfast grid and no other add-ons, so the BR-09 "Add-ons" step could only ever render a "no add-ons available" placeholder. The public flow now skips an empty Add-ons step, so the corporate flow skips its empty one too — the two flows keep mirroring each other, for the same reason. The `add-ons` render branch is KEPT as the deep-link fallback and a redirect moves the guest on from it.
 - [x] All other steps inherit from standard booking flow with no changes
 - [x] Back button on landing returns to `/corporate` marketing page
 

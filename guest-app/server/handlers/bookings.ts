@@ -246,6 +246,15 @@ import {
   // denormalized flag alongside the selections.
   normalizeOtherAddOnsEnabled,
   hasAnyOtherAddOns,
+  // Per AO-SKIP-01 (2026-11-18): the "does the payload actually
+  // REQUEST an add-on?" rule. The create path used to read the
+  // PRESENCE of the `otherAddOnSelections` key as a selection, so
+  // the empty map the client always sends (a guest who picked
+  // nothing) was treated as a request — and on a hotel with the
+  // master switch off that REFUSED the whole booking with "One of
+  // the selected add-ons is no longer available." A guest could not
+  // complete a booking on a hotel with no add-ons on sale.
+  requestsOtherAddOns,
   AIRPORT_TRANSFER_PRESEED,
   type AddOn,
   type OtherAddOnSelectionEntry
@@ -2806,7 +2815,22 @@ export async function handleCreateBooking(req: any, res: any) {
       const rawOtherAddOns = (body as any).otherAddOnSelections;
       let validatedOtherAddOnSelections: Record<string, OtherAddOnSelectionEntry[]> | null = null;
       let validatedOtherAddOnTotal = 0;
-      if (rawOtherAddOns && typeof rawOtherAddOns === "object") {
+      // Per AO-SKIP-01 (2026-11-18): the validation block below runs
+      // ONLY when the payload actually REQUESTS an add-on.
+      //
+      // The old guard was `rawOtherAddOns && typeof rawOtherAddOns
+      // === "object"` — the PRESENCE of the key. The client sends
+      // the key on every create, with an empty map when the guest
+      // picked nothing, so an empty map walked straight into the
+      // master-switch check and raised OTHER_ADDON_NOT_AVAILABLE_ERROR
+      // on every booking at a hotel with no add-ons on sale ("One of
+      // the selected add-ons is no longer available. Please refresh
+      // and try again."). The guest could not finish the flow at all.
+      //
+      // "No add-ons" is a legitimate booking. It must never be
+      // refused — only a REAL selection of something that is no
+      // longer on sale is.
+      if (requestsOtherAddOns(rawOtherAddOns)) {
         if (!normalizeOtherAddOnsEnabled(hotelConfig.otherAddOnsEnabled)) {
           // The hotel took other add-ons off sale between the guest
           // loading Step 2 and submitting. The guest must not get

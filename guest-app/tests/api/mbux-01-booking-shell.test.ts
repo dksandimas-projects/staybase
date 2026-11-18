@@ -133,7 +133,7 @@ describe("MBUX-01 — Step eyebrows are redundant on mobile", () => {
   it.each([
     ["BookingPage", bookingPageSrc],
     ["CorporateBookingPage", corporatePageSrc]
-  ])("%s hides the `Step N of 5` eyebrow below sm:", (_name, src) => {
+  ])("%s hides the `Step N of M` eyebrow below sm:", (_name, src) => {
     expect(src).toMatch(/hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block/);
   });
 
@@ -141,14 +141,23 @@ describe("MBUX-01 — Step eyebrows are redundant on mobile", () => {
     ["BookingPage", bookingPageSrc],
     ["CorporateBookingPage", corporatePageSrc]
   ])("%s keeps all four eyebrows (none was deleted)", (_name, src) => {
-    expect(src.match(/sm:block">Step \d of 5<\/p>/g)).toHaveLength(4);
+    // Per AO-SKIP-01 (2026-11-18): the eyebrow's NUMBERS are
+    // derived now — the public flow's step count depends on
+    // whether the Add-ons step is shown, and the corporate
+    // flow's denominator is 4. The pin therefore counts the
+    // eyebrows (four per page — one per step branch) and no
+    // longer hardcodes the denominator.
+    expect(src.match(/sm:block">Step [^<]*<\/p>/g)).toHaveLength(4);
   });
 
   it.each([
     ["BookingPage", bookingPageSrc],
     ["CorporateBookingPage", corporatePageSrc]
   ])("%s keeps the StepIndicator call sites", (_name, src) => {
-    expect(src.match(/<StepIndicator steps=\{steps\} currentStep=\{\d\} \/>/g)).toHaveLength(4);
+    // Per AO-SKIP-01 (2026-11-18): `currentStep` is a derived
+    // expression, not a literal digit — the pin counts the
+    // call sites (four per page — one per step branch).
+    expect(src.match(/<StepIndicator steps=\{steps\} currentStep=\{[^}]*\} \/>/g)).toHaveLength(4);
   });
 });
 

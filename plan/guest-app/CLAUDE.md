@@ -66,6 +66,8 @@ Five-step flow in `BookingPage.tsx`. State persists across steps via React Conte
 4. **Review & Pay** — summary, discount selector, voucher input, payment method, screenshot upload
 5. **Confirmation** — booking ref, summary, Add to Calendar, payment instructions
 
+**Per AO-SKIP-01 (decision #317):** step 2 is SKIPPED when the hotel has no add-on options on sale (breakfast off AND the other-add-ons catalog empty). The step list is derived, so the stepper shows 4 steps and the guest goes straight from the room picker to guest details. "No add-ons" is a legitimate booking — the server never refuses an empty selection.
+
 Booking creation calls `/api/bookings/create` — never writes directly to Firestore from the client.
 
 See `plan/features/BOOKING-FLOW.md` for full checklist.
@@ -74,11 +76,12 @@ See `plan/features/BOOKING-FLOW.md` for full checklist.
 
 ## Corporate Booking (`/corporate/book`)
 
-Reuses the same five-step booking flow components with:
+Reuses the same booking flow components with:
 - Access code validation on landing before entering flow
 - Corporate skin (dark header, persistent rate badge)
 - Company name field added in Step 3
 - Flat corporate rate or custom negotiated rate from access code
+- **Four steps** — the corporate rate is a flat rate with no add-on options, so the Add-ons step is skipped (decision #317)
 
 See `plan/features/CORPORATE-BOOKING.md`.
 
