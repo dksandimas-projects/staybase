@@ -190,7 +190,7 @@ export function resolveConfirmationStatus(
         paymentState,
         tone: "success",
         headline: "Your booking is confirmed.",
-        summary: `You're looking forward to hosting you at ${brand}.`,
+        summary: `We look forward to hosting you at ${brand}.`,
         paymentStatusLabel: "Pay at the property",
         paymentStatusDetail: `Nothing to pay now — settle with ${methodLabel} when you check in.`,
         nextStep: "Just arrive at check-in time. Your reference is all you need.",
