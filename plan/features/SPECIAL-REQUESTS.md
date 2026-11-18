@@ -31,6 +31,15 @@ bookingPreferences: { value: string; label: string; icon?: string, surchargeNote
 
 Both default-seeded from `shared/constants/index.ts → DEFAULT_BED_SETUPS` + `DEFAULT_BOOKING_PREFERENCES`. The 9 seeded preferences match the screenshot; the 2 seeded bed set-ups match the screenshot.
 
+**ABSENT vs EXPLICITLY EMPTY (per SR-01 follow-up, 2026-11-18 — decision #316).** The two states are different and must stay different end-to-end:
+
+| Live `settings/hotelConfig` | Admin tab | Guest booking form |
+|---|---|---|
+| field **absent** (never configured) | the seeded catalog | the seeded catalog (RPT-03 fallback) |
+| field present but **`[]`** (the admin cleared it) | empty | **nothing renders** |
+
+The public projection (`GET /api/public/hotel-config`) projects an absent field as `undefined` and an empty one as `[]` — it used to flatten both into `[]`, which made "delete every entry" a no-op on the guest form. The **server's** validation stays permissive for an empty catalog (it must never reject a key a guest could have ticked from a stale page — that rejection happens inside the create transaction and surfaces as a 500, NO-ID-A68). Shared helpers: `resolveBookingPreferenceOptions` / `resolveBedSetupOptions` (`shared/utils/bookingPreferences.ts`) for the DISPLAY catalog, `resolveBookingPreferenceValues` for the server's allowed-values list.
+
 ### Per room type (`settings/hotelConfig.roomTypes[]`)
 
 ```ts
@@ -85,6 +94,7 @@ A single shared `<SpecialRequestsBlock />` component renders:
 | Commit | Surface | Files |
 |---|---|---|
 | **SR-01** | Admin: Booking Preferences tab + Room Types bedSetupValues editor | `shared/constants/index.ts`, `shared/schemas/bookingPreferences.ts`, `admin-app/src/context/AdminContext.tsx`, `admin-app/src/pages/SettingsPage.tsx` |
+| **SR-01 follow-up** (2026-11-18, decision #316) | The tab follows the LIVE snapshot; the delete confirm is a Modal + ConfirmForm; absent ≠ empty end-to-end | `admin-app/src/context/AdminContext.tsx`, `admin-app/src/pages/SettingsPage.tsx`, `shared/utils/bookingPreferences.ts`, `shared/types/publicHotelConfig.ts`, `guest-app/src/hooks/useRoomTypes.ts`, `guest-app/server/lib/publicHotelConfig.ts` |
 | **SR-02** | Guest + corporate Step 3 UI | `guest-app/src/components/SpecialRequestsBlock.tsx`, `guest-app/src/hooks/useRoomTypes.ts`, `guest-app/src/hooks/usePublicSiteContent.ts`, `shared/utils/bookingPreferences.ts`, `shared/index.ts`, `guest-app/src/pages/BookingPage.tsx`, `guest-app/src/pages/CorporateBookingPage.tsx` |
 | **SR-03** | Wire + server validation + storage | `guest-app/server/handlers/bookings.ts` |
 | **SR-04** | Admin read surfaces | `admin-app/src/pages/CalendarPage.tsx`, `admin-app/src/pages/BookingsPage.tsx`, `admin-app/src/components/GuestSpecialRequestsBlock.tsx`, `admin-app/src/context/AdminContext.tsx`, `shared/types/index.ts`, `guest-app/server/handlers/email.ts` |
@@ -99,6 +109,10 @@ A single shared `<SpecialRequestsBlock />` component renders:
 - **Hotel-config `checkInTime` is empty** — the dropdown defaults to "2:00 PM" (the deploy-time fallback). Both client and server use `parseCheckInTimeToPair("2:00 PM")` so they agree.
 - **Step 1 → Step 3 transition** — the new Step 3 fields reset whenever the cart changes (the existing `bedSelections` / `additionalPreferences` / `additionalRequest` / `expectedArrivalTime` state is reset to its defaults on a fresh mount).
 - **In-flow hold expires** — the same SR fields are preserved in `state` while the hold is active, same as the existing `guestDetails` state. Re-clicking Step 3 after a hold expiry restores them from a `useEffect` keyed on the cart.
+- **Admin deletes a catalog entry (per SR-01 follow-up, 2026-11-18)** — the tab renders the hotel's LIVE catalog, so the delete filters the live list and the write replaces the live catalog with that list. A previously deleted entry does NOT resurrect and a custom entry is not dropped. The row disappears from the guest form on the next public-config fetch (the public site caches the config for 5 minutes per returning visitor).
+- **Admin clears the WHOLE catalog** — the live field becomes `[]`; the guest form renders no chips and no bed set-up radios (the accordion shows its "No preferences are configured" empty state). The server still accepts a stale key from a guest who loaded the form before the clear — it never rejects a chip a guest could have rendered (NO-ID-A68).
+- **Admin deletes an entry that an existing reservation used** — the reservation's `additionalPreferences` / `Booking.bedSetup` is the immutable snapshot and is unaffected. The drawer chips fall back to the raw key (`option?.label ?? key`), exactly as before.
+- **A catalog write is in flight** — the local state owns the catalog until the write settles, so the snapshot echo of the pre-write value cannot resurrect the row that was just deleted. A FAILED write rolls the catalog back to its previous value and reports the error.
 
 ## Out of scope
 
@@ -113,3 +127,4 @@ A single shared `<SpecialRequestsBlock />` component renders:
 - The existing `feat/special-requests-redirect` redirect card is retired on `BookingPage.tsx` + `BookingConfirmPage.tsx` (no more "Forgot something?" prompt). The corporate flow had no redirect card to retire; the legacy `Special requests` textarea is replaced by the `SpecialRequestsBlock`.
 - The `BookingSpecialRequestsEditor` (staff-captured) is unchanged — post-booking follow-ups from email / phone still have a home.
 - The booking drawer's `<GuestSpecialRequestsBlock />` hidden when the reservation has none of the new fields, so pre-SR legacy reservations render without a silent empty card.
+- **SR-01 follow-up (2026-11-18)** — `shared/__tests__/bookingPreferenceCatalog.test.ts` (10 behavioural: absent → defaults, empty → nothing), `admin-app/src/__tests__/sr-01-booking-preferences-catalog-hydration.test.ts` (9 source-shape: the hydration follows the live snapshot, the write-in-flight guard, the Modal + ConfirmForm delete), `guest-app/tests/api/sr-01-catalog-empty-semantics.test.ts` (4: the public projection keeps absent ≠ empty). Suites green: shared **946** · admin **2,245** · guest-api **3,155**.

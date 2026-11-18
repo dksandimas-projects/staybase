@@ -1098,8 +1098,7 @@ function CatalogEditor<T extends { value: string; label: string }>({
   title,
   subtitle,
   rows,
-  isPending,
-  pendingValue,
+  isDeleting,
   onAdd,
   onEdit,
   onDelete,
@@ -1110,8 +1109,9 @@ function CatalogEditor<T extends { value: string; label: string }>({
   title: string;
   subtitle: string;
   rows: T[];
-  isPending: (value: string) => boolean;
-  pendingValue: string | null;
+  // True while a delete write is in flight — the buttons are
+  // disabled so a second click cannot queue a second write.
+  isDeleting: boolean;
   onAdd: () => void;
   onEdit: (entry: T) => void;
   onDelete: (entry: T) => Promise<void> | void;
@@ -1119,16 +1119,6 @@ function CatalogEditor<T extends { value: string; label: string }>({
   renderModal: () => React.ReactNode;
   beginLabel: string;
 }) {
-  const toast = useToast();
-
-  useEffect(() => {
-    if (!pendingValue) return;
-    const timer = setTimeout(() => {
-      // Parent listens on `pendingValue` to arm/disarm.
-    }, 3000);
-    return () => clearTimeout(timer);
-  }, [pendingValue]);
-
   return (
     <div className="rounded-card border border-gray-200 bg-white p-5 shadow-sm">
       <header className="mb-4 flex items-start justify-between gap-3">
@@ -1169,35 +1159,12 @@ function CatalogEditor<T extends { value: string; label: string }>({
                 </button>
                 <button
                   type="button"
-                  onClick={async () => {
-                    if (!isPending(entry.value)) {
-                      toast.info("Confirm delete", "Click the delete button again within 3 seconds to confirm.");
-                      // Surface the arm via a custom event so the
-                      // parent can lift state into the prop-driven
-                      // pending state without prop drilling here.
-                      // We dispatch a synthetic event the parent
-                      // listens on. Alternative: parent passes a
-                        // callback. We do that below in
-                        // `handleArmDelete`.
-                      window.dispatchEvent(
-                        new CustomEvent("booking-preferences-arm-delete", { detail: { value: entry.value } })
-                      );
-                      return;
-                    }
-                    try {
-                      await onDelete(entry);
-                    } catch (err) {
-                      toast.error("Could not delete", err instanceof Error ? err.message : "Unknown error");
-                    }
-                  }}
-                  className={`min-h-[44px] px-2 text-[11px] font-bold ${
-                    isPending(entry.value)
-                      ? "text-red-700 hover:underline"
-                      : "text-red-650 hover:text-red-700 hover:underline"
-                  }`}
+                  onClick={() => onDelete(entry)}
+                  disabled={isDeleting}
+                  className="min-h-[44px] px-2 text-[11px] font-bold text-red-650 hover:text-red-700 hover:underline disabled:opacity-50"
                   aria-label={`Delete ${entry.label}`}
                 >
-                  {isPending(entry.value) ? "Click again to confirm" : "Delete"}
+                  Delete
                 </button>
               </div>
             </li>
@@ -1216,46 +1183,20 @@ function BookingPreferencesTabBody({
   onUpdateBookingPreferences
 }: BookingPreferencesTabBodyProps) {
   const toast = useToast();
-  const [bedSetupsPendingDelete, setBedSetupsPendingDelete] = useState<string | null>(null);
-  const [prefsPendingDelete, setPrefsPendingDelete] = useState<string | null>(null);
+  // Per SR-01 follow-up (2026-11-18): the delete confirm is a MODAL
+  // (the RTS-05 pattern the room-type delete already uses), not the
+  // 3-second "click Delete again" arm. RTS-05 already called that
+  // pattern out as a defect in its own right: "a user who clicks
+  // Delete, reads the label change, hesitates past 3s, and clicks
+  // again simply RE-ARMS it. Repeat indefinitely and nothing ever
+  // deletes." The arm state also routed both catalogs through ONE
+  // window event keyed by value, so a value present in both catalogs
+  // armed the wrong one.
+  const [pendingDeleteBedSetup, setPendingDeleteBedSetup] = useState<BedSetupOption | null>(null);
+  const [pendingDeletePreference, setPendingDeletePreference] = useState<BookingPreferenceOption | null>(null);
+  const [isDeletingCatalogEntry, setIsDeletingCatalogEntry] = useState(false);
   const [bedSetupModal, setBedSetupModal] = useState<BedSetupModalState>({ open: false });
   const [prefsModal, setPrefsModal] = useState<BookingPreferenceModalState>({ open: false });
-
-  // The CatalogEditor above is generic; we use a single
-  // shared "arm" timer per catalog. The custom-event
-  // dispatch is the simplest way to keep the editor
-  // component prop-light while still letting the parent own
-  // the pending state. (Alternative would be prop drilling
-  // two more callbacks — not for two screens.)
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ value: string }>).detail;
-      if (!detail) return;
-      // Route to whichever catalog owns the value.
-      if (bedSetups.some((b) => b.value === detail.value)) {
-        setBedSetupsPendingDelete(detail.value);
-      } else if (bookingPreferences.some((p) => p.value === detail.value)) {
-        setPrefsPendingDelete(detail.value);
-      }
-    };
-    window.addEventListener("booking-preferences-arm-delete", handler as EventListener);
-    return () => {
-      window.removeEventListener("booking-preferences-arm-delete", handler as EventListener);
-    };
-  }, [bedSetups, bookingPreferences]);
-
-  // Auto-disarm after 3 seconds (the existing "click
-  // twice" pattern).
-  useEffect(() => {
-    if (!bedSetupsPendingDelete) return;
-    const timer = setTimeout(() => setBedSetupsPendingDelete(null), 3000);
-    return () => clearTimeout(timer);
-  }, [bedSetupsPendingDelete]);
-  useEffect(() => {
-    if (!prefsPendingDelete) return;
-    const timer = setTimeout(() => setPrefsPendingDelete(null), 3000);
-    return () => clearTimeout(timer);
-  }, [prefsPendingDelete]);
 
   // ── Bed Set-ups ────────────────────────────────────────
   const handleBedSetupSave = async (entry: BedSetupOption, isNew: boolean) => {
@@ -1291,17 +1232,15 @@ function BookingPreferencesTabBody({
   };
 
   const handleBedSetupDelete = async (entry: BedSetupOption) => {
-    if (bedSetupsPendingDelete !== entry.value) {
-      setBedSetupsPendingDelete(entry.value);
-      toast.info("Confirm delete", "Click delete again within 3 seconds to confirm.");
-      return;
-    }
-    setBedSetupsPendingDelete(null);
+    setIsDeletingCatalogEntry(true);
     try {
       await onUpdateBedSetups(bedSetups.filter((b) => b.value !== entry.value));
       toast.success("Bed set-up removed", `${entry.label} was removed from the catalog.`);
+      setPendingDeleteBedSetup(null);
     } catch (err) {
       toast.error("Could not delete", err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setIsDeletingCatalogEntry(false);
     }
   };
 
@@ -1343,17 +1282,15 @@ function BookingPreferencesTabBody({
   };
 
   const handlePreferenceDelete = async (entry: BookingPreferenceOption) => {
-    if (prefsPendingDelete !== entry.value) {
-      setPrefsPendingDelete(entry.value);
-      toast.info("Confirm delete", "Click delete again within 3 seconds to confirm.");
-      return;
-    }
-    setPrefsPendingDelete(null);
+    setIsDeletingCatalogEntry(true);
     try {
       await onUpdateBookingPreferences(bookingPreferences.filter((p) => p.value !== entry.value));
       toast.success("Preference removed", `${entry.label} was removed from the catalog.`);
+      setPendingDeletePreference(null);
     } catch (err) {
       toast.error("Could not delete", err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setIsDeletingCatalogEntry(false);
     }
   };
 
@@ -1374,13 +1311,12 @@ function BookingPreferencesTabBody({
         title="Bed set-ups"
         subtitle="Per-room-type subset of these options appears on the public booking Step 2. Empty subset = no set-up choice for that type."
         rows={bedSetups}
-        isPending={(v) => bedSetupsPendingDelete === v}
-        pendingValue={bedSetupsPendingDelete}
+        isDeleting={isDeletingCatalogEntry}
         onAdd={() =>
           setBedSetupModal({ open: true, isNew: true, entry: { value: "", label: "" } })
         }
         onEdit={(entry) => setBedSetupModal({ open: true, isNew: false, entry: { ...entry } })}
-        onDelete={handleBedSetupDelete}
+        onDelete={(entry) => setPendingDeleteBedSetup(entry)}
         beginLabel="Add bed set-up"
         renderRow={(entry) => (
           <div className="space-y-0.5">
@@ -1470,13 +1406,12 @@ function BookingPreferencesTabBody({
         title="Additional preferences"
         subtitle="The checkbox grid in the public booking Step 2 “Show additional preferences” accordion. The `surchargeNote` renders next to the label (informational only)."
         rows={bookingPreferences}
-        isPending={(v) => prefsPendingDelete === v}
-        pendingValue={prefsPendingDelete}
+        isDeleting={isDeletingCatalogEntry}
         onAdd={() =>
           setPrefsModal({ open: true, isNew: true, entry: { value: "", label: "" } })
         }
         onEdit={(entry) => setPrefsModal({ open: true, isNew: false, entry: { ...entry } })}
-        onDelete={handlePreferenceDelete}
+        onDelete={(entry) => setPendingDeletePreference(entry)}
         beginLabel="Add preference"
         renderRow={(entry) => (
           <div className="space-y-0.5">
@@ -1581,6 +1516,88 @@ function BookingPreferencesTabBody({
           </Modal>
         )}
       />
+
+      {/* BED SET-UP DELETE CONFIRM (per SR-01 follow-up, 2026-11-18) */}
+      <Modal
+        title={
+          pendingDeleteBedSetup
+            ? `Delete · ${pendingDeleteBedSetup.label}`
+            : "Delete bed set-up"
+        }
+        open={!!pendingDeleteBedSetup}
+        onClose={() => {
+          if (isDeletingCatalogEntry) return;
+          setPendingDeleteBedSetup(null);
+        }}
+        footer={null}
+      >
+        {pendingDeleteBedSetup ? (
+          <div className="space-y-4 text-sm">
+            <p className="text-xs leading-relaxed text-gray-600">
+              You are about to remove <strong>{pendingDeleteBedSetup.label}</strong> (
+              {pendingDeleteBedSetup.value}) from the bed set-up catalog. It disappears from the
+              guest booking form, and any room type that offered it no longer offers a choice.
+              Existing bookings keep the set-up they were made with.
+            </p>
+            <ConfirmForm
+              title="Remove this bed set-up"
+              message="The option disappears from the public booking form immediately. Re-add the entry to bring it back."
+              reasonLabel="Reason (optional)"
+              reasonPlaceholder="Why is this bed set-up being removed?"
+              confirmLabel={isDeletingCatalogEntry ? "Removing…" : "Remove bed set-up"}
+              cancelLabel="Back"
+              variant="danger"
+              onConfirm={() => void handleBedSetupDelete(pendingDeleteBedSetup)}
+              onCancel={() => {
+                if (isDeletingCatalogEntry) return;
+                setPendingDeleteBedSetup(null);
+              }}
+              testId="delete-bed-setup-confirm"
+            />
+          </div>
+        ) : null}
+      </Modal>
+
+      {/* ADDITIONAL PREFERENCE DELETE CONFIRM (per SR-01 follow-up, 2026-11-18) */}
+      <Modal
+        title={
+          pendingDeletePreference
+            ? `Delete · ${pendingDeletePreference.label}`
+            : "Delete preference"
+        }
+        open={!!pendingDeletePreference}
+        onClose={() => {
+          if (isDeletingCatalogEntry) return;
+          setPendingDeletePreference(null);
+        }}
+        footer={null}
+      >
+        {pendingDeletePreference ? (
+          <div className="space-y-4 text-sm">
+            <p className="text-xs leading-relaxed text-gray-600">
+              You are about to remove <strong>{pendingDeletePreference.label}</strong> (
+              {pendingDeletePreference.value}) from the additional preferences catalog. It
+              disappears from the guest booking form, and the guest can no longer tick it. Existing
+              bookings keep the preference they were made with.
+            </p>
+            <ConfirmForm
+              title="Remove this preference"
+              message="The option disappears from the public booking form immediately. Re-add the entry to bring it back."
+              reasonLabel="Reason (optional)"
+              reasonPlaceholder="Why is this preference being removed?"
+              confirmLabel={isDeletingCatalogEntry ? "Removing…" : "Remove preference"}
+              cancelLabel="Back"
+              variant="danger"
+              onConfirm={() => void handlePreferenceDelete(pendingDeletePreference)}
+              onCancel={() => {
+                if (isDeletingCatalogEntry) return;
+                setPendingDeletePreference(null);
+              }}
+              testId="delete-booking-preference-confirm"
+            />
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }

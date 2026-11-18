@@ -133,8 +133,19 @@ export interface PublicHotelConfig {
   botProtectionMode?: BotProtectionMode;
   roomTypes: PublicRoomType[];
   seasonalRateOverrides: SeasonalRateOverride[];
-  bedSetups: PublicBedSetupOption[];
-  bookingPreferences: PublicBookingPreferenceOption[];
+  /**
+   * The admin-configurable bed set-ups + additional preferences.
+   *
+   * Per SR-01 follow-up (2026-11-18): both are OPTIONAL on purpose.
+   * "ABSENT" (`undefined` — the field is not on `settings/hotelConfig`
+   * at all) means "this hotel never configured the list", and the
+   * guest renders the shipped defaults. An explicitly EMPTY array
+   * (`[]`) means "the hotel cleared the list", and the guest renders
+   * NOTHING. The projection used to flatten both states into `[]`,
+   * which made "delete every entry" a no-op on the booking form.
+   */
+  bedSetups?: PublicBedSetupOption[];
+  bookingPreferences?: PublicBookingPreferenceOption[];
   paymentMethods: PublicPaymentMethod[];
   /**
    * The in-room intercom quick-request list
