@@ -152670,6 +152670,27 @@ function sortAddOnsByDisplayOrder(addOns) {
     return String(a.name || "").localeCompare(String(b3.name || ""));
   });
 }
+function requestsOtherAddOns(raw) {
+  if (!raw || typeof raw !== "object") return false;
+  const groups = Object.values(raw);
+  for (const group of groups) {
+    if (!Array.isArray(group)) continue;
+    for (const item of group) {
+      if (!item || typeof item !== "object") continue;
+      const entry = item;
+      const addOnId = String(entry.addOnId || "").trim();
+      if (!addOnId) continue;
+      const quantity = Math.floor(Number(entry.quantity) || 0);
+      if (quantity > 0) return true;
+    }
+  }
+  return false;
+}
+function hasBookableAddOns(input) {
+  if (!input.catalogSettled) return true;
+  if (input.breakfastEnabled) return true;
+  return input.otherAddOnCount > 0;
+}
 function isOtherAddOnBookingMutable(status) {
   const normalized = String(status ?? "").trim().toLowerCase();
   return normalized !== "checked-out" && normalized !== "cancelled";
@@ -152999,6 +153020,7 @@ __export(shared_exports, {
   getSweepHistory: () => getSweepHistory,
   getWeekendNightCount: () => getWeekendNightCount,
   hasAnyOtherAddOns: () => hasAnyOtherAddOns,
+  hasBookableAddOns: () => hasBookableAddOns,
   inFlowHoldStayMatches: () => inFlowHoldStayMatches,
   isBookingOccupyingRoom: () => isBookingOccupyingRoom,
   isBotProtectionDisabled: () => isBotProtectionDisabled,
@@ -153049,6 +153071,7 @@ __export(shared_exports, {
   recordSweepResult: () => recordSweepResult,
   redateBreakfastSelections: () => redateBreakfastSelections,
   redateOtherAddOnSelections: () => redateOtherAddOnSelections,
+  requestsOtherAddOns: () => requestsOtherAddOns,
   requiredExtraBedsFor: () => requiredExtraBedsFor,
   resolveBedSetupOptions: () => resolveBedSetupOptions,
   resolveBookingPreferenceOptions: () => resolveBookingPreferenceOptions,
@@ -233127,7 +233150,7 @@ async function handleCreateBooking(req, res) {
       const rawOtherAddOns = body.otherAddOnSelections;
       let validatedOtherAddOnSelections = null;
       let validatedOtherAddOnTotal = 0;
-      if (rawOtherAddOns && typeof rawOtherAddOns === "object") {
+      if (requestsOtherAddOns(rawOtherAddOns)) {
         if (!normalizeOtherAddOnsEnabled(hotelConfig.otherAddOnsEnabled)) {
           throw new Error(OTHER_ADDON_NOT_AVAILABLE_ERROR);
         }

@@ -85,7 +85,12 @@ import {
   buildOtherAddOnDraftSelections,
   countOtherAddOnDraftSelections,
   otherAddOnDraftKey,
-  recomputeOtherAddOnTotal
+  recomputeOtherAddOnTotal,
+  // Per AO-SKIP-01 (2026-11-18): the shared "is there ANY add-on
+  // option on sale?" rule that decides whether the Add-ons step is
+  // shown at all. Shared so the guest + corporate flows cannot
+  // drift onto two different definitions of "no add-ons".
+  hasBookableAddOns
 } from "@spark-inn/shared";
 // Per MRB-02 (2026-08-02, per decision #164): the
 // reservation-level idempotency key, imported separately to
@@ -187,7 +192,37 @@ import {
 // details step. The label is forward-thinking ("Add-ons"
 // not "Breakfast") so future per-stay add-ons (spa,
 // parking, etc.) share the same step without a rename.
-const steps = ["Select Room", "Add-ons", "Guest Details", "Review & Pay", "Confirmation"];
+// Per AO-SKIP-01 (2026-11-18): the step LABELS live in one map so
+// the visible step list can be DERIVED from whether the Add-ons step
+// is shown. The list is no longer a fixed 5-item constant: a hotel
+// with no add-on options on sale has no Add-ons step to show, and
+// the stepper + the "Step N of M" captions follow the live list
+// instead of a hardcoded 5.
+//
+// The keys are the URL step keys — the label is only what the
+// stepper prints.
+const STEP_LABELS: Record<string, string> = {
+  "select-room": "Select Room",
+  "add-ons": "Add-ons",
+  "guest-details": "Guest Details",
+  review: "Review & Pay",
+  confirmation: "Confirmation"
+};
+// The canonical order of the flow. The Add-ons entry is DROPPED
+// (not renumbered) when the hotel has nothing to offer there.
+const STEP_ORDER_WITH_ADD_ONS = [
+  "select-room",
+  "add-ons",
+  "guest-details",
+  "review",
+  "confirmation"
+];
+const STEP_ORDER_WITHOUT_ADD_ONS = [
+  "select-room",
+  "guest-details",
+  "review",
+  "confirmation"
+];
 // Per BR-09: the URL step-key contract. The legacy
 // numeric `?step=N` values (1-4 from the pre-BR-09
 // flow) are mapped to the new string keys in
@@ -2099,7 +2134,16 @@ export function BookingPage() {
           // an add-on that is no longer on sale is refused. The
           // client snapshots exist so the Step 2 grid can quote a
           // total that matches the bill.
-          otherAddOnSelections: otherAddOnDraft,
+          //
+          // Per AO-SKIP-01 (2026-11-18): an EMPTY draft is omitted
+          // from the payload entirely. "No add-ons" is a legitimate
+          // booking, and the key must not be on the wire when it
+          // carries no selection — the server reads a present key as
+          // "the guest asked for an add-on" and refuses the booking
+          // at a hotel with no add-ons on sale.
+          ...(Object.keys(otherAddOnDraft).length > 0
+            ? { otherAddOnSelections: otherAddOnDraft }
+            : {}),
           // Per CHD-10: the adult/child split. `numAdults` is
           // derived from `guests - numChildren` in the client.
           // The server uses these to compute the breakfast total
@@ -2321,6 +2365,16 @@ export function BookingPage() {
     if (isGuestDetailsStep) {
       // Per BR-09: back from the new Step 3 ("Guest
       // Details") returns to the new Step 2 ("Add-ons").
+      //
+      // Per AO-SKIP-01 (2026-11-18): when the Add-ons step is
+      // hidden there is no Step 2 to go back to — back returns to
+      // Step 1 (the room picker), the same destination the Add-ons
+      // step's own back button uses.
+      if (hideAddOnsStep) {
+        const step1Params = new URLSearchParams(continueParams);
+        step1Params.delete("step");
+        return `/book?${step1Params.toString()}`;
+      }
       return `/book?${continueParams.toString()}`;
     }
     if (isAddOnsStep) {
@@ -2485,6 +2539,62 @@ const otherAddOnCount = useMemo(
   () => countOtherAddOnDraftSelections(otherAddOnDraft),
   [otherAddOnDraft]
 );
+
+// Per AO-SKIP-01 (2026-11-18): the Add-ons step is SKIPPED when the
+// hotel has no add-on options on sale at all.
+//
+// The step hosts two kinds of add-on — the breakfast per-meal grid
+// and the BR-12 other-add-ons grid. On a hotel with neither (the
+// production Spark Inn shape as of 2026-11-18: the "Add-ons enabled"
+// master switch is off AND the only catalog row is disabled) the step
+// renders an empty card and asks the guest to press on. The flow now
+// removes it: the guest goes straight from the room picker to guest
+// details, and the stepper shows 4 steps instead of 5.
+//
+// The catalog must have SETTLED before the step is hidden — while it
+// is still loading (or if the fetch failed) the answer is "we don't
+// know yet", and hiding the step on a guess would take away a step
+// the guest could have used.
+const otherAddOnsCatalogSettled =
+  !otherAddOnsCatalog.isLoading && !otherAddOnsCatalog.error;
+const hideAddOnsStep = !hasBookableAddOns({
+  breakfastEnabled: breakfastConfig.isEnabled,
+  otherAddOnCount: otherAddOnsCatalog.addOns.length,
+  catalogSettled: otherAddOnsCatalogSettled
+});
+
+// The VISIBLE step list + the guest's position in it. Both are
+// derived from `hideAddOnsStep`, so the stepper and the
+// "Step N of M" captions can never disagree with each other or with
+// the steps the guest actually walks through.
+const visibleStepKeys = hideAddOnsStep
+  ? STEP_ORDER_WITHOUT_ADD_ONS
+  : STEP_ORDER_WITH_ADD_ONS;
+const steps = visibleStepKeys.map((key) => STEP_LABELS[key] || key);
+const totalStepCount = visibleStepKeys.length;
+const currentStepNumber = Math.max(
+  1,
+  visibleStepKeys.indexOf(currentStepKey) + 1
+);
+
+// The Step 1 "Continue" target. Normally it points at the Add-ons
+// step; when that step is hidden it points straight at guest
+// details. Built here (after `hideAddOnsStep` is known) rather than
+// at the `continueParams` definition so the two can never disagree.
+const stepOneContinueParams = new URLSearchParams(continueParams);
+if (hideAddOnsStep) {
+  stepOneContinueParams.set("step", STEP_KEYS.guestDetails);
+}
+
+// A guest who lands on the Add-ons step (a deep link, a back button,
+// a stale share-link) at a hotel with no add-on options on sale is
+// moved on to Guest Details instead of staring at an empty step.
+useEffect(() => {
+  if (!isAddOnsStep || !hideAddOnsStep) return;
+  const next = new URLSearchParams(searchParams);
+  next.set("step", STEP_KEYS.guestDetails);
+  setSearchParams(next, { replace: true });
+}, [isAddOnsStep, hideAddOnsStep, searchParams, setSearchParams]);
 
 // Per MBUX-05 (decision #257): the number of breakfast SLOTS chosen.
 //
@@ -2938,6 +3048,26 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
   };
 
   if (isAddOnsStep) {
+    // Per AO-SKIP-01 (2026-11-18): the hotel has no add-on options
+    // on sale, so this step has nothing to offer. The redirect effect
+    // above moves the guest on to Guest Details; this placeholder
+    // covers the one frame before the URL changes, so the guest never
+    // sees the empty step itself.
+    if (hideAddOnsStep) {
+      return bookingShell(
+        <section className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-3xl">
+            <h1 className="font-heading text-4xl text-gray-950 sm:text-5xl">
+              Add-ons
+            </h1>
+            <p className="mt-4 max-w-2xl leading-7 text-gray-600">
+              Taking you to guest details — this hotel has no optional
+              add-ons on sale.
+            </p>
+          </div>
+        </section>
+      );
+    }
     // Per BR-09 (2026-10-14): the new Step 2
     // ("Add-ons"). Hosts the breakfast per-date ×
     // per-guest meal grid extracted from the old
@@ -2952,14 +3082,14 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
       <>
         <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-3xl">
-            <StepIndicator steps={steps} currentStep={2} />
+            <StepIndicator steps={steps} currentStep={currentStepNumber} />
           </div>
           <div className="mt-10">
             {/* Per MBUX-01: hidden on mobile because the compact
                 stepper now states the position once, in its
                 `Step N of 5 · Name` caption. Retained from
                 `sm:` up, where the stepper shows every label. */}
-            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 2 of 5</p>
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step {currentStepNumber} of {totalStepCount}</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Add-ons</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Optional extras for your stay.
@@ -3164,11 +3294,11 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
       <>
         <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-3xl">
-            <StepIndicator steps={steps} currentStep={3} />
+            <StepIndicator steps={steps} currentStep={currentStepNumber} />
           </div>
           <div className="mt-10">
             {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
-            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 3 of 5</p>
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step {currentStepNumber} of {totalStepCount}</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Guest details</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Add the guest information for this stay. Required fields show inline validation once touched.
@@ -3519,11 +3649,11 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
       <>
         <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-3xl">
-            <StepIndicator steps={steps} currentStep={4} />
+            <StepIndicator steps={steps} currentStep={currentStepNumber} />
           </div>
           <div className="mt-10">
             {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
-            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 4 of 5</p>
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step {currentStepNumber} of {totalStepCount}</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Review & Pay</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Review your details, select a discount or enter a voucher, and choose your payment method.
@@ -4346,12 +4476,12 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
     <>
       <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-3xl">
-          <StepIndicator steps={steps} currentStep={1} />
+          <StepIndicator steps={steps} currentStep={currentStepNumber} />
         </div>
         <div className="mt-10 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
           <div>
             {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
-            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 1 of 5</p>
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step {currentStepNumber} of {totalStepCount}</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Select your stay</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Choose dates, guests, and a room option. We will show room types available for your stay.
@@ -5385,8 +5515,15 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
           // `continueParams` URL stamp already points
           // at `step=add-ons` (see `continueParams`
           // above).
-          <PrimaryButton to={`/book?${continueParams.toString()}`} className="sm:min-w-56">
-            Continue to add-ons
+          //
+          // Per AO-SKIP-01 (2026-11-18): when the hotel has no
+          // add-on options on sale there IS no add-ons step, so
+          // the button goes straight to guest details and says so.
+          <PrimaryButton
+            to={`/book?${(hideAddOnsStep ? stepOneContinueParams : continueParams).toString()}`}
+            className="sm:min-w-56"
+          >
+            {hideAddOnsStep ? "Continue to guest details" : "Continue to add-ons"}
           </PrimaryButton>
         ) : (
           <PrimaryButton

@@ -68,12 +68,28 @@ describe("BR-09 — step-flow refactor tripwires", () => {
       // in BR-09. The legacy 4-step array must be
       // gone, and the new 5-step array must be
       // present.
+      //
+      // Per AO-SKIP-01 (2026-11-18): the list is no longer a
+      // hardcoded array of LABELS — it is derived from the step
+      // KEYS, because the Add-ons step is DROPPED (not renumbered)
+      // when the hotel has no add-on options on sale. The pin
+      // therefore covers the canonical 5-key order + the label
+      // map, which is what renders those 5 names.
       expect(bookingPageSrc).not.toMatch(
         /\[\s*"Select Room"\s*,\s*"Guest Details"\s*,\s*"Review & Pay"\s*,\s*"Confirmation"\s*\]/
       );
       expect(bookingPageSrc).toMatch(
-        /\[\s*"Select Room"\s*,\s*"Add-ons"\s*,\s*"Guest Details"\s*,\s*"Review & Pay"\s*,\s*"Confirmation"\s*\]/
+        /STEP_ORDER_WITH_ADD_ONS = \[\s*"select-room"\s*,\s*"add-ons"\s*,\s*"guest-details"\s*,\s*"review"\s*,\s*"confirmation"\s*\]/
       );
+      expect(bookingPageSrc).toMatch(
+        /STEP_ORDER_WITHOUT_ADD_ONS = \[\s*"select-room"\s*,\s*"guest-details"\s*,\s*"review"\s*,\s*"confirmation"\s*\]/
+      );
+      // The LABELS the stepper prints.
+      expect(bookingPageSrc).toMatch(/"select-room":\s*"Select Room"/);
+      expect(bookingPageSrc).toMatch(/"add-ons":\s*"Add-ons"/);
+      expect(bookingPageSrc).toMatch(/"guest-details":\s*"Guest Details"/);
+      expect(bookingPageSrc).toMatch(/review:\s*"Review & Pay"/);
+      expect(bookingPageSrc).toMatch(/confirmation:\s*"Confirmation"/);
     });
 
     it("introduces the new 'Add-ons' step URL key", () => {
@@ -173,10 +189,21 @@ describe("BR-09 — step-flow refactor tripwires", () => {
   });
 
   describe("CorporateBookingPage.tsx (corporate booking flow)", () => {
-    it("renders the corporate stepper with 5 steps", () => {
-      // The corporate flow mirrors the public flow
-      // step model (5 entries).
+    it("renders the corporate stepper with 4 steps (the Add-ons step is skipped)", () => {
+      // The corporate flow mirrored the public flow's
+      // 5-step model — but its Add-ons step could only ever
+      // render a "no add-ons available" placeholder (the
+      // corporate rate is a flat rate).
+      //
+      // Per AO-SKIP-01 (2026-11-18): the public flow now
+      // SKIPS an empty Add-ons step, so the corporate flow
+      // (which has no add-on options by construction) skips
+      // it too. The mirror is preserved — both flows now show
+      // the same number of steps for the same reason.
       expect(corporateBookingPageSrc).toMatch(
+        /\[\s*"Select Room"\s*,\s*"Guest Details"\s*,\s*"Review & Pay"\s*,\s*"Confirmation"\s*\]/
+      );
+      expect(corporateBookingPageSrc).not.toMatch(
         /\[\s*"Select Room"\s*,\s*"Add-ons"\s*,\s*"Guest Details"\s*,\s*"Review & Pay"\s*,\s*"Confirmation"\s*\]/
       );
     });
@@ -187,21 +214,23 @@ describe("BR-09 — step-flow refactor tripwires", () => {
       // step model as the public flow, even though
       // the corporate rate is a flat rate with no
       // per-day breakfast grid.
+      //
+      // Per AO-SKIP-01 (2026-11-18): the branch is KEPT as
+      // the deep-link fallback; a redirect moves the guest
+      // on from it.
       expect(corporateBookingPageSrc).toMatch(/currentStepKey\s*===\s*["']add-ons["']/);
     });
 
-    it("uses 'Step 1 of 5' / 'Step 3 of 5' / 'Step 4 of 5' headers (no stale 'of 4')", () => {
-      // The corporate page's "Step N of M" labels
-      // now read "of 5" (the old "of 4" is gone).
-      // The regex below pins "Step N of 4" exactly
-      // (the old stepper's denominator was 4) —
-      // anchored to the literal " of 4" suffix so it
-      // doesn't match the new "Step 4 of 5" header
-      // that contains the digit "4" inside.
-      expect(corporateBookingPageSrc).toMatch(/Step 1 of 5/);
-      expect(corporateBookingPageSrc).toMatch(/Step 3 of 5/);
-      expect(corporateBookingPageSrc).toMatch(/Step 4 of 5/);
-      expect(corporateBookingPageSrc).not.toMatch(/Step \d of 4\b/);
+    it("uses 'Step N of 4' headers (the 4-step model — no stale 'of 5')", () => {
+      // The corporate page's "Step N of M" labels now
+      // read "of 4" — the Add-ons step is gone from the
+      // corporate flow. The regex pins the literal
+      // " of 4" suffix so it doesn't match the public
+      // flow's dynamic caption.
+      expect(corporateBookingPageSrc).toMatch(/Step 1 of 4/);
+      expect(corporateBookingPageSrc).toMatch(/Step 2 of 4/);
+      expect(corporateBookingPageSrc).toMatch(/Step 3 of 4/);
+      expect(corporateBookingPageSrc).not.toMatch(/Step \d of 5\b/);
     });
   });
 
