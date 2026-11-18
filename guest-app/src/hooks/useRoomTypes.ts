@@ -5,6 +5,8 @@ import {
   DEFAULT_BOOKING_PREFERENCES,
   DEFAULT_ROOM_TYPES,
   normalizeSeasonalRateOverrides,
+  resolveBedSetupOptions,
+  resolveBookingPreferenceOptions,
   type BedSetupOption,
   type BookingPreferenceOption,
   type RoomTypeEntry,
@@ -171,48 +173,19 @@ export function useRoomTypes(): UseRoomTypesResult {
     // admin's write to `settings/hotelConfig.bedSetups`
     // / `.bookingPreferences` reaches us on the same
     // payload.
-    setBedSetups(hydrateBedSetupCatalog(config.bedSetups));
-    setBookingPreferences(hydrateBookingPreferenceCatalog(config.bookingPreferences));
+    //
+    // Per SR-01 follow-up (2026-11-18): both catalogs
+    // resolve through the SHARED helpers, so the client
+    // and the server read the absent-vs-empty distinction
+    // the same way — an ABSENT field keeps the shipped
+    // defaults, an EXPLICITLY EMPTY field renders
+    // NOTHING (the hotel cleared it; deleting every entry
+    // used to be a no-op on the public booking form).
+    setBedSetups(resolveBedSetupOptions(config.bedSetups));
+    setBookingPreferences(resolveBookingPreferenceOptions(config.bookingPreferences));
     setError(null);
   }, [config]);
 
-  function hydrateBedSetupCatalog(raw: unknown): BedSetupOption[] {
-  if (!Array.isArray(raw)) return DEFAULT_BED_SETUPS.map((o) => ({ ...o }));
-  const out: BedSetupOption[] = [];
-  for (const entry of raw) {
-    if (!entry || typeof entry !== "object") continue;
-    const value = (entry as { value?: unknown }).value;
-    const label = (entry as { label?: unknown }).label;
-    if (typeof value !== "string" || typeof label !== "string") continue;
-    const icon = (entry as { icon?: unknown }).icon;
-    out.push({
-      value,
-      label,
-      icon: typeof icon === "string" ? icon : undefined
-    });
-  }
-  return out.length > 0 ? out : DEFAULT_BED_SETUPS.map((o) => ({ ...o }));
-}
-
-function hydrateBookingPreferenceCatalog(raw: unknown): BookingPreferenceOption[] {
-  if (!Array.isArray(raw)) return DEFAULT_BOOKING_PREFERENCES.map((o) => ({ ...o }));
-  const out: BookingPreferenceOption[] = [];
-  for (const entry of raw) {
-    if (!entry || typeof entry !== "object") continue;
-    const value = (entry as { value?: unknown }).value;
-    const label = (entry as { label?: unknown }).label;
-    if (typeof value !== "string" || typeof label !== "string") continue;
-    const icon = (entry as { icon?: unknown }).icon;
-    const surchargeNote = (entry as { surchargeNote?: unknown }).surchargeNote;
-    out.push({
-      value,
-      label,
-      icon: typeof icon === "string" ? icon : undefined,
-      surchargeNote: typeof surchargeNote === "string" ? surchargeNote : undefined
-    });
-  }
-  return out.length > 0 ? out : DEFAULT_BOOKING_PREFERENCES.map((o) => ({ ...o }));
-}
 
 return { roomTypes, seasonalRateOverrides, bedSetups, bookingPreferences, loading: isLoading, error };
 }

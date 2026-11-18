@@ -190,10 +190,16 @@ test.describe("Guest write paths (browser, bot protection off)", () => {
     expect(result.bookingRef, "the booking must carry a booking reference").toMatch(/^SI-\d{8}-\d{5}$/);
     expect(result.reservationRef, "the confirmation page must show a reservation reference").toMatch(/^R-\d{8}-\d{5}$/);
 
-    // The chip the guest ticked must travel with the booking. The hotel's
-    // `bookingPreferences` catalogue is not configured, so the client
-    // renders the nine shipped defaults and the server falls back to the
-    // same list — the chip is accepted, not rejected.
+    // The chip the guest ticked must travel with the booking.
+    //
+    // The catalog is admin-configurable, and per SR-01 follow-up
+    // (2026-11-18, decision #316) an ABSENT catalog renders the nine
+    // shipped defaults while an EXPLICITLY EMPTY one renders nothing.
+    // This scenario therefore assumes a hotel whose catalog still
+    // carries "high-floor" — the default catalog (staging) does. A
+    // hotel that has cleared or re-keyed its catalog needs its own
+    // chip value here, because the server accepts what the CLIENT
+    // renders (an empty catalog never rejects a stale key).
     expect(
       (result.createRequest?.additionalPreferences || []).map(String),
       "the ticked preference chip must be on the wire"

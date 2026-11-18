@@ -9,7 +9,13 @@
 // forward hour-by-hour for `ARRIVAL_WINDOW_HOURS`. Times
 // earlier than `checkInTime` are intentionally not offered
 // (the existing `earlyCheckIn` flow covers that).
-import { ARRIVAL_WINDOW_HOURS, DEFAULT_BOOKING_PREFERENCES } from "../constants";
+import {
+  ARRIVAL_WINDOW_HOURS,
+  DEFAULT_BED_SETUPS,
+  DEFAULT_BOOKING_PREFERENCES,
+  type BedSetupOption,
+  type BookingPreferenceOption
+} from "../constants";
 
 export interface ArrivalTimeOption {
   value: string | null;
@@ -61,6 +67,84 @@ export function resolveBookingPreferenceValues(raw: unknown): string[] {
   return values.length > 0
     ? values
     : DEFAULT_BOOKING_PREFERENCES.map((option) => option.value);
+}
+
+// Per SR-01 follow-up (2026-11-18): the DISPLAY catalog resolvers.
+//
+// "ABSENT" and "EXPLICITLY EMPTY" are two different states, and the
+// guest booking form must be able to tell them apart:
+//
+//   - ABSENT (the field is not on `settings/hotelConfig` at all) =
+//     "this hotel never configured the list" → the shipped defaults
+//     render. This is the RPT-03 fallback and it does NOT change.
+//   - EXPLICITLY EMPTY (`[]` on the doc) = "the hotel cleared this
+//     list" → NOTHING renders.
+//
+// Before this fix both the client and the server collapsed the two
+// states: an empty catalog fell back to the defaults, so deleting
+// every entry from the admin's Booking Preferences tab was a NO-OP on
+// the public booking form — the nine chips came back. (Production
+// 2026-11-18: `hotelConfig.bedSetups` was `[]` — the admin had
+// deleted both bed set-ups — and the guest Step 3 still offered
+// "I'd like a large bed" / "I'd like twin beds".)
+//
+// The ASYMMETRY WITH THE SERVER IS DELIBERATE. The server resolver
+// (`resolveBookingPreferenceValues`) stays PERMISSIVE for an empty
+// catalog: it must never reject a key a guest could have ticked from
+// a stale page, because that rejection happens INSIDE the create
+// transaction and surfaces as a 500 (NO-ID-A68). The client hides
+// what the hotel removed; the server accepts a stale key rather than
+// failing a live booking.
+export function resolveBookingPreferenceOptions(
+  raw: unknown
+): BookingPreferenceOption[] {
+  // ABSENT → the shipped defaults.
+  if (!Array.isArray(raw)) {
+    return DEFAULT_BOOKING_PREFERENCES.map((option) => ({ ...option }));
+  }
+  // An explicitly empty array stays empty — the hotel cleared it.
+  const out: BookingPreferenceOption[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const value = (entry as { value?: unknown }).value;
+    const label = (entry as { label?: unknown }).label;
+    if (typeof value !== "string" || !value) continue;
+    if (typeof label !== "string") continue;
+    const icon = (entry as { icon?: unknown }).icon;
+    const surchargeNote = (entry as { surchargeNote?: unknown }).surchargeNote;
+    out.push({
+      value,
+      label,
+      icon: typeof icon === "string" ? icon : undefined,
+      surchargeNote: typeof surchargeNote === "string" ? surchargeNote : undefined
+    });
+  }
+  return out;
+}
+
+// The bed set-up catalog follows the same absent-vs-empty rule as the
+// preferences catalog (see `resolveBookingPreferenceOptions`).
+export function resolveBedSetupOptions(raw: unknown): BedSetupOption[] {
+  // ABSENT → the shipped defaults.
+  if (!Array.isArray(raw)) {
+    return DEFAULT_BED_SETUPS.map((option) => ({ ...option }));
+  }
+  // An explicitly empty array stays empty — the hotel cleared it.
+  const out: BedSetupOption[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const value = (entry as { value?: unknown }).value;
+    const label = (entry as { label?: unknown }).label;
+    if (typeof value !== "string" || !value) continue;
+    if (typeof label !== "string") continue;
+    const icon = (entry as { icon?: unknown }).icon;
+    out.push({
+      value,
+      label,
+      icon: typeof icon === "string" ? icon : undefined
+    });
+  }
+  return out;
 }
 
 // Per SR-01..05 (2026-10-12): parse the hotel's
