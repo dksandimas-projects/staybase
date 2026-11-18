@@ -319,6 +319,35 @@ next step, payment-status label, payment-status detail and email-status sentence
 - [ ] **"Existing other add-ons as progressive cards" is vacuous** — Step 2 has breakfast only; the other-add-ons catalogue is not implemented in the guest flow. `addOnCount` is therefore derived from breakfast selections alone rather than hardcoded to a wider formula that does not exist yet.
 - [ ] The optional thumbnail **preview modal** (spec says "may open") is deferred. The strip's no-photo / loading / failed states are the contract MBUX-10 must verify.
 
+## The Add-ons step is SKIPPED when there is nothing to buy (AO-SKIP-01, shipped 2026-11-18)
+
+> Decision: `plan/docs/DECISIONS-FEATURES.md` #317. Owning spec: `plan/features/OTHER-ADD-ONS.md §The Add-ons step is SKIPPED`. Public `/book` flow + corporate `/corporate/book`.
+
+### The rule
+
+- [x] The Add-ons step hosts TWO kinds of add-on — the breakfast per-meal grid and the BR-12 other-add-ons grid. When **neither** has anything on sale, the step is REMOVED from the flow (not rendered as an empty card).
+- [x] One shared rule: `hasBookableAddOns({ breakfastEnabled, otherAddOnCount, catalogSettled })` in `shared/utils/addOns.ts`.
+- [x] **`catalogSettled` is a third state, not a boolean guess** — while the catalog is loading (or the fetch failed) the answer is "we don't know yet", and the step is KEPT. Hiding a step the guest could have used is the worse failure.
+
+### What the guest sees
+
+- [x] The step list is DERIVED (`STEP_ORDER_WITH_ADD_ONS` / `STEP_ORDER_WITHOUT_ADD_ONS` in `BookingPage.tsx`), so the stepper and the `Step N of M` eyebrow show the steps the guest actually walks through — 4 instead of 5.
+- [x] Step 1's CTA goes straight to guest details and says so (`Continue to guest details`).
+- [x] A guest who lands on the skipped step (deep link, stale share-link, browser back) is redirected to guest details; the step renders a one-frame placeholder, never the empty step.
+- [x] "Back" from guest details returns to the ROOM PICKER, not to a step the guest never saw.
+
+### "No add-ons" must never be refused (the production bug)
+
+- [x] The create path read the PRESENCE of the `otherAddOnSelections` key as a request. The client sends the key on every create — with an EMPTY map when nothing was picked — so on any hotel with the "Add-ons enabled" master switch off, EVERY booking was refused with *"One of the selected add-ons is no longer available. Please refresh and try again."* The guest could not finish the booking flow at all.
+- [x] The server now refuses only a REAL request — `requestsOtherAddOns`: an entry with an add-on id AND a quantity above 0. An empty map, an absent key, and 0-quantity rows are "no add-ons", which is a legitimate booking.
+- [x] A REAL selection of something that is no longer on sale is STILL refused (the price-authority rule, OCT-C2) — the fix does not turn that guard into a no-op.
+- [x] The client omits an empty map from the wire entirely, so the key's presence on the payload can never mean anything but a selection.
+
+### The corporate flow
+
+- [x] The corporate rate is a flat rate with no add-on options at all, so its Add-ons step (a "no add-ons available" placeholder since BR-09) is skipped unconditionally — the corporate flow is **4 steps**. BR-09 added that step for PARITY with the public flow; the public flow now skips an empty Add-ons step, so the mirror is preserved for the same reason.
+- [x] The corporate `add-ons` render branch is KEPT as the deep-link fallback; a redirect moves the guest on from it.
+
 ## Step 3 Essential Guest Details (MBUX-06, shipped 2026-10-15)
 
 > Decision: `plan/docs/DECISIONS-FEATURES.md` #258. Owning spec: `plan/features/BOOKING-MOBILE-UX.md §Step 3 — Guest Details`. Public `/book` flow.

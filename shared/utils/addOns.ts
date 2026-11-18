@@ -212,6 +212,78 @@ export function sortAddOnsByDisplayOrder(addOns: AddOn[] | null | undefined): Ad
 }
 
 /**
+ * Per AO-SKIP-01 (2026-11-18): does the incoming payload actually
+ * REQUEST an other add-on?
+ *
+ * The bug this closes: the booking-create handler read the PRESENCE
+ * of the `otherAddOnSelections` key as "the guest picked an add-on".
+ * The guest client sends the key on EVERY create — with an EMPTY map
+ * (`{}`) when the guest picked nothing — so "the key is present" and
+ * "the guest wants an add-on" were the same thing. On a hotel with
+ * the master switch off (OCT-M1) that raised
+ * OTHER_ADDON_NOT_AVAILABLE_ERROR and refused the booking outright:
+ * "One of the selected add-ons is no longer available. Please
+ * refresh and try again." A guest on a hotel with NO add-ons on sale
+ * could not complete a booking at all.
+ *
+ * The rule: only a NON-EMPTY selection counts as a request — an entry
+ * that names an add-on AND carries a quantity above zero. An absent
+ * key, an empty map, a map of empty arrays, and entries whose quantity
+ * is 0 all mean "no add-ons", and "no add-ons" must never be refused.
+ *
+ * A quantity of 0 is deliberately NOT a request: the client sends a
+ * 0-quantity row when the guest zeroes a stepper control, and the
+ * server drops 0-quantity rows anyway (there is nothing to charge
+ * for). Refusing those would fail a booking over a row that carries
+ * no purchase.
+ */
+export function requestsOtherAddOns(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const groups = Object.values(raw as Record<string, unknown>);
+  for (const group of groups) {
+    if (!Array.isArray(group)) continue;
+    for (const item of group) {
+      if (!item || typeof item !== "object") continue;
+      const entry = item as Record<string, unknown>;
+      const addOnId = String(entry.addOnId || "").trim();
+      if (!addOnId) continue;
+      const quantity = Math.floor(Number(entry.quantity) || 0);
+      if (quantity > 0) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Per AO-SKIP-01 (2026-11-18): does the booking flow have ANY add-on
+ * option to offer?
+ *
+ * The Add-ons step hosts TWO kinds of add-on: the breakfast per-meal
+ * grid and the BR-12 other-add-ons grid. When NEITHER has anything on
+ * sale the step has nothing to offer — it renders an empty card and
+ * asks the guest to press on. The flow then skips the step entirely
+ * (the guest goes straight from the room picker to guest details).
+ *
+ * `unknown` is a real third state: while the other-add-ons catalog is
+ * still loading (or failed to load) the answer is "we don't know yet",
+ * and the caller MUST keep the step rather than guess. Guessing
+ * "nothing on sale" from a catalog that has not loaded would hide a
+ * step the guest could have used.
+ */
+export function hasBookableAddOns(input: {
+  /** Is the breakfast add-on on sale? (`settings/breakfastConfig.isEnabled`) */
+  breakfastEnabled: boolean;
+  /** How many other add-ons are on sale right now. */
+  otherAddOnCount: number;
+  /** Has the other-add-ons catalog settled (loaded, not failed)? */
+  catalogSettled: boolean;
+}): boolean {
+  if (!input.catalogSettled) return true;
+  if (input.breakfastEnabled) return true;
+  return input.otherAddOnCount > 0;
+}
+
+/**
  * Per OCT-M3 (2026-10-20, decision #291): may the other-add-on
  * selections on a booking in this status still be EDITED?
  *

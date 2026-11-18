@@ -536,6 +536,99 @@ describe("/api/bookings/create", () => {
     });
   });
 
+  // Per AO-SKIP-01 (2026-11-18): "no add-ons" is a legitimate
+  // booking and must never be refused.
+  //
+  // The bug: the create path read the PRESENCE of the
+  // `otherAddOnSelections` key as "the guest selected an add-on".
+  // The guest client sends the key on every create (with an empty
+  // map when the guest picked nothing), so on a hotel with the
+  // "Add-ons enabled" master switch OFF (OCT-M1) every booking was
+  // refused with "One of the selected add-ons is no longer
+  // available. Please refresh and try again." — the guest could not
+  // complete the booking flow at all.
+  describe("AO-SKIP-01 — an empty other-add-ons selection is not a refusal", () => {
+    const addOnsBookingBody = (bookingId: string, otherAddOnSelections: unknown) => ({
+      bookingId,
+      roomType: "standard-double",
+      checkIn: FUTURE_CHECK_IN_1,
+      checkOut: FUTURE_CHECK_OUT_1,
+      guests: 2,
+      guestDetails: {
+        firstName: "Daniel",
+        lastName: "Sandi",
+        email: "daniel@example.com",
+        phone: "09171234567",
+        consent: true
+      },
+      discountType: "",
+      discountIdPhotoUrl: null,
+      paymentMethod: "pay-at-hotel",
+      turnstileToken: "mock_token",
+      otherAddOnSelections
+    });
+
+    test("an EMPTY selection map is accepted when the hotel has add-ons off sale", async () => {
+      mockSettings.hotelConfig.otherAddOnsEnabled = false;
+      const req = mockRequest(addOnsBookingBody("bookingAo01", {}));
+      const res = mockResponse();
+
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      const bookingWrite = setCalls.find((call) => call.path === "bookings/bookingAo01");
+      expect(bookingWrite).toBeDefined();
+      // The booking carries NO add-on selections.
+      expect(bookingWrite?.data?.otherAddOnSelections ?? null).toBeNull();
+    });
+
+    test("an ABSENT selection is accepted when the hotel has add-ons off sale", async () => {
+      mockSettings.hotelConfig.otherAddOnsEnabled = false;
+      const body = addOnsBookingBody("bookingAo02", undefined);
+      delete (body as Record<string, unknown>).otherAddOnSelections;
+      const req = mockRequest(body);
+      const res = mockResponse();
+
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    test("an EMPTY selection map is accepted when add-ons are ON sale", async () => {
+      mockSettings.hotelConfig.otherAddOnsEnabled = true;
+      const req = mockRequest(addOnsBookingBody("bookingAo03", {}));
+      const res = mockResponse();
+
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    test("a REAL selection is STILL refused when the hotel has add-ons off sale", async () => {
+      // The guard must survive the fix: a guest who picked an
+      // add-on that is no longer on sale must not be charged for
+      // one, and must not get one.
+      mockSettings.hotelConfig.otherAddOnsEnabled = false;
+      const req = mockRequest(
+        addOnsBookingBody("bookingAo04", {
+          [FUTURE_CHECK_IN_1]: [
+            { addOnId: "airport-transfer", quantity: 2 }
+          ]
+        })
+      );
+      const res = mockResponse();
+
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({
+        success: false,
+        error: "One of the selected add-ons is no longer available. Please refresh and try again."
+      });
+      expect(setCalls).toHaveLength(0);
+    });
+  });
+
   test.skip("breakfast still multiplies by total occupancy when children are included (BR-08 close-out: legacy flat-rate path removed)", () => {
     // Per BR-08 (decision #238, 2026-10-14 — close-out):
     // this test exercised the legacy flat-rate

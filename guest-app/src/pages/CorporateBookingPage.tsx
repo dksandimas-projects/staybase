@@ -127,7 +127,25 @@ import { formatPrice } from "../utils/format";
 // identical across both flows. Future per-stay add-ons
 // (spa, parking, etc.) will drop into the same step
 // without renaming.
-const steps = ["Select Room", "Add-ons", "Guest Details", "Review & Pay", "Confirmation"];
+// Per AO-SKIP-01 (2026-11-18): the corporate flow no longer has an
+// "Add-ons" step.
+//
+// BR-09 added the step for PARITY with the public flow: the
+// corporate rate is a flat rate with no per-date breakfast grid and
+// no other add-ons, so the step could only ever render a "no
+// add-ons available" placeholder — a step the guest had to click
+// through to reach the form that actually matters.
+//
+// The public flow now SKIPS its Add-ons step when the hotel has no
+// add-on options on sale (the same rule, the same shared helper).
+// The corporate flow has no add-on options by construction, so the
+// same rule applies unconditionally: the flow is now 4 steps
+// (Select Room → Guest Details → Review → Confirmation).
+//
+// The `add-ons` render branch below is KEPT as the deep-link
+// fallback for an old bookmark; the redirect effect moves the guest
+// on from there.
+const steps = ["Select Room", "Guest Details", "Review & Pay", "Confirmation"];
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const ACCEPTED_UPLOAD_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
@@ -676,6 +694,18 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
       setSearchParams(next, { replace: true });
     }
   }, [currentStepKey, companyName, isFlatRate, searchParams, setSearchParams]);
+
+  // Per AO-SKIP-01 (2026-11-18): the corporate Add-ons step is
+  // skipped (the corporate rate is a flat rate — there are no
+  // add-on options to offer). A guest who lands on it (an old
+  // bookmark, a stale share-link) is moved on to guest details
+  // instead of pressing through an empty placeholder.
+  useEffect(() => {
+    if (currentStepKey !== "add-ons") return;
+    const next = new URLSearchParams(searchParams);
+    next.set("step", "guest-details");
+    setSearchParams(next, { replace: true });
+  }, [currentStepKey, searchParams, setSearchParams]);
 
   // Fetch breakfast config from Firestore on mount
   useEffect(() => {
@@ -1301,8 +1331,14 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
   // breakfast grid — the Add-ons step is a
   // placeholder, but the step exists for parity so
   // future add-ons can drop into the same step.
+  //
+  // Per AO-SKIP-01 (2026-11-18): the corporate flow has
+  // no add-on options at all, so the Add-ons step is
+  // skipped exactly like the public flow's empty step.
+  // `continueParams` now carries the guest straight to
+  // the guest-details step.
   const continueParams = new URLSearchParams({
-    step: "add-ons",
+    step: "guest-details",
     checkIn,
     checkOut,
     guests: String(guests),
@@ -1323,6 +1359,13 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
     // the same cart via `parseBookingRoomCart`.
     rooms: serializeBookingRoomCart(distributedRoomCart.length > 0 ? distributedRoomCart : roomCart)
   });
+
+  // Per AO-SKIP-01 (2026-11-18): the "back to the room picker"
+  // destination. The corporate Add-ons step is skipped, so
+  // back from guest details lands on Select Room — the same
+  // place the Add-ons step's own back button used to lead.
+  const corporateSelectRoomParams = new URLSearchParams(continueParams);
+  corporateSelectRoomParams.set("step", "select-room");
 
   // Per BR-09: the Add-ons "Continue" routes to the
   // corporate guest-details step. The step 2 → step 3
@@ -1365,7 +1408,11 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
       // Per BR-09: back from the corporate guest
       // details (new Step 3) returns to the corporate
       // "Add-ons" step (new Step 2).
-      return `/corporate/book?${continueParams.toString()}`;
+      //
+      // Per AO-SKIP-01 (2026-11-18): the Add-ons step is
+      // skipped in the corporate flow, so back returns to
+      // Select Room.
+      return `/corporate/book?${corporateSelectRoomParams.toString()}`;
     }
     if (currentStepKey === "add-ons") {
       // Per BR-09: back from the corporate "Add-ons"
@@ -1908,11 +1955,11 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
       <>
         <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-3xl">
-            <StepIndicator steps={steps} currentStep={1} />
+            <StepIndicator steps={steps} currentStep={stepIndicatorIndex} />
           </div>
           <div className="mt-10">
             {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
-            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 1 of 5</p>
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 1 of 4</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Select Corporate Room</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Browse negotiated configurations and availability. Room rates shown are corporate rates matching your contract agreement.
@@ -2366,8 +2413,14 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
               a numbered "Step N" reference. The
               `continueParams` URL stamp already
               points at `step=add-ons` (see
-              `continueParams` above). */}
-          Continue to add-ons
+              `continueParams` above).
+
+              Per AO-SKIP-01 (2026-11-18): the
+              corporate Add-ons step is skipped — the
+              corporate rate is a flat rate with no
+              add-on options — so the copy names the
+              step the guest actually lands on. */}
+          Continue to guest details
         </PrimaryButton>
         </BookingStickyFooter>
       </>
@@ -2391,11 +2444,11 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
       <>
         <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-3xl">
-            <StepIndicator steps={steps} currentStep={2} />
+            <StepIndicator steps={steps} currentStep={stepIndicatorIndex || 1} />
           </div>
           <div className="mt-10">
             {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
-            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 2 of 5</p>
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 1 of 4</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Add-ons</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Optional extras for your stay. The negotiated corporate rate doesn&apos;t include per-day add-ons — continue to provide your employee and billing details.
@@ -2483,11 +2536,11 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
       <>
         <section className="mx-auto max-w-7xl px-4 pb-8 pt-8 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-3xl">
-            <StepIndicator steps={steps} currentStep={3} />
+            <StepIndicator steps={steps} currentStep={stepIndicatorIndex} />
           </div>
           <div className="mt-10">
             {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
-            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 3 of 5</p>
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 2 of 4</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Corporate details</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Provide employee guest details along with company references and billing arrangements.
@@ -2842,11 +2895,11 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
                 the new 5-step "Step 4" — the new "Add-ons"
                 step sits between Select Room and Guest
                 Details. */}
-            <StepIndicator steps={steps} currentStep={4} />
+            <StepIndicator steps={steps} currentStep={stepIndicatorIndex} />
           </div>
           <div className="mt-10">
             {/* Per MBUX-01: hidden on mobile — the stepper caption states the position. */}
-            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 4 of 5</p>
+            <p className="hidden text-sm font-semibold uppercase tracking-wide text-primary sm:block">Step 3 of 4</p>
             <h1 className="mt-3 font-heading text-4xl text-gray-950 sm:text-5xl">Review & pay</h1>
             <p className="mt-4 max-w-2xl leading-7 text-gray-600">
               Confirm your corporate profile details and upload the required verification files to complete the request.

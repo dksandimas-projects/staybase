@@ -263,6 +263,16 @@ Added to `shared/schemas/booking.ts`:
 
 Below the existing `renderBreakfastSection`, the Step 2 grid now also renders the enabled add-ons catalog with per-day quantity inputs. The dual-button pattern (BR-10) covers both breakfast AND other add-ons — "No add-ons, continue" applies to the union.
 
+### The Add-ons step is SKIPPED when the hotel has no add-on options (AO-SKIP-01, 2026-11-18; decision #317)
+
+The step hosts two kinds of add-on: the breakfast per-meal grid and the other-add-ons grid. When **neither** has anything on sale, the step is REMOVED from the flow rather than rendered as an empty card.
+
+- **The rule** — `hasBookableAddOns({ breakfastEnabled, otherAddOnCount, catalogSettled })` in `shared/utils/addOns.ts`. One shared helper, both booking flows. `catalogSettled` is a third state, not a boolean guess: while the catalog is loading (or the fetch failed) the answer is "we don't know yet" and the step is KEPT.
+- **"No add-ons" is a legitimate booking and is NEVER refused** — the create path read the PRESENCE of `otherAddOnSelections` as a request, so an empty map used to be refused with "One of the selected add-ons is no longer available." on any hotel with the master switch off. The server now refuses only a REAL request (`requestsOtherAddOns`: an entry with an add-on id AND a quantity above 0); a REAL selection of something no longer on sale is still refused — the price-authority rule (OCT-C2) is untouched. The client omits an empty map from the wire.
+- **The step list is derived** — the stepper + the `Step N of M` eyebrow show the steps the guest actually walks through (4 instead of 5), and the corporate flow (no add-on options at all) is a 4-step flow.
+
+Step-by-step behaviour (which CTA goes where, the redirect, the back-navigation) is owned by `plan/features/BOOKING-FLOW.md §The Add-ons step is SKIPPED`.
+
 ### Guest Manage page at `/my-booking/addons`
 
 Mirrors `ManageBreakfastPage.tsx`. Same cutoff countdown per date, same batched POST with 60s `clientBatchId` idempotency, same refund-due banner.
@@ -330,21 +340,23 @@ Back-compat: pre-BR-12 bookings have no `otherAddOnSelections` — the guest Man
 
 ## Open Items
 
-1. ✅ **Email template dedicated to other add-on refund paid** — BR-12 v1 piggy-backs on the existing breakfast `mark-refund-paid` copy. A dedicated `add-on-refund-paid` template is a follow-up if operations finds the conflation confusing. *(Intentionally deferred per the BR-12 spec.)*
+All shipped — the detail lives in `plan/docs/DECISIONS-FEATURES.md` #245 / #247 and the ROADMAP's BR-12 / BR-12.1 entries.
 
-2. ✅ **Walk-in modal + calendar-create modal mirror** — BR-12.1 (decision #247) ships the `WalkinOtherAddOnGrid` parallel to `WalkinBreakfastGrid` and mounts it in both the walk-in modal AND the calendar-create modal Step 2.
+1. ✅ **Email template dedicated to other add-on refund paid** — BR-12 v1 piggy-backs on the existing breakfast `mark-refund-paid` copy. A dedicated `add-on-refund-paid` template is a follow-up if operations finds the conflation confusing.
 
-3. ✅ **Hotel-wide `otherAddOnCutoffsEnabled` toggle** — mirrors BR-10's `cutoffsEnabled`. Skipped for BR-12 v1 because the per-add-on `isEnabled` switch is operationally equivalent for v1; the BR-13 refactor may add it when a second add-on **type** (seaport) lands with its own semantics. *(The Settings tab's "Add-ons enabled" affordance shipped as a v1 placeholder in BR-12.1; **OCT-M1 (decision #295) made it real** — it persists to `settings/hotelConfig.otherAddOnsEnabled` and gates the public catalog endpoint, the guest Manage page and the guest save path.)*
+2. ✅ **Walk-in modal + calendar-create modal mirror** — BR-12.1 ships the `WalkinOtherAddOnGrid` parallel to `WalkinBreakfastGrid` and mounts it in both the walk-in modal AND the calendar-create modal Step 2.
 
-4. ✅ **Reports → Sales → Add-Ons sub-tab** — BR-12.1 (decision #247) ships the new sub-tab with 5 metrics (total selections, total revenue, top add-ons, late-change count, pending refund liability) + a top-add-ons bar chart + the per-booking detail table.
+3. ✅ **Hotel-wide `otherAddOnCutoffsEnabled` toggle** — skipped for BR-12 v1 because the per-add-on `isEnabled` switch is operationally equivalent; the BR-13 refactor may add it when a second add-on **type** (seaport) lands with its own semantics. *(The Settings tab's "Add-ons enabled" affordance shipped as a v1 placeholder in BR-12.1; **OCT-M1 (decision #295) made it real** — it persists to `settings/hotelConfig.otherAddOnsEnabled` and gates the public catalog endpoint, the guest Manage page and the guest save path.)*
 
-5. ✅ **Admin edit UI for individual selections** — BR-12.1 (decision #247) replaces the BR-12 read-only booking-drawer tab with the full edit UI: per-day × per-add-on grid with quantity inputs + add row + remove + locked-date badges + override modal + Save changes button, writing through `/api/bookings/addons/staff-update`.
+4. ✅ **Reports → Sales → Add-Ons sub-tab** — BR-12.1 ships the sub-tab with 5 metrics (total selections, total revenue, top add-ons, late-change count, pending refund liability) + a top-add-ons bar chart + the per-booking detail table.
+
+5. ✅ **Admin edit UI for individual selections** — BR-12.1 replaces the BR-12 read-only booking-drawer tab with the full edit UI (per-day × per-add-on grid with quantity inputs + add row + remove + locked-date badges + override modal + Save), writing through `/api/bookings/addons/staff-update`.
 
 ---
 
 ## Implementation Order
 
-BR-12 shipped in a single `feat(breakfast): BR-12` commit: shared types + helpers + schemas → server lib (assertions / audit / refund-liability writer) → the **6** server handlers + apiRouter wiring → the guest Manage Other Add-Ons page + the booking-drawer tab → tests → this spec + decision entry #245 (the per-step file map is there). The BR-13 refactor (when a second add-on **type** — seaport — lands) will extract the common patterns into a shared abstraction: a non-breaking refactor, not a rewrite.
+BR-12 shipped in a single `feat(breakfast): BR-12` commit (shared types + helpers + schemas → server lib → the 6 server handlers + apiRouter wiring → the guest Manage page + the drawer tab → tests → this spec + decision entry #245). The BR-13 refactor (when a second add-on **type** — seaport — lands) will extract the common patterns into a shared abstraction: a non-breaking refactor, not a rewrite.
 
 ---
 
@@ -353,7 +365,7 @@ BR-12 shipped in a single `feat(breakfast): BR-12` commit: shared types + helper
 1. `npm run typecheck` from the worktree root → clean on both workspaces
 2. `npm run test:fast` → no new failures (pre-existing baseline unchanged)
 3. All NEW BR-12 tests pass (~108 tripwires)
-4. BR-09 + BR-10 tripwires still pass — no regression on the 5-step layout, dual-button pattern, or `cutoffsEnabled` toggle
+4. BR-09 + BR-10 tripwires still pass — no regression on the step layout, dual-button pattern, or `cutoffsEnabled` toggle
 
 ---
 
