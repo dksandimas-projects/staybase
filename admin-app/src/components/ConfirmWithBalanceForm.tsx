@@ -23,6 +23,8 @@ import { useAdmin } from "../context/AdminContext";
 import { useToast } from "./Toast";
 import { formatPrice } from "../utils/format";
 import { cn } from "../utils/cn";
+import { RoomAssignmentSection } from "./RoomAssignmentSection";
+import type { AssignableRoom, RoomAssignment } from "./RoomAssignmentSection";
 
 const REASON_MAX_LENGTH = 500;
 // Same shortcut language as the unpaid-checkout form so the
@@ -61,6 +63,25 @@ interface ConfirmWithBalanceFormProps {
   // recomputing it here.
   currentBalance: number;
   onConfirmed?: () => void;
+  /**
+   * Per RAR-02 (decision #325): the room this booking is assigned
+   * to. When supplied, the modal renders the room-override panel —
+   * the desk can re-point the booking at another room of the SAME
+   * CATEGORY before confirming. The price does not move (the server
+   * reads the dates and the money from the booking and carries both
+   * forward verbatim).
+   *
+   * Omitted → no panel. The booking is confirmed exactly as before.
+   */
+  roomAssignment?: RoomAssignment;
+  /** The hotel's rooms, for the override picker. */
+  assignableRooms?: AssignableRoom[];
+  /** Applies the override. The parent owns the API call. */
+  onAssignRoom?: (
+    bookingId: string,
+    roomId: string,
+    reason: string
+  ) => Promise<{ ok: boolean; error?: string; roomNumber?: string; roomId?: string }>;
 }
 
 export function ConfirmWithBalanceForm({
@@ -69,7 +90,10 @@ export function ConfirmWithBalanceForm({
   booking,
   currentBalance,
   collectedAmount,
-  onConfirmed
+  onConfirmed,
+  roomAssignment,
+  assignableRooms,
+  onAssignRoom
 }: ConfirmWithBalanceFormProps) {
   const { currentUser, hotelConfig, confirmBookingWithBalance } = useAdmin();
   const toast = useToast();
@@ -77,6 +101,11 @@ export function ConfirmWithBalanceForm({
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Per RAR-02 (decision #325): TRUE while a room override is in
+  // flight. The submit is blocked for the duration — the room change
+  // and the status transition are two separate server calls, and
+  // firing both at once would race them.
+  const [assignBusy, setAssignBusy] = useState(false);
 
   const role = currentUser?.role || "front-desk";
   const isAdmin = role === "admin";
@@ -87,10 +116,11 @@ export function ConfirmWithBalanceForm({
   const overThreshold = currentBalance > threshold;
   const canSubmit = useMemo(() => {
     if (submitting) return false;
+    if (assignBusy) return false;
     if (!reason.trim()) return false;
     if (overThreshold && !isAdmin) return false;
     return true;
-  }, [submitting, reason, overThreshold, isAdmin]);
+  }, [submitting, assignBusy, reason, overThreshold, isAdmin]);
 
   const close = () => {
     if (submitting) return;
@@ -220,6 +250,25 @@ export function ConfirmWithBalanceForm({
           Confirming with a balance will email the guest a confirmation that includes the balance and the reason you
           enter below. The remaining amount will be collected at check-in.
         </p>
+
+        {/* Per RAR-02 (decision #325): the room override. This form
+            is the OTHER confirm path in the booking drawer — it is
+            where the desk lands when the folio still owes money and
+            the plain "Confirm booking" action is blocked. Without
+            the panel here, the room override would be reachable in
+            the plain-confirm modal and UNREACHABLE in this one, so
+            a booking that owed an add-on could never have its room
+            corrected at confirm time. Same rule as everywhere else:
+            same category only, the price does not move. */}
+        {roomAssignment ? (
+          <RoomAssignmentSection
+            assignments={[roomAssignment]}
+            rooms={assignableRooms ?? []}
+            onAssignRoom={onAssignRoom}
+            onBusyChange={setAssignBusy}
+            resetKey={booking.id}
+          />
+        ) : null}
 
         <div>
           <label htmlFor="confirm-with-balance-reason" className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-gray-500">

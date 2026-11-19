@@ -43,6 +43,19 @@ const paymentSuccessModalSrc = readFileSync(
   resolve(__dirname, "../components/PaymentSuccessModal.tsx"),
   "utf8"
 );
+// Per RAR-02 (decision #325): the room-assignment panel was
+// EXTRACTED out of PaymentSuccessModal into its own component, so
+// the post-verify success modal and the booking drawer's
+// confirm-booking modal render the SAME panel. The picker guards
+// below now point at the shared component.
+const roomAssignmentSectionSrc = readFileSync(
+  resolve(__dirname, "../components/RoomAssignmentSection.tsx"),
+  "utf8"
+);
+const confirmWithBalanceSrc = readFileSync(
+  resolve(__dirname, "../components/ConfirmWithBalanceForm.tsx"),
+  "utf8"
+);
 const adminContextSrc = readFileSync(
   resolve(__dirname, "../context/AdminContext.tsx"),
   "utf8"
@@ -62,12 +75,12 @@ const assignRoomSchemaSrc = readFileSync(
 
 describe("RAR-01 §1 — the success modal shows the pre-assigned room number", () => {
   it("the modal renders a room-assignment section", () => {
-    expect(paymentSuccessModalSrc).toMatch(/Room assignment/);
-    expect(paymentSuccessModalSrc).toMatch(/Pre-assigned at booking/);
+    expect(roomAssignmentSectionSrc).toMatch(/Room assignment/);
+    expect(roomAssignmentSectionSrc).toMatch(/Pre-assigned at booking/);
   });
 
   it("the modal renders the room NUMBER of each room in the scope", () => {
-    expect(paymentSuccessModalSrc).toMatch(/Room \{\s*assignment\.roomNumber\s*\}/);
+    expect(roomAssignmentSectionSrc).toMatch(/Room \{\s*assignment\.roomNumber\s*\}/);
   });
 
   it("the modal's room-assignment props are part of its public contract", () => {
@@ -96,20 +109,20 @@ describe("RAR-01 §1 — the success modal shows the pre-assigned room number", 
 
 describe("RAR-01 §2 — the desk can override the assignment", () => {
   it("the modal offers a Change control and an Apply action", () => {
-    expect(paymentSuccessModalSrc).toMatch(/startEditing\(assignment\)/);
-    expect(paymentSuccessModalSrc).toMatch(/applyAssignment/);
-    expect(paymentSuccessModalSrc).toMatch(/>\s*Change\s*</);
-    expect(paymentSuccessModalSrc).toMatch(/"Apply"/);
+    expect(roomAssignmentSectionSrc).toMatch(/startEditing\(assignment\)/);
+    expect(roomAssignmentSectionSrc).toMatch(/applyAssignment/);
+    expect(roomAssignmentSectionSrc).toMatch(/>\s*Change\s*</);
+    expect(roomAssignmentSectionSrc).toMatch(/"Apply"/);
   });
 
   it("the picker only offers rooms of the SAME category, and never the room already held", () => {
-    expect(paymentSuccessModalSrc).toMatch(
+    expect(roomAssignmentSectionSrc).toMatch(
       /r\.type === assignment\.roomType && r\.id !== assignment\.roomId/
     );
   });
 
   it("the candidate list skips inactive rooms", () => {
-    expect(paymentSuccessModalSrc).toMatch(/r\.isActive &&/);
+    expect(roomAssignmentSectionSrc).toMatch(/r\.isActive &&/);
   });
 
   it("the admin context exposes the assign-room call", () => {
@@ -227,25 +240,138 @@ describe("RAR-01 §4 — the change is auditable and guest-safe", () => {
   });
 
   it("the picker explains the same-category rule to the desk", () => {
-    expect(paymentSuccessModalSrc).toMatch(/Same category only/);
-    expect(paymentSuccessModalSrc).toMatch(/price does not change/);
+    expect(roomAssignmentSectionSrc).toMatch(/Same category only/);
+    expect(roomAssignmentSectionSrc).toMatch(/price does not change/);
   });
 
   it("the picker collects a reason for the audit trail", () => {
-    expect(paymentSuccessModalSrc).toMatch(/Reason \(audit trail\)/);
+    expect(roomAssignmentSectionSrc).toMatch(/Reason \(audit trail\)/);
   });
 });
 
 describe("RAR-01 §5 — the touch targets meet the 44px rule", () => {
   it("every control in the room-assignment section is at least 44px tall", () => {
-    const section = paymentSuccessModalSrc.slice(
-      paymentSuccessModalSrc.indexOf("Room assignment"),
-      paymentSuccessModalSrc.indexOf("Email-sent confirmation")
+    const section = roomAssignmentSectionSrc.slice(
+      roomAssignmentSectionSrc.indexOf(
+        'return (\n    <div className="rounded-lg border border-gray-200 bg-white p-3">'
+      )
     );
     const controls = section.match(/min-h-\[?\d+px\]?|min-h-11/g) || [];
     // The select, the reason input, the Change button, the Cancel
     // button and the Apply button.
     expect(controls.length).toBeGreaterThanOrEqual(5);
     expect(section).not.toMatch(/min-h-\[(?!44px|4[5-9]px|5\dpx)\d+px\]/);
+  });
+});
+
+// Per RAR-02 (2026-11-19, decision #325): the room override in the
+// booking drawer's CONFIRM path.
+//
+// The gap: the drawer has TWO confirm paths — the plain
+// "Confirm booking" modal (CLS-01) and the "Confirm with balance"
+// form it redirects to when the folio still owes money. RAR-01 put
+// the override in the POST-VERIFY success modal only, so a booking
+// confirmed straight from the drawer kept its auto-assigned room
+// with no way to change it at that point — and the desk discovers
+// a wrong room assignment at confirm time as often as at verify
+// time.
+//
+// The contract:
+//   1. BOTH confirm paths render the SAME panel as the success
+//      modal (one component, not two copies).
+//   2. The scope is the booking being confirmed — the confirm
+//      actions are ROOM-scoped, so the panel shows that one room.
+//   3. The same rule as everywhere else: same category only, the
+//      price does not move.
+//   4. The confirm action is BLOCKED while a room override is in
+//      flight — the room change and the status transition are two
+//      separate server calls and must not race.
+describe("RAR-02 §1 — the drawer's confirm-booking modal renders the override", () => {
+  it("the confirm-booking modal renders the shared room-assignment panel", () => {
+    expect(bookingsPageSrc).toMatch(/<RoomAssignmentSection/);
+    expect(bookingsPageSrc).toMatch(/import \{ RoomAssignmentSection \} from "\.\.\/components\/RoomAssignmentSection"/);
+  });
+
+  it("the panel's scope is the booking being confirmed", () => {
+    expect(bookingsPageSrc).toMatch(/bookingId: selectedBooking\.id/);
+    expect(bookingsPageSrc).toMatch(/roomId: selectedBooking\.roomId \|\| ""/);
+    expect(bookingsPageSrc).toMatch(/roomNumber: selectedBooking\.roomNumber \|\| "TBD"/);
+  });
+
+  it("the panel is wired to the same override handler + the hotel's rooms", () => {
+    expect(bookingsPageSrc).toMatch(/rooms=\{assignableRoomsForOverride\}/);
+    expect(bookingsPageSrc).toMatch(/onAssignRoom=\{handleAssignRoom\}/);
+  });
+
+  it("the confirm button is blocked while an override is in flight", () => {
+    // The room change and the status transition are two separate
+    // server calls; firing both at once would race them.
+    expect(bookingsPageSrc).toMatch(/const \[roomAssignBusy, setRoomAssignBusy\] = useState\(false\)/);
+    expect(bookingsPageSrc).toMatch(
+      /confirmDisabled=\{\(selectedBookingFolio\?\.balance \?\? 0\) > 0 \|\| roomAssignBusy\}/
+    );
+    expect(bookingsPageSrc).toMatch(/onBusyChange=\{setRoomAssignBusy\}/);
+  });
+
+  it("the confirm-booking modal shows the room-type LABEL, not the raw key", () => {
+    // The same defect the owner's screenshot showed: "Room: superior".
+    expect(bookingsPageSrc).toMatch(
+      /\{selectedBooking\.roomNumber\} · \{roomTypeLabels\[String\(selectedBooking\.roomType/
+    );
+  });
+});
+
+describe("RAR-02 §2 — the confirm-with-balance path renders it too", () => {
+  it("the form accepts the override props", () => {
+    expect(confirmWithBalanceSrc).toMatch(/roomAssignment\?: RoomAssignment/);
+    expect(confirmWithBalanceSrc).toMatch(/assignableRooms\?: AssignableRoom\[\]/);
+    expect(confirmWithBalanceSrc).toMatch(/onAssignRoom\?:/);
+  });
+
+  it("the form renders the shared panel", () => {
+    expect(confirmWithBalanceSrc).toMatch(/import \{ RoomAssignmentSection \} from "\.\/RoomAssignmentSection"/);
+    expect(confirmWithBalanceSrc).toMatch(/<RoomAssignmentSection/);
+  });
+
+  it("the form's submit is blocked while an override is in flight", () => {
+    expect(confirmWithBalanceSrc).toMatch(/const \[assignBusy, setAssignBusy\] = useState\(false\)/);
+    expect(confirmWithBalanceSrc).toMatch(/if \(assignBusy\) return false;/);
+    expect(confirmWithBalanceSrc).toMatch(/onBusyChange=\{setAssignBusy\}/);
+  });
+
+  it("the drawer's call site wires the booking's room into the form", () => {
+    expect(bookingsPageSrc).toMatch(/roomAssignment=\{\{/);
+    expect(bookingsPageSrc).toMatch(/bookingId: confirmWithBalanceContext\.booking\.id/);
+    expect(bookingsPageSrc).toMatch(/assignableRooms=\{assignableRoomsForOverride\}/);
+  });
+
+  it("the drawer updates BOTH booking snapshots after an override", () => {
+    // The drawer's own booking AND the confirm-with-balance form's
+    // snapshot — otherwise one of the two would show the
+    // pre-override room.
+    expect(bookingsPageSrc).toMatch(/setSelectedBooking\(\(previous\) =>/);
+    expect(bookingsPageSrc).toMatch(/setConfirmWithBalanceContext\(\(previous\) =>/);
+  });
+});
+
+describe("RAR-02 §3 — the panel is ONE component, not two copies", () => {
+  it("the success modal uses the shared panel instead of its own copy", () => {
+    expect(paymentSuccessModalSrc).toMatch(/import \{ RoomAssignmentSection \} from "\.\/RoomAssignmentSection"/);
+    expect(paymentSuccessModalSrc).toMatch(/<RoomAssignmentSection/);
+    // No leftover inline picker in the success modal.
+    expect(paymentSuccessModalSrc).not.toMatch(/startEditing\(assignment\)/);
+    expect(paymentSuccessModalSrc).not.toMatch(/candidatesFor/);
+    expect(paymentSuccessModalSrc).not.toMatch(/Reason \(audit trail\)/);
+  });
+
+  it("the shared component keeps the same-category rule + the audit reason", () => {
+    expect(roomAssignmentSectionSrc).toMatch(/Same category only/);
+    expect(roomAssignmentSectionSrc).toMatch(/price does not change/);
+    expect(roomAssignmentSectionSrc).toMatch(/Reason \(audit trail\)/);
+    expect(roomAssignmentSectionSrc).toMatch(/Room re-assigned at the front desk/);
+  });
+
+  it("the shared component's types are re-exported for the existing importers", () => {
+    expect(paymentSuccessModalSrc).toMatch(/export type \{ RoomAssignment, AssignableRoom \}/);
   });
 });
