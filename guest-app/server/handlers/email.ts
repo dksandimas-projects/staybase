@@ -2733,6 +2733,46 @@ export async function sendBookingConfirmedWithBalanceTrigger(booking: any, balan
   await sendEmail(booking.guestEmail, subject, html, attachments, banner);
 }
 
+// Per RSQ-01 (2026-11-19): the reservation-scope view for the
+// staff RESEND of the `booking-rescheduled` template.
+//
+// The inline reschedule path (`handleRescheduleBooking` +
+// `handleAddRoomToReservation`) hands the trigger a
+// reservation-scope view built from the transaction's
+// post-commit state — every room in the block is listed. The
+// generic resend path hands the trigger the single booking doc,
+// which for an N-room reservation renders ONLY the lead room — so
+// a manually re-sent "your booking changed" email would show the
+// guest one room while their reservation has N.
+//
+// This helper closes that gap by rebuilding the same view
+// (`buildReservationEmailView`) from the CURRENT state. The
+// resend renders the live state, not the state at the moment of
+// the original move — which is what the desk wants when they
+// re-send after a delivery failure.
+//
+// A legacy booking with no `reservationId` (pre-MRB-01) has no
+// reservation header; the per-child view is correct for it and is
+// returned unchanged.
+async function buildRescheduledEmailView(booking: any): Promise<any> {
+  const reservationId = String(booking?.reservationId || "").trim();
+  if (!reservationId) return booking;
+  try {
+    const [reservationSnap, childrenSnap] = await Promise.all([
+      adminDb.collection("reservations").doc(reservationId).get(),
+      adminDb.collection("bookings").where("reservationId", "==", reservationId).get()
+    ]);
+    if (!reservationSnap.exists) return booking;
+    const children = childrenSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+    return buildReservationEmailView({ id: reservationId, ...reservationSnap.data() }, children) ?? booking;
+  } catch (viewErr) {
+    // A failed view build must not block the resend — the
+    // per-child view is a lesser email, not a missing one.
+    console.error("Failed to build the reservation view for the booking-rescheduled resend:", viewErr);
+    return booking;
+  }
+}
+
 export async function handleEmailTrigger(req: VercelRequest, res: VercelResponse, action: EmailAction) {
   const isCronReminderRequest = action === "checkin-reminder" && req.method === "GET";
 
@@ -3018,7 +3058,15 @@ export async function handleEmailTrigger(req: VercelRequest, res: VercelResponse
       return res.status(404).json({ success: false, error: "Booking not found." });
     }
 
-    await sendBookingTrigger(action, booking);
+    // Per RSQ-01 (2026-11-19): the `booking-rescheduled` resend
+    // renders the reservation-scope view (every room in the
+    // block), matching what the inline reschedule path sent.
+    // Every other action keeps the per-child view.
+    const emailView = action === "booking-rescheduled"
+      ? await buildRescheduledEmailView(booking)
+      : booking;
+
+    await sendBookingTrigger(action, emailView);
     return res.status(200).json({ success: true });
   } catch (error) {
     console.error("Email trigger failed:", error);

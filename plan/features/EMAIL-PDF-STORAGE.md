@@ -23,7 +23,7 @@ All email sent through Vercel API routes. From address: `sparkinn.dev@gmail.com`
 | Payment rejected | *(inline booking trigger)* | Guest | When staff rejects an uploaded payment proof |
 | Booking confirmed | `/api/email/booking-confirmed` | Guest | When status set to `confirmed` |
 | Booking confirmed with balance *(CWB-02, decision #122)* | *(inline booking trigger)* | Guest | When staff confirms a `payment-uploaded` booking with a positive balance via `POST /api/bookings/confirm-with-balance`; balance + reason included in the body so the guest knows what to settle at check-in. Room type only (never room number — booking is not yet `checked-in`). |
-| Booking rescheduled | *(inline booking trigger)* | Guest | When staff changes the assigned room or stay dates |
+| Booking rescheduled | *(inline booking trigger)* + `POST /api/email/booking-rescheduled` (staff resend) | Guest | When staff changes the assigned room or stay dates. **Room type + dates only — never the room number** (the room-number-visibility rule: the assignment can still shift before check-in). The response carries `emailQueued: boolean` (RSQ-01) so the desk's move / extend / add-room toast can warn that the guest was not told; the drawer can re-send it via the "Booking Updated" button. |
 | Check-in reminder | `/api/email/checkin-reminder` | Guest | 1 day before `checkIn` date |
 | Booking cancelled | `/api/email/booking-cancelled` | Guest | When booking cancelled (by guest or staff) |
 | New corporate inquiry | `/api/email/corporate-inquiry` | Staff (admin email) | When inquiry form submitted on guest site |
@@ -41,6 +41,25 @@ All email sent through Vercel API routes. From address: `sparkinn.dev@gmail.com`
 | Store order cancelled | `/api/email/store-order-cancelled` | Guest | When order is cancelled (by guest or staff) |
 | New online booking | `/api/email/staff-new-booking` | Staff (`settings/hotelConfig.staffEmail`) | When a new online booking is created |
 | New payment proof | `/api/email/staff-new-payment` | Staff (`settings/hotelConfig.staffEmail`) | When guest uploads GCash/bank payment proof |
+
+### Staff Resend Panel (Booking Drawer)
+
+The admin booking drawer's **"Resend Transactional Email"** panel (`admin-app/src/components/BookingEmailActions.tsx`) re-sends a template to the booking's guest on demand. Each button posts to `/api/email/<action>` with `{ bookingId }`.
+
+| Button | Action | Route |
+|---|---|---|
+| Booking Submitted | `booking-submitted` | `POST /api/email/booking-submitted` |
+| Booking Confirmed | `booking-confirmed` | `POST /api/email/booking-confirmed` |
+| **Booking Updated** | `booking-rescheduled` | `POST /api/email/booking-rescheduled` |
+| Payment Confirmed | `payment-confirmed` | `POST /api/email/payment-confirmed` |
+| Check-in Reminder | `checkin-reminder` | `POST /api/email/checkin-reminder` |
+| Booking Cancelled | `booking-cancelled` | `POST /api/email/booking-cancelled` |
+| Discount Rejected | `discount-rejected` | `POST /api/email/discount-rejected` |
+
+- [x] **RSQ-01 (2026-11-19): `booking-rescheduled` is resendable.** The action was previously in NEITHER `publicEmailActions` NOR `staffOnlyEmailActions` in `guest-app/server/apiRouter.ts`, so the route answered **404** and the panel had no button for it — the desk could not re-send a failed "your booking changed" notification. It is now registered **staff-only** (same posture as `booking-confirmed`: no guest code path calls it).
+- [x] **The resend renders the reservation-scope view.** The generic resend path hands the trigger a single booking doc, which for an N-room reservation renders only the lead room — while the inline reschedule path sent every room. `buildRescheduledEmailView()` rebuilds the reservation view from the CURRENT state so the re-sent email matches what the guest should have received.
+- [x] **A failed reschedule notification is never silent.** `POST /api/bookings/reschedule`, `POST /api/bookings/extend-stay` and `POST /api/bookings/add-room` return `emailQueued: boolean` in their response `data`. `false` means the guest-notification email failed — the desk's move / extend / add-room toast warns ("Email delivery failed") and points at this panel. The durable audit trail is the `failed_emails` collection (the desk banner), written inside `sendEmail` per #11.
+- [x] **The room number is never in the email.** Every guest-facing template omits it (the room-number-visibility rule) — a "your room changed" email carries the room TYPE + the new dates, and the guest reads the number from `/my-booking` once the status is `checked-in` / `checked-out`.
 
 ### Email Content Checklist
 

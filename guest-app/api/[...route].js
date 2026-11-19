@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.22.6";
+    VERSION2 = "2.23.0";
   }
 });
 
@@ -230063,6 +230063,22 @@ async function sendBookingConfirmedWithBalanceTrigger(booking, balance, reason) 
   };
   await sendEmail(booking.guestEmail, subject, html, attachments, banner);
 }
+async function buildRescheduledEmailView(booking) {
+  const reservationId = String(booking?.reservationId || "").trim();
+  if (!reservationId) return booking;
+  try {
+    const [reservationSnap, childrenSnap] = await Promise.all([
+      adminDb.collection("reservations").doc(reservationId).get(),
+      adminDb.collection("bookings").where("reservationId", "==", reservationId).get()
+    ]);
+    if (!reservationSnap.exists) return booking;
+    const children = childrenSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    return buildReservationEmailView({ id: reservationId, ...reservationSnap.data() }, children) ?? booking;
+  } catch (viewErr) {
+    console.error("Failed to build the reservation view for the booking-rescheduled resend:", viewErr);
+    return booking;
+  }
+}
 async function handleEmailTrigger(req, res, action) {
   const isCronReminderRequest = action === "checkin-reminder" && req.method === "GET";
   if (req.method !== "POST" && !isCronReminderRequest) {
@@ -230236,7 +230252,8 @@ async function handleEmailTrigger(req, res, action) {
     if (!booking) {
       return res.status(404).json({ success: false, error: "Booking not found." });
     }
-    await sendBookingTrigger(action, booking);
+    const emailView = action === "booking-rescheduled" ? await buildRescheduledEmailView(booking) : booking;
+    await sendBookingTrigger(action, emailView);
     return res.status(200).json({ success: true });
   } catch (error) {
     console.error("Email trigger failed:", error);
@@ -239840,10 +239857,12 @@ async function handleRescheduleBooking(req, res) {
         });
       }
     });
+    let emailQueued = true;
     if (fullBookingForEmail) {
       try {
         await sendBookingTrigger("booking-rescheduled", fullBookingForEmail);
       } catch (emailErr) {
+        emailQueued = false;
         console.error("Failed to send reschedule email:", emailErr);
       }
     }
@@ -239874,7 +239893,12 @@ async function handleRescheduleBooking(req, res) {
         // MRB-02, so it has no header to echo).
         ...updatedBooking,
         reservationId: bookingReservationId || "",
-        reservationRef: String(existingReservationData?.reservationRef || "")
+        reservationRef: String(existingReservationData?.reservationRef || ""),
+        // Per RSQ-01 (2026-11-19): the desk branches its toast on
+        // this flag. `false` means the guest-notification email
+        // failed — the desk banner lists the failure and the
+        // drawer can now resend it manually.
+        emailQueued
       }
     });
   } catch (error) {
@@ -240396,10 +240420,12 @@ async function handleAddRoomToReservation(req, res) {
         transaction.update(corporateUsageUpdate.ref, corporateUsageUpdate.data);
       }
     });
+    let emailQueued = true;
     if (fullBookingForEmail) {
       try {
         await sendBookingTrigger("booking-rescheduled", fullBookingForEmail);
       } catch (emailErr) {
+        emailQueued = false;
         console.error("Failed to send add-room email:", emailErr);
       }
     }
@@ -240409,7 +240435,10 @@ async function handleAddRoomToReservation(req, res) {
         bookingId: newBookingId,
         bookingRef: newBookingRef,
         reservationId,
-        reservationRef: updatedHeader?.reservationRef || null
+        reservationRef: updatedHeader?.reservationRef || null,
+        // Per RSQ-01 (2026-11-19): the desk branches its
+        // toast on this flag.
+        emailQueued
       }
     });
   } catch (error) {
@@ -248589,6 +248618,17 @@ init_hotel_config();
 var staffOnlyEmailActions = /* @__PURE__ */ new Set([
   "payment-confirmed",
   "booking-confirmed",
+  // Per RSQ-01 (2026-11-19): the desk-facing RESEND path for the
+  // "your booking changed" email. The template + the trigger
+  // already existed (the inline reschedule path fires
+  // `booking-rescheduled` after every room/date move), but the
+  // action was in NEITHER allowlist — so `POST
+  // /api/email/booking-rescheduled` fell through to the router's
+  // fallback 404 and the desk could not re-send a notification
+  // whose delivery had failed. Staff-only for the same reason as
+  // `booking-confirmed`: this is the DESK's resend button, and
+  // no guest code path calls it.
+  "booking-rescheduled",
   // Per CWB-02 / decision #122 (2026-07-23): confirm-with-balance
   // is a server-triggered email fired from
   // `handleConfirmBookingWithBalance` after the transaction
