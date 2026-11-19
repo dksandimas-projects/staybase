@@ -150734,6 +150734,34 @@ var init_paymentMethodSemantics = __esm({
   }
 });
 
+// ../shared/utils/paymentQr.ts
+function isPaymentQrMethodKey(value) {
+  return typeof value === "string" && /^[a-z0-9][a-z0-9-]{0,63}$/.test(value.trim());
+}
+function paymentQrDownloadUrl(methodKey) {
+  return `${PAYMENT_QR_DOWNLOAD_PATH}?method=${encodeURIComponent(methodKey.trim())}`;
+}
+function paymentQrFileExtension(contentType) {
+  const normalized = (contentType || "").split(";")[0].trim().toLowerCase();
+  if (normalized === "image/jpeg" || normalized === "image/jpg") return "jpg";
+  if (normalized === "image/webp") return "webp";
+  if (normalized === "image/gif") return "gif";
+  if (normalized === "image/svg+xml") return "svg";
+  return "png";
+}
+function paymentQrFileName(methodKey, extension = "png") {
+  const slug = (methodKey || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "payment";
+  const safeExtension = /^[a-z0-9]{1,8}$/.test(extension) ? extension : "png";
+  return `${slug}-qr-code.${safeExtension}`;
+}
+var PAYMENT_QR_DOWNLOAD_PATH;
+var init_paymentQr = __esm({
+  "../shared/utils/paymentQr.ts"() {
+    "use strict";
+    PAYMENT_QR_DOWNLOAD_PATH = "/api/public/payment-qr";
+  }
+});
+
 // ../shared/utils/paymentReference.ts
 function getLatestPaymentReference(booking) {
   const payments = booking?.onsitePayments;
@@ -152920,6 +152948,7 @@ __export(shared_exports, {
   OtherAddOnRefundContextSchema: () => OtherAddOnRefundContextSchema,
   OtherAddOnSelectionEntrySchema: () => OtherAddOnSelectionEntrySchema,
   OtherAddOnUpdateSchema: () => OtherAddOnUpdateSchema,
+  PAYMENT_QR_DOWNLOAD_PATH: () => PAYMENT_QR_DOWNLOAD_PATH,
   PAYMENT_REJECTED_FRESH_DEADLINE_FROM: () => PAYMENT_REJECTED_FRESH_DEADLINE_FROM,
   PROTECTED_BOOKING_SOURCES: () => PROTECTED_BOOKING_SOURCES,
   PROTECTED_PAYMENT_METHODS: () => PROTECTED_PAYMENT_METHODS,
@@ -153060,6 +153089,7 @@ __export(shared_exports, {
   isInFlowHoldActive: () => isInFlowHoldActive,
   isOnlinePaymentMethod: () => isOnlinePaymentMethod,
   isOtherAddOnBookingMutable: () => isOtherAddOnBookingMutable,
+  isPaymentQrMethodKey: () => isPaymentQrMethodKey,
   isPaymentVerified: () => isPaymentVerified,
   isRewardVoucher: () => isRewardVoucher,
   isSettleAtPropertyPaymentMethod: () => isSettleAtPropertyPaymentMethod,
@@ -153095,6 +153125,9 @@ __export(shared_exports, {
   parseCheckInTime: () => parseCheckInTime,
   parseCheckInTimeToPair: () => parseCheckInTimeToPair,
   parseOtherAddOnSelectionKey: () => parseOtherAddOnSelectionKey,
+  paymentQrDownloadUrl: () => paymentQrDownloadUrl,
+  paymentQrFileExtension: () => paymentQrFileExtension,
+  paymentQrFileName: () => paymentQrFileName,
   raceUploadWithTimeout: () => raceUploadWithTimeout,
   readCacheWithTtl: () => readCacheWithTtl,
   readPublicSiteContentBustTimestamp: () => readPublicSiteContentBustTimestamp,
@@ -153174,6 +153207,7 @@ var init_shared = __esm({
     init_kitchenPrep();
     init_paymentMethodLabel();
     init_paymentMethodSemantics();
+    init_paymentQr();
     init_paymentReference();
     init_paymentVerification();
     init_pricing();
@@ -248468,6 +248502,87 @@ async function handleGetCorporateRates(req, res) {
   }
 }
 
+// server/handlers/payment-qr.ts
+init_shared();
+var MAX_QR_BYTES = 5 * 1024 * 1024;
+var UPSTREAM_TIMEOUT_MS = 1e4;
+function readQueryParam(req, name2) {
+  const query = req?.query;
+  const value = query?.[name2];
+  if (typeof value === "string") return value.trim();
+  if (Array.isArray(value) && typeof value[0] === "string") return value[0].trim();
+  try {
+    const parsed = new URL(req.url || "", `http://${req.headers?.host || "localhost"}`);
+    return (parsed.searchParams.get(name2) || "").trim();
+  } catch {
+    return "";
+  }
+}
+async function handleGetPaymentQr(req, res) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const methodKey = readQueryParam(req, "method");
+  if (!isPaymentQrMethodKey(methodKey)) {
+    return res.status(400).json({ success: false, error: "A valid payment method is required." });
+  }
+  try {
+    const config2 = await loadPublicHotelConfig();
+    const method = config2.paymentMethods.find((entry) => entry.method === methodKey);
+    if (!method || !method.qrUrl) {
+      return res.status(404).json({
+        success: false,
+        error: "No QR code is available for that payment method."
+      });
+    }
+    const upstream = await fetch(method.qrUrl, {
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)
+    });
+    if (!upstream.ok) {
+      return res.status(502).json({
+        success: false,
+        error: "The QR code is temporarily unavailable."
+      });
+    }
+    const contentType = (upstream.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    if (!contentType.startsWith("image/")) {
+      return res.status(502).json({
+        success: false,
+        error: "The QR code is temporarily unavailable."
+      });
+    }
+    const declaredLength = Number(upstream.headers.get("content-length") || "0");
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_QR_BYTES) {
+      return res.status(413).json({ success: false, error: "The QR code is too large to download." });
+    }
+    const bytes = Buffer.from(await upstream.arrayBuffer());
+    if (bytes.length === 0) {
+      return res.status(502).json({
+        success: false,
+        error: "The QR code is temporarily unavailable."
+      });
+    }
+    if (bytes.length > MAX_QR_BYTES) {
+      return res.status(413).json({ success: false, error: "The QR code is too large to download." });
+    }
+    const fileName = paymentQrFileName(method.method, paymentQrFileExtension(contentType));
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Length", String(bytes.length));
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.setHeader("Cache-Control", "public, max-age=300, s-maxage=3600");
+    return res.status(200).send(bytes);
+  } catch (error) {
+    console.error(
+      "Payment QR download failed:",
+      String(error?.message || "unknown error")
+    );
+    return res.status(500).json({
+      success: false,
+      error: "The QR code is temporarily unavailable."
+    });
+  }
+}
+
 // server/apiRouter.ts
 init_test_runs();
 init_hotel_config();
@@ -249283,6 +249398,12 @@ async function handler(req, res) {
       return res.status(429).json({ success: false, error: "Too many hotel-config requests. Please try again in a minute." });
     }
     return await handleGetPublicHotelConfig(req, res);
+  }
+  if (domain === "public" && action === "payment-qr" && req.method === "GET") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`public-payment-qr:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many QR download requests. Please try again in a minute." });
+    }
+    return await handleGetPaymentQr(req, res);
   }
   if (domain === "corporate" && action === "rates" && req.method === "GET") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`corporate-rates:${ip}`, 30, 6e4)) {
