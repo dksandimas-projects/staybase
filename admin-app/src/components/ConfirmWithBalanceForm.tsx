@@ -45,6 +45,16 @@ interface ConfirmWithBalanceFormProps {
     totalPrice: number;
     onsitePayments?: Array<{ amount: number }>;
   };
+  /**
+   * Per VPM-01 (decision #322): the money ALREADY COLLECTED for
+   * this scope. The caller owns the live ledger, so it passes the
+   * canonical collected figure rather than having this component
+   * re-derive it from the payment array — the array's raw sum
+   * includes pending refunds (a liability, not collected money),
+   * so summing it here could show "Collected" as LESS than the
+   * amount the folio says was collected.
+   */
+  collectedAmount?: number;
   // Current charge-inclusive balance (post-verify state). The
   // caller is the only one with the live payments + charges
   // + add-to-bill totals, so we accept the value rather than
@@ -58,6 +68,7 @@ export function ConfirmWithBalanceForm({
   onClose,
   booking,
   currentBalance,
+  collectedAmount,
   onConfirmed
 }: ConfirmWithBalanceFormProps) {
   const { currentUser, hotelConfig, confirmBookingWithBalance } = useAdmin();
@@ -179,7 +190,9 @@ export function ConfirmWithBalanceForm({
             <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Collected</p>
             <p className="text-sm font-bold text-gray-900">
               {formatPrice(
-                (booking.onsitePayments || []).reduce((sum, p) => sum + (p.amount || 0), 0)
+                typeof collectedAmount === "number"
+                  ? collectedAmount
+                  : (booking.onsitePayments || []).reduce((sum, p) => sum + (p.amount || 0), 0)
               )}
             </p>
           </div>
