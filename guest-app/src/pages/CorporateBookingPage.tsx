@@ -92,6 +92,9 @@ import { ref, uploadBytes } from "firebase/storage";
 import { storage } from "../firebase/config";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
+// Per decision #320 (2026-11-19): the payment-method QR tile —
+// full-size view + download.
+import { PaymentQrCode } from "../components/PaymentQrCode";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { GhostButton } from "../components/GhostButton";
 import { StepIndicator } from "../components/StepIndicator";
@@ -3002,7 +3005,14 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
                         )}
                         {pm.qrUrl && (
                           <div className="mt-3 flex justify-center">
-                            <img src={pm.qrUrl} alt={`${pm.label} QR code`} className="h-32 w-32 rounded-lg border border-gray-200 bg-white object-contain p-2" />
+                            {/* Per decision #320 (2026-11-19): the QR
+                                is a TILE — full-size view + download. */}
+                            <PaymentQrCode
+                              method={pm.method}
+                              label={pm.label}
+                              qrUrl={pm.qrUrl}
+                              imageClassName="h-32 w-32 rounded-lg border border-gray-200 bg-white object-contain p-2"
+                            />
                           </div>
                         )}
                         {!pm.accountName && !pm.accountNumber && !pm.qrUrl && (

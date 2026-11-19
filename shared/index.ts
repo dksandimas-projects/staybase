@@ -32,6 +32,12 @@ export * from "./utils/paymentMethodLabel";
 // booking flow, the guest confirmation page and the server cannot
 // drift onto different answers again.
 export * from "./utils/paymentMethodSemantics";
+// Per decision #320 (2026-11-19): the payment-method QR DOWNLOAD
+// contract — the same-origin route, the method-key shape, the download
+// URL and the saved file name. Shared so the server (which sets
+// `Content-Disposition`) and the guest app (which names the file) can
+// never drift.
+export * from "./utils/paymentQr";
 export * from "./utils/paymentReference";
 export * from "./utils/paymentVerification";
 export * from "./utils/pricing";

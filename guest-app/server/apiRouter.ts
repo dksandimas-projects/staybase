@@ -43,6 +43,12 @@ import { handleHoldExpiryCron } from "./handlers/hold-expiry";
 import { handleExtendInFlowHold, handleReadInFlowHold, handleStartInFlowHold, handleSweepInFlowHolds } from "./handlers/in-flow-hold";
 import { handleGetPrivateStorageUrl } from "./handlers/storage";
 import { handleGetCorporateRates, handleGetPublicHotelConfig } from "./handlers/public-config";
+// Per decision #320 (2026-11-19): the payment-method QR download
+// route (`GET /api/public/payment-qr?method=<key>`). A same-origin
+// proxy so the guest can SAVE the QR (a cross-origin `download`
+// attribute is ignored, and the Storage bucket's CORS allow-list does
+// not cover a white-label domain).
+import { handleGetPaymentQr } from "./handlers/payment-qr";
 import { handleCreateTestRun, handleCloseTestRun, handleDeleteTestRun, handleListTestRuns, handleStagingRefreshPreview, handleStagingRefreshImport, handleStagingRefreshDestroy, handleStagingResetPreview, handleStagingResetExecute } from "./handlers/test-runs";
 import config from "../../hotel.config";
 
@@ -1580,6 +1586,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(429).json({ success: false, error: "Too many hotel-config requests. Please try again in a minute." });
     }
     return await handleGetPublicHotelConfig(req, res);
+  }
+
+  // Per decision #320 (2026-11-19): the payment-method QR download
+  // (`GET /api/public/payment-qr?method=<key>`).
+  //
+  // The Review & Pay step shows the selected method's QR as a small
+  // thumbnail; this route lets the guest SAVE it. The QR file itself
+  // is already public (the public hotel-config payload carries
+  // `paymentMethods[].qrUrl`), so nothing new is exposed — the route
+  // only adds a download disposition and a file name we control.
+  //
+  // The upstream URL comes from the admin-configured hotel config, so
+  // the route cannot be pointed at an arbitrary host. Rate-limited at
+  // 30/min/IP: every request costs one Storage read.
+  if (
+    domain === "public" &&
+    action === "payment-qr" &&
+    req.method === "GET"
+  ) {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`public-payment-qr:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many QR download requests. Please try again in a minute." });
+    }
+    return await handleGetPaymentQr(req, res);
   }
 
   // Per F09 / SEC-5 / SEC-6 (2026-10-22): the PUBLISHED flat

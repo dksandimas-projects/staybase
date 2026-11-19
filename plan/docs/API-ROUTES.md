@@ -39,6 +39,19 @@ Guest member routes require a valid Firebase ID token for the signed-in guest. T
 
 ## Route Surface
 
+### Public Routes (`/api/public/*`)
+
+Unauthenticated, read-only endpoints that serve the hotel's PUBLIC content. The Firestore rules no longer let an anonymous client read `settings/hotelConfig` (decision #295 / F09), so the guest site reads the hotel's public slice through these routes instead. Both are served from the server and are rate-limited per IP.
+
+| Route | Method | Auth | Purpose |
+|---|---|---|---|
+| `/api/public/hotel-config` | GET | None (public, rate-limited) | The public projection of `settings/hotelConfig` — brand, contact details, room types, amenities, public prices, booking preferences and the payment methods the guest site renders. Drops `roomTypes[].corporateRate` and the `accountNumber` of any method hidden from the corporate surface (`showInCorporate: false`). Rate-limited to 60/IP/min, cached 60s. See `plan/docs/DECISIONS-FEATURES.md #295`. |
+| `/api/public/payment-qr` | GET | None (public, rate-limited) | Serves one payment method's QR image with `Content-Disposition: attachment` so the guest can SAVE it. Query: `?method=<payment-method key>` (the admin-configured key, e.g. `gcash` / `bpi`). The upstream URL is the admin-configured `paymentMethods[].qrUrl` — never a request-supplied URL — so the route cannot be pointed at an arbitrary host. Only an `image/*` upstream is proxied (a Storage error page answers `text/html` and is refused), and the payload is capped at 5 MB. Rate-limited to 30/IP/min. |
+
+**Why the QR download is a route and not a direct link (decision #320).** The admin-uploaded QR lives on a cross-origin `firebasestorage.googleapis.com` URL. The browser IGNORES the `download` attribute for a cross-origin URL (it navigates instead of saving), and the bucket's CORS allow-list only echoes `access-control-allow-origin` for the origins the hotel configured — so on a white-label domain the `fetch()` a blob download needs is blocked outright. A same-origin route sidesteps both: the browser downloads from its own origin, the `download` attribute is honoured, and the file name is ours to control. The QR file itself is already public (the hotel-config payload above carries `paymentMethods[].qrUrl`), so the route exposes nothing new — it only adds a download disposition.
+
+---
+
 ### Email Routes (`/api/email/*`)
 
 | Route | Trigger | Recipient |
@@ -335,6 +348,8 @@ API route checks for a `_hp` field in the request body (the honeypot field name)
 | `/api/validate/corporate-code` | 10 requests / IP / minute |
 | `/api/bookings/lookup` | 10 requests / IP / minute |
 | `/api/rooms/availability` | 30 requests / IP / minute |
+| `/api/public/hotel-config` | 60 requests / IP / minute |
+| `/api/public/payment-qr` | 30 requests / IP / minute |
 | `/api/email/*` | 3 requests / booking ref / hour |
 
 Use Vercel Edge middleware for IP-based rate limiting. Simple in-memory map is sufficient for Phase 1 at this traffic scale.
