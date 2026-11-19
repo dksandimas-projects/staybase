@@ -117,6 +117,19 @@ dead config and was removed.
 
 ### Deploying a release — use the deploy hook, not the GitHub webhook
 
+> **Re-verified 2026-11-19 (decision #318 deploy).** The statement below ("the
+> GitHub webhook does NOT fire on a `main` push") is **no longer true**: pushing
+> `main` at commit `d048c65` started a production build for BOTH projects on its
+> own — both went `READY` for that commit with no hook POST — and the pushed
+> `dev` branch started a **preview** build. The hook below is still the
+> deterministic trigger (use it when you want a build NOW, without touching
+> `main`), but do not rely on "the webhook doesn't fire" to decide whether a
+> push deployed: **always confirm** with
+> `GET /v6/deployments?projectId=…&target=production` and compare
+> `meta.githubCommitSha` with what you pushed. The PWA service worker can also
+> serve the PREVIOUS bundle on a guest's first load after a deploy — see
+> `plan/docs/GOTCHAS.md §Vite & TypeScript`.
+
 **The GitHub webhook does NOT fire on a `main` push in this repo.** Two
 releases in a row (RPT-13, 2026-10-21, and the 2026-10-22 QA fix batch)
 were pushed to `main` and `dev` with no build ever starting; the live asset
