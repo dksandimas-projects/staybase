@@ -21,9 +21,6 @@ const expectedTemplates = [
   "early-checkin-request",
   "early-checkin-resolve",
   "voucher-issued",
-  "store-order-placed",
-  "store-order-confirmed",
-  "store-order-out-for-delivery",
   "store-order-delivered",
   "store-order-cancelled",
   "staff-new-booking",
@@ -36,6 +33,23 @@ describe("Settings email-template catalog", () => {
     for (const template of expectedTemplates) {
       expect(settingsSrc, `missing Settings catalog entry for ${template}`).toContain(`action: "${template}"`);
       expect(emailHandlerSrc, `missing preview handler for ${template}`).toContain(`case "${template}"`);
+    }
+  });
+
+  it("the removed store-order templates are NOT in the catalog", () => {
+    // Per CNE-01 (2026-11-19): `store-order-placed` /
+    // `store-order-confirmed` / `store-order-out-for-delivery`
+    // were removed — the client cut the guest's store-order
+    // notifications. The Settings catalog must not advertise a
+    // template that cannot be previewed (the preview switch
+    // cases went with them).
+    for (const template of [
+      "store-order-placed",
+      "store-order-confirmed",
+      "store-order-out-for-delivery"
+    ]) {
+      expect(settingsSrc, `expected ${template} to be removed from the catalog`).not.toContain(`action: "${template}"`);
+      expect(emailHandlerSrc, `expected ${template} to be removed from the preview handler`).not.toContain(`case "${template}"`);
     }
   });
 

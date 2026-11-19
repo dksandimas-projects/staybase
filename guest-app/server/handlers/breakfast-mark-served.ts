@@ -57,13 +57,18 @@ import {
 } from "@spark-inn/shared";
 import { adminDb } from "../lib/firebase-admin";
 import { auditBreakfastOp } from "../lib/breakfast-selections";
-// Per BR-08 (decision #238, 2026-10-14 — close-out): the
-// `sendLateServedTrigger` carries the guest-facing "Late
-// served — please rate" email fired from this handler
-// when a serve action crosses the per-date cutoff window.
-// The email is the guest's first signal that the meal was
-// delivered past the published cutoff.
-import { sendLateServedTrigger } from "./email";
+// Per BR-08 (decision #238, 2026-10-14 — close-out): a
+// guest-facing service-feedback email used to be fired from
+// this handler when a serve action crosses the per-date cutoff
+// window.
+//
+// Per CNE-01 (2026-11-19): that email is GONE — the client asked
+// to cut the guest's service-solicitation notifications (a
+// late-served breakfast is an operational fact, and the guest is
+// standing at the breakfast table when it happens). The
+// `isLateServe` flag still drives the audit record + the
+// kitchen-list late-change rows, which are the artifacts the
+// kitchen actually needs.
 
 // ---------- Wire schemas ----------
 
@@ -467,49 +472,17 @@ export async function handleMarkServed(req: VercelRequest, res: VercelResponse) 
     return res.status(opError.status).json({ success: false, error: opError.error });
   }
 
-  // Per BR-08 (decision #238, 2026-10-14 — close-out):
-  // fire the guest-facing "Late served — please rate"
-  // email after the transaction commits, only when the
-  // serve action crossed the per-date cutoff. Fire-and-
-  // log: an email send failure must NOT mask the 200
-  // response — the audit doc + kitchen list are already
-  // correct, the email is the guest-comms icing.
-  if (isLateServe && action === "serve") {
-    try {
-      const detail = await adminDb.collection("bookings").doc(bookingId).get();
-      const data: any = detail.exists ? detail.data() || {} : {};
-      const guestEmail = String(data.guestEmail || "").trim();
-      if (guestEmail) {
-        const slotEntry = {
-          slotKey,
-          mealId: String(selection.mealId),
-          mealName: String(selection.mealName),
-          price: Number(selection.price || 0)
-        };
-        const occurredAtIso = new Date().toISOString();
-        await sendLateServedTrigger(
-          {
-            id: bookingId,
-            bookingRef: data.bookingRef || data.reservationRef || bookingId,
-            reservationRef: data.reservationRef || null,
-            guestEmail,
-            guestName: data.guestName || "",
-            isTestData: data.isTestData === true,
-            testRunName: typeof data.testRunName === "string" ? data.testRunName : undefined,
-            testRunEnvironment:
-              data.testRunEnvironment === "staging" || data.testRunEnvironment === "production"
-                ? data.testRunEnvironment
-                : undefined
-          },
-          slotEntry,
-          occurredAtIso
-        );
-      }
-    } catch (err: any) {
-      // eslint-disable-next-line no-console
-      console.error("[breakfast-mark-served] late-served email failed:", err?.message || err);
-    }
-  }
+  // Per CNE-01 (2026-11-19): NO guest-facing late-served service-
+  // feedback email (it was added by BR-08 / decision #238). The client
+  // asked to cut the guest's service-solicitation notifications: a
+  // late-served breakfast is an OPERATIONAL fact, not something the
+  // guest needs by email — and the guest is standing at the
+  // breakfast table when it happens. The audit doc + the
+  // kitchen-list late-change rows (the artifacts the kitchen
+  // actually needs) are untouched.
+  //
+  // The `isLateServe` flag still drives the audit record + the
+  // kitchen list — only the email is gone.
 
   return res.status(200).json({ success: true, data: resultPayload });
 }

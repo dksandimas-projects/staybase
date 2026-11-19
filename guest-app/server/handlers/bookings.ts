@@ -13362,6 +13362,13 @@ export async function handleRescheduleBooking(req: any, res: any) {
   try {
     let updatedBooking: any = null;
     let fullBookingForEmail: any = null;
+    // Per CNE-01 (2026-11-19): whether the move changed anything
+    // the guest can SEE or PAY. A physical-room shuffle (same
+    // dates, same room type, same price) leaves this `false` and
+    // the guest is not emailed. Computed inside the transaction
+    // (it needs the pre-move booking + the target room) and
+    // applied to the send below.
+    let guestVisibleChange = false;
     // Per MRB-02.x (2026-08-02, per decision #164): the
     // canonical reservation id + header snapshot for this
     // reschedule. Hoisted to the outer `try` scope because
@@ -14021,6 +14028,48 @@ export async function handleRescheduleBooking(req: any, res: any) {
         id: bookingId
       };
 
+      // Per CNE-01 (2026-11-19): the GUEST-VISIBLE-CHANGE gate.
+      //
+      // The client asked us to stop emailing the guest when the
+      // front desk moves a booking to a different PHYSICAL ROOM
+      // (same dates, same room type) — "it is only a backend
+      // change".
+      //
+      // That request is well-founded: the guest-facing email
+      // renders the room TYPE, the dates, the occupancy and the
+      // price — and it deliberately NEVER renders the room NUMBER
+      // (the room-number-visibility rule). So a room-number-only
+      // move produced an email whose entire content was
+      // IDENTICAL to the booking's previous state while telling
+      // the guest "your dates or room have changed". A no-op
+      // email with a scary subject line.
+      //
+      // So the email now fires only when something the guest can
+      // actually SEE or PAY changed:
+      //   (a) the stay dates moved (arrival / departure);
+      //   (b) the room TYPE changed (upgrade / downgrade);
+      //   (c) the price changed (the new dates re-price the stay,
+      //       and the re-dated breakfast + add-on selections can
+      //       move the total — OCT-H8).
+      // A move that changes NONE of those is a physical-room
+      // shuffle and stays silent.
+      //
+      // NOTE the asymmetry: the room NUMBER is deliberately NOT
+      // part of the gate. An in-house guest who is moved to
+      // another room learns about it from the desk (the email
+      // could not carry the number anyway); a guest who is not
+      // yet here has no reason to know.
+      guestVisibleChange = (() => {
+        const previousCheckIn = toDateOrNull(booking.checkIn);
+        const previousCheckOut = toDateOrNull(booking.checkOut);
+        const datesChanged =
+          (previousCheckIn ? previousCheckIn.getTime() : 0) !== checkInDate.getTime() ||
+          (previousCheckOut ? previousCheckOut.getTime() : 0) !== checkOutDate.getTime();
+        const roomTypeChanged = String(booking.roomType || "") !== String(room.type || "");
+        const priceChanged = Number(booking.totalPrice || 0) !== Number(finalTotalPrice || 0);
+        return datesChanged || roomTypeChanged || priceChanged;
+      })();
+
       // If the guest is in-house (checked-in), sync room statuses
       if (booking.status === "checked-in") {
         const oldRoomRef = adminDb.collection("rooms").doc(booking.roomId);
@@ -14303,25 +14352,18 @@ export async function handleRescheduleBooking(req: any, res: any) {
       }
     });
 
-    // Per RSQ-01 (2026-11-19): the guest-notification email for a
-    // reschedule is best-effort, but "best-effort" must not be
-    // SILENT. The pre-fix shape swallowed a Resend failure into a
-    // `console.error` and still answered 200 with no email state,
-    // so the desk had NO way to know the guest never heard about
-    // their room/date change — the exact silent-swallow shape that
-    // #11 fixed for the confirm path.
-    //
-    // The flag mirrors the confirm path (`emailQueued: boolean` in
-    // the response `data`) so the desk's move/extend toast can
-    // branch on it. The durable audit trail is unchanged: the DLQ
-    // write (`failed_emails`) already happens inside `sendEmail`
-    // (per #11), and `sendEmail` re-throws so this catch sees it.
+    // Per CNE-01 (2026-11-19): the send is gated on the
+    // GUEST-VISIBLE-CHANGE check. A move that only changed the
+    // physical room number is silent — the client asked for
+    // exactly that ("it is only a backend change"), and the email
+    // could not have carried the number anyway.
     //
     // `emailQueued` starts `true` because the pre-transaction
     // failure paths return early — reaching this line means the
-    // transaction committed and an email was attempted.
+    // transaction committed. A DELIBERATELY SUPPRESSED email is
+    // not a failure: the flag reports a send failure, not a send.
     let emailQueued = true;
-    if (fullBookingForEmail) {
+    if (fullBookingForEmail && guestVisibleChange) {
       try {
         await sendBookingTrigger("booking-rescheduled", fullBookingForEmail);
       } catch (emailErr) {

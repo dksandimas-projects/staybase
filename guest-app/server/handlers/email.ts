@@ -87,9 +87,6 @@ type EmailAction =
   // store-order-* are guest status updates; staff-* notify the
   // hotel team when they are not logged in.
   | "voucher-issued"
-  | "store-order-placed"
-  | "store-order-confirmed"
-  | "store-order-out-for-delivery"
   | "store-order-delivered"
   | "store-order-cancelled"
   | "staff-new-booking"
@@ -2172,72 +2169,6 @@ function storeOrderBaseLayout(action: EmailAction, order: any) {
   };
 }
 
-function storeOrderPlacedEmail(order: any) {
-  const { paymentLabel, itemsTable, totalRow, deepLink } = storeOrderBaseLayout("store-order-placed", order);
-  return emailLayout({
-    preheader: `Order ${order.orderRef} received.`,
-    eyebrow: "Order received",
-    title: "We have your in-room order",
-    intro: `Thank you for ordering from the ${escapeHtml(config.brandName)} in-room store. Your items are being prepared and we'll bring them to your room in about 15 minutes.`,
-    body: `
-      ${callout("green", "Order received", `We have your order. Watch the Intercom chat for status updates, or check the email inbox for any change.`)}
-      ${card("Order details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Order ref", order.orderRef || "—")}
-        ${itemsTable}
-        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
-        ${totalRow}
-      </table>`)}
-    `,
-    ctaLabel: "Open the chat",
-    ctaUrl: deepLink,
-    bannerHtml: environmentBanner({})
-  });
-}
-
-function storeOrderConfirmedEmail(order: any) {
-  const { itemsTable, totalRow, deepLink } = storeOrderBaseLayout("store-order-confirmed", order);
-  return emailLayout({
-    preheader: `Order ${order.orderRef} confirmed.`,
-    eyebrow: "Order confirmed",
-    title: "Your order is confirmed and being prepared",
-    intro: `Your order from the ${escapeHtml(config.brandName)} in-room store has been confirmed. Our team is preparing your items now.`,
-    body: `
-      ${callout("warm", "In the kitchen", "Our team is preparing your items. You'll get another email when your order is on its way.")}
-      ${card("Order summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Order ref", order.orderRef || "—")}
-        ${itemsTable}
-        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
-        ${totalRow}
-      </table>`)}
-    `,
-    ctaLabel: "Open the chat",
-    ctaUrl: deepLink,
-    bannerHtml: environmentBanner({})
-  });
-}
-
-function storeOrderOutForDeliveryEmail(order: any) {
-  const { itemsTable, totalRow, deepLink } = storeOrderBaseLayout("store-order-out-for-delivery", order);
-  return emailLayout({
-    preheader: `Order ${order.orderRef} is on its way.`,
-    eyebrow: "Order on the way",
-    title: "Your order is heading to your room",
-    intro: `Your order from the ${escapeHtml(config.brandName)} in-room store is on its way. Please keep your door accessible — our team will be there shortly.`,
-    body: `
-      ${callout("warm", "On the way", "Your order is being delivered to your room. You can track progress in the Intercom chat.")}
-      ${card("Order summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Order ref", order.orderRef || "—")}
-        ${itemsTable}
-        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
-        ${totalRow}
-      </table>`)}
-    `,
-    ctaLabel: "Open the chat",
-    ctaUrl: deepLink,
-    bannerHtml: environmentBanner({})
-  });
-}
-
 function storeOrderDeliveredEmail(order: any) {
   const { itemsTable, totalRow, deepLink } = storeOrderBaseLayout("store-order-delivered", order);
   return emailLayout({
@@ -2291,18 +2222,6 @@ function storeOrderCancelledEmail(order: any) {
 export async function sendStoreOrderTrigger(action: EmailAction, order: any) {
   if (!order?.guestEmail) return;
   const map: Partial<Record<EmailAction, { subject: string; html: string }>> = {
-    "store-order-placed": {
-      subject: `[${config.brandName}] Order placed: ${order.orderRef || "in-room"}`,
-      html: storeOrderPlacedEmail(order)
-    },
-    "store-order-confirmed": {
-      subject: `[${config.brandName}] Order confirmed: ${order.orderRef || "in-room"}`,
-      html: storeOrderConfirmedEmail(order)
-    },
-    "store-order-out-for-delivery": {
-      subject: `[${config.brandName}] Order on its way: ${order.orderRef || "in-room"}`,
-      html: storeOrderOutForDeliveryEmail(order)
-    },
     "store-order-delivered": {
       subject: `[${config.brandName}] Order delivered: ${order.orderRef || "in-room"}`,
       html: storeOrderDeliveredEmail(order)
@@ -2458,76 +2377,20 @@ export async function sendStaffRefundReviewTrigger(order: any) {
   );
 }
 
-// Per BR-08 (decision #238, 2026-10-14 — close-out): a
-// guest-facing "Late served — please rate" email fires
-// after the BR-05 mark-served handler records a serve
-// action whose service date has crossed
-// `BreakfastConfig.cutoffTime` (i.e. `occurredAfterCutoff
-// === true` on the audit doc). The email is the guest's
-// first signal that the breakfast service was delivered
-// past the published cutoff — the kitchen list already
-// surfaces late changes to staff (BR-07), but the guest
-// needs a direct line so they can flag a service problem
-// quickly. The link points at `/my-booking` so the guest
-// lands on their lookup page; the rating submission is a
-// follow-up ticket (a Servy-style star widget on the
-// booking's breakfast section) and is out of scope here.
+// Per CNE-01 (2026-11-19): the BR-08 late-served guest email
+// (the service-feedback solicitation the kitchen sent when a
+// breakfast crossed the published cutoff) is REMOVED. It fired
+// from the BR-05 mark-served handler when a serve action
+// crossed the cutoff (`occurredAfterCutoff === true` on the
+// audit doc). The client asked to cut the guest's service-
+// solicitation notifications: a late-served breakfast is an
+// operational fact, and the guest is standing at the breakfast
+// table when it happens.
 //
-// The audit action reused is `"serve"` — the audit doc
-// carries `occurredAfterCutoff: true` and the late-served
-// email trigger reads the same field. We do NOT add a new
-// `BreakfastAuditAction` enum value; the existing flag is
-// the discriminator.
-function lateServedEmail(booking: any, slotEntry: any, occurredAtIso: string) {
-  const slotDate = typeof slotEntry?.slotKey === "string"
-    ? slotEntry.slotKey.slice(0, 10)
-    : "—";
-  const mealLabel = slotEntry?.mealName || "your meal";
-  const bookingRef = booking.bookingRef || booking.reservationRef || booking.id || "your booking";
-  const ratingUrl = siteUrl(`/my-booking?ref=${encodeURIComponent(bookingRef || "")}`);
-  // Per DF-7 + the existing audit-extension posture: the
-  // email body surfaces the booking ref + slot date + meal
-  // name so the guest can identify the meal in question.
-  // No PII (no guest email in the visible HTML — the
-  // recipient line carries it). No payment or id URLs.
-  return emailLayout({
-    preheader: `Your breakfast on ${slotDate} was served past our cutoff — we'd value your feedback.`,
-    eyebrow: "Service update",
-    title: "We served your breakfast late",
-    intro: `We noticed that the breakfast for ${escapeHtml(String(bookingRef))} on ${escapeHtml(slotDate)} (${escapeHtml(mealLabel)}) was served past our ${escapeHtml(String(bookingRef)).length > 0 ? "published" : ""} cutoff window. We're sorry for the delay.`,
-    body: `
-      ${callout("warm", "How was it?", "If a few minutes of delay affected your meal, let us know — your feedback helps the kitchen team tighten their morning service. Open the booking below and tap the rate-this-meal card on the breakfast section.")}
-      ${card("What happened", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Booking ref", bookingRef)}
-        ${row("Service date", slotDate)}
-        ${row("Meal", mealLabel)}
-        ${row("Served at", occurredAtIso)}
-      </table>`)}
-    `,
-    ctaLabel: "Rate this meal",
-    ctaUrl: ratingUrl,
-    bannerHtml: environmentBannerFromBooking(booking)
-  });
-}
+// The kitchen list (BR-07) still surfaces late changes to STAFF,
+// and the audit doc still records `occurredAfterCutoff` — only
+// the guest-facing email is gone.
 
-export async function sendLateServedTrigger(booking: any, slotEntry: any, occurredAtIso: string) {
-  // ETR-22.10: subject prefix from the booking's test-run
-  // banner state. Staging auto-detects inside `sendEmail`.
-  const banner = {
-    isTestData: booking?.isTestData === true,
-    testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : undefined,
-    testRunEnvironment: booking?.testRunEnvironment === "staging" || booking?.testRunEnvironment === "production"
-      ? booking.testRunEnvironment
-      : undefined
-  };
-  await sendEmail(
-    booking.guestEmail,
-    `[${config.brandName}] Late served — please rate your meal`,
-    lateServedEmail(booking, slotEntry, occurredAtIso),
-    undefined,
-    banner
-  );
-}
 
 async function getTomorrowConfirmedBookings() {
   // Per BF-42 (booking-flow audit 2026-06-26): this is NOT
@@ -3335,15 +3198,6 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
         break;
       case "voucher-issued":
         html = voucherIssuedEmail(mockVoucher);
-        break;
-      case "store-order-placed":
-        html = storeOrderPlacedEmail(mockStoreOrder);
-        break;
-      case "store-order-confirmed":
-        html = storeOrderConfirmedEmail(mockStoreOrder);
-        break;
-      case "store-order-out-for-delivery":
-        html = storeOrderOutForDeliveryEmail(mockStoreOrder);
         break;
       case "store-order-delivered":
         html = storeOrderDeliveredEmail(mockStoreOrder);

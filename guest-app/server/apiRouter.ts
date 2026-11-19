@@ -80,10 +80,13 @@ const staffOnlyEmailActions = new Set([
   // voucher-issued + store-order-* + staff-* are not in
   // publicEmailActions below â€” they bypass the endpoint and are
   // fired directly from the handler.
+  //
+  // Per CNE-01 (2026-11-19): `store-order-placed` /
+  // `store-order-confirmed` / `store-order-out-for-delivery` were
+  // removed — the client cut the guest's store-order notifications
+  // (the Intercom panel shows the live order tracker). The
+  // `store-order-delivered` + `store-order-cancelled` actions stay.
   "voucher-issued",
-  "store-order-placed",
-  "store-order-confirmed",
-  "store-order-out-for-delivery",
   "store-order-delivered",
   "store-order-cancelled",
   "staff-new-booking",

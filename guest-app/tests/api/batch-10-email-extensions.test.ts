@@ -39,18 +39,35 @@ const ratesPageSrc = readFileSync(
 
 describe("Phase 11.6 Batch 10 — W4.4 email extensions (decision #104)", () => {
   describe("EmailAction union + template exports", () => {
-    it("union includes the 8 new actions", () => {
+    it("union includes the surviving actions", () => {
+      // Per CNE-01 (2026-11-19): `store-order-placed` /
+      // `store-order-confirmed` / `store-order-out-for-delivery`
+      // were REMOVED (the client cut the guest's store-order
+      // notifications — the Intercom panel shows the live order
+      // tracker). The rest of the W4.4 batch survives.
       for (const action of [
         "voucher-issued",
-        "store-order-placed",
-        "store-order-confirmed",
-        "store-order-out-for-delivery",
         "store-order-delivered",
         "store-order-cancelled",
         "staff-new-booking",
         "staff-new-payment"
       ]) {
         expect(emailSrc, `expected EmailAction to include ${action}`).toMatch(
+          new RegExp(`["']${action}["']`)
+        );
+      }
+    });
+
+    it("the removed store-order actions are GONE from the union + the trigger map", () => {
+      // The removal must be COMPLETE: no action name, no
+      // template entry, no preview case. A leftover name would
+      // let something re-introduce the email.
+      for (const action of [
+        "store-order-placed",
+        "store-order-confirmed",
+        "store-order-out-for-delivery"
+      ]) {
+        expect(emailSrc, `expected ${action} to be removed from email.ts`).not.toMatch(
           new RegExp(`["']${action}["']`)
         );
       }
@@ -79,14 +96,12 @@ describe("Phase 11.6 Batch 10 — W4.4 email extensions (decision #104)", () => 
       expect(emailSrc).toMatch(/voucherCodeBlock\([\s\S]*?voucher\.code/);
     });
 
-    it("store-order templates render an items table", () => {
-      // All 5 store-order templates must exist. The items table
-      // helper is shared via storeOrderBaseLayout; we just check
-      // that the templates exist and that the helper is used.
+    it("the surviving store-order templates render an items table", () => {
+      // Per CNE-01 (2026-11-19): only the DELIVERED + CANCELLED
+      // store-order templates survive. The items table helper is
+      // shared via storeOrderBaseLayout; we check that the
+      // surviving templates exist and that the helper is used.
       for (const fn of [
-        "storeOrderPlacedEmail",
-        "storeOrderConfirmedEmail",
-        "storeOrderOutForDeliveryEmail",
         "storeOrderDeliveredEmail",
         "storeOrderCancelledEmail"
       ]) {
@@ -96,10 +111,22 @@ describe("Phase 11.6 Batch 10 — W4.4 email extensions (decision #104)", () => 
       }
       // The shared helper that renders the items table
       expect(emailSrc).toMatch(/function\s+storeOrderItemsTable\(/);
-      // Each placed/confirmed/oofd/delivered/cancelled template
-      // must include a deep link back to the Intercom chat
+      // Each surviving template must include a deep link back to
+      // the Intercom chat
       const deepLinkUses = emailSrc.match(/storeOrderBaseLayout\(/g) || [];
-      expect(deepLinkUses.length).toBeGreaterThanOrEqual(5);
+      expect(deepLinkUses.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("the removed store-order templates are GONE", () => {
+      for (const fn of [
+        "storeOrderPlacedEmail",
+        "storeOrderConfirmedEmail",
+        "storeOrderOutForDeliveryEmail"
+      ]) {
+        expect(emailSrc, `expected ${fn} to be removed`).not.toMatch(
+          new RegExp(`function\\s+${fn}\\b`)
+        );
+      }
     });
 
     it("staff-new-booking + staff-new-payment render to ADMIN_EMAIL", () => {
@@ -172,10 +199,20 @@ describe("Phase 11.6 Batch 10 — W4.4 email extensions (decision #104)", () => 
   });
 
   describe("Store handler integration (5 store-order templates)", () => {
-    it("handleCreateStoreOrder fires store-order-placed after the transaction commits", () => {
-      // The placed email must fire after the order transaction
-      // commits, with the guest email looked up from the booking.
-      expect(storeSrc).toMatch(/sendStoreOrderTrigger\(\s*["']store-order-placed["']/);
+    it("handleCreateStoreOrder does NOT fire a store-order-placed email", () => {
+      // Per CNE-01 (2026-11-19): the client cut the guest's
+      // store-order notifications. The guest PLACED the order on
+      // screen and the Intercom panel shows the live order
+      // tracker — the email duplicated both.
+      expect(storeSrc).not.toMatch(/sendStoreOrderTrigger\(\s*["']store-order-placed["']/);
+    });
+
+    it("handleDeliverStoreOrder DOES fire store-order-delivered (the fix)", () => {
+      // The template + the route existed since W4.4 but NO code
+      // path ever sent it — "your order has arrived" was dead
+      // code. Per CNE-01 it now fires, exactly once per delivery.
+      expect(storeSrc).toMatch(/sendStoreOrderTrigger\(\s*["']store-order-delivered["']/);
+      expect(storeSrc).toMatch(/justDelivered/);
     });
 
     it("handleCancelStoreOrder fires store-order-cancelled after the transaction commits", () => {
