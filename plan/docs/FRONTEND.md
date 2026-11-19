@@ -415,6 +415,8 @@ Mobile: `slideInBottom` variant (slides up from bottom like a sheet).
 <motion.div variants={slideInBottom} initial="hidden" animate="visible" exit="exit" />
 ```
 
+**The guest app's modal primitive is `guest-app/src/components/Modal.tsx`.** Use it for every guest overlay rather than hand-rolling a dialog — as of decision #320 it carries the full dialog contract: `role="dialog"` + `aria-modal="true"` + `aria-labelledby`, a focus trap with focus restored to the trigger on close, Escape-to-close, and a body scroll lock (per OCT-H11 / decision #287). Its width is chosen with the `size` prop (`md` / `lg` / `xl`), NOT through `className` — the guest `cn` is a plain class join, so a `max-w-*` passed through `className` would leave two width classes on the panel and the rendered width would depend on stylesheet order.
+
 ---
 
 ### Drawers (admin + guest)

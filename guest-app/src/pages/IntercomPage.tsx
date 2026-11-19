@@ -26,6 +26,9 @@ import config from "@config";
 import { db, storage } from "../firebase/config";
 import { formatPrice } from "../utils/format";
 import { PrimaryButton } from "../components/PrimaryButton";
+// Per decision #320 (2026-11-19): the payment-method QR tile —
+// full-size view + download.
+import { PaymentQrCode } from "../components/PaymentQrCode";
 import { GhostButton } from "../components/GhostButton";
 import { getEffectiveStorePaymentMethods, type EffectiveStorePaymentMethod } from "@spark-inn/shared";
 import { fetchPublicHotelConfig } from "../hooks/usePublicHotelConfig";
@@ -2145,10 +2148,13 @@ export function IntercomPage() {
                           {currentPaymentMethodConfig.label} Transfer Details
                         </p>
                         {currentPaymentMethodConfig.qrUrl && (
-                          <img
-                            src={currentPaymentMethodConfig.qrUrl}
-                            alt={`${currentPaymentMethodConfig.label} QR`}
-                            className="mx-auto h-36 w-36 rounded-lg border border-gray-200 bg-white object-contain p-2"
+                          /* Per decision #320 (2026-11-19): the QR is a
+                             TILE — full-size view + download. */
+                          <PaymentQrCode
+                            method={currentPaymentMethodConfig.method}
+                            label={currentPaymentMethodConfig.label}
+                            qrUrl={currentPaymentMethodConfig.qrUrl}
+                            imageClassName="h-36 w-36 rounded-lg border border-gray-200 bg-white object-contain p-2"
                           />
                         )}
                         <div className="text-[10px] text-gray-500 space-y-1">

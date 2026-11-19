@@ -125,6 +125,9 @@ import { z } from "zod";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
 import { Modal } from "../components/Modal";
+// Per decision #320 (2026-11-19): the payment-method QR tile —
+// full-size view + download.
+import { PaymentQrCode } from "../components/PaymentQrCode";
 import { PrimaryButton } from "../components/PrimaryButton";
 import { PriceBreakdown } from "../components/PriceBreakdown";
 // Per OCT-M4 (2026-10-20, decision #297): the guest Step 2
@@ -2454,7 +2457,7 @@ export function BookingPage() {
         title={imagePreview?.title ?? "Image preview"}
         open={!!imagePreview}
         onClose={() => setImagePreview(null)}
-        className="max-w-3xl"
+        size="lg"
       >
         {imagePreview ? (
           <img
@@ -4161,17 +4164,16 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
                     ) : currentPaymentMethod ? (
                       <div className="grid sm:grid-cols-5">
                         <div className="sm:col-span-2 min-h-48 overflow-hidden bg-gray-100 flex items-center justify-center p-4">
-                          {currentPaymentMethod.qrUrl ? (
-                            <img
-                              src={currentPaymentMethod.qrUrl}
-                              alt={`${currentPaymentMethod.label} QR code`}
-                              className="h-40 w-40 object-contain rounded"
-                            />
-                          ) : (
-                            <p className="text-xs text-gray-500 text-center px-4">
-                              QR code not yet configured. Please contact the front desk for payment details.
-                            </p>
-                          )}
+                          {/* Per decision #320 (2026-11-19): the QR is
+                              a TILE now — the guest can open it
+                              full-size and save it. The component
+                              owns the thumbnail, the expand dialog
+                              and the download. */}
+                          <PaymentQrCode
+                            method={currentPaymentMethod.method}
+                            label={currentPaymentMethod.label}
+                            qrUrl={currentPaymentMethod.qrUrl}
+                          />
                         </div>
                         <div className="sm:col-span-3 p-5 flex flex-col justify-center">
                           <h4 className="font-semibold text-primary text-base">{currentPaymentMethod.label} Payment Details</h4>
