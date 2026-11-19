@@ -20,6 +20,125 @@ export function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
+/**
+ * Per ETR-23 (2026-11-19): the resolved shape of "the run that is
+ * active right now".
+ */
+export interface ResolvedTestRun {
+  id: string;
+  name: string;
+  environment: "staging" | "production";
+  createdAt: Date | null;
+  expiresAt: Date | null;
+}
+
+/**
+ * Coerce a Firestore Timestamp / Date / ISO string into a Date.
+ * Returns null for anything unparseable so the caller can decide
+ * (a missing or unparseable `expiresAt` means "no expiry known").
+ */
+function toDate(value: any): Date | null {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value.toDate === "function") {
+    const d = value.toDate();
+    return Number.isNaN(d?.getTime?.()) ? null : d;
+  }
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * ETR-23 (2026-11-19) — the active-run resolver.
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * The guest booking path used to be taggable ONLY through a secret
+ * `testToken` in the request body, and the only thing in the repo
+ * that ever sent one was the Playwright QA harness (it injects the
+ * token at the network layer). A human booking through the public
+ * site during a production test run therefore produced an UNTAGGED,
+ * live-looking booking:
+ *
+ *   - no TEST badge in the admin app,
+ *   - no entry in the run's close manifest (which queries
+ *     `bookings.where("testRunId" == runId)`),
+ *   - so the run's cleanup deleted nothing, and
+ *   - the record counted as real revenue in the money reports.
+ *
+ * The staff walk-in path had the mirror-image problem: the "Mark as
+ * Test Data" dropdown defaulted to "Live data (not a test)", so a
+ * walk-in made during a run was untagged unless the operator
+ * remembered to change it. Exactly one booking in a live production
+ * run carried the badge (2026-11-19) — the one creation where the
+ * dropdown had been switched.
+ *
+ * THE RULE
+ * --------
+ * While a test run is active, EVERY booking created in this
+ * deployment is test data. The run is an admin-opened, time-boxed,
+ * explicit "this deployment is in test mode" switch, so the
+ * server decides — not the client. The desk keeps ONE explicit
+ * escape hatch for a genuine walk-in guest arriving mid-run
+ * (`TEST_RUN_LIVE_OPT_OUT`); the guest path has none, because a
+ * guest must never be able to declare their own booking untaggable
+ * (or taggable).
+ *
+ * CONTRACT
+ * --------
+ * - Returns the NEWEST active, unexpired run, or null.
+ * - A run whose `expiresAt` has passed is NOT active, even if its
+ *   status is still "active" (the admin's duration elapsed) —
+ *   mirroring the walk-in validation.
+ * - A read failure returns null and is logged: an unreachable read
+ *   must not silently tag real bookings as test data (and must not
+ *   block a real booking either — the create transaction would fail
+ *   on its own if Firestore were down).
+ */
+export async function resolveActiveTestRun(): Promise<ResolvedTestRun | null> {
+  let snapshot: any;
+  try {
+    snapshot = await adminDb
+      .collection("testRuns")
+      .where("status", "==", "active")
+      .get();
+  } catch (error: any) {
+    console.error("Active test run lookup failed:", error);
+    return null;
+  }
+
+  const now = Date.now();
+  const candidates: ResolvedTestRun[] = [];
+
+  for (const doc of snapshot?.docs || []) {
+    const run = doc.data() || {};
+    if (run.status !== "active") continue;
+
+    const expiresAt = toDate(run.expiresAt);
+    if (expiresAt && expiresAt.getTime() <= now) continue;
+
+    candidates.push({
+      id: String(run.id || doc.id || "").trim(),
+      name: typeof run.name === "string" ? run.name.trim().slice(0, 120) : "",
+      environment: run.environment === "staging" ? "staging" : "production",
+      createdAt: toDate(run.createdAt),
+      expiresAt
+    });
+  }
+
+  if (candidates.length === 0) return null;
+
+  // Newest first; the id is a deterministic tie-break so two runs
+  // created in the same millisecond cannot flip the answer.
+  candidates.sort((a, b) => {
+    const aMs = a.createdAt ? a.createdAt.getTime() : 0;
+    const bMs = b.createdAt ? b.createdAt.getTime() : 0;
+    if (aMs !== bMs) return bMs - aMs;
+    return a.id.localeCompare(b.id);
+  });
+
+  return candidates[0];
+}
+
 const createTestRunSchema = z.object({
   name: z.string().trim().min(1).max(120),
   environment: z.enum(["staging", "production"]),
@@ -37,6 +156,7 @@ const deleteTestRunSchema = z.object({
 async function collectManifest(runId: string): Promise<{
   bookings: number;
   storeOrders: number;
+  reservations: number;
   affectedRooms: string[];
   affectedStockItems: string[];
 }> {
@@ -52,6 +172,14 @@ async function collectManifest(runId: string): Promise<{
     return d.id;
   });
 
+  // Per ETR-23 (2026-11-19): the tagged reservation headers. The
+  // cleanup deletes them too (with their canonical ledger), so the
+  // operator's review counts what will actually be removed.
+  const reservationsSnap = await adminDb
+    .collection("reservations")
+    .where("testRunId", "==", runId)
+    .get();
+
   const storeSnap = await adminDb
     .collection("storeOrders")
     .where("testRunId", "==", runId)
@@ -64,6 +192,7 @@ async function collectManifest(runId: string): Promise<{
   return {
     bookings: bookingIds.length,
     storeOrders: storeSnap.docs.length,
+    reservations: reservationsSnap.docs.length,
     affectedRooms: [...affectedRooms].filter(Boolean),
     affectedStockItems: [...affectedStockItems].filter(Boolean)
   };
@@ -351,6 +480,49 @@ export async function handleDeleteTestRun(req: any, res: any) {
 
         } catch (err) {
           failedItems.push(`booking/${doc.id}`);
+        }
+      }
+      await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
+    }
+
+    // Delete tagged RESERVATION headers (+ their canonical ledger).
+    //
+    // Per ETR-23 (2026-11-19): the create paths stamp the test-run
+    // fields on the `reservations/{id}` HEADER as well as on the
+    // child booking docs, and this loop is what takes the header
+    // with the run.
+    //
+    // Two things were being left behind without it:
+    //  (1) the header itself — an orphan reservation with no
+    //      children, still sitting in the admin's reservation list;
+    //  (2) its canonical LEDGER — `reservations/{id}/payments` (and
+    //      `refunds` / `charges`) is where the money actually lives
+    //      since MRB-01, while the booking cleanup only enumerates
+    //      `bookings/{id}`'s own subcollections. So every tagged
+    //      booking that had a payment left an orphan money record
+    //      with no booking under it — the exact defect the
+    //      `deleteTestRunBookingSubcollections` comment describes for
+    //      the legacy `refunds` subcollection.
+    //
+    // `deleteTestRunBookingSubcollections` enumerates a document's
+    // subcollections rather than a fixed list, so it is reused here
+    // for the reservation ref: the payments/refunds/charges it finds
+    // go with the header.
+    lastDoc = null;
+    while (true) {
+      let q: any = adminDb.collection("reservations").where("testRunId", "==", runId).limit(batchSize);
+      if (lastDoc) q = q.startAfter(lastDoc);
+      const snap = await q.get();
+      if (snap.empty) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+
+      for (const doc of snap.docs) {
+        try {
+          const reservationRef = adminDb.collection("reservations").doc(doc.id);
+          await deleteTestRunBookingSubcollections(reservationRef);
+          await doc.ref.delete();
+        } catch (err) {
+          failedItems.push(`reservation/${doc.id}`);
         }
       }
       await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);

@@ -51,6 +51,11 @@ import {
   // `totalPrice` — the two surfaces reported different verdicts
   // for the same payment. Both now call this.
   resolveVerifyPaymentOutcome,
+  // Per ETR-23 (2026-11-19): the "this walk-in is live, do not
+  // auto-tag it" sentinel. The walk-in modal sends it when the
+  // operator picks "Live data (not a test)" while a test run is
+  // active — the one deliberate escape hatch from the auto-tag.
+  TEST_RUN_LIVE_OPT_OUT,
   type DiscountType
 } from "@spark-inn/shared";
 import { DataTable, DataTableColumn } from "../components/DataTable";
@@ -5395,7 +5400,19 @@ export function BookingsPage() {
           <div className="col-span-full rounded-lg bg-amber-50 border border-amber-300 px-4 py-3 text-xs text-amber-900 flex items-center gap-2.5">
             <FlaskConical size={14} className="shrink-0" />
             <span>
-              <strong>Active test run.</strong> Test data is tagged with TEST badges.
+              {/* Per ETR-23 (2026-11-19): the banner now states the
+                  AUTO-TAG rule, not just the fact that badges exist.
+                  Before this, the banner said "Test data is tagged with
+                  TEST badges" while the default walk-in dropdown said
+                  "Live data (not a test)" — so the desk had no way to
+                  know that a booking created during the run was, in
+                  fact, tagged automatically. */}
+              <strong>Active test run.</strong>{" "}
+              Every booking and store order created right now is tagged{" "}
+              <strong>TEST DATA</strong> automatically — it will be
+              listed in this run&apos;s cleanup manifest and deleted
+              when the run is cleaned up. Close the run before a real
+              guest books.
             </span>
           </div>
         )}
@@ -8604,13 +8621,35 @@ export function BookingsPage() {
             </label>
             {testRuns.filter(r => r.status === "active").length > 0 && (
               <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                Mark as Test Data
+                {/* Per ETR-23 (2026-11-19): the default is now
+                    AUTO-TAG. Before this, the dropdown's only
+                    default was "Live data (not a test)", so a
+                    walk-in created during a run was untagged unless
+                    the operator remembered to switch it — and in the
+                    live production run of 2026-11-19 exactly ONE of
+                    eleven bookings carried the badge. The server now
+                    tags every booking created while a run is active,
+                    so the dropdown's default must say so; "Live data"
+                    is the explicit escape hatch for a genuine guest
+                    who walks in during the run. */}
+                Test data
                 <select value={walkinTestRunId} onChange={(e) => setWalkinTestRunId(e.target.value)} className="min-h-[44px] w-full rounded-lg border border-gray-250 bg-white px-3 text-xs">
-                  <option value="">Live data (not a test)</option>
+                  <option value="">
+                    Auto — tag with active run:{" "}
+                    {testRuns.find(r => r.status === "active")?.name || "active run"}
+                  </option>
+                  <option value={TEST_RUN_LIVE_OPT_OUT}>
+                    Live data (not a test) — a real guest is arriving
+                  </option>
                   {testRuns.filter(r => r.status === "active").map(run => (
                     <option key={run.id} value={run.id}>{run.name}</option>
                   ))}
                 </select>
+                <span className="text-[10px] font-normal leading-relaxed text-gray-500">
+                  A test run is active, so this booking is tagged TEST DATA
+                  and will be deleted with the run&apos;s cleanup. Pick
+                  &ldquo;Live data&rdquo; only for a genuine guest.
+                </span>
               </label>
             )}
           </>

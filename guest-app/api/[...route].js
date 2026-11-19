@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.25.0";
+    VERSION2 = "2.26.0";
   }
 });
 
@@ -144143,7 +144143,7 @@ var init_animations = __esm({
 });
 
 // ../shared/constants/index.ts
-var BOOKING_STATUSES, BOOKING_SOURCES, DEFAULT_BOOKING_SOURCES, PROTECTED_BOOKING_SOURCES, ROOM_STATUSES, HOUSEKEEPING_STATUSES, DEFAULT_ROOM_TYPES, DEFAULT_BED_SETUPS, DEFAULT_BOOKING_PREFERENCES, ADDITIONAL_REQUEST_MAX_LENGTH, ARRIVAL_WINDOW_HOURS, MAX_ROOM_TYPE_PHOTOS, DEFAULT_BREAKFAST_CUTOFF_TIME, DEFAULT_BREAKFAST_CUTOFF_TIMEZONE, DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES, MIN_BREAKFAST_OVERRIDE_REASON_LENGTH, DEFAULT_CORPORATE_PERKS, KNOWN_CONTENT_ICONS, DEFAULT_CORPORATE_PAGE_CONTENT, MAX_FEATURED_TYPES, MAX_FEATURED_ROOMS, SUPPORTED_PAYMENT_METHODS, UNSUPPORTED_PAYMENT_METHODS, PROTECTED_PAYMENT_METHODS, MAX_PAYMENT_METHOD_QR_BYTES, MAX_BREAKFAST_MEAL_IMAGE_BYTES, BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES, MAX_STAY_NIGHTS, MAX_ADVANCE_DAYS, PUBLIC_SITE_CONTENT_CACHE_KEY, PUBLIC_SITE_CONTENT_CACHE_TTL_MS, PUBLIC_SITE_CONTENT_CACHE_BUST_KEY, DEFAULT_TERMS_VERSION, TERMS_BODY_MAX_LENGTH;
+var BOOKING_STATUSES, BOOKING_SOURCES, DEFAULT_BOOKING_SOURCES, PROTECTED_BOOKING_SOURCES, ROOM_STATUSES, HOUSEKEEPING_STATUSES, DEFAULT_ROOM_TYPES, DEFAULT_BED_SETUPS, DEFAULT_BOOKING_PREFERENCES, ADDITIONAL_REQUEST_MAX_LENGTH, ARRIVAL_WINDOW_HOURS, MAX_ROOM_TYPE_PHOTOS, DEFAULT_BREAKFAST_CUTOFF_TIME, DEFAULT_BREAKFAST_CUTOFF_TIMEZONE, DEFAULT_BREAKFAST_SERVED_GRACE_MINUTES, MIN_BREAKFAST_OVERRIDE_REASON_LENGTH, DEFAULT_CORPORATE_PERKS, KNOWN_CONTENT_ICONS, DEFAULT_CORPORATE_PAGE_CONTENT, MAX_FEATURED_TYPES, MAX_FEATURED_ROOMS, SUPPORTED_PAYMENT_METHODS, UNSUPPORTED_PAYMENT_METHODS, PROTECTED_PAYMENT_METHODS, MAX_PAYMENT_METHOD_QR_BYTES, MAX_BREAKFAST_MEAL_IMAGE_BYTES, BREAKFAST_MEAL_IMAGE_ACCEPTED_TYPES, MAX_STAY_NIGHTS, MAX_ADVANCE_DAYS, PUBLIC_SITE_CONTENT_CACHE_KEY, PUBLIC_SITE_CONTENT_CACHE_TTL_MS, PUBLIC_SITE_CONTENT_CACHE_BUST_KEY, DEFAULT_TERMS_VERSION, TERMS_BODY_MAX_LENGTH, TEST_RUN_LIVE_OPT_OUT;
 var init_constants = __esm({
   "../shared/constants/index.ts"() {
     "use strict";
@@ -144330,6 +144330,7 @@ var init_constants = __esm({
     PUBLIC_SITE_CONTENT_CACHE_BUST_KEY = "publicSiteContent:bust";
     DEFAULT_TERMS_VERSION = "1.0.0";
     TERMS_BODY_MAX_LENGTH = 5e4;
+    TEST_RUN_LIVE_OPT_OUT = "live";
   }
 });
 
@@ -148749,6 +148750,18 @@ var init_booking = __esm({
       discountType: external_exports.enum(["", "senior", "pwd"]).optional().default(""),
       voucherCode: external_exports.string().trim().max(40).optional().default(""),
       linkedInquiryId: external_exports.string().trim().max(64).nullable().optional(),
+      // Per ETR-23 (2026-11-19): the walk-in test-run reference.
+      //
+      // Three states, and the SERVER decides what each one means:
+      //  - absent / null / ""  → AUTO: while a test run is active, the
+      //    server tags this booking with that run (this is the new
+      //    default — the desk does not have to remember to set it).
+      //  - a run id             → tag with THAT run (the server
+      //    validates it is active and unexpired).
+      //  - "live"               → the explicit opt-out: this walk-in is
+      //    a genuine guest, do not tag it even if a run is active. The
+      //    sentinel is `TEST_RUN_LIVE_OPT_OUT` (shared/constants) so
+      //    the client and the server cannot disagree on the spelling.
       testRunId: external_exports.string().trim().max(64).nullable().optional(),
       // Per MRB-02.x (2026-08-02, per decision #164): the
       // optional client-preallocated `reservationId` (UUIDv4)
@@ -153018,6 +153031,7 @@ __export(shared_exports, {
   StartBookingHoldSchema: () => StartBookingHoldSchema,
   TERMINAL_CANCELLATION_STATUSES: () => TERMINAL_CANCELLATION_STATUSES,
   TERMS_BODY_MAX_LENGTH: () => TERMS_BODY_MAX_LENGTH,
+  TEST_RUN_LIVE_OPT_OUT: () => TEST_RUN_LIVE_OPT_OUT,
   UNSUPPORTED_PAYMENT_METHODS: () => UNSUPPORTED_PAYMENT_METHODS,
   VERSION: () => VERSION2,
   WalkinBookingSchema: () => WalkinBookingSchema,
@@ -153298,6 +153312,47 @@ function generateRunId() {
 function hashToken(token2) {
   return import_node_crypto.default.createHash("sha256").update(token2).digest("hex");
 }
+function toDate3(value) {
+  if (value === null || value === void 0 || value === "") return null;
+  if (typeof value.toDate === "function") {
+    const d2 = value.toDate();
+    return Number.isNaN(d2?.getTime?.()) ? null : d2;
+  }
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+async function resolveActiveTestRun() {
+  let snapshot;
+  try {
+    snapshot = await adminDb.collection("testRuns").where("status", "==", "active").get();
+  } catch (error) {
+    console.error("Active test run lookup failed:", error);
+    return null;
+  }
+  const now = Date.now();
+  const candidates = [];
+  for (const doc of snapshot?.docs || []) {
+    const run = doc.data() || {};
+    if (run.status !== "active") continue;
+    const expiresAt = toDate3(run.expiresAt);
+    if (expiresAt && expiresAt.getTime() <= now) continue;
+    candidates.push({
+      id: String(run.id || doc.id || "").trim(),
+      name: typeof run.name === "string" ? run.name.trim().slice(0, 120) : "",
+      environment: run.environment === "staging" ? "staging" : "production",
+      createdAt: toDate3(run.createdAt),
+      expiresAt
+    });
+  }
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b3) => {
+    const aMs = a.createdAt ? a.createdAt.getTime() : 0;
+    const bMs = b3.createdAt ? b3.createdAt.getTime() : 0;
+    if (aMs !== bMs) return bMs - aMs;
+    return a.id.localeCompare(b3.id);
+  });
+  return candidates[0];
+}
 async function collectManifest(runId) {
   const affectedRooms = /* @__PURE__ */ new Set();
   const affectedStockItems = /* @__PURE__ */ new Set();
@@ -153306,6 +153361,7 @@ async function collectManifest(runId) {
     affectedRooms.add(d.data().roomNumber || "");
     return d.id;
   });
+  const reservationsSnap = await adminDb.collection("reservations").where("testRunId", "==", runId).get();
   const storeSnap = await adminDb.collection("storeOrders").where("testRunId", "==", runId).get();
   storeSnap.docs.forEach((d) => {
     const itemIds = (d.data().items || []).map((i2) => i2.itemId);
@@ -153316,6 +153372,7 @@ async function collectManifest(runId) {
   return {
     bookings: bookingIds.length,
     storeOrders: storeSnap.docs.length,
+    reservations: reservationsSnap.docs.length,
     affectedRooms: [...affectedRooms].filter(Boolean),
     affectedStockItems: [...affectedStockItems].filter(Boolean)
   };
@@ -153540,6 +153597,24 @@ async function handleDeleteTestRun(req, res) {
           bookingCount++;
         } catch (err) {
           failedItems.push(`booking/${doc.id}`);
+        }
+      }
+      await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
+    }
+    lastDoc = null;
+    while (true) {
+      let q3 = adminDb.collection("reservations").where("testRunId", "==", runId).limit(batchSize);
+      if (lastDoc) q3 = q3.startAfter(lastDoc);
+      const snap = await q3.get();
+      if (snap.empty) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+      for (const doc of snap.docs) {
+        try {
+          const reservationRef = adminDb.collection("reservations").doc(doc.id);
+          await deleteTestRunBookingSubcollections(reservationRef);
+          await doc.ref.delete();
+        } catch (err) {
+          failedItems.push(`reservation/${doc.id}`);
         }
       }
       await heartbeatTestRunCleanup(runRef, bookingCount, storeOrderCount);
@@ -228475,7 +228550,7 @@ function generateReceiptPdf(booking) {
   top += 8;
   const fmtDate = (v6) => {
     if (!v6) return "-";
-    const d = toDate3(v6);
+    const d = toDate4(v6);
     return d ? new Intl.DateTimeFormat(hotel_config_default.locale, { month: "short", day: "numeric", year: "numeric", timeZone: hotel_config_default.timezone }).format(d) : "-";
   };
   const fmtMoney = (v6) => {
@@ -228789,7 +228864,7 @@ function addressLine() {
 function brandLogoUrl() {
   return siteUrl(`/brand/${encodeURIComponent(hotel_config_default.logos.white)}`);
 }
-function toDate3(value) {
+function toDate4(value) {
   if (!value) return null;
   if (value instanceof Date) return value;
   if (typeof value.toDate === "function") return value.toDate();
@@ -228797,7 +228872,7 @@ function toDate3(value) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 function formatDate(value) {
-  const date = toDate3(value);
+  const date = toDate4(value);
   if (!date) return "Not set";
   return new Intl.DateTimeFormat(hotel_config_default.locale, {
     month: "short",
@@ -230048,7 +230123,7 @@ async function handleEmailTrigger(req, res, action) {
       if (!ALLOWED_EARLY_CHECKIN_STATUSES.includes(booking2.status)) {
         return res.status(400).json({ success: false, error: `Early check-in request is not allowed for bookings with status '${booking2.status}'.` });
       }
-      const checkInDateObj = toDate3(booking2.checkIn);
+      const checkInDateObj = toDate4(booking2.checkIn);
       if (!checkInDateObj) {
         return res.status(400).json({ success: false, error: "Invalid check-in date." });
       }
@@ -231653,6 +231728,7 @@ function generateOtherAddOnRefundId() {
 
 // server/handlers/bookings.ts
 init_shared();
+init_shared();
 
 // server/handlers/reservationScopeTransition.ts
 async function preReadSiblingChildren(transaction, adminDb3, bookingReservationId, map2) {
@@ -232835,6 +232911,13 @@ async function handleCreateBooking(req, res) {
     validatedTestRunId = run.id;
     validatedTestRunName = typeof run.name === "string" ? run.name.trim().slice(0, 120) : "";
     validatedTestRunEnvironment = run.environment === "staging" || run.environment === "production" ? run.environment : "production";
+  } else {
+    const activeRun = await resolveActiveTestRun();
+    if (activeRun) {
+      validatedTestRunId = activeRun.id;
+      validatedTestRunName = activeRun.name;
+      validatedTestRunEnvironment = activeRun.environment;
+    }
   }
   const isCorporateIntent = Boolean(corporateCode) || corporateFlatRate === true;
   const guestNameForFingerprint = `${rawGuestDetails.firstName.trim()} ${rawGuestDetails.lastName.trim()}`;
@@ -234147,6 +234230,24 @@ async function handleCreateBooking(req, res) {
         } : {},
         createdAt: now,
         updatedAt: now,
+        // Per ETR-23 (2026-11-19): the test-run stamp on the
+        // RESERVATION HEADER, not just on the child booking docs.
+        //
+        // The header is the canonical aggregate for the stay, and
+        // the run's cleanup deletes the tagged CHILD bookings — so
+        // an unstamped header survives the cleanup as an orphan
+        // reservation with no children, and its canonical ledger
+        // (`reservations/{id}/payments` — where the money actually
+        // lives since MRB-01) survives as orphan money records with
+        // no booking under them. Stamping the header is what lets
+        // the cleanup take the whole reservation with it.
+        //
+        // NOTE the placement: the stamp sits BEFORE `createdBy`, so
+        // the header's literal shape (which the MRB-14 guard pins —
+        // `actualDateRange` → `createdBy: "guest"` → `};`) is
+        // unchanged. A source-text guard is a contract; move your
+        // field, do not loosen the guard.
+        ...validatedTestRunId ? { isTestData: true, testRunId: validatedTestRunId, testRunName: validatedTestRunName, testRunEnvironment: validatedTestRunEnvironment } : {},
         createdBy: "guest"
       };
       transaction.set(reservationDocRef, newReservation);
@@ -234716,7 +234817,8 @@ async function handleCreateWalkin(req, res) {
   let validatedTestRunId = null;
   let validatedTestRunName = "";
   let validatedTestRunEnvironment = "production";
-  if (requestedTestRunId) {
+  if (requestedTestRunId === TEST_RUN_LIVE_OPT_OUT) {
+  } else if (requestedTestRunId) {
     const runDoc = await adminDb.collection("testRuns").doc(requestedTestRunId).get();
     if (!runDoc.exists) {
       return res.status(400).json({
@@ -234740,6 +234842,13 @@ async function handleCreateWalkin(req, res) {
     validatedTestRunId = run.id;
     validatedTestRunName = typeof run.name === "string" ? run.name.trim().slice(0, 120) : "";
     validatedTestRunEnvironment = run.environment === "staging" || run.environment === "production" ? run.environment : "production";
+  } else {
+    const activeRun = await resolveActiveTestRun();
+    if (activeRun) {
+      validatedTestRunId = activeRun.id;
+      validatedTestRunName = activeRun.name;
+      validatedTestRunEnvironment = activeRun.environment;
+    }
   }
   try {
     let finalBookingRef = "";
@@ -235538,6 +235647,17 @@ async function handleCreateWalkin(req, res) {
         },
         createdAt: now,
         updatedAt: now,
+        // Per ETR-23 (2026-11-19): the test-run stamp on the
+        // RESERVATION HEADER — same reason as the public create
+        // path: the run's cleanup deletes the tagged child bookings,
+        // so the header must carry the same classification or it
+        // survives as an orphan reservation (with its canonical
+        // ledger under it) after the cleanup.
+        //
+        // Placed BEFORE `createdBy` for the same reason as the
+        // public path — the MRB-14 guard pins the header's literal
+        // shape, so the new field moves rather than the guard.
+        ...validatedTestRunId ? { isTestData: true, testRunId: validatedTestRunId, testRunName: validatedTestRunName, testRunEnvironment: validatedTestRunEnvironment } : {},
         createdBy: "staff"
       };
       transaction.set(reservationDocRef, newReservation);
@@ -240417,6 +240537,28 @@ async function handleAddRoomToReservation(req, res) {
         }),
         revenueAllocation: newChildRevenueAllocation,
         holdExpiresAt: reservation.holdExpiresAt ?? null,
+        // Per ETR-23 (2026-11-19): the new child INHERITS the
+        // reservation's classification.
+        //
+        // This path builds the child doc field by field (it does not
+        // copy the parent), so without this the added room would be
+        // UNSTAMPED: invisible to the run's cleanup (the manifest
+        // queries `bookings.where("testRunId" == runId)`), visible
+        // as a live booking, and counted as revenue. A child of a
+        // tagged reservation must be tagged with the SAME run.
+        //
+        // An untagged parent yields an untagged child ON PURPOSE:
+        // tagging one child of a live reservation would let the
+        // cleanup delete a REAL guest's room out of a live
+        // reservation. The classification follows the reservation,
+        // so a reservation is never split across the cleanup
+        // boundary.
+        ...reservation.isTestData === true ? {
+          isTestData: true,
+          testRunId: reservation.testRunId || null,
+          testRunName: String(reservation.testRunName || ""),
+          testRunEnvironment: reservation.testRunEnvironment === "staging" ? "staging" : "production"
+        } : {},
         updatedAt: /* @__PURE__ */ new Date()
       };
       const newBookingRefDoc = adminDb.collection("bookings").doc(bookingId);
@@ -243138,6 +243280,7 @@ init_shared();
 init_firebase_admin();
 init_notifications();
 init_email();
+init_test_runs();
 var MAX_GUEST_NAME_LENGTH = 120;
 var MAX_ROOM_NUMBER_LENGTH = 12;
 var MAX_ORDER_REF_LENGTH = 40;
@@ -243334,6 +243477,7 @@ async function handleCreateStoreOrder(req, res) {
   try {
     let responseData = null;
     const { todayStr, manilaDate } = getManilaDateInfo();
+    const activeTestRun = await resolveActiveTestRun();
     await adminDb.runTransaction(async (transaction) => {
       const storeConfigRef = adminDb.collection("settings").doc("storeConfig");
       const storeConfigDoc = await transaction.get(storeConfigRef);
@@ -243425,6 +243569,16 @@ async function handleCreateStoreOrder(req, res) {
         cancellationReason: "",
         handledBy: "",
         notes: "",
+        // Per ETR-23 (2026-11-19): the test-run stamp. Present only
+        // while a run is active — a missing flag means "live data"
+        // (ETR-08's live-by-default rule still holds for every order
+        // created outside a run).
+        ...activeTestRun ? {
+          isTestData: true,
+          testRunId: activeTestRun.id,
+          testRunName: activeTestRun.name,
+          testRunEnvironment: activeTestRun.environment
+        } : {},
         createdAt: /* @__PURE__ */ new Date(),
         updatedAt: /* @__PURE__ */ new Date()
       });

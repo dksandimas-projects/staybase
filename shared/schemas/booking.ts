@@ -186,6 +186,18 @@ export const WalkinBookingSchema = z.object({
   discountType: z.enum(["", "senior", "pwd"]).optional().default(""),
   voucherCode: z.string().trim().max(40).optional().default(""),
   linkedInquiryId: z.string().trim().max(64).nullable().optional(),
+  // Per ETR-23 (2026-11-19): the walk-in test-run reference.
+  //
+  // Three states, and the SERVER decides what each one means:
+  //  - absent / null / ""  → AUTO: while a test run is active, the
+  //    server tags this booking with that run (this is the new
+  //    default — the desk does not have to remember to set it).
+  //  - a run id             → tag with THAT run (the server
+  //    validates it is active and unexpired).
+  //  - "live"               → the explicit opt-out: this walk-in is
+  //    a genuine guest, do not tag it even if a run is active. The
+  //    sentinel is `TEST_RUN_LIVE_OPT_OUT` (shared/constants) so
+  //    the client and the server cannot disagree on the spelling.
   testRunId: z.string().trim().max(64).nullable().optional(),
   // Per MRB-02.x (2026-08-02, per decision #164): the
   // optional client-preallocated `reservationId` (UUIDv4)

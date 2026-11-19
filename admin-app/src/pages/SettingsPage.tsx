@@ -3313,6 +3313,16 @@ export function SettingsPage() {
   const [newRunName, setNewRunName] = useState("");
   const [newRunEnv, setNewRunEnv] = useState<"staging" | "production">("staging");
   const [newRunDuration, setNewRunDuration] = useState(60);
+  // Per ETR-24 (2026-11-19): the token returned by a just-created
+  // run. The token used to be DISCARDED — `createTestRun` returned
+  // it and `handleCreateRun` dropped it on the floor, so nobody
+  // (not the operator, not the QA harness) could ever see it. It
+  // is not needed for the auto-tag rule (ETR-23) — the server tags
+  // every booking created while the run is active on its own — but
+  // it is the credential the Playwright harness injects into the
+  // booking-create body, so an operator running the harness by hand
+  // needs a way to read it out.
+  const [createdRunToken, setCreatedRunToken] = useState<{ name: string; token: string } | null>(null);
   const [confirmDeleteRun, setConfirmDeleteRun] = useState<TestRun | null>(null);
   // Per ETR-01a (2026-11-10): the cleanup confirmation modal is
   // reachable two ways — "Clean up" on an already-closed run, or
@@ -3619,7 +3629,16 @@ export function SettingsPage() {
       durationMinutes: newRunDuration
     });
     if (result.success) {
-      toast.success("Test run created", "Admin SDK service account is required for server route.");
+      // Per ETR-24 (2026-11-19): keep the token instead of dropping
+      // it. It is admin-only, and it is the only way an operator can
+      // drive the QA harness's tagged-booking flow by hand.
+      setCreatedRunToken(
+        result.token ? { name: newRunName.trim(), token: result.token } : null
+      );
+      toast.success(
+        "Test run created",
+        "Every booking and store order created now is tagged TEST DATA automatically."
+      );
       setNewRunName("");
     } else {
       toast.error("Failed to create test run", result.error || "Unknown error");
@@ -9523,7 +9542,13 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                             {new Date(run.expiresAt).toLocaleString()}
                           </p>
                         ))}
-                        <p className="mt-2 text-amber-700">Test data is clearly marked with TEST DATA badges.</p>
+                        <p className="mt-2 text-amber-700">
+                          Every booking and store order created while this run is
+                          active is tagged <strong>TEST DATA</strong> automatically
+                          — it appears in the run&apos;s cleanup manifest and is
+                          deleted when the run is cleaned up. Close the run
+                          before a real guest books.
+                        </p>
                       </div>
                     </div>
                   )}
@@ -9672,6 +9697,47 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                       <FlaskConical size={14} />
                       Create Test Run
                     </button>
+
+                    {/* Per ETR-24 (2026-11-19): the run token, revealed.
+                        The token used to be discarded by `handleCreateRun`,
+                        so the credential the QA harness injects into the
+                        booking-create body was unreachable from the UI.
+                        It is NOT needed for the auto-tag rule (ETR-23) —
+                        every booking created during the run is tagged by
+                        the server on its own — but an operator driving the
+                        harness by hand needs it. Admin-only screen. */}
+                    {createdRunToken && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                          Run token — &ldquo;{createdRunToken.token}&rdquo;
+                        </p>
+                        <p className="text-[10px] leading-relaxed text-amber-900">
+                          Not needed for the automatic TEST DATA tagging — the
+                          server tags every booking created while this run is
+                          active by itself. Keep it only to drive the QA
+                          harness, which sends it in the booking-create body.
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <code className="min-w-0 flex-1 truncate rounded border border-amber-200 bg-white px-2 py-1 text-[10px] text-gray-700">
+                            {createdRunToken.token}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              try {
+                                void navigator.clipboard?.writeText(createdRunToken.token);
+                                toast.success("Token copied", "Paste it into the QA harness run.");
+                              } catch {
+                                toast.error("Could not copy", "Select the token and copy it manually.");
+                              }
+                            }}
+                            className="min-h-[44px] shrink-0 rounded-lg border border-amber-300 bg-white px-3 text-[10px] font-bold text-amber-800 hover:bg-amber-100"
+                          >
+                            Copy token
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Run history */}
@@ -11012,7 +11078,10 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
               All data tagged under this test run will be permanently deleted.
               {confirmDeleteRun?.manifest && (
                 <span className="block mt-2">
-                  Manifest: {confirmDeleteRun.manifest.bookings} bookings, {confirmDeleteRun.manifest.storeOrders} store orders
+                  Manifest: {confirmDeleteRun.manifest.bookings} bookings
+                  {typeof confirmDeleteRun.manifest.reservations === "number" &&
+                    `, ${confirmDeleteRun.manifest.reservations} reservations`}
+                  , {confirmDeleteRun.manifest.storeOrders} store orders
                 </span>
               )}
             </p>

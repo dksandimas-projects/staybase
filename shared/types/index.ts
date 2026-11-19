@@ -1650,6 +1650,13 @@ export type TestRunStatus = "active" | "closed" | "cleanup-in-progress" | "clean
 export interface TestRunManifest {
   bookings: number;
   storeOrders: number;
+  // Per ETR-23 (2026-11-19): the number of tagged RESERVATION headers
+  // the run created. A multi-room stay is one reservation header over
+  // N child bookings, and the cleanup takes the header (with its
+  // canonical `reservations/{id}/payments` ledger) with the run — so
+  // the review the operator sees before deleting must count them.
+  // Optional: manifests written before this field existed don't have it.
+  reservations?: number;
   affectedRooms: string[];
   affectedStockItems: string[];
 }

@@ -1,5 +1,5 @@
 import { adminAuth, adminDb } from "../lib/firebase-admin";
-import { hashToken } from "./test-runs";
+import { hashToken, resolveActiveTestRun } from "./test-runs";
 // In-flow hold (Steps 2 + 3 countdown banner). The consume
 // helper is called best-effort AFTER the booking transaction
 // commits — the hold is a UX signal, not a hard inventory
@@ -336,6 +336,12 @@ function buildValidArrivalTimeOptions(checkInTimeStr: string): Set<string> {
   return valid;
 }
 import { DEFAULT_TERMS_VERSION } from "@spark-inn/shared";
+// Per ETR-23 (2026-11-19): the explicit "this walk-in is live, do
+// not auto-tag it" sentinel. The desk's New Booking modal sends it
+// when the operator picks "Live data (not a test)" while a test run
+// is active. Every other value (empty / null / absent) means
+// "auto — tag me with the active run".
+import { TEST_RUN_LIVE_OPT_OUT } from "@spark-inn/shared";
 // Per BAR-03 (2026-08-08, per decision #204): the
 // shared FOL-05 sibling-flip helper. The pre-BAR-03
 // `handleVerifyAndRecordPayment` + `handleAddPayment`
@@ -2064,6 +2070,28 @@ export async function handleCreateBooking(req: any, res: any) {
     validatedTestRunEnvironment = run.environment === "staging" || run.environment === "production"
       ? run.environment
       : "production";
+  } else {
+    // Per ETR-23 (2026-11-19): while a test run is active, EVERY
+    // booking created in this deployment is test data.
+    //
+    // Before this, the ONLY way to tag a guest booking was a
+    // secret `testToken` in the body, and the only thing that ever
+    // sent one was the Playwright QA harness. A human booking
+    // through the public site during a production run came out
+    // UNTAGGED — no badge, no manifest entry, no cleanup, and it
+    // counted as real money. The run is an admin-opened, time-boxed
+    // "this deployment is in test mode" switch, so the SERVER
+    // decides, not the client.
+    //
+    // A guest can never opt out of this (see `TEST_RUN_LIVE_OPT_OUT`
+    // — the staff-only escape hatch): a guest must not be able to
+    // declare their own booking test data, or untaggable.
+    const activeRun = await resolveActiveTestRun();
+    if (activeRun) {
+      validatedTestRunId = activeRun.id;
+      validatedTestRunName = activeRun.name;
+      validatedTestRunEnvironment = activeRun.environment;
+    }
   }
 
   // Per MRB-02 (2026-08-02, per decision #159): the
@@ -4378,6 +4406,26 @@ export async function handleCreateBooking(req: any, res: any) {
           : {}),
         createdAt: now,
         updatedAt: now,
+        // Per ETR-23 (2026-11-19): the test-run stamp on the
+        // RESERVATION HEADER, not just on the child booking docs.
+        //
+        // The header is the canonical aggregate for the stay, and
+        // the run's cleanup deletes the tagged CHILD bookings — so
+        // an unstamped header survives the cleanup as an orphan
+        // reservation with no children, and its canonical ledger
+        // (`reservations/{id}/payments` — where the money actually
+        // lives since MRB-01) survives as orphan money records with
+        // no booking under them. Stamping the header is what lets
+        // the cleanup take the whole reservation with it.
+        //
+        // NOTE the placement: the stamp sits BEFORE `createdBy`, so
+        // the header's literal shape (which the MRB-14 guard pins —
+        // `actualDateRange` → `createdBy: "guest"` → `};`) is
+        // unchanged. A source-text guard is a contract; move your
+        // field, do not loosen the guard.
+        ...(validatedTestRunId
+          ? { isTestData: true, testRunId: validatedTestRunId, testRunName: validatedTestRunName, testRunEnvironment: validatedTestRunEnvironment }
+          : {}),
         createdBy: "guest"
       };
       transaction.set(reservationDocRef, newReservation);
@@ -5175,7 +5223,14 @@ export async function handleCreateWalkin(req: any, res: any) {
   let validatedTestRunId: string | null = null;
   let validatedTestRunName = "";
   let validatedTestRunEnvironment: "staging" | "production" = "production";
-  if (requestedTestRunId) {
+  if (requestedTestRunId === TEST_RUN_LIVE_OPT_OUT) {
+    // Per ETR-23 (2026-11-19): the desk explicitly chose "Live data
+    // (not a test)" in the New Booking modal. No auto-tag, even
+    // though a run is active. This is the ONE escape hatch — it
+    // exists for a genuine walk-in guest who arrives while the
+    // deployment is in test mode. The guest path has no equivalent
+    // (a guest must never be able to choose this).
+  } else if (requestedTestRunId) {
     const runDoc = await adminDb.collection("testRuns").doc(requestedTestRunId).get();
     if (!runDoc.exists) {
       return res.status(400).json({
@@ -5204,6 +5259,21 @@ export async function handleCreateWalkin(req: any, res: any) {
     validatedTestRunEnvironment = run.environment === "staging" || run.environment === "production"
       ? run.environment
       : "production";
+  } else {
+    // Per ETR-23 (2026-11-19): the desk did NOT choose a run, so the
+    // server decides — while a test run is active, every new booking
+    // is test data. Before this, the dropdown defaulted to "Live
+    // data (not a test)", so a walk-in made during a run was
+    // untagged unless the operator remembered to change it (in the
+    // live production run of 2026-11-19, exactly ONE of eleven
+    // bookings carried the badge — the one where the dropdown had
+    // been switched).
+    const activeRun = await resolveActiveTestRun();
+    if (activeRun) {
+      validatedTestRunId = activeRun.id;
+      validatedTestRunName = activeRun.name;
+      validatedTestRunEnvironment = activeRun.environment;
+    }
   }
 
   try {
@@ -6482,6 +6552,19 @@ export async function handleCreateWalkin(req: any, res: any) {
         },
         createdAt: now,
         updatedAt: now,
+        // Per ETR-23 (2026-11-19): the test-run stamp on the
+        // RESERVATION HEADER — same reason as the public create
+        // path: the run's cleanup deletes the tagged child bookings,
+        // so the header must carry the same classification or it
+        // survives as an orphan reservation (with its canonical
+        // ledger under it) after the cleanup.
+        //
+        // Placed BEFORE `createdBy` for the same reason as the
+        // public path — the MRB-14 guard pins the header's literal
+        // shape, so the new field moves rather than the guard.
+        ...(validatedTestRunId
+          ? { isTestData: true, testRunId: validatedTestRunId, testRunName: validatedTestRunName, testRunEnvironment: validatedTestRunEnvironment }
+          : {}),
         createdBy: "staff"
       };
       transaction.set(reservationDocRef, newReservation);
@@ -15377,6 +15460,30 @@ export async function handleAddRoomToReservation(req: any, res: any) {
         }),
         revenueAllocation: newChildRevenueAllocation,
         holdExpiresAt: reservation.holdExpiresAt ?? null,
+        // Per ETR-23 (2026-11-19): the new child INHERITS the
+        // reservation's classification.
+        //
+        // This path builds the child doc field by field (it does not
+        // copy the parent), so without this the added room would be
+        // UNSTAMPED: invisible to the run's cleanup (the manifest
+        // queries `bookings.where("testRunId" == runId)`), visible
+        // as a live booking, and counted as revenue. A child of a
+        // tagged reservation must be tagged with the SAME run.
+        //
+        // An untagged parent yields an untagged child ON PURPOSE:
+        // tagging one child of a live reservation would let the
+        // cleanup delete a REAL guest's room out of a live
+        // reservation. The classification follows the reservation,
+        // so a reservation is never split across the cleanup
+        // boundary.
+        ...(reservation.isTestData === true
+          ? {
+              isTestData: true,
+              testRunId: reservation.testRunId || null,
+              testRunName: String(reservation.testRunName || ""),
+              testRunEnvironment: reservation.testRunEnvironment === "staging" ? "staging" : "production"
+            }
+          : {}),
         updatedAt: new Date()
       };
       const newBookingRefDoc = adminDb.collection("bookings").doc(bookingId);
