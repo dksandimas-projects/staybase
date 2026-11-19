@@ -103,6 +103,11 @@ import {
 // `requestFingerprint`) or returns a 409 (different
 // `requestFingerprint`).
 import { generateReservationId } from "@spark-inn/shared";
+// Per 2026-11-19 (decision #318): the ONE rule for "does the guest
+// owe money now?" — Step 4's proof gate and Step 5's status copy must
+// answer it identically, so both read the shared helper instead of
+// their own key comparisons.
+import { isOnlinePaymentMethod, isSettleAtPropertyPaymentMethod } from "@spark-inn/shared";
 import type { BookingRateBreakdown, BookingRateLine } from "@spark-inn/shared";
 // In-flow hold (Steps 2 + 3 countdown banner). The
 // `generateHoldId` helper is the client-side source
@@ -964,7 +969,12 @@ export function BookingPage() {
     [availablePaymentMethods, paymentMethod]
   );
 
-  const isPayAtHotel = currentPaymentMethod?.method === "pay-at-hotel";
+  // Per 2026-11-19 (decision #318): "pay at the property" is decided
+  // by the SHARED rule, not by a hardcoded `=== "pay-at-hotel"`
+  // comparison. The admin can configure any method key (the live
+  // deployment's bank transfer is keyed `bpi`), and a method that
+  // settles at the property must not ask the guest for a receipt.
+  const isPayAtHotel = isSettleAtPropertyPaymentMethod(currentPaymentMethod?.method);
 
   // Re-validate the current selection: if the admin disabled the
   // chosen method (or the config just loaded) while the page is
@@ -3602,7 +3612,12 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
 
   if (isReviewStep) {
   const isIdUploadRequired = discountType !== "none" && !discountIdUpload;
-  const isPaymentProofRequired = paymentMethod !== "pay-at-hotel" && !paymentProofUpload;
+  // Per 2026-11-19 (decision #318): a receipt is required for every
+  // ONLINE method — every admin-configured key that is not a
+  // settle-at-the-property method. Step 5's status copy reads the
+  // SAME rule, so the guest is never told "nothing to pay now" for a
+  // method this step demanded a receipt for (and vice versa).
+  const isPaymentProofRequired = isOnlinePaymentMethod(paymentMethod) && !paymentProofUpload;
     // Per BI-03 + BOOKING-FLOW.md §Step 3: Confirm stays disabled
     // until the Turnstile token has been received — submitting
     // without one is a guaranteed 400 now that the server bypass
@@ -4187,7 +4202,7 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
             </div>
 
             {/* Proof of Payment Upload box */}
-            {paymentMethod !== "pay-at-hotel" && (
+            {isOnlinePaymentMethod(paymentMethod) && (
                 <div className="mt-5">
                   <p className="text-sm font-semibold text-gray-700">
                     Upload Proof of Payment <span className="text-red-500">*</span>

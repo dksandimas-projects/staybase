@@ -203,6 +203,28 @@ next step, payment-status label, payment-status detail and email-status sentence
 - [x] **Early check-in moved below the actions** (reversed EC-02's placement, which put a member perk above the stay
       summary). The rewards prompt already sat below. The full rate breakdown is a collapsed
       `See the full price breakdown` `<details>` — a receipt detail, not the outcome.
+
+### Per decision #318 — one rule for "does the guest owe money now?"
+
+The payment-status copy and the payment-METHOD label are two different facts, and the method is an
+**admin-configured KEY**, not a fixed set of known keys. The live deployment keys its bank transfer as `bpi`
+(label "Bank Transfer").
+
+- [x] **ONE shared rule** — `shared/utils/paymentMethodSemantics.ts`. `SETTLE_AT_PROPERTY_PAYMENT_METHOD_KEYS`
+      (`pay-at-hotel`, `cash`, `cod`, `add-to-bill`) settle at the property; **every other key is an ONLINE
+      method** — paid now, proven with a receipt. `isOnlinePaymentMethod()` / `isSettleAtPropertyPaymentMethod()`
+      replace every per-surface key comparison.
+- [x] **An unknown or custom key defaults to ONLINE, never to "nothing is owed".** The two possible mistakes are
+      not symmetric: telling a guest who must pay that nothing is due loses the money; asking a guest who already
+      paid for a receipt is recoverable. An EMPTY key is neither.
+- [x] **Step 4's proof gate and Step 5's status copy read the SAME helper** (`BookingPage.tsx` +
+      `confirmationStatus.ts`), so the guest is never asked to upload a receipt for a method Step 5 calls
+      "pay at the property", and never told "nothing to pay now" for a method Step 4 demanded a receipt for.
+- [x] **Regression pinned:** production booking `SI-20261118-00006` (`paymentMethod: "bpi"`,
+      `status: "payment-uploaded"`, receipt on file) rendered "Pay at the property — nothing to pay now" while its
+      own email said the uploaded proof was queued for verification. `mbux-08-step-5-confirmation.test.ts` now
+      asserts the page never renders "Pay at the property" for a bank transfer, and
+      `shared/__tests__/paymentMethodSemantics.test.ts` pins both halves of the rule.
 - [x] `cancelled` deep links get a neutral tone, so the green success tick is never rendered beside a cancellation.
 
 - [x] Spark Rewards prompt — shown only to logged-out guests or non-members:
