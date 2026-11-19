@@ -181,8 +181,8 @@ next step, payment-status label, payment-status detail and email-status sentence
 
 - [x] **Payment PROOF is never presented as payment VERIFICATION.** The page derives every status string from the
       server-returned `status` (already carried in the URL for the early-check-in gate), never from the payment-method
-      boolean. `payment-uploaded` renders `Proof received — not yet verified` verbatim; only `payment-confirmed` /
-      `confirmed` / `checked-in` / `checked-out` on an ONLINE method render `Payment verified`.
+      boolean. `payment-uploaded` renders `Payment proof received — verification in progress` verbatim; only
+      `payment-confirmed` / `confirmed` / `checked-in` / `checked-out` on an ONLINE method render `Payment verified`.
 - [x] **Precedence:** `cancelled` beats everything → a NON-online method outranks the booking status → verified outranks
       `payment-uploaded` → `payment-uploaded` outranks awaiting-proof. The pay-at-hotel arm is deliberate: a
       pay-at-hotel booking reaching `confirmed` has had its *stay* confirmed, but no money moved and none could have
@@ -225,6 +225,29 @@ The payment-status copy and the payment-METHOD label are two different facts, an
       own email said the uploaded proof was queued for verification. `mbux-08-step-5-confirmation.test.ts` now
       asserts the page never renders "Pay at the property" for a bank transfer, and
       `shared/__tests__/paymentMethodSemantics.test.ts` pins both halves of the rule.
+
+### Per decision #319 — the pending screen is a SUCCESS screen with one pending row in it
+
+The `proof-received` state (a receipt uploaded, staff still verifying) was rewritten by the owner. It is the
+state almost every online-method guest lands on, because Step 4 requires the receipt upload before Confirm
+unlocks.
+
+- [x] **The medallion draws a CHECK, not a clock.** The icon was keyed off `tone`, so every pending state drew a
+      clock — telling a guest who had already done everything that the hotel was waiting on *them*. `headerIcon`
+      is now a field of the status view (`check` for `proof-received` / `verified` / `pay-at-hotel`; `clock` for
+      `awaiting-proof` / `cancelled`), and the `animate-pulse` stays reserved for the fully-confirmed state.
+- [x] **One message across four blocks.** Hero: *"Booking request received!"* + *"Thanks! Your room is on hold while
+      we verify your payment. This usually takes a few hours and no more than 24 hours."* Next step: *"You're all set
+      for now. Once your payment is verified, we'll email your booking confirmation. You can also check your status
+      anytime on this page or under Manage."* Status box: *"Payment proof received — verification in progress"* +
+      *"We've received your {method} receipt and our team is reviewing it. Your booking is confirmed once it's
+      verified, usually within 24 hours."* Email line: *"We've emailed you a copy of this request. Your confirmation
+      will follow as soon as your payment is verified."*
+- [x] **The method label inside that copy stays dynamic** — the admin's configured label (decision #200), never a
+      hardcoded "bank transfer".
+- [x] **`awaiting-proof` keeps its own copy** ("Booking submitted for review" / "we have not received a receipt
+      yet"): nothing can be verified when no receipt has arrived, and "You're all set for now" would be untrue to a
+      guest who still owes a receipt.
 - [x] `cancelled` deep links get a neutral tone, so the green success tick is never rendered beside a cancellation.
 
 - [x] Spark Rewards prompt — shown only to logged-out guests or non-members:
