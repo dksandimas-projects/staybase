@@ -2,6 +2,13 @@ import { generateStoreOrderRef, getEffectiveStorePaymentMethods, getManilaDateIn
 import { adminDb } from "../lib/firebase-admin";
 import { writeNotification } from "../lib/notifications";
 import { sendStaffRefundReviewTrigger, sendStoreOrderTrigger } from "./email";
+// Per ETR-23 (2026-11-19): the active-run resolver. Store orders
+// created while a test run is active are tagged too — the admin
+// app renders a TEST badge on store-order rows (and the run's
+// cleanup manifest counts store orders by `testRunId`), but until
+// now NO write path ever stamped the fields, so that badge could
+// never appear and a test order survived the run's cleanup.
+import { resolveActiveTestRun } from "./test-runs";
 
 interface StoreOrderItemInput {
   itemId: string;
@@ -418,6 +425,11 @@ export async function handleCreateStoreOrder(req: any, res: any) {
     let responseData: { orderId: string; orderRef: string; totalAmount: number; bookingId: string | null; items: any[] } | null = null;
     const { todayStr, manilaDate } = getManilaDateInfo();
 
+    // Per ETR-23 (2026-11-19): resolve the active run OUTSIDE the
+    // transaction (FOL-03 — a transaction body must not read after
+    // it writes; this read is not part of the transaction at all).
+    const activeTestRun = await resolveActiveTestRun();
+
     await adminDb.runTransaction(async (transaction) => {
       const storeConfigRef = adminDb.collection("settings").doc("storeConfig");
       const storeConfigDoc = await transaction.get(storeConfigRef);
@@ -553,6 +565,18 @@ export async function handleCreateStoreOrder(req: any, res: any) {
         cancellationReason: "",
         handledBy: "",
         notes: "",
+        // Per ETR-23 (2026-11-19): the test-run stamp. Present only
+        // while a run is active — a missing flag means "live data"
+        // (ETR-08's live-by-default rule still holds for every order
+        // created outside a run).
+        ...(activeTestRun
+          ? {
+              isTestData: true,
+              testRunId: activeTestRun.id,
+              testRunName: activeTestRun.name,
+              testRunEnvironment: activeTestRun.environment
+            }
+          : {}),
         createdAt: new Date(),
         updatedAt: new Date()
       });

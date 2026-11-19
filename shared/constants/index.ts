@@ -574,3 +574,19 @@ export const DEFAULT_TERMS_VERSION = "1.0.0";
 // side so the user sees a clear "exceeds the 50 KB limit"
 // before submission.
 export const TERMS_BODY_MAX_LENGTH = 50_000;
+
+// Per ETR-23 (2026-11-19): the sentinel a staff member can send in
+// the walk-in `testRunId` field to say "this booking is LIVE, do not
+// auto-tag it" even though a test run is active.
+//
+// The auto-tag rule is "while a test run is active, every new
+// booking is test data" — which is right for a QA pass but wrong for
+// a genuine walk-in guest who arrives during that window. The desk
+// needs one deliberate escape hatch, and it must be EXPLICIT: the
+// walk-in dropdown offers "Live data (not a test)" and sends this
+// value. Anything else (empty, null, absent) means "auto — tag me
+// with the active run".
+//
+// A test-run id is 32 hex characters from a CSPRNG, so this string
+// can never collide with a real run id.
+export const TEST_RUN_LIVE_OPT_OUT = "live";
