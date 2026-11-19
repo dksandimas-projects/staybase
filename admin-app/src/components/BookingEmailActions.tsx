@@ -41,6 +41,15 @@ export function BookingEmailActions({ booking, resendingAction, onResend }: Book
             {[
               { action: "booking-submitted", label: "Booking Submitted" },
               { action: "booking-confirmed", label: "Booking Confirmed" },
+              // Per RSQ-01 (2026-11-19): the "your booking changed"
+              // template. It was NOT resendable before — the action
+              // was in neither the public nor the staff-only email
+              // allowlist, so `POST /api/email/booking-rescheduled`
+              // answered 404 and the desk had no way to re-send a
+              // room/date-change notification whose delivery had
+              // failed. The server route is staff-only (same
+              // posture as `booking-confirmed`).
+              { action: "booking-rescheduled", label: "Booking Updated" },
               { action: "payment-confirmed", label: "Payment Confirmed" },
               { action: "checkin-reminder", label: "Check-in Reminder" },
               { action: "booking-cancelled", label: "Booking Cancelled" },

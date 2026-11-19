@@ -897,9 +897,14 @@ export interface AdminContextType {
   ) => Promise<{ emailQueued?: boolean } | null>;
   resolveEarlyCheckin: (bookingId: string, status: "approved" | "declined", staffNote?: string, confirmedTime?: string) => Promise<{ success: boolean; error?: string }>;
   grantEarlyCheckin: (bookingId: string, confirmedTime: string, staffNote?: string) => Promise<{ success: boolean; error?: string }>;
-  rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> }>;
+  // Per RSQ-01 (2026-11-19): the reschedule + extend responses
+  // carry the server's `emailQueued` flag, so the desk's toast can
+  // branch on whether the guest-notification email actually went
+  // out. `false` = the email failed (the `failed_emails` banner
+  // lists it, and the drawer can re-send it manually).
+  rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> & { emailQueued?: boolean } }>;
   // Per EXT-01 (2026-01-27): the extend-stay path locks roomId + checkIn to the booking's current values.
-  extendStayBooking: (input: { bookingId: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> }>;
+  extendStayBooking: (input: { bookingId: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> & { emailQueued?: boolean } }>;
   addOnsitePayment: (bookingId: string, paymentId: string, amount: number, method: string, note: string, transactionReference?: string) => Promise<{ success: boolean; error?: string }>;
   // Per BR-05 (2026-10-13, decision #234): the staff
   // breakfast admin-context wrappers. Each wraps the

@@ -4306,7 +4306,19 @@ export function BookingsPage() {
         reason: moveReason
       });
       if (result.success) {
-        toast.success("Booking moved", "Room and dates updated successfully.");
+        // Per RSQ-01 (2026-11-19): branch on the server's
+        // `emailQueued` flag. A failed guest-notification email
+        // must not be SILENT — the desk needs to know the guest
+        // never heard about the room/date change, and the drawer's
+        // email panel can re-send it.
+        if (result.data?.emailQueued === false) {
+          toast.warning(
+            "Email delivery failed",
+            "Booking moved, but the guest notification email failed to send. The desk banner lists the failure — resend it from the drawer's email panel."
+          );
+        } else {
+          toast.success("Booking moved", "Room and dates updated successfully.");
+        }
         const targetRoom = rooms.find(r => r.id === moveRoomId);
         const updatedFields = {
           roomId: moveRoomId,
@@ -4354,7 +4366,18 @@ export function BookingsPage() {
         reason: extendReason || "Extend stay"
       });
       if (result.success) {
-        toast.success("Stay extended", "The guest's check-out date has been updated.");
+        // Per RSQ-01 (2026-11-19): same `emailQueued` branch as
+        // the move path — an extend fires the same
+        // `booking-rescheduled` email, so a failed send must be
+        // visible to the desk.
+        if (result.data?.emailQueued === false) {
+          toast.warning(
+            "Email delivery failed",
+            "Stay extended, but the guest notification email failed to send. The desk banner lists the failure — resend it from the drawer's email panel."
+          );
+        } else {
+          toast.success("Stay extended", "The guest's check-out date has been updated.");
+        }
         const newCheckOutISO = `${extendCheckOut}T00:00:00Z`;
         const newNumNights = Math.max(
           Math.round((new Date(newCheckOutISO).getTime() - new Date(`${selectedBooking.checkIn}T00:00:00Z`).getTime()) / 86400000),
@@ -9194,10 +9217,21 @@ export function BookingsPage() {
                   if (!response.ok || !payload.success) {
                     throw new Error(payload.error || "Unable to add room.");
                   }
-                  toast.success(
-                    "Room added",
-                    `New room ${payload.data?.bookingRef || ""} added to ${selectedBooking.reservationRef || "reservation"}`
-                  );
+                  // Per RSQ-01 (2026-11-19): the add-room path
+                  // fires the same `booking-rescheduled` email, so
+                  // it returns the same `emailQueued` flag — a
+                  // failed send must not be silent.
+                  if (payload.data?.emailQueued === false) {
+                    toast.warning(
+                      "Email delivery failed",
+                      "Room added, but the guest notification email failed to send. The desk banner lists the failure — resend it from the drawer's email panel."
+                    );
+                  } else {
+                    toast.success(
+                      "Room added",
+                      `New room ${payload.data?.bookingRef || ""} added to ${selectedBooking.reservationRef || "reservation"}`
+                    );
+                  }
                   setShowAddRoomForm(false);
                 } catch (error: any) {
                   setAddRoomError(error?.message || "Failed to add room. Please try again.");
