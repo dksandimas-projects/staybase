@@ -84,6 +84,11 @@ export async function handleDeliverStoreOrder(req: any, res: any) {
 
   try {
     let responseData: Record<string, unknown> = {};
+    // Per CNE-01 (2026-11-19): whether THIS request performed the
+    // delivery (as opposed to an idempotent replay of an order
+    // that was already delivered). The delivered email must fire
+    // ONCE, not on every retry.
+    let justDelivered = false;
     await adminDb.runTransaction(async (transaction) => {
       const orderRef = adminDb.collection("storeOrders").doc(orderId);
       const orderDoc = await transaction.get(orderRef);
@@ -136,6 +141,11 @@ export async function handleDeliverStoreOrder(req: any, res: any) {
         updatedAt: deliveredAt,
         handledBy: staffUid
       });
+      // Per CNE-01 (2026-11-19): this request performed the
+      // delivery, so the `store-order-delivered` email fires
+      // (exactly once — the already-delivered branch below
+      // returns without setting this flag).
+      justDelivered = true;
 
       if (isDirectPaid) {
         // A deterministic document id makes retries idempotent. Store tenders
@@ -166,6 +176,45 @@ export async function handleDeliverStoreOrder(req: any, res: any) {
         tenderRecorded: isDirectPaid
       };
     });
+
+    // Per CNE-01 (2026-11-19): the `store-order-delivered` email
+    // NOW FIRES. The template + the subject + the route have
+    // existed since the W4.4 batch, but NO code path ever sent
+    // it — `handleDeliverStoreOrder` marked the order delivered
+    // and returned. So "your order has arrived" was dead code.
+    //
+    // It is the ONE store-order email the client kept, and it
+    // earns its place: the guest ordered from the in-room store,
+    // the order lands on their folio, and "delivered" is the
+    // last thing they need to know. The intermediate steps
+    // (`placed` / `confirmed` / `out-for-delivery`) were cut —
+    // the guest's Intercom panel shows those live.
+    //
+    // The guest's email comes from the LINKED BOOKING (the order
+    // doc carries a `bookingId`), same lookup the other store
+    // triggers used. Best-effort: a delivery notification must
+    // never fail the delivery itself.
+    try {
+      const order = justDelivered && responseData.orderId
+        ? (await adminDb.collection("storeOrders").doc(String(responseData.orderId)).get()).data()
+        : null;
+      let guestEmail = "";
+      if (order?.bookingId) {
+        const bookingDoc = await adminDb.collection("bookings").doc(order.bookingId).get();
+        if (bookingDoc.exists) {
+          guestEmail = String(bookingDoc.data()?.guestEmail || "");
+        }
+      }
+      if (guestEmail && order) {
+        await sendStoreOrderTrigger("store-order-delivered", {
+          ...order,
+          guestEmail,
+          status: "delivered"
+        });
+      }
+    } catch (emailErr) {
+      console.error("Failed to send store-order-delivered email:", emailErr);
+    }
 
     return res.status(200).json({ success: true, data: responseData });
   } catch (error: any) {
@@ -517,35 +566,17 @@ export async function handleCreateStoreOrder(req: any, res: any) {
       };
     });
 
-    // Per W4.4 / decision #104: fire the placed email after the
-    // transaction commits. The guest's email is looked up from
-    // the active booking (if any) by Admin SDK. Idempotent — the
-    // email helper no-ops if guestEmail is missing.
+    // Per CNE-01 (2026-11-19): NO `store-order-placed` email.
+    // The client asked to cut the guest's store-order notifications:
+    // the guest PLACED the order on screen, and the Intercom panel
+    // shows a live order tracker (placed → confirmed → out for
+    // delivery → delivered, with an ETA) that the guest is already
+    // looking at. The email duplicated both — and its own copy said
+    // so ("Watch the Intercom chat for status updates").
+    //
+    // `store-order-delivered` (a bug — it never fired — now fixed)
+    // and `store-order-cancelled` (money) remain.
     if (responseData) {
-      try {
-        let guestEmail = "";
-        if (responseData.bookingId) {
-          const bookingDoc = await adminDb.collection("bookings").doc(responseData.bookingId).get();
-          if (bookingDoc.exists) {
-            guestEmail = String(bookingDoc.data()?.guestEmail || "");
-          }
-        }
-        if (guestEmail) {
-          await sendStoreOrderTrigger("store-order-placed", {
-            orderRef: responseData.orderRef,
-            orderId: responseData.orderId,
-            roomNumber,
-            guestEmail,
-            guestName,
-            items: responseData.items,
-            totalAmount: responseData.totalAmount,
-            paymentMethod: body.paymentMethod,
-            status: "placed"
-          });
-        }
-      } catch (emailErr) {
-        console.error("Failed to send store-order-placed email:", emailErr);
-      }
 
       // Per Phase 12 — Notification Center (decision #120):
       // persist a `notifications` doc for the bell panel so
@@ -730,32 +761,11 @@ export async function handleConfirmStoreOrder(req: any, res: any) {
       confirmedOrder = { ...orderData, status: "confirmed", stockDecrementedAt: new Date() };
     });
 
-    // Per W4.4 / decision #104: fire the confirmed
-    // email after the transaction commits. The guest's
-    // email is looked up from the active booking (if
-    // any) by Admin SDK. Idempotent — the email helper
-    // no-ops if guestEmail is missing. The "store-order-confirmed"
-    // action is already in the EmailAction enum
-    // (email.ts:77) and the template is built at email.ts:1778 —
-    // this handler was the missing caller.
-    if (confirmedOrder) {
-      try {
-        let guestEmail = "";
-        if (confirmedOrder.bookingId) {
-          const bookingDoc = await adminDb.collection("bookings").doc(confirmedOrder.bookingId).get();
-          if (bookingDoc.exists) {
-            guestEmail = String(bookingDoc.data()?.guestEmail || "");
-          }
-        }
-        await sendStoreOrderTrigger("store-order-confirmed", {
-          ...confirmedOrder,
-          guestEmail,
-          handledBy: staffUid
-        });
-      } catch (emailErr) {
-        console.error("Failed to send store confirmation email:", emailErr);
-      }
-    }
+    // Per CNE-01 (2026-11-19): NO `store-order-confirmed` email.
+    // The guest's Intercom panel shows the same confirmation as a
+    // live tracker step, and the client asked to cut the guest's
+    // store-order notifications. The desk's own bell notification
+    // (below) is unchanged.
 
     return res.status(200).json({
       success: true,
@@ -1146,13 +1156,14 @@ export async function handleStaffStoreOrderStatus(req: any, res: any) {
               console.error("Failed to send staff refund-review alert:", staffEmailErr);
             }
           }
-        } else {
-          await sendStoreOrderTrigger("store-order-out-for-delivery", {
-            ...transitioned,
-            guestEmail,
-            handledBy: staffUid
-          });
         }
+        // Per CNE-01 (2026-11-19): NO `store-order-out-for-delivery`
+        // email — the client asked to cut the guest's store-order
+        // notifications. The guest's Intercom panel shows the same
+        // "on its way" step in the live tracker (with the ETA),
+        // which is where the guest is already looking. The
+        // `store-order-delivered` + `store-order-cancelled` emails
+        // remain.
       } catch (emailErr) {
         console.error("Failed to send store order status email:", emailErr);
       }
