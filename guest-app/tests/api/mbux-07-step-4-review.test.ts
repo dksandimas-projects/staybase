@@ -263,8 +263,13 @@ describe("MBUX-07 — preserved (shipped earlier or done in MBUX-06)", () => {
     // `isPayAtHotel` is derived from the CURRENT selection, so the
     // instruction panel describes the method the guest actually chose
     // rather than listing every method's instructions at once.
+    //
+    // Per 2026-11-19 (decision #318) it is derived from the SHARED
+    // "settles at the property" rule, not from a hardcoded
+    // `=== "pay-at-hotel"` comparison: the admin configures method
+    // KEYS, and the live deployment's bank transfer is keyed `bpi`.
     expect(bookingPageSrc).toMatch(
-      /const isPayAtHotel = currentPaymentMethod\?\.method === "pay-at-hotel"/
+      /const isPayAtHotel = isSettleAtPropertyPaymentMethod\(currentPaymentMethod\?\.method\)/
     );
     expect(reviewBranch).toMatch(/Conditional instructions panel/);
   });
