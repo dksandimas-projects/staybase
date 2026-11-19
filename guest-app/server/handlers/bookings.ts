@@ -11641,12 +11641,36 @@ export async function handleConfirmBookingWithBalance(req: any, res: any) {
       const data = bookingDoc.data()!;
       bookingData = data;
 
-      // CWB-01: only `payment-uploaded` bookings are eligible.
-      // A `payment-confirmed` booking has no balance and should
-      // go through the standard confirm flow. A `pending`
-      // booking has not yet provided proof — staff should
-      // verify the payment first.
-      if (data.status !== "payment-uploaded") {
+      // CWB-01: `payment-uploaded` bookings are eligible. A
+      // `pending` booking has not yet provided proof — staff
+      // should verify the payment first.
+      //
+      // Per VPM-01 (2026-11-19, decision #322):
+      // `payment-confirmed` is eligible TOO.
+      //
+      // The original comment here said "a `payment-confirmed`
+      // booking has no balance and should go through the
+      // standard confirm flow". That is not true any more, and
+      // it was never quite true: the server's own
+      // `handleVerifyAndRecordPayment` flips a booking to
+      // `payment-confirmed` as soon as the collected total
+      // reaches the booking's `totalPrice` — which EXCLUDES
+      // the BR-12 "other add-ons" (the airport transfer, the
+      // late checkout) that are added on top of it. So a
+      // booking whose room was paid in full but which still
+      // owed a ₱2,000 transfer sat at `payment-confirmed`
+      // WITH a real balance, and the only endpoint that could
+      // record that balance with a reason + the four-eyes
+      // threshold refused it with
+      // `INVALID_STATUS:payment-confirmed`. The desk was stuck:
+      // the plain confirm path had no balance gate at all, and
+      // the gated path 400'd.
+      //
+      // Accepting `payment-confirmed` here closes that hole:
+      // the outstanding add-on balance now goes through the
+      // same reason + threshold contract as every other
+      // outstanding balance.
+      if (data.status !== "payment-uploaded" && data.status !== "payment-confirmed") {
         throw new Error(`INVALID_STATUS:${data.status}`);
       }
 

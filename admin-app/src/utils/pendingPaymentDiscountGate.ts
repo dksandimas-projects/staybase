@@ -8,6 +8,18 @@
 // "open booking" deep-link CTA + the amber callout + the
 // pre-discount `dueAmount` all read from it.
 //
+// Per VPM-01 (decision #322, 2026-11-19): the gate is now
+// enforced on the BOOKING DRAWER's "Verify & Record
+// Payment" button as well. The original IDG spec scoped
+// the gate to the dashboard alert card, but its stated
+// intent — "closes the 'verify money, reject ID later'
+// gap" — was defeated by the drawer, which offered the
+// same action with no gate at all. The room-level
+// primitives (`hasUnverifiedDiscountInRooms` /
+// `getDueAmountPreDiscountInRooms`) are what both surfaces
+// share; the item-level helpers below are thin wrappers
+// kept for the dashboard's existing call sites.
+//
 // Per `plan/project/ROADMAP.md §IDG-01`:
 // - Pure (no React, no Firestore).
 // - Takes the already-hydrated `PendingPaymentRoom`
@@ -98,10 +110,45 @@ export type PendingPaymentItemLike = {
  *    `Re-verify ID` button).
  */
 export function hasUnverifiedDiscount(item: PendingPaymentItemLike): boolean {
-  return item.rooms.some((room) => isUnverifiedDiscountRoom(room));
+  return hasUnverifiedDiscountInRooms(item.rooms);
 }
 
-function isUnverifiedDiscountRoom(room: PendingPaymentRoomLike): boolean {
+/**
+ * Room-level twin of {@link hasUnverifiedDiscount}.
+ *
+ * Per VPM-01 (decision #322): the IDG gate was applied to the
+ * DASHBOARD's pending-payments card only, so the booking DRAWER's
+ * "Verify & Record Payment" button stayed open on a booking whose
+ * Senior / PWD ID had never been sighted — the drawer was a
+ * one-click bypass of the gate the dashboard enforced. The gate is
+ * now enforced on both surfaces, and the drawer has no
+ * `PendingPaymentItem` to hand (it works from a selected booking +
+ * its reservation siblings), so the room-level function is the
+ * primitive both callers share.
+ */
+export function hasUnverifiedDiscountInRooms(rooms: PendingPaymentRoomLike[]): boolean {
+  return (rooms || []).some((room) => isUnverifiedDiscountRoom(room));
+}
+
+/**
+ * Room-level twin of {@link getDueAmountPreDiscount}.
+ */
+export function getDueAmountPreDiscountInRooms(rooms: PendingPaymentRoomLike[]): number {
+  if (!rooms || rooms.length === 0) return 0;
+  let sum = 0;
+  for (const room of rooms) {
+    const value = isUnverifiedDiscountRoom(room)
+      ? room.originalTotalPrice ?? room.totalPrice
+      : room.totalPrice;
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      sum += numeric;
+    }
+  }
+  return sum;
+}
+
+export function isUnverifiedDiscountRoom(room: PendingPaymentRoomLike): boolean {
   if (room.discountType !== "senior" && room.discountType !== "pwd") {
     return false;
   }
@@ -133,16 +180,5 @@ function isUnverifiedDiscountRoom(room: PendingPaymentRoomLike): boolean {
  *  inactive; defensive default).
  */
 export function getDueAmountPreDiscount(item: PendingPaymentItemLike): number {
-  if (item.rooms.length === 0) return 0;
-  let sum = 0;
-  for (const room of item.rooms) {
-    const value = isUnverifiedDiscountRoom(room)
-      ? room.originalTotalPrice ?? room.totalPrice
-      : room.totalPrice;
-    const numeric = Number(value);
-    if (Number.isFinite(numeric) && numeric > 0) {
-      sum += numeric;
-    }
-  }
-  return sum;
+  return getDueAmountPreDiscountInRooms(item.rooms);
 }

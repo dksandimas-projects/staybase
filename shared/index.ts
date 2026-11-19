@@ -49,6 +49,11 @@ export * from "./utils/seasonalRates";
 export * from "./utils/storageJanitor";
 export * from "./utils/storePaymentMethods";
 export * from "./utils/vouchers";
+// Per VPM-01 (decision #322): the shared money-verdict resolver
+// for the admin verify flow. Exported from the package root so
+// both admin surfaces import the SAME function (the two used to
+// disagree on the denominator — see the module header).
+export * from "./utils/verifyPaymentOutcome";
 export * from "./utils/corporate-codes";
 export * from "./utils/failureBackoff";
 export * from "./utils/financeInvariants";

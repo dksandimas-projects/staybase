@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.23.0";
+    VERSION2 = "2.23.1";
   }
 });
 
@@ -151331,6 +151331,37 @@ var init_vouchers = __esm({
   }
 });
 
+// ../shared/utils/verifyPaymentOutcome.ts
+function toAmount(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return numeric > 0 ? numeric : 0;
+}
+function resolveVerifyPaymentOutcome(input) {
+  const collectedBefore = toAmount(input.collectedBefore);
+  const amount = toAmount(input.amount);
+  const bookingTotal = toAmount(input.bookingTotal);
+  const otherAddOnTotal = toAmount(input.otherAddOnTotal);
+  const chargesTotal = toAmount(input.chargesTotal);
+  const collectedAfter = collectedBefore + amount;
+  const folioTotal = bookingTotal + otherAddOnTotal + chargesTotal;
+  const bookingTotalCovered = bookingTotal > 0 && collectedAfter >= bookingTotal;
+  const folioSettled = collectedAfter >= folioTotal;
+  const remainingBalance = Math.max(0, folioTotal - collectedAfter);
+  return {
+    collectedAfter,
+    folioTotal,
+    bookingTotalCovered,
+    folioSettled,
+    remainingBalance
+  };
+}
+var init_verifyPaymentOutcome = __esm({
+  "../shared/utils/verifyPaymentOutcome.ts"() {
+    "use strict";
+  }
+});
+
 // ../shared/utils/corporate-codes.ts
 function validateCorporateCode(code, now = /* @__PURE__ */ new Date(), options = {}) {
   let effectiveNow;
@@ -153148,6 +153179,7 @@ __export(shared_exports, {
   resolveMaxStayNights: () => resolveMaxStayNights,
   resolvePaymentMethodLabel: () => resolvePaymentMethodLabel,
   resolveRangeSelection: () => resolveRangeSelection,
+  resolveVerifyPaymentOutcome: () => resolveVerifyPaymentOutcome,
   round2: () => round2,
   roundToTwoDecimals: () => roundToTwoDecimals,
   runBackfill: () => runBackfill,
@@ -153219,6 +153251,7 @@ var init_shared = __esm({
     init_storageJanitor();
     init_storePaymentMethods();
     init_vouchers();
+    init_verifyPaymentOutcome();
     init_corporate_codes();
     init_failureBackoff();
     init_financeInvariants();
@@ -238304,7 +238337,7 @@ async function handleConfirmBookingWithBalance(req, res) {
       }
       const data = bookingDoc.data();
       bookingData = data;
-      if (data.status !== "payment-uploaded") {
+      if (data.status !== "payment-uploaded" && data.status !== "payment-confirmed") {
         throw new Error(`INVALID_STATUS:${data.status}`);
       }
       const txHotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
