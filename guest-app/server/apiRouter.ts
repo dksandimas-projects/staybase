@@ -55,6 +55,17 @@ import config from "../../hotel.config";
 const staffOnlyEmailActions = new Set([
   "payment-confirmed",
   "booking-confirmed",
+  // Per RSQ-01 (2026-11-19): the desk-facing RESEND path for the
+  // "your booking changed" email. The template + the trigger
+  // already existed (the inline reschedule path fires
+  // `booking-rescheduled` after every room/date move), but the
+  // action was in NEITHER allowlist — so `POST
+  // /api/email/booking-rescheduled` fell through to the router's
+  // fallback 404 and the desk could not re-send a notification
+  // whose delivery had failed. Staff-only for the same reason as
+  // `booking-confirmed`: this is the DESK's resend button, and
+  // no guest code path calls it.
+  "booking-rescheduled",
   // Per CWB-02 / decision #122 (2026-07-23): confirm-with-balance
   // is a server-triggered email fired from
   // `handleConfirmBookingWithBalance` after the transaction

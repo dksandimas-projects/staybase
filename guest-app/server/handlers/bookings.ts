@@ -14278,11 +14278,29 @@ export async function handleRescheduleBooking(req: any, res: any) {
       }
     });
 
-    // Send email to guest
+    // Per RSQ-01 (2026-11-19): the guest-notification email for a
+    // reschedule is best-effort, but "best-effort" must not be
+    // SILENT. The pre-fix shape swallowed a Resend failure into a
+    // `console.error` and still answered 200 with no email state,
+    // so the desk had NO way to know the guest never heard about
+    // their room/date change — the exact silent-swallow shape that
+    // #11 fixed for the confirm path.
+    //
+    // The flag mirrors the confirm path (`emailQueued: boolean` in
+    // the response `data`) so the desk's move/extend toast can
+    // branch on it. The durable audit trail is unchanged: the DLQ
+    // write (`failed_emails`) already happens inside `sendEmail`
+    // (per #11), and `sendEmail` re-throws so this catch sees it.
+    //
+    // `emailQueued` starts `true` because the pre-transaction
+    // failure paths return early — reaching this line means the
+    // transaction committed and an email was attempted.
+    let emailQueued = true;
     if (fullBookingForEmail) {
       try {
         await sendBookingTrigger("booking-rescheduled", fullBookingForEmail);
       } catch (emailErr) {
+        emailQueued = false;
         console.error("Failed to send reschedule email:", emailErr);
       }
     }
@@ -14319,7 +14337,12 @@ export async function handleRescheduleBooking(req: any, res: any) {
         // MRB-02, so it has no header to echo).
         ...updatedBooking,
         reservationId: bookingReservationId || "",
-        reservationRef: String((existingReservationData as any)?.reservationRef || "")
+        reservationRef: String((existingReservationData as any)?.reservationRef || ""),
+        // Per RSQ-01 (2026-11-19): the desk branches its toast on
+        // this flag. `false` means the guest-notification email
+        // failed — the desk banner lists the failure and the
+        // drawer can now resend it manually.
+        emailQueued
       }
     });
   } catch (error: any) {
@@ -15165,10 +15188,18 @@ export async function handleAddRoomToReservation(req: any, res: any) {
     // carries the new room; the subject reads
     // "Reservation updated: R-… (N rooms)" via the
     // existing template.
+    //
+    // Per RSQ-01 (2026-11-19): the same `emailQueued`
+    // flag the reschedule path returns. The pre-fix shape
+    // swallowed the failure into `console.error` and the
+    // desk never learned the guest was not told about the
+    // added room.
+    let emailQueued = true;
     if (fullBookingForEmail) {
       try {
         await sendBookingTrigger("booking-rescheduled", fullBookingForEmail);
       } catch (emailErr) {
+        emailQueued = false;
         console.error("Failed to send add-room email:", emailErr);
       }
     }
@@ -15179,7 +15210,10 @@ export async function handleAddRoomToReservation(req: any, res: any) {
         bookingId: newBookingId,
         bookingRef: newBookingRef,
         reservationId,
-        reservationRef: updatedHeader?.reservationRef || null
+        reservationRef: updatedHeader?.reservationRef || null,
+        // Per RSQ-01 (2026-11-19): the desk branches its
+        // toast on this flag.
+        emailQueued
       }
     });
   } catch (error: any) {

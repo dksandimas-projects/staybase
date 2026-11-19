@@ -195,9 +195,18 @@ describe("MRB-02.x reschedule — reservation header update", () => {
       // transaction (between the booking read and the
       // `});` that closes the runTransaction
       // callback) — same scope.
-      const runTxnCloseIdx = reschedule.indexOf(
-        "    });\n\n    // Send email to guest"
+      //
+      // The boundary is anchored on the EMAIL SEND, which sits
+      // immediately after the transaction closes. The pre-RSQ-01
+      // version of this anchor was the literal comment
+      // `"    });\n\n    // Send email to guest"`, so any rewrite
+      // of that comment broke this test for a reason that had
+      // nothing to do with the contract it pins — the
+      // transaction-close marker is now the stable one.
+      const runTxnCloseIdx = reschedule.search(
+        /await sendBookingTrigger\("booking-rescheduled", fullBookingForEmail\);/
       );
+      expect(runTxnCloseIdx).toBeGreaterThanOrEqual(0);
       expect(headerUpdateIdx).toBeLessThan(runTxnCloseIdx);
       expect(bookingUpdateIdx).toBeLessThan(runTxnCloseIdx);
     });
