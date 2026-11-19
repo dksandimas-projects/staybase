@@ -23,7 +23,7 @@ All email sent through Vercel API routes. From address: `sparkinn.dev@gmail.com`
 | Payment rejected | *(inline booking trigger)* | Guest | When staff rejects an uploaded payment proof |
 | Booking confirmed | `/api/email/booking-confirmed` | Guest | When status set to `confirmed` |
 | Booking confirmed with balance *(CWB-02, decision #122)* | *(inline booking trigger)* | Guest | When staff confirms a `payment-uploaded` booking with a positive balance via `POST /api/bookings/confirm-with-balance`; balance + reason included in the body so the guest knows what to settle at check-in. Room type only (never room number — booking is not yet `checked-in`). |
-| Booking rescheduled | *(inline booking trigger)* + `POST /api/email/booking-rescheduled` (staff resend) | Guest | When staff changes the assigned room or stay dates. **Room type + dates only — never the room number** (the room-number-visibility rule: the assignment can still shift before check-in). The response carries `emailQueued: boolean` (RSQ-01) so the desk's move / extend / add-room toast can warn that the guest was not told; the drawer can re-send it via the "Booking Updated" button. |
+| Booking rescheduled | *(inline booking trigger)* + `POST /api/email/booking-rescheduled` (staff resend) | Guest | When staff changes something the guest can SEE or PAY: the **stay dates**, the **room type**, or the **price** (CNE-01). A move that only changes the **physical room number** is SILENT — the guest email never renders the number anyway, so such a mail was a no-op message with a scary subject line. Room type + dates only — never the room number (the room-number-visibility rule). The response carries `emailQueued: boolean` (RSQ-01) so the desk's move / extend / add-room toast can warn that the guest was not told; the drawer can re-send it via the "Booking Updated" button. |
 | Check-in reminder | `/api/email/checkin-reminder` | Guest | 1 day before `checkIn` date |
 | Booking cancelled | `/api/email/booking-cancelled` | Guest | When booking cancelled (by guest or staff) |
 | New corporate inquiry | `/api/email/corporate-inquiry` | Staff (admin email) | When inquiry form submitted on guest site |
@@ -34,9 +34,8 @@ All email sent through Vercel API routes. From address: `sparkinn.dev@gmail.com`
 | Early check-in request | `/api/email/early-checkin-request` | Staff (admin email) | When Spark Rewards member requests early check-in for an upcoming booking |
 | Early check-in resolution | *(inline trigger)* | Guest | When staff approves or declines an early check-in request |
 | Voucher issued *(per `DECISIONS-FEATURES.md #104` — implemented in Phase 11.6 Batch 10)* | `/api/email/voucher-issued` | Guest | When admin creates a voucher with a non-empty `guestEmail` |
-| Store order placed | `/api/email/store-order-placed` | Guest | When guest places a store order via Intercom Shop |
-| Store order confirmed | `/api/email/store-order-confirmed` | Guest | When staff confirms the order (status: placed → confirmed) |
-| Store order out for delivery | `/api/email/store-order-out-for-delivery` | Guest | When staff marks the order as out for delivery |
+| Store order delivered | `/api/email/store-order-delivered` | Guest | When the desk marks the order as delivered. **Fires exactly once per delivery** (CNE-01 — the template + the route existed since W4.4 but no code path ever sent it). |
+| Store order cancelled | `/api/email/store-order-cancelled` | Guest | When the order is cancelled (guest or staff) — carries the payment guidance |
 | Store order delivered | `/api/email/store-order-delivered` | Guest | When staff marks the order as delivered |
 | Store order cancelled | `/api/email/store-order-cancelled` | Guest | When order is cancelled (by guest or staff) |
 | New online booking | `/api/email/staff-new-booking` | Staff (`settings/hotelConfig.staffEmail`) | When a new online booking is created |
@@ -55,11 +54,15 @@ The admin booking drawer's **"Resend Transactional Email"** panel (`admin-app/sr
 | Check-in Reminder | `checkin-reminder` | `POST /api/email/checkin-reminder` |
 | Booking Cancelled | `booking-cancelled` | `POST /api/email/booking-cancelled` |
 | Discount Rejected | `discount-rejected` | `POST /api/email/discount-rejected` |
+| *(removed)* Store Order Placed | `store-order-placed` | **REMOVED (CNE-01)** |
+| *(removed)* Store Order Confirmed | `store-order-confirmed` | **REMOVED (CNE-01)** |
+| *(removed)* Store Order Out for Delivery | `store-order-out-for-delivery` | **REMOVED (CNE-01)** |
 
 - [x] **RSQ-01 (2026-11-19): `booking-rescheduled` is resendable.** The action was previously in NEITHER `publicEmailActions` NOR `staffOnlyEmailActions` in `guest-app/server/apiRouter.ts`, so the route answered **404** and the panel had no button for it — the desk could not re-send a failed "your booking changed" notification. It is now registered **staff-only** (same posture as `booking-confirmed`: no guest code path calls it).
 - [x] **The resend renders the reservation-scope view.** The generic resend path hands the trigger a single booking doc, which for an N-room reservation renders only the lead room — while the inline reschedule path sent every room. `buildRescheduledEmailView()` rebuilds the reservation view from the CURRENT state so the re-sent email matches what the guest should have received.
 - [x] **A failed reschedule notification is never silent.** `POST /api/bookings/reschedule`, `POST /api/bookings/extend-stay` and `POST /api/bookings/add-room` return `emailQueued: boolean` in their response `data`. `false` means the guest-notification email failed — the desk's move / extend / add-room toast warns ("Email delivery failed") and points at this panel. The durable audit trail is the `failed_emails` collection (the desk banner), written inside `sendEmail` per #11.
 - [x] **The room number is never in the email.** Every guest-facing template omits it (the room-number-visibility rule) — a "your room changed" email carries the room TYPE + the new dates, and the guest reads the number from `/my-booking` once the status is `checked-in` / `checked-out`.
+- [x] **CNE-01 (2026-11-19): the guest's store-order notifications are cut.** The client asked to remove `store-order-placed` / `store-order-confirmed` / `store-order-out-for-delivery` — the guest placed the order on screen and the Intercom panel shows a LIVE order tracker (placed → confirmed → out for delivery → delivered, with an ETA), so each email duplicated what the guest was already looking at (and the email's own copy said so: *"Watch the Intercom chat for status updates"*). The action names, the templates, the preview cases, the router allowlist entries and the Settings catalog entries are all gone. `store-order-delivered` (fixed — it never fired) and `store-order-cancelled` (money) remain.
 
 ### Email Content Checklist
 

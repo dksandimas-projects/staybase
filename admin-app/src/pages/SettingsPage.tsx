@@ -175,9 +175,6 @@ const EMAIL_TRIGGER_GROUPS: Array<{ label: string; triggers: EmailTriggerCatalog
   {
     label: "In-room store",
     triggers: [
-      { label: "Store Order Placed", description: "Guest receives an order receipt immediately after checkout", action: "store-order-placed" },
-      { label: "Store Order Confirmed", description: "Guest notified when staff confirms and starts preparing the order", action: "store-order-confirmed" },
-      { label: "Store Order Out for Delivery", description: "Guest notified when the order is heading to their room", action: "store-order-out-for-delivery" },
       { label: "Store Order Delivered", description: "Guest receives delivery confirmation and a feedback link", action: "store-order-delivered" },
       { label: "Store Order Cancelled", description: "Guest receives cancellation and payment guidance", action: "store-order-cancelled" }
     ]

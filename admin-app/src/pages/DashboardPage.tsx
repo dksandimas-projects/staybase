@@ -2,6 +2,12 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { collection, collectionGroup, doc, getDocs } from "firebase/firestore";
 import { getManilaDateInfo, normalizeBreakfastSelections, type DiscountType } from "@spark-inn/shared";
+// Per VPM-01 (decision #322): the shared money-verdict resolver.
+// The dashboard used to compute "is this payment complete?" on its
+// own (against the scope's `totalPrice`) while the drawer computed
+// it against the folio grand total — so the same payment produced
+// two different answers. Both call this now.
+import { resolveVerifyPaymentOutcome } from "@spark-inn/shared";
 import { useAdmin, type Booking } from "../context/AdminContext";
 import {
   hasUnverifiedDiscount,
@@ -17,6 +23,7 @@ import { StatsCard } from "../components/StatsCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { Modal } from "../components/Modal";
 import { PaymentSuccessModal } from "../components/PaymentSuccessModal";
+import type { RoomAssignment } from "../components/PaymentSuccessModal";
 import { ConfirmWithBalanceForm } from "../components/ConfirmWithBalanceForm";
 import { ConfirmForm } from "../components/ConfirmForm";
 import { FailedEmailsBanner } from "../components/FailedEmailsBanner";
@@ -94,6 +101,13 @@ export function selectOverdueCheckouts(bookings: Booking[], todayKey: string, cu
 // they hit submit.
 type PendingPaymentRoom = {
   bookingId: string;
+  /**
+   * Per RAR-01 (decision #323): the assigned room's doc id. The
+   * success modal's room-override picker needs it to (a) exclude
+   * the room the booking already holds from the candidate list and
+   * (b) post the target room to the server.
+   */
+  roomId: string;
   roomNumber: string;
   roomType: string;
   totalPrice: number;
@@ -124,6 +138,18 @@ type PendingPaymentRoom = {
    *  staff sees the HONEST amount even if a later ID
    *  rejection re-prices the booking. */
   originalTotalPrice: number | null;
+  /**
+   * Per VPM-01 (decision #322): the room's BR-12 "other add-ons"
+   * total (e.g. an airport transfer added ON TOP of the room
+   * bill). NOT inside `totalPrice` — the folio adds it separately
+   * (decision #298), and the server's confirm-with-balance
+   * threshold measures it too. The dashboard's scope did not
+   * carry it, so the amount the dashboard showed as "due" was
+   * short by exactly this much: a booking whose room total was
+   * paid but which still owed a ₱2,000 transfer read as "fully
+   * paid" here while the drawer showed the transfer outstanding.
+   */
+  otherAddOnTotal: number;
 };
 type PendingPaymentItem = {
   /** `reservationId` for grouped items, `bookingId` for legacy single-row items. */
@@ -144,6 +170,17 @@ type PendingPaymentItem = {
   totalPrice: number;
   paidAmount: number;
   dueAmount: number;
+  /**
+   * Per VPM-01 (decision #322): the scope's FOLIO total — the
+   * booking total + the BR-12 other add-ons. This is the number
+   * the money actually owed, and it is the denominator the
+   * server's threshold gate measures. `totalPrice` alone (the
+   * room + the booking-time add-ons) is a DIFFERENT, smaller
+   * number, which is why the two admin surfaces used to disagree.
+   */
+  folioTotal: number;
+  /** The scope's BR-12 other add-ons total (the gap between `totalPrice` and `folioTotal`). */
+  otherAddOnTotal: number;
   rooms: PendingPaymentRoom[];
   /**
    * The item belongs to a QA test run — a rehearsal payment proof, not
@@ -155,7 +192,7 @@ type PendingPaymentItem = {
 export function DashboardPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount, hotelConfig, corporateInquiries, verifyAndRecordPayment, rejectPayment, resolveEarlyCheckin, reservations, reservationPaidAmount, currentUser } = useAdmin();
+  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount, hotelConfig, corporateInquiries, verifyAndRecordPayment, rejectPayment, resolveEarlyCheckin, reservations, reservationPaidAmount, currentUser, paymentMethods, assignBookingRoom } = useAdmin();
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
   const [clockTick, setClockTick] = useState(() => Date.now());
   const [showRevenue, setShowRevenue] = useState(false);
@@ -264,7 +301,31 @@ export function DashboardPage() {
     methodLabel: string;
     isFullPayment: boolean;
     remainingBalance: number;
+    // Per VPM-01 (decision #322): the scope's booking total + the
+    // FOL-05 sibling-flip count (how many other rooms this
+    // payment cleared in the same transaction).
+    bookingTotal: number;
+    /** The scope's FOLIO total — the booking total + the BR-12 other add-ons. */
+    folioTotal: number;
+    siblingFlippedCount: number;
+    reservationRef: string;
+    /**
+     * Per RAR-01 (decision #323): the scope's rooms, frozen at
+     * submit time with the room number each booking was
+     * PRE-ASSIGNED at creation. Captured into the success state
+     * (rather than read from `verifyScope` at render time)
+     * because `verifyScope` is cleared when the modal's CTAs
+     * fire — the desk must still be able to see and change the
+     * assignment from the success modal.
+     */
+    roomAssignments: RoomAssignment[];
   }>(null);
+  // Per VPM-01 (decision #322): the success modal's inline error.
+  // A failed confirmation used to close the modal in its `finally`
+  // block — the desk got a toast and the money state they were
+  // looking at disappeared, with no way to retry from the same
+  // screen. It now stays open and shows the reason inline.
+  const [verifySuccessError, setVerifySuccessError] = useState<string | null>(null);
   const [confirmingBookingFromSuccess, setConfirmingBookingFromSuccess] = useState(false);
   // Per CWB-04 / decision 122 (2026-07-23): opened by the
   // post-verify partial-payment success modal's "Confirm
@@ -275,16 +336,104 @@ export function DashboardPage() {
   const [confirmWithBalanceContext, setConfirmWithBalanceContext] = useState<null | {
     booking: Booking;
     currentBalance: number;
+    // Per VPM-01 (decision #322): the scope's folio total + the
+    // amount already collected, so the form's Total / Collected
+    // tiles describe the SAME money the balance came from. The
+    // booking's own `totalPrice` excludes the BR-12 other
+    // add-ons, so using it here showed a Total smaller than the
+    // Balance being confirmed.
+    folioTotal: number;
+    collectedAmount: number;
   }>(null);
 
   // Friendly method label lookup — same convention the
   // BookingsPage uses for the onsite payment ledger.
+  //
+  // Per VPM-01 (decision #322): this hardcoded map is no longer
+  // the source of the verify modal's OPTIONS (see
+  // `onsitePaymentMethodOptions` below) — it is only a display
+  // fallback for a method key the hotel has not configured.
   const verifyMethodLabels: Record<string, string> = {
     gcash: "GCash",
     maya: "Maya",
     bank: "Bank Transfer",
     paypal: "PayPal",
     cash: "Cash"
+  };
+
+  // Per VPM-01 (decision #322): the verify modal's payment-method
+  // OPTIONS come from the hotel's configured payment methods — the
+  // same rule every other admin payment selector follows (and the
+  // one `plan/docs/GOTCHAS.md §Payments & Uploads` states as a
+  // hard rule: "Never hardcode a list of payment-method KEYS").
+  // The live deployment keys its bank transfer as `bpi`, so the
+  // old hardcoded list recorded bank transfers under `bank` — a
+  // key the hotel never configured — which split the ledger from
+  // the booking's own `paymentMethod`.
+  //
+  // The non-tender keys are excluded for the same reason as
+  // everywhere else: they are booking-time intents or store rails,
+  // not settlement tenders.
+  const NON_TENDER_ONSITE_PAYMENT_METHODS = new Set(["cod", "add-to-bill", "pay-at-hotel"]);
+  const onsitePaymentMethodOptions = useMemo(() => {
+    const configured = (paymentMethods || []).filter((method) => {
+      const key = String(method?.method || "").trim();
+      return key && !NON_TENDER_ONSITE_PAYMENT_METHODS.has(key);
+    });
+    // Cash must always be selectable at the desk even when the
+    // hotel never added a Cash method in Settings.
+    const hasCash = configured.some((method) => String(method.method).trim().toLowerCase() === "cash");
+    return hasCash
+      ? configured
+      : [{ method: "cash", label: "Cash" }, ...configured];
+  }, [paymentMethods]);
+
+  // Per RAR-01 (decision #323): the room-type labels + the rooms
+  // the success modal's room-override picker may offer.
+  //
+  // The labels come from the hotel's configured room types (the
+  // same `roomTypes` the BookingsPage + CalendarPage use) — the
+  // raw type key is never rendered to staff. The candidate list is
+  // every ACTIVE room; the modal filters it to the booking's
+  // current category, and the server independently enforces the
+  // same-category rule.
+  const dashboardRoomTypeLabels = useMemo(() => {
+    return roomTypes.reduce<Record<string, string>>((acc, type) => {
+      acc[type.value] = type.shortLabel || type.label;
+      return acc;
+    }, {});
+  }, [roomTypes]);
+
+  const dashboardAssignableRooms = useMemo(
+    () =>
+      rooms.map((r) => ({
+        id: r.id,
+        roomNumber: r.roomNumber,
+        type: r.type,
+        typeLabel: dashboardRoomTypeLabels[r.type] || r.type,
+        isActive: r.isActive !== false
+      })),
+    [rooms, dashboardRoomTypeLabels]
+  );
+
+  // Per RAR-01 (decision #323): apply the room override. The
+  // server re-points the booking and echoes the (unchanged) total
+  // so the desk can confirm the price did not move.
+  const handleAssignRoom = async (
+    bookingId: string,
+    roomId: string,
+    reason: string
+  ): Promise<{ ok: boolean; error?: string; roomNumber?: string; roomId?: string }> => {
+    const result = await assignBookingRoom({ bookingId, roomId, reason });
+    if (!result.success) {
+      return { ok: false, error: result.error || "Could not re-assign the room." };
+    }
+    toast.success("Room re-assigned", "The booking now points at the new room. The price did not change.");
+    return {
+      ok: true,
+      roomNumber: result.data?.roomNumber,
+      roomId: result.data?.roomId
+    };
   };
 
   const REJECTION_REASON_PRESETS: Array<{ label: string; value: string }> = [
@@ -522,6 +671,14 @@ export function DashboardPage() {
           (sum, p) => sum + Number(p.amount || 0),
           0
         );
+        // Per VPM-01 (decision #322): the scope's folio total —
+        // the booking total PLUS the BR-12 other add-ons, which
+        // are added on top of `totalPrice` and are therefore part
+        // of what the guest owes. The `dueAmount` the dashboard
+        // showed used to ignore them, so a booking that still owed
+        // a ₱2,000 airport transfer read as "fully paid" here.
+        const otherAddOnTotal = Math.max(0, Number(booking.otherAddOnTotal) || 0);
+        const folioTotal = Number(booking.totalPrice || 0) + otherAddOnTotal;
         items.push({
           id: booking.id,
           publicRef: booking.bookingRef,
@@ -536,11 +693,14 @@ export function DashboardPage() {
           latestReference: getLatestPaymentReference(booking),
           totalPrice: Number(booking.totalPrice || 0),
           paidAmount: paid,
-          dueAmount: Math.max(0, Number(booking.totalPrice || 0) - paid),
+          dueAmount: Math.max(0, folioTotal - paid),
+          folioTotal,
+          otherAddOnTotal,
           isTestData: booking.isTestData === true,
           rooms: [
             {
               bookingId: booking.id,
+              roomId: booking.roomId || "",
               roomNumber: booking.roomNumber || "TBD",
               roomType: booking.roomType,
               totalPrice: Number(booking.totalPrice || 0),
@@ -558,6 +718,7 @@ export function DashboardPage() {
               originalTotalPrice: booking.originalTotalPrice !== undefined && booking.originalTotalPrice !== null
                 ? Number(booking.originalTotalPrice)
                 : null,
+              otherAddOnTotal,
             }
           ]
         });
@@ -594,6 +755,13 @@ export function DashboardPage() {
         0
       );
       const paidAmount = aggregatePaid > 0 ? aggregatePaid : fallbackPaid;
+      // Per VPM-01 (decision #322): the scope's BR-12 other
+      // add-ons total + the folio total that includes it.
+      const otherAddOnTotal = sorted.reduce(
+        (sum, c) => sum + Math.max(0, Number(c.otherAddOnTotal) || 0),
+        0
+      );
+      const folioTotal = scopedTotal + otherAddOnTotal;
 
       items.push({
         id: key,
@@ -616,12 +784,15 @@ export function DashboardPage() {
           .filter(Boolean)[0] || null,
         totalPrice: scopedTotal,
         paidAmount,
-        dueAmount: Math.max(0, scopedTotal - paidAmount),
+        dueAmount: Math.max(0, folioTotal - paidAmount),
+        folioTotal,
+        otherAddOnTotal,
         // A reservation group is a fixture only if EVERY child is one —
         // a mixed group still involves a real guest, so it stays real.
         isTestData: sorted.length > 0 && sorted.every((c) => c.isTestData === true),
         rooms: sorted.map((c) => ({
           bookingId: c.id,
+          roomId: c.roomId || "",
           roomNumber: c.roomNumber || "TBD",
           roomType: c.roomType,
           totalPrice: Number(c.totalPrice || 0),
@@ -637,6 +808,7 @@ export function DashboardPage() {
           originalTotalPrice: c.originalTotalPrice !== undefined && c.originalTotalPrice !== null
             ? Number(c.originalTotalPrice)
             : null,
+          otherAddOnTotal: Math.max(0, Number(c.otherAddOnTotal) || 0),
         }))
       });
     }
@@ -897,9 +1069,18 @@ export function DashboardPage() {
   // `confirmed` transition. The onSnapshot listener keeps
   // the dashboard's pending-payments list in sync, so the
   // confirmed booking drops off the list on the next tick.
+  //
+  // Per VPM-01 (decision #322): the modal no longer closes
+  // unconditionally — a failed confirmation keeps it open with
+  // the reason inline, so the desk can retry from the same
+  // screen. The CTA itself only appears when nothing is
+  // outstanding (the success modal routes an outstanding balance
+  // to the confirm-with-balance flow, which requires a reason and
+  // applies the four-eyes approval limit).
   const handleConfirmBookingFromSuccess = async () => {
     if (!verifySuccess) return;
     setConfirmingBookingFromSuccess(true);
+    setVerifySuccessError(null);
     try {
       // Per #11 (operator-reported 2026-08-20, tracked in
       // `plan/project/ROADMAP.md §Open Operator-Reported Bugs →
@@ -923,13 +1104,14 @@ export function DashboardPage() {
       } else {
         toast.success("Booking confirmed", `${verifySuccess.booking.bookingRef} is ready for the guest's arrival.`);
       }
-    } catch (err: any) {
-      toast.error("Failed to confirm booking", err?.message || "Please try again.");
-    } finally {
-      setConfirmingBookingFromSuccess(false);
       setVerifySuccess(null);
       setVerifyTarget(null);
       setVerifyScope(null);
+    } catch (err: any) {
+      setVerifySuccessError(err?.message || "Failed to confirm the booking. Please try again.");
+      toast.error("Failed to confirm booking", err?.message || "Please try again.");
+    } finally {
+      setConfirmingBookingFromSuccess(false);
     }
   };
 
@@ -942,8 +1124,14 @@ export function DashboardPage() {
     if (!verifySuccess) return;
     setConfirmWithBalanceContext({
       booking: verifySuccess.booking,
-      currentBalance: Math.max(0, verifySuccess.remainingBalance)
+      currentBalance: Math.max(0, verifySuccess.remainingBalance),
+      folioTotal: verifySuccess.folioTotal,
+      collectedAmount: Math.max(
+        0,
+        verifySuccess.folioTotal - verifySuccess.remainingBalance
+      )
     });
+    setVerifySuccessError(null);
     setVerifySuccess(null);
     setVerifyTarget(null);
     setVerifyScope(null);
@@ -1006,15 +1194,58 @@ export function DashboardPage() {
     const scopeTotal = verifyScope
       ? verifyScope.totalPrice
       : Number(verifyTarget.totalPrice || 0);
-    const cumulativeAfter = scopeExistingPaid + amount;
-    const isFullPayment = cumulativeAfter >= scopeTotal && scopeTotal > 0;
+    // Per VPM-01 (decision #322): the money verdict comes from
+    // the SHARED resolver, so the dashboard and the drawer can no
+    // longer disagree about whether the same payment settled the
+    // booking.
+    //
+    // The pre-VPM-01 code compared the cumulative against the
+    // scope's `totalPrice` — the room + the booking-time add-ons,
+    // but NOT the BR-12 other add-ons, which are added on top of
+    // it. The server's threshold gate measures the FOLIO (which
+    // includes them), so the dashboard's "Confirm Booking" CTA
+    // could bank a booking that still owed a ₱2,000 airport
+    // transfer, with no reason recorded and no four-eyes
+    // approval. The resolver answers both questions separately:
+    // the headline follows the server's status rule, and the CTA
+    // follows the folio rule.
+    const scopeOtherAddOnTotal = verifyScope
+      ? verifyScope.otherAddOnTotal
+      : Math.max(0, Number(verifyTarget.otherAddOnTotal) || 0);
+    const outcome = resolveVerifyPaymentOutcome({
+      collectedBefore: scopeExistingPaid,
+      amount,
+      bookingTotal: scopeTotal,
+      otherAddOnTotal: scopeOtherAddOnTotal,
+      chargesTotal: 0
+    });
     setVerifySuccess({
       booking: verifyTarget,
       amount,
       method: verifyMethod,
       methodLabel: verifyMethodLabels[verifyMethod] || verifyMethod,
-      isFullPayment,
-      remainingBalance: Math.max(0, scopeTotal - cumulativeAfter)
+      isFullPayment: outcome.bookingTotalCovered,
+      remainingBalance: outcome.remainingBalance,
+      bookingTotal: scopeTotal,
+      folioTotal: outcome.folioTotal,
+      // Per FOL-05 (decision #201): the server computes how many
+      // sibling rooms the same transaction cleared. The context
+      // parses it; the modal used to drop it, so the desk was
+      // never told that a 3-room reservation had two more rooms
+      // cleared by the one payment.
+      siblingFlippedCount: result.siblingFlippedCount ?? 0,
+      reservationRef: verifyScope?.publicRef ?? "",
+      // Per RAR-01 (decision #323): freeze the scope's room
+      // assignments (with the PRE-ASSIGNED room number) into the
+      // success state, so the desk can check and override the
+      // room from the success modal.
+      roomAssignments: (verifyScope?.rooms ?? []).map((room) => ({
+        bookingId: room.bookingId,
+        roomId: room.roomId,
+        roomNumber: room.roomNumber,
+        roomType: room.roomType,
+        roomTypeLabel: dashboardRoomTypeLabels[room.roomType] || room.roomType
+      }))
     });
     // Reset the verify-form fields so the next open is
     // fresh, but keep verifyTarget alive — the success
@@ -2142,12 +2373,33 @@ export function DashboardPage() {
                   {formatPrice(verifyScope?.totalPrice ?? verifyTarget.totalPrice)}
                 </p>
               </div>
+              {/* Per VPM-01 (decision #322): the BR-12 other add-ons
+                  are added ON TOP of the booking total, so they get
+                  their own tile. Without it the "Outstanding"
+                  number below was bigger than "Booking total" with
+                  no visible explanation. */}
+              {(verifyScope?.otherAddOnTotal ?? 0) > 0 ? (
+                <div className="rounded-lg bg-gray-50 px-3 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Other add-ons</p>
+                  <p className="text-sm font-bold text-gray-900">
+                    {formatPrice(verifyScope?.otherAddOnTotal ?? 0)}
+                  </p>
+                </div>
+              ) : null}
               <div className="rounded-lg bg-gray-50 px-3 py-2">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
                   {verifyScope?.isReservation ? "Reservation due" : "Outstanding"}
                 </p>
                 <p className="text-sm font-bold text-gray-900">
                   {formatPrice(verifyScope?.dueAmount ?? (verifyTarget.totalPrice - (verifyTarget.onsitePayments?.reduce((s, p) => s + p.amount, 0) || 0)))}
+                </p>
+              </div>
+              {/* Per VPM-01 (decision #322): what has already been
+                  collected for this scope. */}
+              <div className="rounded-lg bg-gray-50 px-3 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Collected so far</p>
+                <p className="text-sm font-bold text-gray-900">
+                  {formatPrice(verifyScope?.paidAmount ?? 0)}
                 </p>
               </div>
             </div>
@@ -2232,16 +2484,16 @@ export function DashboardPage() {
 
             <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
               Payment method
+              {/* Per VPM-01 (decision #322): the hotel's CONFIGURED
+                  methods, not a hardcoded list. */}
               <select
                 value={verifyMethod}
                 onChange={(e) => setVerifyMethod(e.target.value)}
                 className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-900"
               >
-                <option value="gcash">GCash</option>
-                <option value="maya">Maya</option>
-                <option value="bank">Bank Transfer</option>
-                <option value="paypal">PayPal</option>
-                <option value="cash">Cash</option>
+                {onsitePaymentMethodOptions.map((m) => (
+                  <option key={m.method} value={m.method}>{m.label || m.method}</option>
+                ))}
               </select>
             </label>
 
@@ -2327,6 +2579,23 @@ export function DashboardPage() {
         methodLabel={verifySuccess?.methodLabel}
         isFullPayment={verifySuccess?.isFullPayment ?? false}
         remainingBalance={verifySuccess?.remainingBalance}
+        bookingTotal={verifySuccess?.bookingTotal}
+        siblingFlippedCount={verifySuccess?.siblingFlippedCount}
+        reservationRef={verifySuccess?.reservationRef}
+        error={verifySuccessError}
+        roomLabel={
+          verifySuccess
+            ? `${verifySuccess.booking.roomNumber || "TBD"} · ${dashboardRoomTypeLabels[String(verifySuccess.booking.roomType || "")] || String(verifySuccess.booking.roomType || "Room")}`
+            : undefined
+        }
+        stayLabel={
+          verifySuccess
+            ? `${verifySuccess.booking.checkIn} → ${verifySuccess.booking.checkOut} (${verifySuccess.booking.numNights} night${Number(verifySuccess.booking.numNights) === 1 ? "" : "s"})`
+            : undefined
+        }
+        roomAssignments={verifySuccess?.roomAssignments}
+        assignableRooms={dashboardAssignableRooms}
+        onAssignRoom={handleAssignRoom}
         onConfirmBooking={handleConfirmBookingFromSuccess}
         confirmingBooking={confirmingBookingFromSuccess}
         onViewBooking={() => {
@@ -2351,8 +2620,15 @@ export function DashboardPage() {
         <ConfirmWithBalanceForm
           open={confirmWithBalanceContext !== null}
           onClose={() => setConfirmWithBalanceContext(null)}
-          booking={confirmWithBalanceContext.booking}
+          booking={{
+            ...confirmWithBalanceContext.booking,
+            // Per VPM-01 (decision #322): the folio total, not the
+            // booking's `totalPrice` — the other add-ons are part
+            // of what is owed.
+            totalPrice: confirmWithBalanceContext.folioTotal
+          }}
           currentBalance={confirmWithBalanceContext.currentBalance}
+          collectedAmount={confirmWithBalanceContext.collectedAmount}
           onConfirmed={() => setConfirmWithBalanceContext(null)}
         />
       )}

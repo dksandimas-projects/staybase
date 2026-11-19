@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.23.0";
+    VERSION2 = "2.24.1";
   }
 });
 
@@ -148595,7 +148595,7 @@ var init_bookingInFlowHold = __esm({
 });
 
 // ../shared/schemas/booking.ts
-var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, SetLouReceivedSchema, AddRoomBookingSchema, StartBookingHoldSchema, BreakfastMealSchema, BreakfastConfigSchema, BreakfastSelectionEntrySchema, BreakfastServedEntrySchema, BreakfastAuditEntrySchema, BreakfastRefundContextSchema, AddOnSchema, OtherAddOnSelectionEntrySchema, OtherAddOnAuditEntrySchema, OtherAddOnRefundContextSchema, OtherAddOnUpdateSchema, StaffOtherAddOnUpdateSchema, OtherAddOnMarkServedSchema, OtherAddOnMarkRefundPaidSchema, AddOnCatalogAuditLogSchema, ExtendBookingHoldSchema;
+var BookingDatesSchema, GuestDetailsSchema, PaymentReviewSchema, WalkinGuestDetailsSchema, BookingRevenueAllocationSchema, WalkinRoomLineSchema, WalkinBookingSchema, RescheduleBookingSchema, AssignRoomSchema, SetLouReceivedSchema, AddRoomBookingSchema, StartBookingHoldSchema, BreakfastMealSchema, BreakfastConfigSchema, BreakfastSelectionEntrySchema, BreakfastServedEntrySchema, BreakfastAuditEntrySchema, BreakfastRefundContextSchema, AddOnSchema, OtherAddOnSelectionEntrySchema, OtherAddOnAuditEntrySchema, OtherAddOnRefundContextSchema, OtherAddOnUpdateSchema, StaffOtherAddOnUpdateSchema, OtherAddOnMarkServedSchema, OtherAddOnMarkRefundPaidSchema, AddOnCatalogAuditLogSchema, ExtendBookingHoldSchema;
 var init_booking = __esm({
   "../shared/schemas/booking.ts"() {
     "use strict";
@@ -148799,6 +148799,17 @@ var init_booking = __esm({
       // allowing only `checkOut` to be extended. The server enforces
       // the lock; the client pre-fills both fields as read-only hints.
       mode: external_exports.enum(["extend"]).optional()
+    }).strict();
+    AssignRoomSchema = external_exports.object({
+      bookingId: external_exports.string().trim().min(1).max(64),
+      roomId: external_exports.string().trim().min(1).max(64),
+      // The reason is stamped into `rescheduleHistory[]` so the
+      // change is auditable. It is OPTIONAL and defaults to ""
+      // (the same posture as the reschedule schema's `reason`) —
+      // but the admin UI always sends one, because a room
+      // re-assignment with no recorded reason is exactly the kind
+      // of silent change the desk banner is supposed to surface.
+      reason: external_exports.string().trim().max(500).optional().default("")
     }).strict();
     SetLouReceivedSchema = external_exports.object({
       bookingId: external_exports.string().trim().min(1).max(64),
@@ -151331,6 +151342,37 @@ var init_vouchers = __esm({
   }
 });
 
+// ../shared/utils/verifyPaymentOutcome.ts
+function toAmount(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return numeric > 0 ? numeric : 0;
+}
+function resolveVerifyPaymentOutcome(input) {
+  const collectedBefore = toAmount(input.collectedBefore);
+  const amount = toAmount(input.amount);
+  const bookingTotal = toAmount(input.bookingTotal);
+  const otherAddOnTotal = toAmount(input.otherAddOnTotal);
+  const chargesTotal = toAmount(input.chargesTotal);
+  const collectedAfter = collectedBefore + amount;
+  const folioTotal = bookingTotal + otherAddOnTotal + chargesTotal;
+  const bookingTotalCovered = bookingTotal > 0 && collectedAfter >= bookingTotal;
+  const folioSettled = collectedAfter >= folioTotal;
+  const remainingBalance = Math.max(0, folioTotal - collectedAfter);
+  return {
+    collectedAfter,
+    folioTotal,
+    bookingTotalCovered,
+    folioSettled,
+    remainingBalance
+  };
+}
+var init_verifyPaymentOutcome = __esm({
+  "../shared/utils/verifyPaymentOutcome.ts"() {
+    "use strict";
+  }
+});
+
 // ../shared/utils/corporate-codes.ts
 function validateCorporateCode(code, now = /* @__PURE__ */ new Date(), options = {}) {
   let effectiveNow;
@@ -152870,6 +152912,7 @@ __export(shared_exports, {
   AddOnCatalogAuditLogSchema: () => AddOnCatalogAuditLogSchema,
   AddOnSchema: () => AddOnSchema,
   AddRoomBookingSchema: () => AddRoomBookingSchema,
+  AssignRoomSchema: () => AssignRoomSchema,
   BOOKING_OCCUPYING_STATUSES: () => BOOKING_OCCUPYING_STATUSES,
   BOOKING_REF_REGEX: () => BOOKING_REF_REGEX,
   BOOKING_SOURCES: () => BOOKING_SOURCES,
@@ -153148,6 +153191,7 @@ __export(shared_exports, {
   resolveMaxStayNights: () => resolveMaxStayNights,
   resolvePaymentMethodLabel: () => resolvePaymentMethodLabel,
   resolveRangeSelection: () => resolveRangeSelection,
+  resolveVerifyPaymentOutcome: () => resolveVerifyPaymentOutcome,
   round2: () => round2,
   roundToTwoDecimals: () => roundToTwoDecimals,
   runBackfill: () => runBackfill,
@@ -153219,6 +153263,7 @@ var init_shared = __esm({
     init_storageJanitor();
     init_storePaymentMethods();
     init_vouchers();
+    init_verifyPaymentOutcome();
     init_corporate_codes();
     init_failureBackoff();
     init_financeInvariants();
@@ -228361,7 +228406,6 @@ __export(email_exports, {
   sendCorporateInquiryTrigger: () => sendCorporateInquiryTrigger,
   sendEarlyCheckinRequestTrigger: () => sendEarlyCheckinRequestTrigger,
   sendEarlyCheckinResolveTrigger: () => sendEarlyCheckinResolveTrigger,
-  sendLateServedTrigger: () => sendLateServedTrigger,
   sendStaffNewBookingTrigger: () => sendStaffNewBookingTrigger,
   sendStaffNewPaymentTrigger: () => sendStaffNewPaymentTrigger,
   sendStaffRefundReviewTrigger: () => sendStaffRefundReviewTrigger,
@@ -229643,69 +229687,6 @@ function storeOrderBaseLayout(action, order) {
     deepLink: `${siteUrl("/intercom")}?room=${encodeURIComponent(order.roomNumber || "")}&order=${encodeURIComponent(order.orderRef || "")}`
   };
 }
-function storeOrderPlacedEmail(order) {
-  const { paymentLabel, itemsTable, totalRow, deepLink } = storeOrderBaseLayout("store-order-placed", order);
-  return emailLayout({
-    preheader: `Order ${order.orderRef} received.`,
-    eyebrow: "Order received",
-    title: "We have your in-room order",
-    intro: `Thank you for ordering from the ${escapeHtml2(hotel_config_default.brandName)} in-room store. Your items are being prepared and we'll bring them to your room in about 15 minutes.`,
-    body: `
-      ${callout2("green", "Order received", `We have your order. Watch the Intercom chat for status updates, or check the email inbox for any change.`)}
-      ${card("Order details", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Order ref", order.orderRef || "\u2014")}
-        ${itemsTable}
-        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
-        ${totalRow}
-      </table>`)}
-    `,
-    ctaLabel: "Open the chat",
-    ctaUrl: deepLink,
-    bannerHtml: environmentBanner({})
-  });
-}
-function storeOrderConfirmedEmail(order) {
-  const { itemsTable, totalRow, deepLink } = storeOrderBaseLayout("store-order-confirmed", order);
-  return emailLayout({
-    preheader: `Order ${order.orderRef} confirmed.`,
-    eyebrow: "Order confirmed",
-    title: "Your order is confirmed and being prepared",
-    intro: `Your order from the ${escapeHtml2(hotel_config_default.brandName)} in-room store has been confirmed. Our team is preparing your items now.`,
-    body: `
-      ${callout2("warm", "In the kitchen", "Our team is preparing your items. You'll get another email when your order is on its way.")}
-      ${card("Order summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Order ref", order.orderRef || "\u2014")}
-        ${itemsTable}
-        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
-        ${totalRow}
-      </table>`)}
-    `,
-    ctaLabel: "Open the chat",
-    ctaUrl: deepLink,
-    bannerHtml: environmentBanner({})
-  });
-}
-function storeOrderOutForDeliveryEmail(order) {
-  const { itemsTable, totalRow, deepLink } = storeOrderBaseLayout("store-order-out-for-delivery", order);
-  return emailLayout({
-    preheader: `Order ${order.orderRef} is on its way.`,
-    eyebrow: "Order on the way",
-    title: "Your order is heading to your room",
-    intro: `Your order from the ${escapeHtml2(hotel_config_default.brandName)} in-room store is on its way. Please keep your door accessible \u2014 our team will be there shortly.`,
-    body: `
-      ${callout2("warm", "On the way", "Your order is being delivered to your room. You can track progress in the Intercom chat.")}
-      ${card("Order summary", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Order ref", order.orderRef || "\u2014")}
-        ${itemsTable}
-        <tr><td colspan="4" style="padding-top: 12px; border-top: 1px solid #e5e7eb;"></td></tr>
-        ${totalRow}
-      </table>`)}
-    `,
-    ctaLabel: "Open the chat",
-    ctaUrl: deepLink,
-    bannerHtml: environmentBanner({})
-  });
-}
 function storeOrderDeliveredEmail(order) {
   const { itemsTable, totalRow, deepLink } = storeOrderBaseLayout("store-order-delivered", order);
   return emailLayout({
@@ -229753,18 +229734,6 @@ function storeOrderCancelledEmail(order) {
 async function sendStoreOrderTrigger(action, order) {
   if (!order?.guestEmail) return;
   const map2 = {
-    "store-order-placed": {
-      subject: `[${hotel_config_default.brandName}] Order placed: ${order.orderRef || "in-room"}`,
-      html: storeOrderPlacedEmail(order)
-    },
-    "store-order-confirmed": {
-      subject: `[${hotel_config_default.brandName}] Order confirmed: ${order.orderRef || "in-room"}`,
-      html: storeOrderConfirmedEmail(order)
-    },
-    "store-order-out-for-delivery": {
-      subject: `[${hotel_config_default.brandName}] Order on its way: ${order.orderRef || "in-room"}`,
-      html: storeOrderOutForDeliveryEmail(order)
-    },
     "store-order-delivered": {
       subject: `[${hotel_config_default.brandName}] Order delivered: ${order.orderRef || "in-room"}`,
       html: storeOrderDeliveredEmail(order)
@@ -229889,44 +229858,6 @@ async function sendStaffRefundReviewTrigger(order) {
     ADMIN_EMAIL,
     `[${hotel_config_default.brandName}] Refund review: cancelled paid store order ${order.orderRef}`,
     staffRefundReviewEmail(order)
-  );
-}
-function lateServedEmail(booking, slotEntry, occurredAtIso) {
-  const slotDate = typeof slotEntry?.slotKey === "string" ? slotEntry.slotKey.slice(0, 10) : "\u2014";
-  const mealLabel = slotEntry?.mealName || "your meal";
-  const bookingRef2 = booking.bookingRef || booking.reservationRef || booking.id || "your booking";
-  const ratingUrl = siteUrl(`/my-booking?ref=${encodeURIComponent(bookingRef2 || "")}`);
-  return emailLayout({
-    preheader: `Your breakfast on ${slotDate} was served past our cutoff \u2014 we'd value your feedback.`,
-    eyebrow: "Service update",
-    title: "We served your breakfast late",
-    intro: `We noticed that the breakfast for ${escapeHtml2(String(bookingRef2))} on ${escapeHtml2(slotDate)} (${escapeHtml2(mealLabel)}) was served past our ${escapeHtml2(String(bookingRef2)).length > 0 ? "published" : ""} cutoff window. We're sorry for the delay.`,
-    body: `
-      ${callout2("warm", "How was it?", "If a few minutes of delay affected your meal, let us know \u2014 your feedback helps the kitchen team tighten their morning service. Open the booking below and tap the rate-this-meal card on the breakfast section.")}
-      ${card("What happened", `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse;">
-        ${row("Booking ref", bookingRef2)}
-        ${row("Service date", slotDate)}
-        ${row("Meal", mealLabel)}
-        ${row("Served at", occurredAtIso)}
-      </table>`)}
-    `,
-    ctaLabel: "Rate this meal",
-    ctaUrl: ratingUrl,
-    bannerHtml: environmentBannerFromBooking(booking)
-  });
-}
-async function sendLateServedTrigger(booking, slotEntry, occurredAtIso) {
-  const banner = {
-    isTestData: booking?.isTestData === true,
-    testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : void 0,
-    testRunEnvironment: booking?.testRunEnvironment === "staging" || booking?.testRunEnvironment === "production" ? booking.testRunEnvironment : void 0
-  };
-  await sendEmail(
-    booking.guestEmail,
-    `[${hotel_config_default.brandName}] Late served \u2014 please rate your meal`,
-    lateServedEmail(booking, slotEntry, occurredAtIso),
-    void 0,
-    banner
   );
 }
 async function getTomorrowConfirmedBookings() {
@@ -230464,15 +230395,6 @@ async function handleEmailPreview(req, res) {
         break;
       case "voucher-issued":
         html = voucherIssuedEmail(mockVoucher);
-        break;
-      case "store-order-placed":
-        html = storeOrderPlacedEmail(mockStoreOrder);
-        break;
-      case "store-order-confirmed":
-        html = storeOrderConfirmedEmail(mockStoreOrder);
-        break;
-      case "store-order-out-for-delivery":
-        html = storeOrderOutForDeliveryEmail(mockStoreOrder);
         break;
       case "store-order-delivered":
         html = storeOrderDeliveredEmail(mockStoreOrder);
@@ -238304,7 +238226,7 @@ async function handleConfirmBookingWithBalance(req, res) {
       }
       const data = bookingDoc.data();
       bookingData = data;
-      if (data.status !== "payment-uploaded") {
+      if (data.status !== "payment-uploaded" && data.status !== "payment-confirmed") {
         throw new Error(`INVALID_STATUS:${data.status}`);
       }
       const txHotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
@@ -239235,6 +239157,7 @@ async function handleRescheduleBooking(req, res) {
   try {
     let updatedBooking = null;
     let fullBookingForEmail = null;
+    let guestVisibleChange = false;
     let bookingReservationId = null;
     let existingReservationData = null;
     const expiredHoldRetirements = [];
@@ -239648,6 +239571,14 @@ async function handleRescheduleBooking(req, res) {
         ...updatedBooking,
         id: bookingId
       };
+      guestVisibleChange = (() => {
+        const previousCheckIn = toDateOrNull(booking.checkIn);
+        const previousCheckOut = toDateOrNull(booking.checkOut);
+        const datesChanged = (previousCheckIn ? previousCheckIn.getTime() : 0) !== checkInDate.getTime() || (previousCheckOut ? previousCheckOut.getTime() : 0) !== checkOutDate.getTime();
+        const roomTypeChanged = String(booking.roomType || "") !== String(room.type || "");
+        const priceChanged = Number(booking.totalPrice || 0) !== Number(finalTotalPrice || 0);
+        return datesChanged || roomTypeChanged || priceChanged;
+      })();
       if (booking.status === "checked-in") {
         const oldRoomRef = adminDb.collection("rooms").doc(booking.roomId);
         transaction.update(oldRoomRef, { status: "available" });
@@ -239858,7 +239789,7 @@ async function handleRescheduleBooking(req, res) {
       }
     });
     let emailQueued = true;
-    if (fullBookingForEmail) {
+    if (fullBookingForEmail && guestVisibleChange) {
       try {
         await sendBookingTrigger("booking-rescheduled", fullBookingForEmail);
       } catch (emailErr) {
@@ -239909,6 +239840,152 @@ async function handleRescheduleBooking(req, res) {
       });
     }
     return res.status(400).json({ success: false, error: error.message || "Failed to move booking." });
+  }
+}
+async function handleAssignBookingRoom(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+  const parsedAssign = AssignRoomSchema.safeParse(req.body || {});
+  if (!parsedAssign.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Booking and room are required."
+    });
+  }
+  const { bookingId, roomId, reason } = parsedAssign.data;
+  const { todayStr: todayKey, manilaDate: currentManilaDate } = getManilaDateInfo();
+  const currentManilaMinutes = currentManilaDate.getHours() * 60 + currentManilaDate.getMinutes();
+  try {
+    const assigned = await adminDb.runTransaction(async (transaction) => {
+      const bookingRef2 = adminDb.collection("bookings").doc(String(bookingId));
+      const bookingDoc = await transaction.get(bookingRef2);
+      if (!bookingDoc.exists) throw new Error("Booking not found.");
+      const booking = bookingDoc.data() || {};
+      if (!RESCHEDULABLE_STATUSES.includes(String(booking.status))) {
+        throw new Error(`Room cannot be reassigned while status is ${booking.status}.`);
+      }
+      const checkInDate = toDateOrNull(booking.checkIn);
+      const checkOutDate = toDateOrNull(booking.checkOut);
+      if (!checkInDate || !checkOutDate) {
+        throw new Error("Booking dates are missing \u2014 cannot re-assign the room.");
+      }
+      const checkInKey = dateKeyFromDate(checkInDate);
+      const checkOutKey = dateKeyFromDate(checkOutDate);
+      const roomRef = adminDb.collection("rooms").doc(String(roomId));
+      const roomDoc = await transaction.get(roomRef);
+      if (!roomDoc.exists) throw new Error("Room not found.");
+      const room = roomDoc.data() || {};
+      if (room.isActive === false) throw new Error("Target room is inactive.");
+      if (room.status === "blocked") {
+        const blockedFrom = toDateOrNull(room.blockedFrom);
+        const blockedTo = toDateOrNull(room.blockedTo);
+        const windowActive = blockedFrom && blockedTo ? rangesOverlap2(blockedFrom, blockedTo, checkInDate, checkOutDate) : true;
+        if (windowActive) throw new Error("Target room is blocked for those dates.");
+      }
+      const currentRoomType = String(booking.roomType || "").trim();
+      const targetRoomType = String(room.type || "").trim();
+      if (!targetRoomType || targetRoomType !== currentRoomType) {
+        throw new Error(
+          "Room category cannot be changed here \u2014 use \u201CMove / upgrade room\u201D for a different room type."
+        );
+      }
+      const currentRoomId = String(booking.roomId || "");
+      if (currentRoomId === String(roomId)) {
+        return {
+          roomId: currentRoomId,
+          roomNumber: String(booking.roomNumber || room.roomNumber || ""),
+          roomType: currentRoomType,
+          checkIn: checkInKey,
+          checkOut: checkOutKey,
+          totalPrice: Number(booking.totalPrice || 0),
+          unchanged: true
+        };
+      }
+      const overlapQuery = adminDb.collection("bookings").where("roomId", "==", String(roomId)).where("status", "in", ROOM_OCCUPYING_STATUSES);
+      const overlapSnapshot = await transaction.get(overlapQuery);
+      const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
+      const hotelConfig = hotelConfigDoc.data() || {};
+      const now = /* @__PURE__ */ new Date();
+      let sawConflict = false;
+      let sawLingering = false;
+      for (const doc of overlapSnapshot.docs) {
+        if (doc.id === String(bookingId)) continue;
+        const docData = doc.data();
+        const reason2 = getOccupancyConflictReason({
+          bookingData: docData,
+          requestedCheckIn: checkInDate,
+          requestedCheckOut: checkOutDate,
+          requestedCheckInKey: checkInKey,
+          todayKey,
+          currentMinutes: currentManilaMinutes,
+          checkOutTime: hotelConfig.checkOutTime,
+          now
+        });
+        if (reason2 === "overlap" || reason2 === "lingering-checked-in") {
+          if (reason2 === "lingering-checked-in") sawLingering = true;
+          sawConflict = true;
+          break;
+        }
+      }
+      if (sawConflict) {
+        throw new Error(sawLingering ? "Target room is not ready because the previous guest has not checked out yet." : "Target room already has a booking in that date range.");
+      }
+      const hasBlockConflict = await hasActiveRoomBlockConflict(
+        transaction,
+        String(roomId),
+        checkInDate,
+        checkOutDate
+      );
+      if (hasBlockConflict) throw new Error("Target room is blocked for that date range.");
+      const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+      const assignmentEntry = {
+        fromRoomId: currentRoomId,
+        fromRoomNumber: String(booking.roomNumber || ""),
+        fromCheckIn: checkInKey,
+        fromCheckOut: checkOutKey,
+        toRoomId: String(roomId),
+        toRoomNumber: String(room.roomNumber || ""),
+        toCheckIn: checkInKey,
+        toCheckOut: checkOutKey,
+        reason: typeof reason === "string" ? reason.slice(0, 500) : "",
+        by: req.staff?.uid || req.staff?.email || "staff",
+        at: nowIso,
+        pricingBasis: "preserved",
+        deltaTotalPrice: 0,
+        kind: "room"
+      };
+      transaction.update(bookingRef2, {
+        roomId: String(roomId),
+        roomNumber: String(room.roomNumber || ""),
+        roomType: targetRoomType,
+        rescheduleHistory: [
+          ...Array.isArray(booking.rescheduleHistory) ? booking.rescheduleHistory : [],
+          assignmentEntry
+        ],
+        updatedAt: /* @__PURE__ */ new Date()
+      });
+      if (booking.status === "checked-in" && currentRoomId) {
+        const oldRoomRef = adminDb.collection("rooms").doc(currentRoomId);
+        transaction.update(oldRoomRef, { status: "available" });
+        transaction.update(roomRef, { status: "occupied" });
+      }
+      return {
+        roomId: String(roomId),
+        roomNumber: String(room.roomNumber || ""),
+        roomType: targetRoomType,
+        checkIn: checkInKey,
+        checkOut: checkOutKey,
+        totalPrice: Number(booking.totalPrice || 0),
+        unchanged: false
+      };
+    });
+    return res.status(200).json({ success: true, data: assigned });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      error: error?.message || "Failed to re-assign the room."
+    });
   }
 }
 var GUEST_EXTEND_STATUSES = ["payment-confirmed", "confirmed", "checked-in"];
@@ -243078,6 +243155,7 @@ async function handleDeliverStoreOrder(req, res) {
   }
   try {
     let responseData = {};
+    let justDelivered = false;
     await adminDb.runTransaction(async (transaction) => {
       const orderRef = adminDb.collection("storeOrders").doc(orderId);
       const orderDoc = await transaction.get(orderRef);
@@ -243109,6 +243187,7 @@ async function handleDeliverStoreOrder(req, res) {
         updatedAt: deliveredAt,
         handledBy: staffUid2
       });
+      justDelivered = true;
       if (isDirectPaid) {
         const tenderRef = orderRef.collection("payments").doc(STORE_TENDER_DOC_ID);
         transaction.set(tenderRef, {
@@ -243134,6 +243213,25 @@ async function handleDeliverStoreOrder(req, res) {
         tenderRecorded: isDirectPaid
       };
     });
+    try {
+      const order = justDelivered && responseData.orderId ? (await adminDb.collection("storeOrders").doc(String(responseData.orderId)).get()).data() : null;
+      let guestEmail = "";
+      if (order?.bookingId) {
+        const bookingDoc = await adminDb.collection("bookings").doc(order.bookingId).get();
+        if (bookingDoc.exists) {
+          guestEmail = String(bookingDoc.data()?.guestEmail || "");
+        }
+      }
+      if (guestEmail && order) {
+        await sendStoreOrderTrigger("store-order-delivered", {
+          ...order,
+          guestEmail,
+          status: "delivered"
+        });
+      }
+    } catch (emailErr) {
+      console.error("Failed to send store-order-delivered email:", emailErr);
+    }
     return res.status(200).json({ success: true, data: responseData });
   } catch (error) {
     const knownErrors = {
@@ -243339,30 +243437,6 @@ async function handleCreateStoreOrder(req, res) {
       };
     });
     if (responseData) {
-      try {
-        let guestEmail = "";
-        if (responseData.bookingId) {
-          const bookingDoc = await adminDb.collection("bookings").doc(responseData.bookingId).get();
-          if (bookingDoc.exists) {
-            guestEmail = String(bookingDoc.data()?.guestEmail || "");
-          }
-        }
-        if (guestEmail) {
-          await sendStoreOrderTrigger("store-order-placed", {
-            orderRef: responseData.orderRef,
-            orderId: responseData.orderId,
-            roomNumber,
-            guestEmail,
-            guestName,
-            items: responseData.items,
-            totalAmount: responseData.totalAmount,
-            paymentMethod: body.paymentMethod,
-            status: "placed"
-          });
-        }
-      } catch (emailErr) {
-        console.error("Failed to send store-order-placed email:", emailErr);
-      }
       await writeNotification({
         type: "store-order",
         title: `New store order \u2014 ${responseData.orderRef} (Room ${roomNumber})`,
@@ -243467,24 +243541,6 @@ async function handleConfirmStoreOrder(req, res) {
       });
       confirmedOrder = { ...orderData, status: "confirmed", stockDecrementedAt: /* @__PURE__ */ new Date() };
     });
-    if (confirmedOrder) {
-      try {
-        let guestEmail = "";
-        if (confirmedOrder.bookingId) {
-          const bookingDoc = await adminDb.collection("bookings").doc(confirmedOrder.bookingId).get();
-          if (bookingDoc.exists) {
-            guestEmail = String(bookingDoc.data()?.guestEmail || "");
-          }
-        }
-        await sendStoreOrderTrigger("store-order-confirmed", {
-          ...confirmedOrder,
-          guestEmail,
-          handledBy: staffUid2
-        });
-      } catch (emailErr) {
-        console.error("Failed to send store confirmation email:", emailErr);
-      }
-    }
     return res.status(200).json({
       success: true,
       data: {
@@ -243752,12 +243808,6 @@ async function handleStaffStoreOrderStatus(req, res) {
               console.error("Failed to send staff refund-review alert:", staffEmailErr);
             }
           }
-        } else {
-          await sendStoreOrderTrigger("store-order-out-for-delivery", {
-            ...transitioned,
-            guestEmail,
-            handledBy: staffUid2
-          });
         }
       } catch (emailErr) {
         console.error("Failed to send store order status email:", emailErr);
@@ -245287,7 +245337,6 @@ init_zod();
 init_firestore();
 init_shared();
 init_firebase_admin();
-init_email();
 var slotKeySchema3 = external_exports.string().trim().min(11).max(80).regex(/^\d{4}-\d{2}-\d{2}-[A-Za-z0-9_-]+$/, "Invalid slot key.");
 var markServedBodySchema = external_exports.object({
   bookingId: external_exports.string().trim().min(8).max(80),
@@ -245547,38 +245596,6 @@ async function handleMarkServed(req, res) {
   }
   if (opError) {
     return res.status(opError.status).json({ success: false, error: opError.error });
-  }
-  if (isLateServe && action === "serve") {
-    try {
-      const detail = await adminDb.collection("bookings").doc(bookingId).get();
-      const data = detail.exists ? detail.data() || {} : {};
-      const guestEmail = String(data.guestEmail || "").trim();
-      if (guestEmail) {
-        const slotEntry = {
-          slotKey,
-          mealId: String(selection.mealId),
-          mealName: String(selection.mealName),
-          price: Number(selection.price || 0)
-        };
-        const occurredAtIso = (/* @__PURE__ */ new Date()).toISOString();
-        await sendLateServedTrigger(
-          {
-            id: bookingId,
-            bookingRef: data.bookingRef || data.reservationRef || bookingId,
-            reservationRef: data.reservationRef || null,
-            guestEmail,
-            guestName: data.guestName || "",
-            isTestData: data.isTestData === true,
-            testRunName: typeof data.testRunName === "string" ? data.testRunName : void 0,
-            testRunEnvironment: data.testRunEnvironment === "staging" || data.testRunEnvironment === "production" ? data.testRunEnvironment : void 0
-          },
-          slotEntry,
-          occurredAtIso
-        );
-      }
-    } catch (err) {
-      console.error("[breakfast-mark-served] late-served email failed:", err?.message || err);
-    }
   }
   return res.status(200).json({ success: true, data: resultPayload });
 }
@@ -248643,10 +248660,13 @@ var staffOnlyEmailActions = /* @__PURE__ */ new Set([
   // voucher-issued + store-order-* + staff-* are not in
   // publicEmailActions below â€” they bypass the endpoint and are
   // fired directly from the handler.
+  //
+  // Per CNE-01 (2026-11-19): `store-order-placed` /
+  // `store-order-confirmed` / `store-order-out-for-delivery` were
+  // removed — the client cut the guest's store-order notifications
+  // (the Intercom panel shows the live order tracker). The
+  // `store-order-delivered` + `store-order-cancelled` actions stay.
   "voucher-issued",
-  "store-order-placed",
-  "store-order-confirmed",
-  "store-order-out-for-delivery",
   "store-order-delivered",
   "store-order-cancelled",
   "staff-new-booking",
@@ -249130,6 +249150,17 @@ async function handler(req, res) {
     }
     req.staff = authResult;
     return await handleRescheduleBooking(req, res);
+  }
+  if (domain === "bookings" && action === "assign-room" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-reschedule:${ip}`, 30, 6e4)) {
+      return res.status(429).json({ success: false, error: "Too many reschedule requests. Please try again in a minute." });
+    }
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    req.staff = authResult;
+    return await handleAssignBookingRoom(req, res);
   }
   if (domain === "bookings" && action === "add-room" && req.method === "POST") {
     if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-reschedule:${ip}`, 30, 6e4)) {

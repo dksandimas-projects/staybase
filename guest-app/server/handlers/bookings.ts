@@ -46,6 +46,7 @@ import {
   getLockedManualNightlyRate,
   WalkinBookingSchema,
   RescheduleBookingSchema,
+  AssignRoomSchema,
   AddRoomBookingSchema,
   MAX_ADVANCE_DAYS,
   // Per PEX-02 (2026-08-01, per decision #147): the shared
@@ -11641,12 +11642,36 @@ export async function handleConfirmBookingWithBalance(req: any, res: any) {
       const data = bookingDoc.data()!;
       bookingData = data;
 
-      // CWB-01: only `payment-uploaded` bookings are eligible.
-      // A `payment-confirmed` booking has no balance and should
-      // go through the standard confirm flow. A `pending`
-      // booking has not yet provided proof — staff should
-      // verify the payment first.
-      if (data.status !== "payment-uploaded") {
+      // CWB-01: `payment-uploaded` bookings are eligible. A
+      // `pending` booking has not yet provided proof — staff
+      // should verify the payment first.
+      //
+      // Per VPM-01 (2026-11-19, decision #322):
+      // `payment-confirmed` is eligible TOO.
+      //
+      // The original comment here said "a `payment-confirmed`
+      // booking has no balance and should go through the
+      // standard confirm flow". That is not true any more, and
+      // it was never quite true: the server's own
+      // `handleVerifyAndRecordPayment` flips a booking to
+      // `payment-confirmed` as soon as the collected total
+      // reaches the booking's `totalPrice` — which EXCLUDES
+      // the BR-12 "other add-ons" (the airport transfer, the
+      // late checkout) that are added on top of it. So a
+      // booking whose room was paid in full but which still
+      // owed a ₱2,000 transfer sat at `payment-confirmed`
+      // WITH a real balance, and the only endpoint that could
+      // record that balance with a reason + the four-eyes
+      // threshold refused it with
+      // `INVALID_STATUS:payment-confirmed`. The desk was stuck:
+      // the plain confirm path had no balance gate at all, and
+      // the gated path 400'd.
+      //
+      // Accepting `payment-confirmed` here closes that hole:
+      // the outstanding add-on balance now goes through the
+      // same reason + threshold contract as every other
+      // outstanding balance.
+      if (data.status !== "payment-uploaded" && data.status !== "payment-confirmed") {
         throw new Error(`INVALID_STATUS:${data.status}`);
       }
 
@@ -13337,6 +13362,13 @@ export async function handleRescheduleBooking(req: any, res: any) {
   try {
     let updatedBooking: any = null;
     let fullBookingForEmail: any = null;
+    // Per CNE-01 (2026-11-19): whether the move changed anything
+    // the guest can SEE or PAY. A physical-room shuffle (same
+    // dates, same room type, same price) leaves this `false` and
+    // the guest is not emailed. Computed inside the transaction
+    // (it needs the pre-move booking + the target room) and
+    // applied to the send below.
+    let guestVisibleChange = false;
     // Per MRB-02.x (2026-08-02, per decision #164): the
     // canonical reservation id + header snapshot for this
     // reschedule. Hoisted to the outer `try` scope because
@@ -13996,6 +14028,48 @@ export async function handleRescheduleBooking(req: any, res: any) {
         id: bookingId
       };
 
+      // Per CNE-01 (2026-11-19): the GUEST-VISIBLE-CHANGE gate.
+      //
+      // The client asked us to stop emailing the guest when the
+      // front desk moves a booking to a different PHYSICAL ROOM
+      // (same dates, same room type) — "it is only a backend
+      // change".
+      //
+      // That request is well-founded: the guest-facing email
+      // renders the room TYPE, the dates, the occupancy and the
+      // price — and it deliberately NEVER renders the room NUMBER
+      // (the room-number-visibility rule). So a room-number-only
+      // move produced an email whose entire content was
+      // IDENTICAL to the booking's previous state while telling
+      // the guest "your dates or room have changed". A no-op
+      // email with a scary subject line.
+      //
+      // So the email now fires only when something the guest can
+      // actually SEE or PAY changed:
+      //   (a) the stay dates moved (arrival / departure);
+      //   (b) the room TYPE changed (upgrade / downgrade);
+      //   (c) the price changed (the new dates re-price the stay,
+      //       and the re-dated breakfast + add-on selections can
+      //       move the total — OCT-H8).
+      // A move that changes NONE of those is a physical-room
+      // shuffle and stays silent.
+      //
+      // NOTE the asymmetry: the room NUMBER is deliberately NOT
+      // part of the gate. An in-house guest who is moved to
+      // another room learns about it from the desk (the email
+      // could not carry the number anyway); a guest who is not
+      // yet here has no reason to know.
+      guestVisibleChange = (() => {
+        const previousCheckIn = toDateOrNull(booking.checkIn);
+        const previousCheckOut = toDateOrNull(booking.checkOut);
+        const datesChanged =
+          (previousCheckIn ? previousCheckIn.getTime() : 0) !== checkInDate.getTime() ||
+          (previousCheckOut ? previousCheckOut.getTime() : 0) !== checkOutDate.getTime();
+        const roomTypeChanged = String(booking.roomType || "") !== String(room.type || "");
+        const priceChanged = Number(booking.totalPrice || 0) !== Number(finalTotalPrice || 0);
+        return datesChanged || roomTypeChanged || priceChanged;
+      })();
+
       // If the guest is in-house (checked-in), sync room statuses
       if (booking.status === "checked-in") {
         const oldRoomRef = adminDb.collection("rooms").doc(booking.roomId);
@@ -14278,25 +14352,18 @@ export async function handleRescheduleBooking(req: any, res: any) {
       }
     });
 
-    // Per RSQ-01 (2026-11-19): the guest-notification email for a
-    // reschedule is best-effort, but "best-effort" must not be
-    // SILENT. The pre-fix shape swallowed a Resend failure into a
-    // `console.error` and still answered 200 with no email state,
-    // so the desk had NO way to know the guest never heard about
-    // their room/date change — the exact silent-swallow shape that
-    // #11 fixed for the confirm path.
-    //
-    // The flag mirrors the confirm path (`emailQueued: boolean` in
-    // the response `data`) so the desk's move/extend toast can
-    // branch on it. The durable audit trail is unchanged: the DLQ
-    // write (`failed_emails`) already happens inside `sendEmail`
-    // (per #11), and `sendEmail` re-throws so this catch sees it.
+    // Per CNE-01 (2026-11-19): the send is gated on the
+    // GUEST-VISIBLE-CHANGE check. A move that only changed the
+    // physical room number is silent — the client asked for
+    // exactly that ("it is only a backend change"), and the email
+    // could not have carried the number anyway.
     //
     // `emailQueued` starts `true` because the pre-transaction
     // failure paths return early — reaching this line means the
-    // transaction committed and an email was attempted.
+    // transaction committed. A DELIBERATELY SUPPRESSED email is
+    // not a failure: the flag reports a send failure, not a send.
     let emailQueued = true;
-    if (fullBookingForEmail) {
+    if (fullBookingForEmail && guestVisibleChange) {
       try {
         await sendBookingTrigger("booking-rescheduled", fullBookingForEmail);
       } catch (emailErr) {
@@ -14362,6 +14429,275 @@ export async function handleRescheduleBooking(req: any, res: any) {
       });
     }
     return res.status(400).json({ success: false, error: error.message || "Failed to move booking." });
+  }
+}
+
+// Per RAR-01 (2026-11-19, decision #323): the pre-assigned
+// room OVERRIDE. The booking create path auto-assigns a room
+// (the room the guest is booked into). Sometimes that
+// assignment is wrong — the desk knows the room is taken,
+// the guest prefers the other side of the hall, the room
+// needs cleaning. The desk must be able to re-point the
+// booking at a DIFFERENT ROOM OF THE SAME CATEGORY without
+// disturbing the money.
+//
+// Why a dedicated endpoint rather than `mode: "room"` on the
+// reschedule route:
+//
+//   The reschedule path RE-PRICES. It rebuilds `roomBreakdown`
+//   from the CURRENT rate table (`typeEntry.pricePerNight`),
+//   re-runs the discount chain, re-dates the breakfast
+//   selections, and re-stamps `revenueAllocation`. For a
+//   same-category move those steps are all no-ops IN THEORY —
+//   but "in theory" is exactly the gap: if the hotel's rate
+//   for that category changed after the booking was made, the
+//   reschedule path would silently RE-PRICE the booking to
+//   today's rate. The desk would swap room 201 for room 202
+//   and the guest's total would move, with nothing on screen
+//   explaining why.
+//
+//   This handler has no pricing code at all. It writes the
+//   room identity and NOTHING else: `totalPrice`,
+//   `ratePerNight`, `rateBreakdown`, `originalTotalPrice`,
+//   `voucherDiscount`, `revenueAllocation`, the breakfast
+//   selections, the add-on selections, and the discount
+//   snapshots are all left exactly as they were. "The price
+//   stays the same" is therefore a STRUCTURAL property of
+//   this route, not a promise that depends on the rate table
+//   happening not to have moved.
+//
+// The rules the server enforces (the client is never trusted):
+//   1. SAME CATEGORY ONLY — the target room's `type` must
+//      equal the booking's `roomType`. A different category is
+//      a DIFFERENT product (different rate, different
+//      capacity, different breakfast) and stays on the
+//      drawer's "Move / upgrade room" action, which re-prices
+//      deliberately and shows the price delta.
+//   2. DATES UNCHANGED — the stay window is read from the
+//      booking and carried forward verbatim.
+//   3. AVAILABLE — the same transactional occupancy check the
+//      reschedule path uses (self-excluded, so re-assigning a
+//      booking to the room it already holds is not a
+//      self-conflict), plus the room-block + staff-hold check.
+//   4. AUDITABLE — a `rescheduleHistory[]` entry with
+//      `kind: "room"` and `pricingBasis: "preserved"` records
+//      the from/to room, the reason, the actor, and the
+//      timestamp.
+//
+// No guest email fires. The room NUMBER is never sent to a
+// guest (the room-number-visibility rule), the room TYPE and
+// the DATES are unchanged, and the room is only finalised at
+// check-in — so a "your booking was updated" email would carry
+// no guest-visible change at all. The audit trail in
+// `rescheduleHistory[]` is where this change lives.
+export async function handleAssignBookingRoom(req: any, res: any) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ success: false, error: "Method not allowed." });
+  }
+
+  // Per RAR-01: strict-Zod validation, same posture as the
+  // create + walkin + reschedule schemas. The body carries NO
+  // dates and NO price — the server reads them from the
+  // booking.
+  const parsedAssign = AssignRoomSchema.safeParse(req.body || {});
+  if (!parsedAssign.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Booking and room are required."
+    });
+  }
+  const { bookingId, roomId, reason } = parsedAssign.data;
+
+  const { todayStr: todayKey, manilaDate: currentManilaDate } = getManilaDateInfo();
+  const currentManilaMinutes = currentManilaDate.getHours() * 60 + currentManilaDate.getMinutes();
+
+  try {
+    const assigned = await adminDb.runTransaction(async (transaction) => {
+      const bookingRef = adminDb.collection("bookings").doc(String(bookingId));
+      const bookingDoc = await transaction.get(bookingRef);
+      if (!bookingDoc.exists) throw new Error("Booking not found.");
+      const booking = bookingDoc.data() || {};
+
+      // The same status gate the reschedule path uses. A
+      // `pending` hold, an unpaid booking, a confirmed booking
+      // and an in-house guest are all re-assignable; a
+      // cancelled or checked-out booking is not.
+      if (!RESCHEDULABLE_STATUSES.includes(String(booking.status))) {
+        throw new Error(`Room cannot be reassigned while status is ${booking.status}.`);
+      }
+
+      // The stay window comes from the BOOKING, never from the
+      // body — that is the "dates unchanged" rule.
+      const checkInDate = toDateOrNull(booking.checkIn);
+      const checkOutDate = toDateOrNull(booking.checkOut);
+      if (!checkInDate || !checkOutDate) {
+        throw new Error("Booking dates are missing — cannot re-assign the room.");
+      }
+      const checkInKey = dateKeyFromDate(checkInDate);
+      const checkOutKey = dateKeyFromDate(checkOutDate);
+
+      const roomRef = adminDb.collection("rooms").doc(String(roomId));
+      const roomDoc = await transaction.get(roomRef);
+      if (!roomDoc.exists) throw new Error("Room not found.");
+      const room = roomDoc.data() || {};
+      if (room.isActive === false) throw new Error("Target room is inactive.");
+      if (room.status === "blocked") {
+        const blockedFrom = toDateOrNull(room.blockedFrom);
+        const blockedTo = toDateOrNull(room.blockedTo);
+        const windowActive = blockedFrom && blockedTo
+          ? rangesOverlap(blockedFrom, blockedTo, checkInDate, checkOutDate)
+          : true;
+        if (windowActive) throw new Error("Target room is blocked for those dates.");
+      }
+
+      // RULE 1 — SAME CATEGORY ONLY. The target room must be
+      // the same product as the one the booking was priced for.
+      // A different category changes the rate, the occupancy
+      // caps and the breakfast, so it is a different action
+      // (the drawer's "Move / upgrade room").
+      const currentRoomType = String(booking.roomType || "").trim();
+      const targetRoomType = String(room.type || "").trim();
+      if (!targetRoomType || targetRoomType !== currentRoomType) {
+        throw new Error(
+          "Room category cannot be changed here — use “Move / upgrade room” for a different room type."
+        );
+      }
+
+      // Re-assigning a booking to the room it already holds is
+      // a no-op, not an error: the desk may re-open the picker
+      // and pick the current room. Refusing it would make the
+      // UI look broken for no reason.
+      const currentRoomId = String(booking.roomId || "");
+      if (currentRoomId === String(roomId)) {
+        return {
+          roomId: currentRoomId,
+          roomNumber: String(booking.roomNumber || room.roomNumber || ""),
+          roomType: currentRoomType,
+          checkIn: checkInKey,
+          checkOut: checkOutKey,
+          totalPrice: Number(booking.totalPrice || 0),
+          unchanged: true
+        };
+      }
+
+      // RULE 3 — AVAILABILITY. The same transactional occupancy
+      // check the reschedule path uses. The booking itself is
+      // excluded, so a booking that is being moved out of a
+      // room does not conflict with itself.
+      const overlapQuery = adminDb.collection("bookings")
+        .where("roomId", "==", String(roomId))
+        .where("status", "in", ROOM_OCCUPYING_STATUSES);
+      const overlapSnapshot = await transaction.get(overlapQuery);
+      // The hotel's checkout time drives the "lingering checked-in"
+      // rule, so the config is read ONCE here (before the loop)
+      // rather than inside it — every read in a Firestore
+      // transaction must happen before any write, and a read in
+      // a loop is a wasted round trip.
+      const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
+      const hotelConfig = hotelConfigDoc.data() || {};
+      const now = new Date();
+      let sawConflict = false;
+      let sawLingering = false;
+      for (const doc of overlapSnapshot.docs) {
+        if (doc.id === String(bookingId)) continue;
+        const docData = doc.data();
+        const reason = getOccupancyConflictReason({
+          bookingData: docData,
+          requestedCheckIn: checkInDate,
+          requestedCheckOut: checkOutDate,
+          requestedCheckInKey: checkInKey,
+          todayKey,
+          currentMinutes: currentManilaMinutes,
+          checkOutTime: hotelConfig.checkOutTime,
+          now
+        });
+        if (reason === "overlap" || reason === "lingering-checked-in") {
+          if (reason === "lingering-checked-in") sawLingering = true;
+          sawConflict = true;
+          break;
+        }
+      }
+      if (sawConflict) {
+        throw new Error(sawLingering
+          ? "Target room is not ready because the previous guest has not checked out yet."
+          : "Target room already has a booking in that date range.");
+      }
+
+      // The room-block + staff-hold check. This one does its
+      // own reads inside the transaction.
+      const hasBlockConflict = await hasActiveRoomBlockConflict(
+        transaction,
+        String(roomId),
+        checkInDate,
+        checkOutDate
+      );
+      if (hasBlockConflict) throw new Error("Target room is blocked for that date range.");
+
+      // RULE 4 — the audit entry. `kind: "room"` distinguishes
+      // a room override from a move (`"move"`) and an extend
+      // (`"extend"`). `pricingBasis: "preserved"` records that
+      // the money was deliberately NOT re-derived.
+      const nowIso = new Date().toISOString();
+      const assignmentEntry = {
+        fromRoomId: currentRoomId,
+        fromRoomNumber: String(booking.roomNumber || ""),
+        fromCheckIn: checkInKey,
+        fromCheckOut: checkOutKey,
+        toRoomId: String(roomId),
+        toRoomNumber: String(room.roomNumber || ""),
+        toCheckIn: checkInKey,
+        toCheckOut: checkOutKey,
+        reason: typeof reason === "string" ? reason.slice(0, 500) : "",
+        by: req.staff?.uid || req.staff?.email || "staff",
+        at: nowIso,
+        pricingBasis: "preserved",
+        deltaTotalPrice: 0,
+        kind: "room"
+      };
+
+      // The write. NOTE what is NOT here: no `totalPrice`, no
+      // `ratePerNight`, no `rateBreakdown`, no
+      // `originalTotalPrice`, no `voucherDiscount`, no
+      // `revenueAllocation`, no breakfast / add-on selections,
+      // no discount snapshots, no date fields. The booking's
+      // money is untouched by construction.
+      transaction.update(bookingRef, {
+        roomId: String(roomId),
+        roomNumber: String(room.roomNumber || ""),
+        roomType: targetRoomType,
+        rescheduleHistory: [
+          ...(Array.isArray(booking.rescheduleHistory) ? booking.rescheduleHistory : []),
+          assignmentEntry
+        ],
+        updatedAt: new Date()
+      });
+
+      // An in-house guest physically moves: the old room is
+      // released and the new room is marked occupied, in the
+      // SAME transaction.
+      if (booking.status === "checked-in" && currentRoomId) {
+        const oldRoomRef = adminDb.collection("rooms").doc(currentRoomId);
+        transaction.update(oldRoomRef, { status: "available" });
+        transaction.update(roomRef, { status: "occupied" });
+      }
+
+      return {
+        roomId: String(roomId),
+        roomNumber: String(room.roomNumber || ""),
+        roomType: targetRoomType,
+        checkIn: checkInKey,
+        checkOut: checkOutKey,
+        totalPrice: Number(booking.totalPrice || 0),
+        unchanged: false
+      };
+    });
+
+    return res.status(200).json({ success: true, data: assigned });
+  } catch (error: any) {
+    return res.status(400).json({
+      success: false,
+      error: error?.message || "Failed to re-assign the room."
+    });
   }
 }
 

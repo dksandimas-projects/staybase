@@ -18,6 +18,12 @@
 //   - 403 when front-desk tries to confirm over threshold
 //   - 400 when reason is missing or empty
 //   - 400 when booking is not in `payment-uploaded` status
+//   - 200 when booking is `payment-confirmed` and still owes an
+//     other add-on (VPM-01, decision #322 — the other add-ons are
+//     added on TOP of `totalPrice`, so a booking whose room was
+//     paid in full sits at `payment-confirmed` WITH a balance)
+//   - 403 when a `payment-confirmed` booking's balance is over the
+//     front-desk threshold
 //   - 404 when booking does not exist
 //   - 403 when booking is not staff (auth is enforced at the
 //     dispatch level; this is the same mocked staff flow)
@@ -361,6 +367,73 @@ describe("/api/bookings/confirm-with-balance", () => {
 
     expect(res.status).toHaveBeenCalledWith(400);
     expect((res.json as any).mock.calls[0][0].error).toMatch(/pending/);
+    expect(sendBookingConfirmedWithBalanceTrigger).not.toHaveBeenCalled();
+  });
+
+  // Per VPM-01 (2026-11-19, decision #322): a `payment-confirmed`
+  // booking is now ELIGIBLE for the confirm-with-balance flow.
+  //
+  // Why: `handleVerifyAndRecordPayment` flips a booking to
+  // `payment-confirmed` as soon as the collected total reaches the
+  // booking's `totalPrice` — and `totalPrice` EXCLUDES the BR-12
+  // "other add-ons" (the airport transfer, the late checkout)
+  // that are added on top of it. So a booking whose room was paid
+  // in full but which still owed a ₱2,000 transfer sat at
+  // `payment-confirmed` WITH a real balance. The only endpoint
+  // that could record that balance — with the required reason and
+  // the four-eyes threshold — refused it with
+  // `INVALID_STATUS:payment-confirmed`, while the plain confirm
+  // path had no balance gate at all. The desk was stuck between a
+  // 400 and an unaudited confirm.
+  test("confirms a payment-confirmed booking with a balance (the other-add-ons case)", async () => {
+    mockBookings["booking_1"] = baseBooking({ status: "payment-confirmed" });
+    mockSettings["hotelConfig"] = { unpaidCheckoutApprovalThreshold: 5000 };
+
+    const res = mockResponse();
+    await handleConfirmBookingWithBalance(
+      {
+        method: "POST",
+        staff: { uid: "staff_1", email: "frontdesk@sparkinn.com", role: "front-desk" },
+        body: { bookingId: "booking_1", reason: "Airport transfer collected at check-in." }
+      },
+      res
+    );
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const updateWrite = mockWrites.find(
+      (w) => w.path === "bookings/booking_1" && (w.data as any).status === "confirmed"
+    );
+    expect(updateWrite).toBeDefined();
+    expect(updateWrite!.data).toEqual(
+      expect.objectContaining({
+        status: "confirmed",
+        confirmedWithBalance: 5000,
+        confirmedWithBalanceReason: "Airport transfer collected at check-in.",
+        confirmedWithBalanceBy: "staff_1"
+      })
+    );
+    // The guest-facing "confirmed with balance" email still fires.
+    expect(sendBookingConfirmedWithBalanceTrigger).toHaveBeenCalledTimes(1);
+  });
+
+  test("the threshold gate still applies to a payment-confirmed booking", async () => {
+    mockBookings["booking_1"] = baseBooking({ status: "payment-confirmed", totalPrice: 12000 });
+    mockSettings["hotelConfig"] = { unpaidCheckoutApprovalThreshold: 5000 };
+
+    const res = mockResponse();
+    await handleConfirmBookingWithBalance(
+      {
+        method: "POST",
+        staff: { uid: "staff_1", email: "frontdesk@sparkinn.com", role: "front-desk" },
+        body: { bookingId: "booking_1", reason: "Front desk trying to approve above limit." }
+      },
+      res
+    );
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    const json = (res.json as any).mock.calls[0][0];
+    expect(json.thresholdExceeded).toBe(true);
+    expect(json.balance).toBe(12000);
     expect(sendBookingConfirmedWithBalanceTrigger).not.toHaveBeenCalled();
   });
 

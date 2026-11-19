@@ -905,6 +905,14 @@ export interface AdminContextType {
   rescheduleBooking: (input: { bookingId: string; roomId: string; checkIn: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> & { emailQueued?: boolean } }>;
   // Per EXT-01 (2026-01-27): the extend-stay path locks roomId + checkIn to the booking's current values.
   extendStayBooking: (input: { bookingId: string; checkOut: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: Partial<Booking> & { emailQueued?: boolean } }>;
+  // Per RAR-01 (2026-11-19, decision #323): the pre-assigned room
+  // OVERRIDE. Re-points a booking at a different room of the SAME
+  // CATEGORY. The body carries no dates and no price — the server
+  // reads both from the booking and carries them forward verbatim,
+  // so the guest's total cannot move. The response echoes the
+  // booking's `totalPrice` so the caller can show what stayed the
+  // same, plus the new room identity.
+  assignBookingRoom: (input: { bookingId: string; roomId: string; reason?: string }) => Promise<{ success: boolean; error?: string; data?: { roomId: string; roomNumber: string; roomType: string; totalPrice: number; unchanged: boolean } }>;
   addOnsitePayment: (bookingId: string, paymentId: string, amount: number, method: string, note: string, transactionReference?: string) => Promise<{ success: boolean; error?: string }>;
   // Per BR-05 (2026-10-13, decision #234): the staff
   // breakfast admin-context wrappers. Each wraps the
@@ -3204,6 +3212,38 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       return { success: true, data: data.data };
     } catch (err: any) {
       console.error("extendStayBooking failed:", err);
+      return { success: false, error: err.message || "An unexpected error occurred." };
+    }
+  };
+
+  // Per RAR-01 (2026-11-19, decision #323): the pre-assigned room
+  // OVERRIDE. Posts ONLY `{ bookingId, roomId, reason }` — no dates
+  // and no price — because the server reads the stay window and the
+  // money from the booking and carries both forward verbatim. That
+  // is what guarantees "the price stays the same": the request
+  // physically cannot express a price change.
+  const assignBookingRoom = async (input: { bookingId: string; roomId: string; reason?: string }) => {
+    try {
+      const token = await auth.currentUser?.getIdToken(true);
+      const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/assign-room`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : ""
+        },
+        body: JSON.stringify({
+          bookingId: input.bookingId,
+          roomId: input.roomId,
+          reason: input.reason || ""
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, error: data.error || "Failed to re-assign the room." };
+      }
+      return { success: true, data: data.data };
+    } catch (err: any) {
+      console.error("assignBookingRoom failed:", err);
       return { success: false, error: err.message || "An unexpected error occurred." };
     }
   };
@@ -8815,6 +8855,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
         grantEarlyCheckin,
         rescheduleBooking,
         extendStayBooking,
+        assignBookingRoom,
         addOnsitePayment,
         staffUpdateBreakfast,
         markBreakfastServed,

@@ -45,7 +45,13 @@ interface Voucher {
 }
 ```
 
-### 2. `store-order-placed`
+### 2. `store-order-placed` — **REMOVED (CNE-01, 2026-11-19)**
+
+> The client cut the guest's store-order notifications: the guest placed the
+> order on screen and the Intercom panel shows a live order tracker, so this
+> mail duplicated what the guest was already looking at. The action, the
+> template, the trigger, the preview case and the allowlist entry are gone.
+> The section below is kept as the historical record of what it was.
 
 | Field | Value |
 |---|---|
@@ -55,7 +61,9 @@ interface Voucher {
 | Body essentials | Order ref, items table (name, qty, unit price, line total), grand total, payment method chosen, expected prep time ("we'll bring it to your room in ~15 min"), link to intercom chat (deep link to Shop tab) |
 | Reply-to | `config.supportEmail` |
 
-### 3. `store-order-confirmed`
+### 3. `store-order-confirmed` — **REMOVED (CNE-01, 2026-11-19)**
+
+> Removed with `store-order-placed` — see the note above.
 
 | Field | Value |
 |---|---|
@@ -64,7 +72,10 @@ interface Voucher {
 | Subject | `[${config.brandName}] Order confirmed: ${order.orderRef}` |
 | Body essentials | "Your order is confirmed and being prepared", items recap, ETA, link to chat |
 
-### 4. `store-order-out-for-delivery`
+### 4. `store-order-out-for-delivery` — **REMOVED (CNE-01, 2026-11-19)**
+
+> Removed with `store-order-placed` — see the note above. `store-order-delivered`
+> survives (and CNE-01 FIXED it: it never fired before).
 
 | Field | Value |
 |---|---|
@@ -136,16 +147,16 @@ type EmailAction =
   | "early-checkin-request"
   // new 7 (Phase 1.5)
   | "voucher-issued"
-  | "store-order-placed"
-  | "store-order-confirmed"
-  | "store-order-out-for-delivery"
+  // Per CNE-01 (2026-11-19): `store-order-placed` /
+  // `store-order-confirmed` / `store-order-out-for-delivery` were
+  // REMOVED (the client cut the guest's store-order notifications).
   | "store-order-delivered"
   | "store-order-cancelled"
   | "staff-new-booking"
   | "staff-new-payment";
 ```
 
-Total: **15 templates**.
+Total: **12 of these templates** (3 removed per CNE-01 — see above).
 
 ---
 
@@ -252,9 +263,9 @@ The per-record timestamp fields prevent duplicate emails on status churn (e.g. a
 
 - [x] Create a voucher with a `guestEmail` → email arrives at that address with the code in large monospace
 - [x] Create a voucher without `guestEmail` → no email sent (only visible in the admin)
-- [x] Place a store order → `store-order-placed` email arrives within 30s
+- [x] ~~Place a store order → `store-order-placed` email arrives within 30s~~ — **REMOVED (CNE-01)**; the guest's Intercom tracker carries the status instead
 - [x] Flip status `placed → cancelled` within 5 min of order → only `placed` email; cancellation email not sent (or vice versa, per implementation)
-- [x] Flip status `placed → out-for-delivery` → `store-order-out-for-delivery` email arrives
+- [x] ~~Flip status `placed → out-for-delivery` → `store-order-out-for-delivery` email arrives~~ — **REMOVED (CNE-01)**
 - [x] Create an online booking → `staff-new-booking` email arrives at `staffEmail` within 30s
 - [x] Upload a payment proof → `staff-new-payment` email arrives
 - [x] Trigger the same event twice (e.g. re-call the API) → second send suppressed by `emailNotificationsSent` timestamp

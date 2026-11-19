@@ -30,9 +30,6 @@
   "server/handlers/refunds.ts TS2339: Property 'alreadyPaid' does not exist on type 'never'.",
   "server/handlers/refunds.ts TS2339: Property 'newBookingPaidAmount' does not exist on type 'never'.",
   "server/handlers/refunds.ts TS2339: Property 'refundEntry' does not exist on type 'never'.",
-  "server/handlers/store.ts TS2339: Property 'bookingId' does not exist on type 'never'.",
-  "server/handlers/store.ts TS2339: Property 'items' does not exist on type 'never'.",
   "server/handlers/store.ts TS2339: Property 'orderId' does not exist on type 'never'.",
-  "server/handlers/store.ts TS2339: Property 'orderRef' does not exist on type 'never'.",
-  "server/handlers/store.ts TS2339: Property 'totalAmount' does not exist on type 'never'."
+  "server/handlers/store.ts TS2339: Property 'orderRef' does not exist on type 'never'."
 ]
