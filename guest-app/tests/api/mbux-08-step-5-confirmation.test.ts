@@ -161,11 +161,12 @@ describe("MBUX-08 — payment proof vs payment verification (the shipped bug)", 
     const view = resolveConfirmationStatus({ ...base, bookingStatus: "payment-uploaded" });
 
     expect(view.paymentState).toBe("proof-received");
-    // The two facts must never be collapsed into one word. The word
-    // "verified" may appear ONLY as part of "not yet verified".
-    expect(view.paymentStatusLabel).toBe("Proof received — not yet verified");
+    // The two facts must never be collapsed into one word. The label
+    // says the proof ARRIVED and the verification is IN PROGRESS — it
+    // must never read as a completed verification.
+    expect(view.paymentStatusLabel).toBe("Payment proof received — verification in progress");
     expect(view.paymentStatusLabel).not.toBe("Payment verified");
-    expect(view.paymentStatusDetail.toLowerCase()).toContain("not been checked");
+    expect(view.paymentStatusDetail.toLowerCase()).toContain("reviewing");
   });
 
   it("VERIFIED wins over the online method — the exact case the boolean could not express", () => {
@@ -227,6 +228,61 @@ describe("MBUX-08 — payment proof vs payment verification (the shipped bug)", 
   });
 });
 
+// Per 2026-11-19 (decision #319): the pending screen was rewritten by
+// the owner. The hero, the "what happens next" block, the payment
+// status box and the email line all now say the SAME thing — the
+// request was RECEIVED, the room is on hold, we are verifying — and
+// the medallion draws a CHECK instead of a clock, so the page reads
+// as a success screen with one clearly-pending row in it.
+describe("MBUX-19 — the pending screen reads as a received request, not a queue", () => {
+  it("the hero announces the REQUEST as received, and says what is on hold", () => {
+    const view = resolveConfirmationStatus({ ...base, bookingStatus: "payment-uploaded" });
+
+    expect(view.headline).toBe("Booking request received!");
+    expect(view.summary).toContain("Your room is on hold while we verify your payment");
+    expect(view.summary).toContain("24 hours");
+  });
+
+  it("the payment-status box names the proof AND the pending verification", () => {
+    const view = resolveConfirmationStatus({
+      ...base,
+      paymentMethodLabel: "Bank Transfer",
+      bookingStatus: "payment-uploaded"
+    });
+
+    expect(view.paymentStatusLabel).toBe("Payment proof received — verification in progress");
+    // The method LABEL is named, not a hardcoded "bank transfer" — the
+    // admin renames the label and this copy follows.
+    expect(view.paymentStatusDetail).toContain("Bank Transfer");
+    expect(view.paymentStatusDetail).toContain("reviewing it");
+    expect(view.paymentStatusDetail).toContain("24 hours");
+  });
+
+  it("the email line says a copy was sent and the confirmation follows", () => {
+    const view = resolveConfirmationStatus({ ...base, bookingStatus: "payment-uploaded" });
+
+    expect(view.emailStatus).toContain("We've emailed you a copy of this request");
+    expect(view.emailStatus).toContain("as soon as your payment is verified");
+  });
+
+  it("the medallion shows a CHECK for a received request", () => {
+    expect(resolveConfirmationStatus({ ...base, bookingStatus: "payment-uploaded" }).headerIcon).toBe("check");
+  });
+
+  it("a state that still waits on the GUEST keeps the clock", () => {
+    expect(resolveConfirmationStatus({ ...base, bookingStatus: "pending" }).headerIcon).toBe("clock");
+    expect(resolveConfirmationStatus({ ...base, bookingStatus: "cancelled" }).headerIcon).toBe("clock");
+  });
+
+  it("the page draws the medallion from the STATUS, not from the tone", () => {
+    // The old markup keyed the icon off `tone`, so every pending state
+    // drew a clock — including the state where the guest had already
+    // done everything and was only waiting on us.
+    expect(confirmPage).toMatch(/confirmationStatus\.headerIcon === "check"/);
+    expect(confirmCode).not.toMatch(/confirmationStatus\.tone === "success"\s*\?\s*\(\s*<CheckCircle2/);
+  });
+});
+
 describe("MBUX-08 — every state tells the guest what happens next", () => {
   const states: Array<[ConfirmationPaymentState, string, string]> = [
     ["pay-at-hotel", "cash", ""],
@@ -250,7 +306,8 @@ describe("MBUX-08 — every state tells the guest what happens next", () => {
 
   it("`proof-received` tells the guest the verification is OUR job, not theirs", () => {
     const view = resolveConfirmationStatus({ ...base, bookingStatus: "payment-uploaded" });
-    expect(view.nextStep.toLowerCase()).toContain("nothing to send");
+    expect(view.nextStep.toLowerCase()).toContain("all set for now");
+    expect(view.nextStep.toLowerCase()).toContain("once your payment is verified");
   });
 
   it("a CANCELLED booking is never presented as confirmed", () => {

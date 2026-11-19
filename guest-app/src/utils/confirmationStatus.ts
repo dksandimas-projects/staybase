@@ -61,6 +61,21 @@ export type ConfirmationPaymentState =
   | "verified"
   | "cancelled";
 
+/**
+ * The icon in the header medallion.
+ *
+ * - `check` — the guest's request was RECEIVED and the page is a
+ *   success screen for the booking request.
+ * - `clock` — the page is waiting on something the GUEST still owes.
+ *
+ * Per 2026-11-19 (decision #319): the medallion used to follow the
+ * tone alone, so a pending state always drew a clock. A guest whose
+ * receipt was already on file read "we are waiting on you" at the top
+ * of the page. The icon is now part of the STATUS, decided per state
+ * alongside the copy.
+ */
+export type ConfirmationHeaderIcon = "check" | "clock";
+
 export interface ConfirmationStatusInput {
   /**
    * Raw payment-method KEY carried through the create redirect, e.g.
@@ -84,6 +99,8 @@ export interface ConfirmationStatusView {
    * green tick beside a cancellation notice.
    */
   tone: "success" | "pending" | "neutral";
+  /** Icon for the header medallion — see `ConfirmationHeaderIcon`. */
+  headerIcon: ConfirmationHeaderIcon;
   headline: string;
   summary: string;
   /** Short label for the payment row in the results card. */
@@ -153,6 +170,7 @@ export function resolveConfirmationStatus(
       return {
         paymentState,
         tone: "neutral",
+        headerIcon: "clock",
         headline: "This booking was cancelled.",
         summary: `It is no longer reserved at ${brand}. Nothing further is needed from you.`,
         paymentStatusLabel: "Cancelled",
@@ -165,6 +183,7 @@ export function resolveConfirmationStatus(
       return {
         paymentState,
         tone: "success",
+        headerIcon: "check",
         headline: "Your booking is confirmed.",
         summary: `You're all set — we're looking forward to hosting you at ${brand}.`,
         paymentStatusLabel: "Payment verified",
@@ -177,18 +196,29 @@ export function resolveConfirmationStatus(
       return {
         paymentState,
         tone: "pending",
-        headline: "We have your payment proof.",
-        summary: `Your booking is reserved. Our team is verifying the payment now — that check is ours to finish, not yours.`,
-        paymentStatusLabel: "Proof received — not yet verified",
-        paymentStatusDetail: `Your ${methodLabel} receipt reached us. It has not been checked by our team yet, so the booking is not confirmed until they do.`,
-        nextStep: "Nothing to send. We'll email you as soon as the payment is verified.",
-        emailStatus: "An acknowledgment email has been sent. A confirmation follows once your payment is verified."
+        // Per 2026-11-19 (decision #319): the header medallion carries a
+        // CHECK, not a clock. The guest's REQUEST was received
+        // successfully — that is the headline fact — while the payment
+        // status box below carries the "still being verified" part. A
+        // clock in the hero said "we are waiting on you" and made a
+        // received request look like a queue.
+        headerIcon: "check",
+        headline: "Booking request received!",
+        summary:
+          "Thanks! Your room is on hold while we verify your payment. This usually takes a few hours and no more than 24 hours.",
+        paymentStatusLabel: "Payment proof received — verification in progress",
+        paymentStatusDetail: `We've received your ${methodLabel} receipt and our team is reviewing it. Your booking is confirmed once it's verified, usually within 24 hours.`,
+        nextStep:
+          "You're all set for now. Once your payment is verified, we'll email your booking confirmation. You can also check your status anytime on this page or under Manage.",
+        emailStatus:
+          "We've emailed you a copy of this request. Your confirmation will follow as soon as your payment is verified."
       };
 
     case "awaiting-proof":
       return {
         paymentState,
         tone: "pending",
+        headerIcon: "clock",
         headline: "Booking submitted for review.",
         summary: `We have received your details at ${brand}. Your booking is held while the payment is checked.`,
         paymentStatusLabel: "Awaiting payment proof",
@@ -202,6 +232,7 @@ export function resolveConfirmationStatus(
       return {
         paymentState,
         tone: "success",
+        headerIcon: "check",
         headline: "Your booking is confirmed.",
         summary: `We look forward to hosting you at ${brand}.`,
         paymentStatusLabel: "Pay at the property",

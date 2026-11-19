@@ -434,8 +434,20 @@ export function BookingConfirmPage() {
                   : "bg-gray-200 text-gray-600 shadow-gray-200/60"
             }`}
           >
-            {confirmationStatus.tone === "success" ? (
-              <CheckCircle2 size={48} className="animate-pulse" />
+            {/* Per 2026-11-19 (decision #319): the medallion icon is
+                part of the STATUS, not of the tone. A pending state
+                used to always draw a clock, so a guest whose receipt
+                was already on file read "we are waiting on you" at the
+                top of the page. `proof-received` now draws a CHECK in
+                the same soft amber circle — the request WAS received
+                successfully — and the payment-status box below it
+                carries the "verification in progress" part. The pulse
+                stays reserved for the fully-confirmed (success) state. */}
+            {confirmationStatus.headerIcon === "check" ? (
+              <CheckCircle2
+                size={48}
+                className={confirmationStatus.tone === "success" ? "animate-pulse" : undefined}
+              />
             ) : (
               <Clock size={44} aria-hidden="true" />
             )}
@@ -579,8 +591,9 @@ export function BookingConfirmPage() {
                 a guest with an uploaded-but-unverified receipt read as
                 though the hotel had already confirmed the money — the
                 headline said "verified" by implication while nothing
-                had been checked. The label never blurs the two: it
-                says "Proof received — not yet verified" verbatim. */}
+                had been checked. The label never blurs the two: per
+                decision #319 it reads "Payment proof received —
+                verification in progress" verbatim. */}
             <div
               data-testid="confirmation-payment-status"
               className={`rounded-lg border px-4 py-3 ${
