@@ -23,6 +23,7 @@ import { StatsCard } from "../components/StatsCard";
 import { StatusBadge } from "../components/StatusBadge";
 import { Modal } from "../components/Modal";
 import { PaymentSuccessModal } from "../components/PaymentSuccessModal";
+import type { RoomAssignment } from "../components/PaymentSuccessModal";
 import { ConfirmWithBalanceForm } from "../components/ConfirmWithBalanceForm";
 import { ConfirmForm } from "../components/ConfirmForm";
 import { FailedEmailsBanner } from "../components/FailedEmailsBanner";
@@ -100,6 +101,13 @@ export function selectOverdueCheckouts(bookings: Booking[], todayKey: string, cu
 // they hit submit.
 type PendingPaymentRoom = {
   bookingId: string;
+  /**
+   * Per RAR-01 (decision #323): the assigned room's doc id. The
+   * success modal's room-override picker needs it to (a) exclude
+   * the room the booking already holds from the candidate list and
+   * (b) post the target room to the server.
+   */
+  roomId: string;
   roomNumber: string;
   roomType: string;
   totalPrice: number;
@@ -184,7 +192,7 @@ type PendingPaymentItem = {
 export function DashboardPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount, hotelConfig, corporateInquiries, verifyAndRecordPayment, rejectPayment, resolveEarlyCheckin, reservations, reservationPaidAmount, currentUser, paymentMethods } = useAdmin();
+  const { rooms, bookings, toggleHousekeepingStatus, roomTypes, updateBookingStatus, dashboardLoading, intercoms, intercomThreads, unreadIntercomCount, hotelConfig, corporateInquiries, verifyAndRecordPayment, rejectPayment, resolveEarlyCheckin, reservations, reservationPaidAmount, currentUser, paymentMethods, assignBookingRoom } = useAdmin();
   const [imagePreview, setImagePreview] = useState<{ title: string; url: string } | null>(null);
   const [clockTick, setClockTick] = useState(() => Date.now());
   const [showRevenue, setShowRevenue] = useState(false);
@@ -301,6 +309,16 @@ export function DashboardPage() {
     folioTotal: number;
     siblingFlippedCount: number;
     reservationRef: string;
+    /**
+     * Per RAR-01 (decision #323): the scope's rooms, frozen at
+     * submit time with the room number each booking was
+     * PRE-ASSIGNED at creation. Captured into the success state
+     * (rather than read from `verifyScope` at render time)
+     * because `verifyScope` is cleared when the modal's CTAs
+     * fire — the desk must still be able to see and change the
+     * assignment from the success modal.
+     */
+    roomAssignments: RoomAssignment[];
   }>(null);
   // Per VPM-01 (decision #322): the success modal's inline error.
   // A failed confirmation used to close the modal in its `finally`
@@ -369,6 +387,54 @@ export function DashboardPage() {
       ? configured
       : [{ method: "cash", label: "Cash" }, ...configured];
   }, [paymentMethods]);
+
+  // Per RAR-01 (decision #323): the room-type labels + the rooms
+  // the success modal's room-override picker may offer.
+  //
+  // The labels come from the hotel's configured room types (the
+  // same `roomTypes` the BookingsPage + CalendarPage use) — the
+  // raw type key is never rendered to staff. The candidate list is
+  // every ACTIVE room; the modal filters it to the booking's
+  // current category, and the server independently enforces the
+  // same-category rule.
+  const dashboardRoomTypeLabels = useMemo(() => {
+    return roomTypes.reduce<Record<string, string>>((acc, type) => {
+      acc[type.value] = type.shortLabel || type.label;
+      return acc;
+    }, {});
+  }, [roomTypes]);
+
+  const dashboardAssignableRooms = useMemo(
+    () =>
+      rooms.map((r) => ({
+        id: r.id,
+        roomNumber: r.roomNumber,
+        type: r.type,
+        typeLabel: dashboardRoomTypeLabels[r.type] || r.type,
+        isActive: r.isActive !== false
+      })),
+    [rooms, dashboardRoomTypeLabels]
+  );
+
+  // Per RAR-01 (decision #323): apply the room override. The
+  // server re-points the booking and echoes the (unchanged) total
+  // so the desk can confirm the price did not move.
+  const handleAssignRoom = async (
+    bookingId: string,
+    roomId: string,
+    reason: string
+  ): Promise<{ ok: boolean; error?: string; roomNumber?: string; roomId?: string }> => {
+    const result = await assignBookingRoom({ bookingId, roomId, reason });
+    if (!result.success) {
+      return { ok: false, error: result.error || "Could not re-assign the room." };
+    }
+    toast.success("Room re-assigned", "The booking now points at the new room. The price did not change.");
+    return {
+      ok: true,
+      roomNumber: result.data?.roomNumber,
+      roomId: result.data?.roomId
+    };
+  };
 
   const REJECTION_REASON_PRESETS: Array<{ label: string; value: string }> = [
     {
@@ -634,6 +700,7 @@ export function DashboardPage() {
           rooms: [
             {
               bookingId: booking.id,
+              roomId: booking.roomId || "",
               roomNumber: booking.roomNumber || "TBD",
               roomType: booking.roomType,
               totalPrice: Number(booking.totalPrice || 0),
@@ -725,6 +792,7 @@ export function DashboardPage() {
         isTestData: sorted.length > 0 && sorted.every((c) => c.isTestData === true),
         rooms: sorted.map((c) => ({
           bookingId: c.id,
+          roomId: c.roomId || "",
           roomNumber: c.roomNumber || "TBD",
           roomType: c.roomType,
           totalPrice: Number(c.totalPrice || 0),
@@ -1166,7 +1234,18 @@ export function DashboardPage() {
       // never told that a 3-room reservation had two more rooms
       // cleared by the one payment.
       siblingFlippedCount: result.siblingFlippedCount ?? 0,
-      reservationRef: verifyScope?.publicRef ?? ""
+      reservationRef: verifyScope?.publicRef ?? "",
+      // Per RAR-01 (decision #323): freeze the scope's room
+      // assignments (with the PRE-ASSIGNED room number) into the
+      // success state, so the desk can check and override the
+      // room from the success modal.
+      roomAssignments: (verifyScope?.rooms ?? []).map((room) => ({
+        bookingId: room.bookingId,
+        roomId: room.roomId,
+        roomNumber: room.roomNumber,
+        roomType: room.roomType,
+        roomTypeLabel: dashboardRoomTypeLabels[room.roomType] || room.roomType
+      }))
     });
     // Reset the verify-form fields so the next open is
     // fresh, but keep verifyTarget alive — the success
@@ -2506,7 +2585,7 @@ export function DashboardPage() {
         error={verifySuccessError}
         roomLabel={
           verifySuccess
-            ? `${verifySuccess.booking.roomNumber || "TBD"} · ${String(verifySuccess.booking.roomType || "Room")}`
+            ? `${verifySuccess.booking.roomNumber || "TBD"} · ${dashboardRoomTypeLabels[String(verifySuccess.booking.roomType || "")] || String(verifySuccess.booking.roomType || "Room")}`
             : undefined
         }
         stayLabel={
@@ -2514,6 +2593,9 @@ export function DashboardPage() {
             ? `${verifySuccess.booking.checkIn} → ${verifySuccess.booking.checkOut} (${verifySuccess.booking.numNights} night${Number(verifySuccess.booking.numNights) === 1 ? "" : "s"})`
             : undefined
         }
+        roomAssignments={verifySuccess?.roomAssignments}
+        assignableRooms={dashboardAssignableRooms}
+        onAssignRoom={handleAssignRoom}
         onConfirmBooking={handleConfirmBookingFromSuccess}
         confirmingBooking={confirmingBookingFromSuccess}
         onViewBooking={() => {
