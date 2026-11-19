@@ -3,7 +3,7 @@ import { adminAuth, adminDb } from "./lib/firebase-admin";
 import { loadBotProtectionMode } from "./lib/botProtection-settings";
 import { sendBookingTrigger } from "./handlers/email";
 import { writeNotification } from "./lib/notifications";
-import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleAddRoomToReservation, handleApplyBookingDiscount, handleApplyReservationDiscount, handleCancelBooking, handleCancelPreview, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleConfirmBookingWithBalance, handleCreateBooking, handleCreateWalkin, handleGetCancellationLiability, handleLookupBooking, handleMarkPaymentConfirmed, handleRecordCancellationException, handleRejectDiscount, handleRejectPayment, handleRemoveVoucher, handleRescheduleBooking, handleResolveEarlyCheckin, handleSetLouReceived, handleSetSpecialRequests, handleVerifyAndRecordPayment, handleExtendStay } from "./handlers/bookings";
+import { getConfiguredBookingRefPrefix, handleAddPayment, handleAddRefund, handleAddRoomToReservation, handleApplyBookingDiscount, handleApplyReservationDiscount, handleAssignBookingRoom, handleCancelBooking, handleCancelPreview, handleCheckinBooking, handleCheckoutBooking, handleConfirmBooking, handleConfirmBookingWithBalance, handleCreateBooking, handleCreateWalkin, handleGetCancellationLiability, handleLookupBooking, handleMarkPaymentConfirmed, handleRecordCancellationException, handleRejectDiscount, handleRejectPayment, handleRemoveVoucher, handleRescheduleBooking, handleResolveEarlyCheckin, handleSetLouReceived, handleSetSpecialRequests, handleVerifyAndRecordPayment, handleExtendStay } from "./handlers/bookings";
 import { handleRoomAvailability } from "./handlers/rooms";
 import { handleCancelRoomBlock, handleCreateBulkRoomBlocks, handleCreateRoomBlock, handleUpdateRoomBlock } from "./handlers/room-blocks";
 import { handleAcquireStaffInventoryHold, handleExtendStaffInventoryHold, handleReleaseStaffInventoryHold } from "./handlers/staff-inventory-holds";
@@ -906,6 +906,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     (req as any).staff = authResult;
 
     return await handleRescheduleBooking(req, res);
+  }
+
+  // Per RAR-01 (2026-11-19, decision #323): the pre-assigned
+  // room OVERRIDE. Staff re-point a booking at a different room
+  // of the SAME CATEGORY when the auto-assignment was wrong.
+  // Same auth posture as the reschedule surface (staff-only,
+  // 401/403 split) — the desk is the audience, and the guest
+  // app never calls it.
+  //
+  // The rate limit shares the bookings-reschedule bucket: both
+  // are deliberate, staff-driven room mutations, and a separate
+  // bucket would starve one path at the other's expense.
+  if (domain === "bookings" && action === "assign-room" && req.method === "POST") {
+    if (process.env.NODE_ENV !== "test" && isRateLimited(`bookings-reschedule:${ip}`, 30, 60000)) {
+      return res.status(429).json({ success: false, error: "Too many reschedule requests. Please try again in a minute." });
+    }
+
+    const authResult = await authenticateStaff(req);
+    if (!authResult.success) {
+      return res.status(authResult.error?.includes("Forbidden") ? 403 : 401).json({ success: false, error: authResult.error });
+    }
+    (req as any).staff = authResult;
+
+    return await handleAssignBookingRoom(req, res);
   }
 
   // Per MRB-14 (2026-08-03, per decision #180 â€” proposed):

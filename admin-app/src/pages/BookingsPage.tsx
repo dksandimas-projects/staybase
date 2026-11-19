@@ -65,6 +65,7 @@ import { Modal } from "../components/Modal";
 // language from the public flow.
 import { StepIndicator } from "../components/StepIndicator";
 import { PaymentSuccessModal } from "../components/PaymentSuccessModal";
+import type { RoomAssignment } from "../components/PaymentSuccessModal";
 import { ConfirmWithBalanceForm } from "../components/ConfirmWithBalanceForm";
 // Per VPM-01 (2026-11-19, decision #322): the IDG discount gate's
 // room-level primitives. The drawer now enforces the same
@@ -689,6 +690,8 @@ export function BookingsPage() {
     members,
     rescheduleBooking,
     extendStayBooking,
+    // Per RAR-01 (decision #323): the pre-assigned room override.
+    assignBookingRoom,
     vouchers,
     corporateCodes,
     paymentMethods,
@@ -1097,6 +1100,15 @@ export function BookingsPage() {
     folioTotal: number;
     siblingFlippedCount: number;
     reservationRef: string;
+    /**
+     * Per RAR-01 (decision #323): the scope's rooms, frozen at
+     * submit time with the room number each booking was
+     * PRE-ASSIGNED at creation. Captured into the success state
+     * (rather than read from `selectedVerifyScopeRooms` at render
+     * time) so the desk can still see and change the assignment
+     * after the drawer moves on.
+     */
+    roomAssignments: RoomAssignment[];
   }>(null);
   const [confirmingBookingFromSuccess, setConfirmingBookingFromSuccess] = useState(false);
   // Per VPM-01 (decision #322): the success modal's inline error
@@ -1564,6 +1576,7 @@ export function BookingsPage() {
   const selectedVerifyScopeRooms = useMemo(() => {
     if (!selectedBooking) return [] as {
       bookingId: string;
+      roomId: string;
       roomNumber: string;
       roomType: string;
       totalPrice: number;
@@ -1580,6 +1593,10 @@ export function BookingsPage() {
       .filter((b): b is Booking => !!b);
     return scopeBookings.map((b) => ({
       bookingId: b.id,
+      // Per RAR-01 (decision #323): the assigned room's doc id —
+      // the success modal's room-override picker excludes the
+      // current room from the candidate list using it.
+      roomId: b.roomId || "",
       roomNumber: b.roomNumber || "TBD",
       roomType: b.roomType,
       totalPrice: Number(b.totalPrice || 0),
@@ -4472,6 +4489,59 @@ export function BookingsPage() {
       setMoveIsSubmitting(false);
     }
   };
+
+  // Per RAR-01 (decision #323): the pre-assigned room OVERRIDE.
+  // The booking was auto-assigned a room when it was created; the
+  // desk can re-point it at another room of the SAME CATEGORY from
+  // the post-verify success modal.
+  //
+  // This is NOT the "Move / upgrade room" action: that one changes
+  // dates and/or category and re-prices deliberately (it shows the
+  // price delta). This one changes the room identity ONLY — the
+  // server reads the dates and the money from the booking and
+  // carries both forward verbatim, so the price cannot move.
+  const handleAssignRoom = async (
+    bookingId: string,
+    roomId: string,
+    reason: string
+  ): Promise<{ ok: boolean; error?: string; roomNumber?: string; roomId?: string }> => {
+    const result = await assignBookingRoom({ bookingId, roomId, reason });
+    if (!result.success) {
+      return { ok: false, error: result.error || "Could not re-assign the room." };
+    }
+    const target = rooms.find((r) => r.id === roomId);
+    const roomNumber = result.data?.roomNumber || target?.roomNumber || "";
+    const roomType = result.data?.roomType || target?.type || "";
+    // The server already committed the authoritative Firestore
+    // update. Update only the open drawer here — the `bookings`
+    // listener refreshes the shared snapshot on the next tick.
+    setSelectedBooking((previous) =>
+      previous && previous.id === bookingId
+        ? { ...previous, roomId, roomNumber, roomType }
+        : previous
+    );
+    toast.success(
+      "Room re-assigned",
+      `Room ${roomNumber} assigned. The price did not change.`
+    );
+    return { ok: true, roomNumber, roomId };
+  };
+
+  // Per RAR-01 (decision #323): the rooms the success modal's
+  // override picker may offer. Every ACTIVE room — the modal
+  // filters to the booking's current category, and the server
+  // enforces the same rule independently.
+  const assignableRoomsForOverride = useMemo(
+    () =>
+      rooms.map((r) => ({
+        id: r.id,
+        roomNumber: r.roomNumber,
+        type: r.type,
+        typeLabel: roomTypeLabels[r.type] || r.type,
+        isActive: r.isActive !== false
+      })),
+    [rooms, roomTypeLabels]
+  );
 
   // EXT-01: extend stay handler
   const handleExtendSubmit = async (e: React.FormEvent) => {
@@ -9172,7 +9242,19 @@ export function BookingsPage() {
                   // computes it and the context parses it — it was
                   // being dropped on the floor here.
                   siblingFlippedCount: result.siblingFlippedCount ?? 0,
-                  reservationRef: selectedBooking.reservationRef || ""
+                  reservationRef: selectedBooking.reservationRef || "",
+                  // Per RAR-01 (decision #323): freeze the scope's
+                  // room assignments (with the PRE-ASSIGNED room
+                  // number) into the success state, so the desk can
+                  // check and override the room from the success
+                  // modal.
+                  roomAssignments: selectedVerifyScopeRooms.map((room) => ({
+                    bookingId: room.bookingId,
+                    roomId: room.roomId,
+                    roomNumber: room.roomNumber,
+                    roomType: room.roomType,
+                    roomTypeLabel: roomTypeLabels[room.roomType] || room.roomType
+                  }))
                 });
               })()} disabled={verifyPending || !verifyAmount || parseFloat(verifyAmount) <= 0} className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark disabled:opacity-50">
                 {verifyPending ? <><span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" /> Recording…</> : "Verify & Record Payment"}
@@ -9206,7 +9288,7 @@ export function BookingsPage() {
         reservationRef={verifySuccess?.reservationRef}
         roomLabel={
           verifySuccess
-            ? `${verifySuccess.booking.roomNumber || "TBD"} · ${String(verifySuccess.booking.roomType || "Room")}`
+            ? `${verifySuccess.booking.roomNumber || "TBD"} · ${roomTypeLabels[String(verifySuccess.booking.roomType || "")] || String(verifySuccess.booking.roomType || "Room")}`
             : undefined
         }
         stayLabel={
@@ -9214,6 +9296,9 @@ export function BookingsPage() {
             ? `${verifySuccess.booking.checkIn} → ${verifySuccess.booking.checkOut} (${verifySuccess.booking.numNights} night${Number(verifySuccess.booking.numNights) === 1 ? "" : "s"})`
             : undefined
         }
+        roomAssignments={verifySuccess?.roomAssignments}
+        assignableRooms={assignableRoomsForOverride}
+        onAssignRoom={handleAssignRoom}
         onConfirmBooking={handleConfirmBookingFromSuccess}
         confirmingBooking={confirmingBookingFromSuccess}
         onConfirmWithBalance={openConfirmWithBalanceFromSuccess}

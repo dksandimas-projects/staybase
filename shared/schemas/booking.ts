@@ -267,6 +267,39 @@ export type RescheduleBookingInput = z.infer<typeof RescheduleBookingSchema>;
 export type WalkinBookingInput = z.infer<typeof WalkinBookingSchema>;
 export type WalkinRoomLineInput = z.infer<typeof WalkinRoomLineSchema>;
 
+// Per RAR-01 (2026-11-19, decision #323): the pre-assigned
+// room override. The front desk can re-assign a booking to a
+// DIFFERENT ROOM OF THE SAME CATEGORY when the auto-assignment
+// was wrong — without touching the dates and WITHOUT touching
+// the money.
+//
+// The body is deliberately minimal: there are NO date fields
+// and NO price fields. The server reads the booking's own
+// `checkIn` / `checkOut` / `totalPrice` and carries them
+// forward verbatim. That is what makes "the price stays the
+// same" a STRUCTURAL property of this endpoint rather than a
+// promise the client or the rate table has to keep — the
+// reschedule path re-prices from the CURRENT rate table, so a
+// same-category move there could silently change the total if
+// the hotel's rates moved since the booking was created.
+//
+// The schema is `strict()` (same posture as the create +
+// walkin + reschedule schemas) so a client can't smuggle
+// extra fields past the contract.
+export const AssignRoomSchema = z.object({
+  bookingId: z.string().trim().min(1).max(64),
+  roomId: z.string().trim().min(1).max(64),
+  // The reason is stamped into `rescheduleHistory[]` so the
+  // change is auditable. It is OPTIONAL and defaults to ""
+  // (the same posture as the reschedule schema's `reason`) —
+  // but the admin UI always sends one, because a room
+  // re-assignment with no recorded reason is exactly the kind
+  // of silent change the desk banner is supposed to surface.
+  reason: z.string().trim().max(500).optional().default("")
+}).strict();
+
+export type AssignRoomInput = z.infer<typeof AssignRoomSchema>;
+
 // Per LOW-1 (reports audit 2026-08-10) +
 // `DECISIONS-FEATURES.md #99` (LOU workflow):
 // the staff-toggled LOU (Letter of Undertaking) flag
