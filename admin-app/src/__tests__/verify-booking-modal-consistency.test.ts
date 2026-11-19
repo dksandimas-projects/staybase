@@ -231,8 +231,13 @@ describe("VPM-01 §4 — the success modal's CTA follows the FOLIO balance, not 
 
 describe("VPM-01 §5 — the confirm-booking modal is gated on an outstanding balance", () => {
   it("the CLS-01 confirm modal disables its confirm button while money is outstanding", () => {
+    // Per RAR-02 (decision #325) the expression gained a second
+    // clause: the button is ALSO disabled while a room override is
+    // in flight (the room change and the status transition are two
+    // separate server calls and must not race). The money gate —
+    // the point of this guard — is unchanged and still first.
     expect(bookingsPageSrc).toMatch(
-      /confirmDisabled=\{\(selectedBookingFolio\?\.balance \?\? 0\) > 0\}/
+      /confirmDisabled=\{\(selectedBookingFolio\?\.balance \?\? 0\) > 0 \|\| roomAssignBusy\}/
     );
   });
 

@@ -65,6 +65,7 @@ import { Modal } from "../components/Modal";
 // language from the public flow.
 import { StepIndicator } from "../components/StepIndicator";
 import { PaymentSuccessModal } from "../components/PaymentSuccessModal";
+import { RoomAssignmentSection } from "../components/RoomAssignmentSection";
 import type { RoomAssignment } from "../components/PaymentSuccessModal";
 import { ConfirmWithBalanceForm } from "../components/ConfirmWithBalanceForm";
 // Per VPM-01 (2026-11-19, decision #322): the IDG discount gate's
@@ -721,6 +722,12 @@ export function BookingsPage() {
   // sees a single "check out" flow regardless of balance.
   const [showConfirmBooking, setShowConfirmBooking] = useState(false);
   const [confirmBookingPending, setConfirmBookingPending] = useState(false);
+  // Per RAR-02 (decision #325): TRUE while a room override is being
+  // applied from the confirm-booking modal. The confirm button is
+  // disabled for the duration — the room change and the status
+  // transition are two separate server calls, and letting the desk
+  // fire both at once would race them.
+  const [roomAssignBusy, setRoomAssignBusy] = useState(false);
   const [showConfirmCheckIn, setShowConfirmCheckIn] = useState(false);
   const [confirmCheckInPending, setConfirmCheckInPending] = useState(false);
   // Unified check-out modal: shows the folio summary + an
@@ -4518,6 +4525,15 @@ export function BookingsPage() {
     setSelectedBooking((previous) =>
       previous && previous.id === bookingId
         ? { ...previous, roomId, roomNumber, roomType }
+        : previous
+    );
+    // Per RAR-02 (decision #325): the confirm-with-balance form
+    // holds its OWN booking snapshot, so it needs the same update —
+    // otherwise the panel would show the pre-override room if its
+    // local copy were ever reset.
+    setConfirmWithBalanceContext((previous) =>
+      previous && previous.booking.id === bookingId
+        ? { ...previous, booking: { ...previous.booking, roomId, roomNumber, roomType } }
         : previous
     );
     toast.success(
@@ -8748,14 +8764,14 @@ export function BookingsPage() {
             iconTone="success"
             confirmLabel="Confirm booking"
             confirming={confirmBookingPending}
-            confirmDisabled={(selectedBookingFolio?.balance ?? 0) > 0}
+            confirmDisabled={(selectedBookingFolio?.balance ?? 0) > 0 || roomAssignBusy}
             onConfirm={handleConfirmBooking}
           >
             <div className="grid gap-2 rounded-lg border border-gray-150 bg-gray-50 p-3 text-xs sm:grid-cols-2">
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Room</p>
                 <p className="font-semibold text-gray-900">
-                  {selectedBooking.roomNumber} · {String(selectedBooking.roomType || "Room")}
+                  {selectedBooking.roomNumber} · {roomTypeLabels[String(selectedBooking.roomType || "")] || String(selectedBooking.roomType || "Room")}
                 </p>
               </div>
               <div>
@@ -8792,6 +8808,42 @@ export function BookingsPage() {
                 </p>
               </div>
             </div>
+            {/* Per RAR-02 (decision #325): the room override, in the
+                CONFIRM-BOOKING modal too. The desk used to be able to
+                fix a wrong room assignment only in the post-verify
+                success modal — so a booking confirmed from the drawer
+                (a different path: the drawer's own "Confirm booking"
+                button) kept its auto-assigned room with no way to
+                change it at that point. The server auto-assigns a
+                room when the booking is created, and the desk
+                discovers the mistake at CONFIRM time as often as at
+                verify time.
+
+                The SCOPE is the booking being confirmed — the confirm
+                action is room-scoped (`renderActionScope("room")`),
+                so the panel shows exactly that one room. The
+                multi-room siblings are covered by the post-verify
+                success modal, which is reservation-scoped.
+
+                The override itself is unchanged: same category only,
+                the price does not move (the server reads the dates
+                and the money from the booking and carries both
+                forward verbatim). */}
+            <RoomAssignmentSection
+              assignments={[
+                {
+                  bookingId: selectedBooking.id,
+                  roomId: selectedBooking.roomId || "",
+                  roomNumber: selectedBooking.roomNumber || "TBD",
+                  roomType: String(selectedBooking.roomType || ""),
+                  roomTypeLabel: roomTypeLabels[String(selectedBooking.roomType || "")] || String(selectedBooking.roomType || "Room")
+                }
+              ]}
+              rooms={assignableRoomsForOverride}
+              onAssignRoom={handleAssignRoom}
+              onBusyChange={setRoomAssignBusy}
+              resetKey={selectedBooking.id}
+            />
             {/* Per VPM-01 (decision #322): the balance gate. A
                 booking with money still outstanding cannot be
                 confirmed with a plain tap — it goes through the
@@ -9322,6 +9374,21 @@ export function BookingsPage() {
           currentBalance={confirmWithBalanceContext.currentBalance}
           collectedAmount={selectedBookingFolio?.paymentsTotal ?? 0}
           onConfirmed={() => setConfirmWithBalanceContext(null)}
+          // Per RAR-02 (decision #325): the room override in the
+          // other confirm path. The scope is the booking being
+          // confirmed — the confirm-with-balance action is
+          // room-scoped, exactly like the plain confirm action.
+          roomAssignment={{
+            bookingId: confirmWithBalanceContext.booking.id,
+            roomId: confirmWithBalanceContext.booking.roomId || "",
+            roomNumber: confirmWithBalanceContext.booking.roomNumber || "TBD",
+            roomType: String(confirmWithBalanceContext.booking.roomType || ""),
+            roomTypeLabel:
+              roomTypeLabels[String(confirmWithBalanceContext.booking.roomType || "")] ||
+              String(confirmWithBalanceContext.booking.roomType || "Room")
+          }}
+          assignableRooms={assignableRoomsForOverride}
+          onAssignRoom={handleAssignRoom}
         />
       )}
 
