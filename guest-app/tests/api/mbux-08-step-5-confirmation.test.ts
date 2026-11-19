@@ -73,7 +73,7 @@ function stateFor(paymentMethod: string, bookingStatus: string): ConfirmationPay
 }
 
 describe("MBUX-08 — isOnlinePaymentMethod", () => {
-  it("treats gcash and bank as the online methods", () => {
+  it("treats the platform's canonical online methods as online", () => {
     expect(isOnlinePaymentMethod("gcash")).toBe(true);
     expect(isOnlinePaymentMethod("bank")).toBe(true);
   });
@@ -83,10 +83,76 @@ describe("MBUX-08 — isOnlinePaymentMethod", () => {
     expect(isOnlinePaymentMethod("BANK")).toBe(true);
   });
 
-  it("does not treat pay-at-hotel methods as online", () => {
+  it("does not treat the settle-at-the-property methods as online", () => {
+    expect(isOnlinePaymentMethod("pay-at-hotel")).toBe(false);
     expect(isOnlinePaymentMethod("cash")).toBe(false);
-    expect(isOnlinePaymentMethod("hotel")).toBe(false);
+    expect(isOnlinePaymentMethod("cod")).toBe(false);
+    expect(isOnlinePaymentMethod("add-to-bill")).toBe(false);
     expect(isOnlinePaymentMethod("")).toBe(false);
+  });
+});
+
+// Per 2026-11-19 (decision #318): the production regression this file
+// now also pins.
+//
+// THE LIVE DEPLOYMENT KEYS ITS BANK TRANSFER AS `bpi`.
+//
+// The rule used to be an ALLOWLIST of method keys (`["gcash",
+// "bank"]`), so `bpi` — the admin-configured key behind the label
+// "Bank Transfer" — fell into the "not online" bucket. The
+// confirmation page then rendered the `pay-at-hotel` state for a
+// guest who had ALREADY uploaded a bank-transfer receipt:
+//
+//   "Pay at the property — Nothing to pay now — settle with Bank
+//    Transfer when you check in."
+//
+// while the very same booking's email said "your uploaded payment
+// proof is queued for manual verification". The page and the email
+// contradicted each other, and the page told the guest that no money
+// was owed.
+//
+// The rule is now a settle-at-the-property LIST: every key that is
+// not one of the platform's internal methods is an ONLINE method, so
+// an admin-configured key can never be mistaken for "settled at the
+// property".
+describe("MBUX-08 — an admin-configured method key is NEVER 'pay at the property'", () => {
+  it("treats the live deployment's `bpi` key (label 'Bank Transfer') as online", () => {
+    expect(isOnlinePaymentMethod("bpi")).toBe(true);
+  });
+
+  it("never renders 'Pay at the property' for a bank transfer", () => {
+    const view = resolveConfirmationStatus({
+      ...base,
+      paymentMethod: "bpi",
+      paymentMethodLabel: "Bank Transfer",
+      bookingStatus: "payment-uploaded"
+    });
+
+    expect(view.paymentState).toBe("proof-received");
+    expect(view.paymentStatusLabel).not.toBe("Pay at the property");
+    expect(view.paymentStatusDetail).not.toMatch(/nothing to pay now/i);
+    // The receipt the guest already sent is named back to them.
+    expect(view.paymentStatusDetail).toContain("Bank Transfer");
+  });
+
+  it("says a receipt is still owed for an online method with no receipt yet", () => {
+    const view = resolveConfirmationStatus({
+      ...base,
+      paymentMethod: "bpi",
+      paymentMethodLabel: "Bank Transfer",
+      bookingStatus: "pending"
+    });
+
+    expect(view.paymentState).toBe("awaiting-proof");
+    expect(view.paymentStatusLabel).toBe("Awaiting payment proof");
+    expect(view.paymentStatusLabel).not.toBe("Pay at the property");
+  });
+
+  it("holds for ANY custom key, not just `bpi`", () => {
+    for (const key of ["pesonet", "credit-card", "crypto"]) {
+      expect(stateFor(key, "payment-uploaded")).toBe("proof-received");
+      expect(stateFor(key, "confirmed")).toBe("verified");
+    }
   });
 });
 

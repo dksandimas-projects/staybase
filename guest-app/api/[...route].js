@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.22.2";
+    VERSION2 = "2.22.5";
   }
 });
 
@@ -150705,6 +150705,35 @@ var init_paymentMethodLabel = __esm({
   }
 });
 
+// ../shared/utils/paymentMethodSemantics.ts
+function normalizePaymentMethodKey(method) {
+  return typeof method === "string" ? method.trim().toLowerCase() : "";
+}
+function isSettleAtPropertyPaymentMethod(method) {
+  const key = normalizePaymentMethodKey(method);
+  if (!key) return false;
+  return SETTLE_AT_PROPERTY_PAYMENT_METHOD_KEYS.includes(
+    key
+  );
+}
+function isOnlinePaymentMethod(method) {
+  const key = normalizePaymentMethodKey(method);
+  if (!key) return false;
+  return !isSettleAtPropertyPaymentMethod(key);
+}
+var SETTLE_AT_PROPERTY_PAYMENT_METHOD_KEYS;
+var init_paymentMethodSemantics = __esm({
+  "../shared/utils/paymentMethodSemantics.ts"() {
+    "use strict";
+    SETTLE_AT_PROPERTY_PAYMENT_METHOD_KEYS = [
+      "pay-at-hotel",
+      "cash",
+      "cod",
+      "add-to-bill"
+    ];
+  }
+});
+
 // ../shared/utils/paymentReference.ts
 function getLatestPaymentReference(booking) {
   const payments = booking?.onsitePayments;
@@ -152908,6 +152937,7 @@ __export(shared_exports, {
   RewardsConfigSchema: () => RewardsConfigSchema,
   RewardsContentSchema: () => RewardsContentSchema,
   RoomStatusEnum: () => RoomStatusEnum,
+  SETTLE_AT_PROPERTY_PAYMENT_METHOD_KEYS: () => SETTLE_AT_PROPERTY_PAYMENT_METHOD_KEYS,
   STAFF_CANCELLABLE_STATUSES: () => STAFF_CANCELLABLE_STATUSES,
   SUPPORTED_PAYMENT_METHODS: () => SUPPORTED_PAYMENT_METHODS,
   SeoPublishSchema: () => SeoPublishSchema,
@@ -153028,9 +153058,11 @@ __export(shared_exports, {
   isDateInStayWindow: () => isDateInStayWindow,
   isFreeNightVoucher: () => isFreeNightVoucher,
   isInFlowHoldActive: () => isInFlowHoldActive,
+  isOnlinePaymentMethod: () => isOnlinePaymentMethod,
   isOtherAddOnBookingMutable: () => isOtherAddOnBookingMutable,
   isPaymentVerified: () => isPaymentVerified,
   isRewardVoucher: () => isRewardVoucher,
+  isSettleAtPropertyPaymentMethod: () => isSettleAtPropertyPaymentMethod,
   isUnlimitedStay: () => isUnlimitedStay,
   isUnpaidRefund: () => isUnpaidRefund,
   isValidBookingRef: () => isValidBookingRef,
@@ -153052,6 +153084,7 @@ __export(shared_exports, {
   normalizeMaxChildren: () => normalizeMaxChildren,
   normalizeOtherAddOnsEnabled: () => normalizeOtherAddOnsEnabled,
   normalizePaymentHoldWindowHours: () => normalizePaymentHoldWindowHours,
+  normalizePaymentMethodKey: () => normalizePaymentMethodKey,
   normalizeSeasonalRateOverride: () => normalizeSeasonalRateOverride,
   normalizeSeasonalRateOverrides: () => normalizeSeasonalRateOverrides,
   normalizeStayRange: () => normalizeStayRange,
@@ -153140,6 +153173,7 @@ var init_shared = __esm({
     init_kitchenGuestNames();
     init_kitchenPrep();
     init_paymentMethodLabel();
+    init_paymentMethodSemantics();
     init_paymentReference();
     init_paymentVerification();
     init_pricing();
@@ -243116,7 +243150,7 @@ async function handleCreateStoreOrder(req, res) {
   if (parsedItems.some((item) => !item.itemId || !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 99)) {
     return res.status(400).json({ success: false, error: "Invalid store order item quantity." });
   }
-  const isOnlinePaymentMethod = body.paymentMethod !== "cod" && body.paymentMethod !== "add-to-bill";
+  const isOnlinePaymentMethod2 = body.paymentMethod !== "cod" && body.paymentMethod !== "add-to-bill";
   const expectedProofPrefix = `store-orders/${roomNumber}/payment-proof/`;
   const paymentProofPath = typeof body.paymentProofPath === "string" ? body.paymentProofPath.trim() : "";
   const proofFileName = paymentProofPath.slice(expectedProofPrefix.length);
@@ -243126,7 +243160,7 @@ async function handleCreateStoreOrder(req, res) {
   const rawPaymentProofUrl = typeof body.paymentProofUrl === "string" ? body.paymentProofUrl.trim() : "";
   const encodedProofPrefix = encodeURIComponent(expectedProofPrefix);
   const paymentProofUrl = rawPaymentProofUrl.startsWith("https://firebasestorage.googleapis.com/") && rawPaymentProofUrl.includes(encodedProofPrefix) ? rawPaymentProofUrl : "";
-  if (isOnlinePaymentMethod && !paymentProofPath && !paymentProofUrl) {
+  if (isOnlinePaymentMethod2 && !paymentProofPath && !paymentProofUrl) {
     return res.status(400).json({ success: false, error: "Payment proof is required for this method." });
   }
   const normalizedItems = Array.from(

@@ -1,4 +1,28 @@
 import type { BookingStatus } from "@spark-inn/shared";
+import { isOnlinePaymentMethod } from "@spark-inn/shared";
+
+// Which methods require the guest to send proof before the hotel can
+// verify anything.
+//
+// Per 2026-11-19 (decision #318) this is NO LONGER a hardcoded
+// allowlist of method keys (`["gcash", "bank"]`). The allowlist could
+// not survive admin-configured methods: the live deployment stores its
+// bank transfer under the key `bpi` (label "Bank Transfer"), so the
+// allowlist classified a receipt-required method as "not online" and
+// this page told a guest who had ALREADY uploaded a bank-transfer
+// receipt that "nothing is due now — pay at the property".
+//
+// The rule now lives in `shared/utils/paymentMethodSemantics.ts` and
+// matches the rest of the platform (booking Step 4's proof gate, the
+// create endpoint's status derivation, the booking-submitted email):
+// only the settle-at-the-property methods defer the money; EVERY
+// other method — including custom admin keys — is paid online with
+// proof.
+//
+// Re-exported so the guest app's existing import sites (and the
+// MBUX-08 suite) keep one entry point for "is this method paid
+// online?".
+export { isOnlinePaymentMethod };
 
 // Per MBUX-08 (decision #260, 2026-10-15): Step 5 truth table.
 //
@@ -38,7 +62,12 @@ export type ConfirmationPaymentState =
   | "cancelled";
 
 export interface ConfirmationStatusInput {
-  /** Raw payment-method key carried through the create redirect, e.g. `gcash`. */
+  /**
+   * Raw payment-method KEY carried through the create redirect, e.g.
+   * `gcash`. This is the admin-configured key (`bpi` on the live
+   * deployment), never the display label — the key is what decides
+   * whether the money is settled at the property or owed now.
+   */
   paymentMethod: string;
   /** Server-authoritative booking status carried in the URL (`status` param). */
   bookingStatus: string;
@@ -80,22 +109,6 @@ const PROOF_RECEIVED_BOOKING_STATUSES: readonly BookingStatus[] = [
 ];
 
 const CANCELLED_BOOKING_STATUSES: readonly BookingStatus[] = ["cancelled"];
-
-/**
- * Methods that require the guest to send proof before the hotel can
- * verify anything.
- *
- * Kept in sync with the pre-MBUX-08 `isOnlinePayment` pair so the
- * payment STATUS never disagrees with which methods were always
- * treated as online. Admin-configured extra methods are display-only
- * labels and do not change this answer.
- */
-const ONLINE_PAYMENT_METHOD_KEYS = ["gcash", "bank"] as const;
-
-export function isOnlinePaymentMethod(method: string): boolean {
-  const key = (method ?? "").trim().toLowerCase();
-  return (ONLINE_PAYMENT_METHOD_KEYS as readonly string[]).includes(key);
-}
 
 function asBookingStatus(value: string): BookingStatus {
   return (value ?? "").trim().toLowerCase() as BookingStatus;

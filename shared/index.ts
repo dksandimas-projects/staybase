@@ -25,6 +25,13 @@ export * from "./utils/points";
 export * from "./utils/kitchenGuestNames";
 export * from "./utils/kitchenPrep";
 export * from "./utils/paymentMethodLabel";
+// Per 2026-11-19 (off-roadmap bug fix, decision #318): the ONE rule
+// for "does the guest owe money now?" — the method keys that settle
+// AT THE PROPERTY vs every other (admin-configured) method, which is
+// paid online with proof. Lives in the shared package so the guest
+// booking flow, the guest confirmation page and the server cannot
+// drift onto different answers again.
+export * from "./utils/paymentMethodSemantics";
 export * from "./utils/paymentReference";
 export * from "./utils/paymentVerification";
 export * from "./utils/pricing";

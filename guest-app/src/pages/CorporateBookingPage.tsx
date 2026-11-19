@@ -67,6 +67,10 @@ import {
   // calls POST /api/holds/start on first read.
   generateHoldId
 } from "@spark-inn/shared";
+// Per 2026-11-19 (decision #318): the shared "is this method paid
+// online (and therefore provable)?" rule. The corporate personal-pay
+// selector reads it instead of a hardcoded list of method keys.
+import { isOnlinePaymentMethod } from "@spark-inn/shared";
 // Per MRB-08 (2026-08-02, per decision #167): the
 // corporate `/corporate/book` page mirrors
 // `BookingPage`'s room cart (MRB-06) so a corporate
@@ -655,15 +659,26 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
   }, []);
 
   // Personal-pay selector source — enabled + corporate-visible
-  // online methods only. Hoisted from the Step 3 JSX so the
+  // ONLINE methods only. Hoisted from the Step 3 JSX so the
   // stale-selection fallback below can reuse it.
+  //
+  // Per 2026-11-19 (decision #318): this filter used to be a
+  // hardcoded key allowlist (`gcash` / `maya` / `bank`). An
+  // allowlist of method keys cannot survive admin-configured
+  // methods: the live deployment keys its bank transfer as `bpi`
+  // (label "Bank Transfer"), so the corporate personal-pay selector
+  // offered GCash ONLY — a corporate guest paying for their own stay
+  // could not choose the hotel's bank transfer at all. The filter is
+  // now the SHARED rule: personal pay means "pay online and prove it",
+  // so every ONLINE method qualifies and the settle-at-the-property
+  // ones (`pay-at-hotel`, `cash`, `cod`, `add-to-bill`) do not.
   const corporatePaymentMethods = useMemo(
     () =>
       paymentMethodsConfig.filter(
         (pm) =>
           pm.isEnabled &&
           pm.showInCorporate !== false &&
-          (pm.method === "gcash" || pm.method === "maya" || pm.method === "bank")
+          isOnlinePaymentMethod(pm.method)
       ),
     [paymentMethodsConfig]
   );
