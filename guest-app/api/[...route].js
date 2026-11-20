@@ -59490,9 +59490,9 @@ var require_fallback = __commonJS({
       }
       loadProtoJSON(json, ignoreCache = false) {
         const hash = objectHash(JSON.stringify(json)).toString();
-        const cached2 = _GrpcClient.protoCache.get(hash);
-        if (cached2 && !ignoreCache) {
-          return cached2;
+        const cached = _GrpcClient.protoCache.get(hash);
+        if (cached && !ignoreCache) {
+          return cached;
         }
         const root = protobuf.Root.fromJSON(json);
         _GrpcClient.protoCache.set(hash, root);
@@ -83474,9 +83474,9 @@ var require_grpc = __commonJS({
       }
       loadProtoJSON(json, ignoreCache = false) {
         const hash = objectHash(JSON.stringify(json)).toString();
-        const cached2 = _GrpcClient.protoCache.get(hash);
-        if (cached2 && !ignoreCache) {
-          return cached2;
+        const cached = _GrpcClient.protoCache.get(hash);
+        if (cached && !ignoreCache) {
+          return cached;
         }
         const options = _GrpcClient.defaultOptions();
         const packageDefinition = grpcProtoLoader.fromJSON(json, options);
@@ -109722,9 +109722,9 @@ var require_range = __commonJS({
         range = range.replace(BUILDSTRIPRE, "");
         const memoOpts = (this.options.includePrerelease && FLAG_INCLUDE_PRERELEASE) | (this.options.loose && FLAG_LOOSE);
         const memoKey = memoOpts + ":" + range;
-        const cached2 = cache.get(memoKey);
-        if (cached2) {
-          return cached2;
+        const cached = cache.get(memoKey);
+        if (cached) {
+          return cached;
         }
         const loose = this.options.loose;
         const hr3 = loose ? re3[t3.HYPHENRANGELOOSE] : re3[t3.HYPHENRANGE];
@@ -115819,15 +115819,15 @@ var require_local = __commonJS({
     };
     exports2.LocalJWKSet = LocalJWKSet;
     async function importWithAlgCache(cache, jwk, alg) {
-      const cached2 = cache.get(jwk) || cache.set(jwk, {}).get(jwk);
-      if (cached2[alg] === void 0) {
+      const cached = cache.get(jwk) || cache.set(jwk, {}).get(jwk);
+      if (cached[alg] === void 0) {
         const key = await (0, import_js_1.importJWK)({ ...jwk, ext: true }, alg);
         if (key instanceof Uint8Array || key.type !== "public") {
           throw new errors_js_1.JWKSInvalid("JSON Web Key Set members must be public keys");
         }
-        cached2[alg] = key;
+        cached[alg] = key;
       }
-      return cached2[alg];
+      return cached[alg];
     }
     function createLocalJWKSet(jwks) {
       const set = new LocalJWKSet(jwks);
@@ -128653,15 +128653,15 @@ var require_stubs = __commonJS({
       cfg.callthrough = cfg.callthrough || false;
       cfg.calls = cfg.calls || 0;
       var norevert = cfg.calls === 0;
-      var cached2 = obj[method].bind(obj);
+      var cached = obj[method].bind(obj);
       obj[method] = function() {
         var args = [].slice.call(arguments);
         var returnVal;
         if (cfg.callthrough)
-          returnVal = cached2.apply(obj, args);
+          returnVal = cached.apply(obj, args);
         returnVal = stub.apply(obj, args) || returnVal;
         if (!norevert && --cfg.calls === 0)
-          obj[method] = cached2;
+          obj[method] = cached;
         return returnVal;
       };
     };
@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.27.1";
+    VERSION2 = "2.27.2";
   }
 });
 
@@ -150921,6 +150921,187 @@ var init_hotelContact = __esm({
   }
 });
 
+// ../shared/utils/bookingPreferences.ts
+function resolveBookingPreferenceValues(raw) {
+  const values = [];
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      if (!entry || typeof entry !== "object") continue;
+      const value = entry.value;
+      if (typeof value === "string" && value) values.push(value);
+    }
+  }
+  return values.length > 0 ? values : DEFAULT_BOOKING_PREFERENCES.map((option2) => option2.value);
+}
+function resolveBookingPreferenceOptions(raw) {
+  if (!Array.isArray(raw)) {
+    return DEFAULT_BOOKING_PREFERENCES.map((option2) => ({ ...option2 }));
+  }
+  const out = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const value = entry.value;
+    const label = entry.label;
+    if (typeof value !== "string" || !value) continue;
+    if (typeof label !== "string") continue;
+    const icon = entry.icon;
+    const surchargeNote = entry.surchargeNote;
+    out.push({
+      value,
+      label,
+      icon: typeof icon === "string" ? icon : void 0,
+      surchargeNote: typeof surchargeNote === "string" ? surchargeNote : void 0
+    });
+  }
+  return out;
+}
+function resolveBedSetupOptions(raw) {
+  if (!Array.isArray(raw)) {
+    return DEFAULT_BED_SETUPS.map((option2) => ({ ...option2 }));
+  }
+  const out = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const value = entry.value;
+    const label = entry.label;
+    if (typeof value !== "string" || !value) continue;
+    if (typeof label !== "string") continue;
+    const icon = entry.icon;
+    out.push({
+      value,
+      label,
+      icon: typeof icon === "string" ? icon : void 0
+    });
+  }
+  return out;
+}
+function parseCheckInTimeToPair(timeStr) {
+  const normalized = timeStr.trim().toLowerCase();
+  if (!normalized) return { hours: 14, minutes: 0 };
+  const ampm = normalized.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/);
+  if (ampm) {
+    let hours = Number(ampm[1]);
+    const minutes = Number(ampm[2] ?? "0");
+    const isPm = ampm[3] === "pm";
+    if (hours === 12) hours = isPm ? 12 : 0;
+    else if (isPm) hours += 12;
+    return { hours, minutes };
+  }
+  const h24 = normalized.match(/^(\d{1,2}):(\d{2})$/);
+  if (h24) {
+    const hours = Number(h24[1]);
+    const minutes = Number(h24[2]);
+    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+      return { hours, minutes };
+    }
+  }
+  return { hours: 14, minutes: 0 };
+}
+function buildArrivalTimeOptions(checkInTimeStr, locale = "en-US") {
+  const base = parseCheckInTimeToPair(checkInTimeStr);
+  const options = [
+    { value: null, label: "I don't know" }
+  ];
+  for (let i2 = 0; i2 < ARRIVAL_WINDOW_HOURS; i2 += 1) {
+    const totalMinutes = base.minutes + (base.hours + i2) * 60;
+    const hours24 = Math.floor(totalMinutes / 60) % 24;
+    const minutes = totalMinutes % 60;
+    options.push({
+      value: formatHHMM(hours24, minutes),
+      label: format12hLabel(hours24, minutes, locale)
+    });
+  }
+  return options;
+}
+function formatHHMM(hours, minutes) {
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+function format12hLabel(hours, minutes, locale) {
+  const safeHours = (hours % 24 + 24) % 24;
+  const safeMinutes = Math.max(0, Math.min(59, minutes));
+  const utcHours = (safeHours - HOTEL_TZ_OFFSET_HOURS + 24) % 24;
+  const reference = new Date(Date.UTC(1970, 0, 1, utcHours, safeMinutes, 0));
+  return new Intl.DateTimeFormat(locale, {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: HOTEL_TZ_IANA
+  }).format(reference);
+}
+var HOTEL_TZ_OFFSET_HOURS, HOTEL_TZ_IANA;
+var init_bookingPreferences = __esm({
+  "../shared/utils/bookingPreferences.ts"() {
+    "use strict";
+    init_constants();
+    HOTEL_TZ_OFFSET_HOURS = 8;
+    HOTEL_TZ_IANA = "Asia/Manila";
+  }
+});
+
+// ../shared/utils/hotelTimes.ts
+function format12hLabel2(hours, minutes, locale) {
+  const HOTEL_TZ_OFFSET_HOURS2 = 8;
+  const HOTEL_TZ_IANA2 = "Asia/Manila";
+  const safeHours = (hours % 24 + 24) % 24;
+  const safeMinutes = Math.max(0, Math.min(59, minutes));
+  const utcHours = (safeHours - HOTEL_TZ_OFFSET_HOURS2 + 24) % 24;
+  const reference = new Date(Date.UTC(1970, 0, 1, utcHours, safeMinutes, 0));
+  return new Intl.DateTimeFormat(locale, {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: HOTEL_TZ_IANA2
+  }).format(reference);
+}
+function formatHotelTimeLabel(raw, locale = "en-US") {
+  const text = typeof raw === "string" ? raw.trim() : "";
+  if (!text) return "";
+  const looksLike24h = /^\d{1,2}:\d{2}$/.test(text);
+  const looksLike12h = /^\d{1,2}(:\d{2})?\s*(am|pm)$/i.test(text);
+  if (!looksLike24h && !looksLike12h) return text;
+  const { hours, minutes } = parseCheckInTimeToPair(text);
+  return format12hLabel2(hours, minutes, locale);
+}
+function asRecord2(value) {
+  return value && typeof value === "object" ? value : {};
+}
+function asTrimmedString2(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+function resolveHotelTimes(runtime, fallback, locale = "en-US") {
+  const r4 = asRecord2(runtime);
+  const f5 = asRecord2(fallback);
+  const pick = (key) => asTrimmedString2(r4[key]) || asTrimmedString2(f5[key]);
+  return {
+    checkInTime: formatHotelTimeLabel(pick("checkInTime"), locale),
+    checkOutTime: formatHotelTimeLabel(pick("checkOutTime"), locale)
+  };
+}
+function interpolateHotelTimes(text, times) {
+  if (typeof text !== "string" || !text) return text ?? "";
+  let out = text;
+  if (times.checkInTime) {
+    out = out.split(CHECK_IN_TIME_TOKEN).join(times.checkInTime);
+  }
+  if (times.checkOutTime) {
+    out = out.split(CHECK_OUT_TIME_TOKEN).join(times.checkOutTime);
+  }
+  return out;
+}
+var CHECK_IN_TIME_TOKEN, CHECK_OUT_TIME_TOKEN, HOUSE_RULES_TIME_TOKENS;
+var init_hotelTimes = __esm({
+  "../shared/utils/hotelTimes.ts"() {
+    "use strict";
+    init_bookingPreferences();
+    CHECK_IN_TIME_TOKEN = "{{checkInTime}}";
+    CHECK_OUT_TIME_TOKEN = "{{checkOutTime}}";
+    HOUSE_RULES_TIME_TOKENS = [
+      { token: CHECK_IN_TIME_TOKEN, field: "checkInTime" },
+      { token: CHECK_OUT_TIME_TOKEN, field: "checkOutTime" }
+    ];
+  }
+});
+
 // ../shared/utils/reservationFingerprint.ts
 function defaultHasher() {
   const { createHash } = require("node:crypto");
@@ -151952,123 +152133,6 @@ var init_uploads = __esm({
   }
 });
 
-// ../shared/utils/bookingPreferences.ts
-function resolveBookingPreferenceValues(raw) {
-  const values = [];
-  if (Array.isArray(raw)) {
-    for (const entry of raw) {
-      if (!entry || typeof entry !== "object") continue;
-      const value = entry.value;
-      if (typeof value === "string" && value) values.push(value);
-    }
-  }
-  return values.length > 0 ? values : DEFAULT_BOOKING_PREFERENCES.map((option2) => option2.value);
-}
-function resolveBookingPreferenceOptions(raw) {
-  if (!Array.isArray(raw)) {
-    return DEFAULT_BOOKING_PREFERENCES.map((option2) => ({ ...option2 }));
-  }
-  const out = [];
-  for (const entry of raw) {
-    if (!entry || typeof entry !== "object") continue;
-    const value = entry.value;
-    const label = entry.label;
-    if (typeof value !== "string" || !value) continue;
-    if (typeof label !== "string") continue;
-    const icon = entry.icon;
-    const surchargeNote = entry.surchargeNote;
-    out.push({
-      value,
-      label,
-      icon: typeof icon === "string" ? icon : void 0,
-      surchargeNote: typeof surchargeNote === "string" ? surchargeNote : void 0
-    });
-  }
-  return out;
-}
-function resolveBedSetupOptions(raw) {
-  if (!Array.isArray(raw)) {
-    return DEFAULT_BED_SETUPS.map((option2) => ({ ...option2 }));
-  }
-  const out = [];
-  for (const entry of raw) {
-    if (!entry || typeof entry !== "object") continue;
-    const value = entry.value;
-    const label = entry.label;
-    if (typeof value !== "string" || !value) continue;
-    if (typeof label !== "string") continue;
-    const icon = entry.icon;
-    out.push({
-      value,
-      label,
-      icon: typeof icon === "string" ? icon : void 0
-    });
-  }
-  return out;
-}
-function parseCheckInTimeToPair(timeStr) {
-  const normalized = timeStr.trim().toLowerCase();
-  if (!normalized) return { hours: 14, minutes: 0 };
-  const ampm = normalized.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/);
-  if (ampm) {
-    let hours = Number(ampm[1]);
-    const minutes = Number(ampm[2] ?? "0");
-    const isPm = ampm[3] === "pm";
-    if (hours === 12) hours = isPm ? 12 : 0;
-    else if (isPm) hours += 12;
-    return { hours, minutes };
-  }
-  const h24 = normalized.match(/^(\d{1,2}):(\d{2})$/);
-  if (h24) {
-    const hours = Number(h24[1]);
-    const minutes = Number(h24[2]);
-    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
-      return { hours, minutes };
-    }
-  }
-  return { hours: 14, minutes: 0 };
-}
-function buildArrivalTimeOptions(checkInTimeStr, locale = "en-US") {
-  const base = parseCheckInTimeToPair(checkInTimeStr);
-  const options = [
-    { value: null, label: "I don't know" }
-  ];
-  for (let i2 = 0; i2 < ARRIVAL_WINDOW_HOURS; i2 += 1) {
-    const totalMinutes = base.minutes + (base.hours + i2) * 60;
-    const hours24 = Math.floor(totalMinutes / 60) % 24;
-    const minutes = totalMinutes % 60;
-    options.push({
-      value: formatHHMM(hours24, minutes),
-      label: format12hLabel(hours24, minutes, locale)
-    });
-  }
-  return options;
-}
-function formatHHMM(hours, minutes) {
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-}
-function format12hLabel(hours, minutes, locale) {
-  const safeHours = (hours % 24 + 24) % 24;
-  const safeMinutes = Math.max(0, Math.min(59, minutes));
-  const utcHours = (safeHours - HOTEL_TZ_OFFSET_HOURS + 24) % 24;
-  const reference = new Date(Date.UTC(1970, 0, 1, utcHours, safeMinutes, 0));
-  return new Intl.DateTimeFormat(locale, {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-    timeZone: HOTEL_TZ_IANA
-  }).format(reference);
-}
-var HOTEL_TZ_OFFSET_HOURS, HOTEL_TZ_IANA;
-var init_bookingPreferences = __esm({
-  "../shared/utils/bookingPreferences.ts"() {
-    "use strict";
-    init_constants();
-    HOTEL_TZ_OFFSET_HOURS = 8;
-    HOTEL_TZ_IANA = "Asia/Manila";
-  }
-});
-
 // ../shared/utils/breakfastCutoff.ts
 function parseServiceDateUtc(value) {
   if (typeof value !== "string") return null;
@@ -152976,6 +153040,8 @@ __export(shared_exports, {
   BreakfastServedEntrySchema: () => BreakfastServedEntrySchema,
   CANCELLATION_SOURCES: () => CANCELLATION_SOURCES,
   CHECK_IN_ELIGIBLE_STATUSES: () => CHECK_IN_ELIGIBLE_STATUSES,
+  CHECK_IN_TIME_TOKEN: () => CHECK_IN_TIME_TOKEN,
+  CHECK_OUT_TIME_TOKEN: () => CHECK_OUT_TIME_TOKEN,
   CorporateContentSchema: () => CorporateContentSchema,
   CreateRoomSchema: () => CreateRoomSchema,
   DEFAULT_BED_SETUPS: () => DEFAULT_BED_SETUPS,
@@ -153001,6 +153067,7 @@ __export(shared_exports, {
   GuestDetailsSchema: () => GuestDetailsSchema,
   HOLD_ID_REGEX: () => HOLD_ID_REGEX,
   HOUSEKEEPING_STATUSES: () => HOUSEKEEPING_STATUSES,
+  HOUSE_RULES_TIME_TOKENS: () => HOUSE_RULES_TIME_TOKENS,
   HomepageContentSchema: () => HomepageContentSchema,
   HousekeepingStatusEnum: () => HousekeepingStatusEnum,
   IN_FLOW_HOLD_EXTENSION_STATUSES: () => IN_FLOW_HOLD_EXTENSION_STATUSES,
@@ -153140,6 +153207,7 @@ __export(shared_exports, {
   fadeIn: () => fadeIn,
   fadeUp: () => fadeUp,
   formatHotelAddress: () => formatHotelAddress,
+  formatHotelTimeLabel: () => formatHotelTimeLabel,
   generateBookingRef: () => generateBookingRef,
   generateFreeNightVoucherCode: () => generateFreeNightVoucherCode,
   generateHoldId: () => generateHoldId,
@@ -153168,6 +153236,7 @@ __export(shared_exports, {
   hasAnyOtherAddOns: () => hasAnyOtherAddOns,
   hasBookableAddOns: () => hasBookableAddOns,
   inFlowHoldStayMatches: () => inFlowHoldStayMatches,
+  interpolateHotelTimes: () => interpolateHotelTimes,
   isBookingOccupyingRoom: () => isBookingOccupyingRoom,
   isBotProtectionDisabled: () => isBotProtectionDisabled,
   isBreakfastRateLine: () => isBreakfastRateLine,
@@ -153232,6 +153301,7 @@ __export(shared_exports, {
   resolveBreakfastSlotGuestIndex: () => resolveBreakfastSlotGuestIndex,
   resolveCurrentLevel: () => resolveCurrentLevel,
   resolveHotelContact: () => resolveHotelContact,
+  resolveHotelTimes: () => resolveHotelTimes,
   resolveKitchenGuestName: () => resolveKitchenGuestName,
   resolveMaxStayNights: () => resolveMaxStayNights,
   resolvePaymentMethodLabel: () => resolvePaymentMethodLabel,
@@ -153302,6 +153372,7 @@ var init_shared = __esm({
     init_pricing();
     init_publicSiteCache();
     init_hotelContact();
+    init_hotelTimes();
     init_references();
     init_reservationFingerprint();
     init_roomTypes();
@@ -228337,30 +228408,33 @@ var init_siteUrl = __esm({
 });
 
 // server/lib/hotelContact.ts
-function deployTimeHotelContact() {
-  return resolveHotelContact(null, hotel_config_default);
-}
-async function loadHotelContact() {
+async function loadHotelConfigSource() {
   const now = Date.now();
-  if (cached && now - cachedAt2 < CACHE_TTL_MS2) {
-    return cached;
+  if (cachedSource && now - cachedAt2 < CACHE_TTL_MS2) {
+    return cachedSource;
   }
-  let resolved;
+  let source = {};
   try {
     const doc = await adminDb.collection("settings").doc("hotelConfig").get();
-    resolved = resolveHotelContact(doc.exists ? doc.data() : null, hotel_config_default);
+    source = doc.exists ? doc.data() || {} : {};
   } catch (error) {
     console.warn(
       "[hotel-contact] Failed to load settings/hotelConfig; using the deploy-time fallback.",
       error
     );
-    resolved = deployTimeHotelContact();
+    source = {};
   }
-  cached = resolved;
+  cachedSource = source;
   cachedAt2 = Date.now();
-  return resolved;
+  return source;
 }
-var CACHE_TTL_MS2, cached, cachedAt2;
+async function loadHotelContact() {
+  return resolveHotelContact(await loadHotelConfigSource(), hotel_config_default);
+}
+async function loadHotelTimes() {
+  return resolveHotelTimes(await loadHotelConfigSource(), hotel_config_default, hotel_config_default.locale);
+}
+var CACHE_TTL_MS2, cachedSource, cachedAt2;
 var init_hotelContact2 = __esm({
   "server/lib/hotelContact.ts"() {
     "use strict";
@@ -228368,7 +228442,7 @@ var init_hotelContact2 = __esm({
     init_hotel_config();
     init_firebase_admin();
     CACHE_TTL_MS2 = 6e4;
-    cached = null;
+    cachedSource = null;
     cachedAt2 = 0;
   }
 });
@@ -229268,6 +229342,10 @@ function houseRulesCard(houseRules) {
     `<p style="margin: 0; color: #374151; font-size: 14px; line-height: 1.7; white-space: pre-wrap;">${escapeHtml2(trimmedRules)}</p>`
   );
 }
+async function resolveHouseRulesTimes(houseRules) {
+  if (!houseRules) return houseRules;
+  return interpolateHotelTimes(houseRules, await loadHotelTimes());
+}
 function paymentConfirmedEmail(booking, houseRules) {
   return emailLayout({
     preheader: `Payment received for booking ${booking.bookingRef}.`,
@@ -230062,6 +230140,7 @@ async function sendBookingTrigger(action, booking) {
       console.warn(`Failed to load websiteContent.houseRules for ${action} email; continuing without it.`, error);
       houseRules = null;
     }
+    houseRules = await resolveHouseRulesTimes(houseRules);
   }
   const contact = await loadHotelContact();
   const templates = renderWithContact(contact, () => ({
@@ -230384,10 +230463,11 @@ async function handleEmailPreview(req, res) {
   if (!req.staff?.success) {
     return res.status(401).json({ success: false, error: "Staff authentication is required." });
   }
-  const { template, houseRules } = req.body || {};
+  const { template } = req.body || {};
   if (!template) {
     return res.status(400).json({ success: false, error: "Template parameter is required." });
   }
+  let houseRules = typeof (req.body || {}).houseRules === "string" ? (req.body || {}).houseRules : null;
   const mockBooking = {
     bookingRef: "BK-2026-MOCK",
     guestName: "Juan Dela Cruz",
@@ -230492,6 +230572,7 @@ async function handleEmailPreview(req, res) {
       console.error("Failed to enrich preview with active test run:", previewRunErr);
     }
     const contact = await loadHotelContact();
+    houseRules = await resolveHouseRulesTimes(houseRules);
     const restoreContact = beginContactRender(contact);
     let html = "";
     try {
@@ -247550,10 +247631,10 @@ async function handleGetKitchenList(req, res) {
     });
   }
   const cacheKey = dateRaw;
-  const cached2 = cacheGet(cacheKey);
-  if (cached2) {
+  const cached = cacheGet(cacheKey);
+  if (cached) {
     res.setHeader("X-Cache", "HIT");
-    return res.status(200).json(cached2);
+    return res.status(200).json(cached);
   }
   const payload = await computeKitchenList(dateRaw);
   cacheSet(cacheKey, payload);
@@ -248568,7 +248649,7 @@ init_firebase_admin();
 init_shared();
 init_firebase_admin();
 var DEFAULT_VAT_ENABLED = true;
-function asRecord2(value) {
+function asRecord3(value) {
   return value && typeof value === "object" ? value : {};
 }
 function asString(value, fallback = "") {
@@ -248588,7 +248669,7 @@ function buildRoomTypes(raw) {
   if (!Array.isArray(raw)) return [];
   const out = [];
   for (const entry of raw) {
-    const type = asRecord2(entry);
+    const type = asRecord3(entry);
     const value = asString(type.value);
     if (!value) continue;
     out.push({
@@ -248617,7 +248698,7 @@ function buildPaymentMethods(raw) {
   if (!Array.isArray(raw)) return [];
   const out = [];
   for (const entry of raw) {
-    const method = asRecord2(entry);
+    const method = asRecord3(entry);
     const key = asString(method.method);
     if (!key) continue;
     const showInCorporate = asBoolean(method.showInCorporate, true);
@@ -248643,7 +248724,7 @@ function buildSeasonalRateOverrides(raw) {
   if (!Array.isArray(raw)) return [];
   const out = [];
   for (const entry of raw) {
-    const override = asRecord2(entry);
+    const override = asRecord3(entry);
     const id = asString(override.id);
     if (!id) continue;
     out.push({
@@ -248662,7 +248743,7 @@ function buildBedSetups(raw) {
   if (!Array.isArray(raw)) return void 0;
   const out = [];
   for (const entry of raw) {
-    const option2 = asRecord2(entry);
+    const option2 = asRecord3(entry);
     const value = asString(option2.value);
     const label = asString(option2.label);
     if (!value || !label) continue;
@@ -248675,7 +248756,7 @@ function buildBookingPreferences(raw) {
   if (!Array.isArray(raw)) return void 0;
   const out = [];
   for (const entry of raw) {
-    const option2 = asRecord2(entry);
+    const option2 = asRecord3(entry);
     const value = asString(option2.value);
     const label = asString(option2.label);
     if (!value || !label) continue;
@@ -248691,11 +248772,11 @@ function buildBookingPreferences(raw) {
   return out;
 }
 function buildVatConfig(raw) {
-  const vat = asRecord2(raw);
+  const vat = asRecord3(raw);
   return { enabled: asBoolean(vat.enabled, DEFAULT_VAT_ENABLED) };
 }
 function buildPublicHotelConfig(source, options) {
-  const config2 = asRecord2(source);
+  const config2 = asRecord3(source);
   const rawMaxStayNights = config2.maxStayNights;
   const contact = resolveHotelContact(config2);
   return {
@@ -248737,7 +248818,7 @@ async function loadPublicHotelConfig() {
     adminDb.collection("settings").doc("hotelConfig").get(),
     adminDb.collection("settings").doc("storeConfig").get()
   ]);
-  const storeConfig = storeSnapshot.exists ? asRecord2(storeSnapshot.data()) : {};
+  const storeConfig = storeSnapshot.exists ? asRecord3(storeSnapshot.data()) : {};
   return buildPublicHotelConfig(hotelSnapshot.exists ? hotelSnapshot.data() : null, {
     storeEnabled: storeConfig.isEnabled !== false
   });
