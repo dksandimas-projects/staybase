@@ -174,6 +174,8 @@ The create rule validates: `action` is in the closed set, `targetCollection` is 
 
 Per-booking audit trails for the breakfast and other-add-on selections, written by the server (Admin SDK) and read by the admin Reports "Late changes" metric via `collectionGroup(db, "breakfastAudit")` / `collectionGroup(db, "otherAddOnAudit")`.
 
+The booking drawer's **History tab** (2026-11-21) ALSO reads them directly, per booking, at `bookings/{id}/breakfastAudit` and `bookings/{id}/otherAddOnAudit` — the `match /{path=**}/…` group rules below cover those paths too, so no new rule block was needed.
+
 Firestore requires an **explicit collectionGroup rule** for a cross-document group query — the per-document rule under `bookings/{id}/…` only covers direct path reads. Without it the client listener fails with "Missing or insufficient permissions" the moment the Reports tab mounts:
 
 ```

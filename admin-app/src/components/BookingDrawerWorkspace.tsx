@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   CreditCard,
+  History,
   LayoutDashboard,
   Loader2,
   Mail,
@@ -161,7 +162,14 @@ async function postMarkRefundPaid(input: {
   }
 }
 
-export type BookingDrawerSection = "overview" | "check-in" | "folio" | "breakfast" | "addons" | "more";
+export type BookingDrawerSection =
+  | "overview"
+  | "check-in"
+  | "folio"
+  | "breakfast"
+  | "addons"
+  | "history"
+  | "more";
 
 interface BookingDrawerWorkspaceHeaderProps {
   booking: Booking;
@@ -230,6 +238,11 @@ const sections: Array<{
   // per-day × per-guest) selection map. Add-on names +
   // per-date quantity grid + served-stamp badge.
   { id: "addons", desktopLabel: "Other Add-Ons", mobileLabel: "Add-Ons", icon: Sparkles },
+  // Per ATR-08 follow-up (2026-11-21): the booking drawer's
+  // HISTORY tab — the per-booking timeline of who changed
+  // what, and when. It sits next to "Activity & More"
+  // because both are informational rather than operational.
+  { id: "history", desktopLabel: "History", mobileLabel: "History", icon: History },
   { id: "more", desktopLabel: "Activity & More", mobileLabel: "More", icon: MoreHorizontal }
 ];
 
@@ -460,7 +473,27 @@ export function BookingDrawerWorkspaceHeader({
         className="sticky top-0 z-10 -mx-5 overflow-x-auto border-y border-gray-200 bg-white px-5 py-2 sm:mx-0 sm:rounded-card sm:border"
         aria-label="Booking drawer sections"
       >
-        <div className="grid min-w-[420px] grid-cols-5 gap-1" role="tablist">
+        {/*
+          Per ATR-08 follow-up (2026-11-21): the tab row is a
+          CONTENT-WIDTH scrolling row, not a fixed-column grid.
+
+          WHY: the drawer has SEVEN sections since the History tab
+          landed, and the previous `grid-cols-5` was already
+          wrapping its sixth tab onto a second row (a latent wart
+          from the day the Other Add-Ons tab was added). With seven
+          sections a fixed grid either wraps or forces the longest
+          label ("Breakfast") to overflow its cell — neither is
+          acceptable.
+
+          The nav was ALREADY horizontally scrollable (the
+          `overflow-x-auto` on the nav element, with a
+          `min-w-[420px]` row that exceeds a 375px viewport), so
+          the scrolling row preserves the established mobile
+          behaviour while making every tab readable at its own
+          natural width. The buttons keep their 44px touch
+          target and never shrink.
+        */}
+        <div className="flex min-w-max gap-1" role="tablist">
           {sections.map(({ id, desktopLabel, mobileLabel, icon: Icon }) => {
             const active = activeSection === id;
             return (
@@ -473,7 +506,7 @@ export function BookingDrawerWorkspaceHeader({
                 id={`booking-drawer-tab-${id}`}
                 onClick={() => onSectionChange(id)}
                 className={cn(
-                  "inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg px-2 text-[11px] font-bold transition sm:text-xs",
+                  "inline-flex min-h-[44px] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 text-[11px] font-bold transition sm:text-xs",
                   active ? "bg-primary text-white shadow-sm" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                 )}
               >

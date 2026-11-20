@@ -279,6 +279,7 @@ Pages with a single primary action that should be reachable one-handed (Bookings
 - [x] Walk-in modal: no `mm/dd/yyyy` browser native picker — keep the existing `type="date"` for now (the Stitch shows a custom picker; deferring to P2)
 - [x] Walk-in modal sticky footer: single full-width **"Create Booking"** orange button
 - [x] Booking detail drawer: full-screen sheet, header shows "spark inn" + booking ref chip + X close
+- [x] Booking detail drawer tab row: a CONTENT-WIDTH horizontally-scrolling row (`flex min-w-max`), not a fixed-column grid — the drawer has SEVEN sections since the History tab landed (2026-11-21), and a fixed grid either wraps its last tab onto a second row or forces the longest label ("Breakfast") to overflow its cell. The nav was already horizontally scrollable, so this preserves the established mobile behaviour while keeping every label readable. Each tab keeps its 44×44px touch target and never shrinks.
 - [x] Booking detail drawer: single-column layout (Stitch shows everything in 1 col on mobile, with `ROOM TYPE` / `ROOM NUMBER` etc. as label-value pairs stacked, not a 2-col grid)
 - [x] Booking detail drawer sticky footer: **"Generate Receipt"** full-width orange button (Stitch shows this specific label, not "Save" or "Confirm")
 - [x] Long drawer sections collapsible on mobile — keep the in-page collapsible pattern, defer to P1

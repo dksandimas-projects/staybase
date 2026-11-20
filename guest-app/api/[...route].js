@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.29.0";
+    VERSION2 = "2.30.0";
   }
 });
 
@@ -151526,6 +151526,347 @@ var init_staffNames = __esm({
   }
 });
 
+// ../shared/utils/money.ts
+function roundToTwoDecimals(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.round(numeric * 100) / 100;
+}
+var init_money = __esm({
+  "../shared/utils/money.ts"() {
+    "use strict";
+  }
+});
+
+// ../shared/utils/otherAddOnTotal.ts
+function recomputeOtherAddOnTotal(selections) {
+  if (!selections) return 0;
+  let total = 0;
+  for (const dateKey2 of Object.keys(selections)) {
+    const items = selections[dateKey2];
+    if (!Array.isArray(items)) continue;
+    for (const entry of items) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+      const price = Math.max(0, Number(entry.priceSnapshot) || 0);
+      const qty = Math.max(0, Math.floor(Number(entry.quantity) || 0));
+      total += price * qty;
+    }
+  }
+  return roundToTwoDecimals(total);
+}
+function otherAddOnBreakdownByDate(selections) {
+  if (!selections) return [];
+  const rows = [];
+  const dates = Object.keys(selections).sort();
+  for (const date of dates) {
+    const items = selections[date];
+    if (!Array.isArray(items) || items.length === 0) continue;
+    let s4 = 0;
+    let n2 = 0;
+    for (const entry of items) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+      const price = Math.max(0, Number(entry.priceSnapshot) || 0);
+      const qty = Math.max(0, Math.floor(Number(entry.quantity) || 0));
+      if (qty > 0) {
+        s4 += price * qty;
+        n2 += 1;
+      }
+    }
+    if (n2 > 0) {
+      rows.push({ date, subtotal: roundToTwoDecimals(s4), itemCount: n2 });
+    }
+  }
+  return rows;
+}
+function hasAnyOtherAddOns(selections) {
+  if (!selections) return false;
+  for (const date of Object.keys(selections)) {
+    const items = selections[date];
+    if (!Array.isArray(items)) continue;
+    for (const entry of items) {
+      if (!entry) continue;
+      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
+      if (Math.max(0, Math.floor(Number(entry.quantity) || 0)) > 0) return true;
+    }
+  }
+  return false;
+}
+function buildOtherAddOnSelectionKey(date, addOnId) {
+  return `${date}-${String(addOnId).trim()}`;
+}
+function parseOtherAddOnSelectionKey(key) {
+  const trimmed = String(key || "").trim();
+  if (!trimmed) return null;
+  if (trimmed.length < 14) return null;
+  const date = trimmed.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const addOnId = trimmed.slice(11);
+  if (!addOnId) return null;
+  return { date, addOnId };
+}
+var init_otherAddOnTotal = __esm({
+  "../shared/utils/otherAddOnTotal.ts"() {
+    "use strict";
+    init_money();
+  }
+});
+
+// ../shared/utils/bookingHistory.ts
+function asText(value) {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return "";
+}
+function asNumber(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+function toIsoTimestamp(value) {
+  if (value === null || value === void 0 || value === "") return null;
+  if (typeof value === "object") {
+    const candidate = value;
+    if (typeof candidate.toDate === "function") {
+      const date = candidate.toDate();
+      return Number.isNaN(date.getTime()) ? null : date.toISOString();
+    }
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime()) ? null : value.toISOString();
+    }
+    return null;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+  if (typeof value === "string") {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+  return null;
+}
+function asActorRole(value) {
+  const text = asText(value);
+  if (text === "guest" || text === "front-desk" || text === "admin" || text === "system") {
+    return text;
+  }
+  return null;
+}
+function breakfastAuditEvent(row2, fallbackId = "") {
+  if (!row2 || typeof row2 !== "object") return null;
+  const data = row2;
+  const action = asText(data.action);
+  if (!action) return null;
+  const slot = parseBreakfastSlotKey(asText(data.slotKey));
+  const snapshot = data.mealSnapshot || null;
+  const mealName = asText(snapshot?.mealName) || null;
+  const base = action.startsWith("override-") ? action.slice("override-".length) : action;
+  const late2 = action.startsWith("override-");
+  const summaries = {
+    add: "Added breakfast",
+    change: "Changed breakfast",
+    remove: "Removed breakfast",
+    serve: "Marked breakfast served",
+    unserve: "Marked breakfast not served"
+  };
+  const summary = summaries[base];
+  if (!summary) return null;
+  return {
+    id: asText(data.id) || fallbackId,
+    kind: "breakfast-change",
+    at: toIsoTimestamp(data.occurredAt),
+    actorUid: asText(data.actorUid) || null,
+    actorRole: asActorRole(data.actorRole),
+    actorName: null,
+    summary: late2 ? `${summary} (late change)` : summary,
+    subject: mealName,
+    serviceDate: slot?.serviceDate ?? null,
+    guestIndex: slot ? slot.rawIndex : null,
+    reason: asText(data.reason) || null,
+    note: null,
+    amount: null,
+    quantity: null,
+    lateChange: Boolean(data.occurredAfterCutoff) || late2
+  };
+}
+function otherAddOnAuditEvent(row2, fallbackId = "") {
+  if (!row2 || typeof row2 !== "object") return null;
+  const data = row2;
+  const action = asText(data.action);
+  if (!action) return null;
+  const key = parseOtherAddOnSelectionKey(asText(data.selectionKey));
+  const snapshot = data.addOnSnapshot || null;
+  const addOnName = asText(snapshot?.name) || null;
+  const quantity = asNumber(snapshot?.quantity);
+  const base = action.startsWith("override-") ? action.slice("override-".length) : action;
+  const late2 = action.startsWith("override-");
+  const summaries = {
+    add: "Added add-on",
+    change: "Changed add-on",
+    remove: "Removed add-on",
+    "mark-served": "Marked add-on served"
+  };
+  const summary = summaries[base];
+  if (!summary) return null;
+  return {
+    id: asText(data.id) || fallbackId,
+    kind: "add-on-change",
+    at: toIsoTimestamp(data.occurredAt),
+    actorUid: asText(data.actorUid) || null,
+    actorRole: asActorRole(data.actorRole),
+    actorName: null,
+    summary: late2 ? `${summary} (late change)` : summary,
+    subject: addOnName,
+    serviceDate: key?.date ?? null,
+    guestIndex: null,
+    reason: asText(data.reason) || null,
+    note: null,
+    amount: null,
+    quantity,
+    lateChange: Boolean(data.occurredAfterCutoff) || late2
+  };
+}
+function incidentalChargeEvent(row2, fallbackId = "") {
+  if (!row2 || typeof row2 !== "object") return null;
+  const data = row2;
+  const label = asText(data.label) || "Incidental charge";
+  const amount = asNumber(data.amount);
+  const isReversal = Boolean(asText(data.voidOf));
+  return {
+    id: asText(data.id) || fallbackId,
+    kind: "charge",
+    at: toIsoTimestamp(data.addedAt),
+    actorUid: asText(data.addedBy) || null,
+    actorRole: null,
+    actorName: null,
+    summary: isReversal ? "Reversed a charge" : "Added an incidental charge",
+    subject: label,
+    serviceDate: null,
+    guestIndex: null,
+    reason: null,
+    note: asText(data.note) || null,
+    amount,
+    quantity: null,
+    lateChange: false
+  };
+}
+function bookingMilestoneEvents(booking) {
+  if (!booking || typeof booking !== "object") return [];
+  const data = booking;
+  const events = [];
+  const push = (kind, summary, at3, actorUid, actorName, actorRole = null) => {
+    if (!at3) return;
+    events.push({
+      id: `${kind}:${at3}`,
+      kind,
+      at: at3,
+      actorUid,
+      actorRole,
+      actorName,
+      summary,
+      subject: null,
+      serviceDate: null,
+      guestIndex: null,
+      reason: null,
+      note: null,
+      amount: null,
+      quantity: null,
+      lateChange: false
+    });
+  };
+  const createdBy = asText(data.createdBy);
+  push(
+    "created",
+    "Booking created",
+    toIsoTimestamp(data.createdAt),
+    createdBy || null,
+    asText(data.createdByName) || null,
+    createdBy === "guest" ? "guest" : null
+  );
+  push(
+    "checked-in",
+    "Checked in",
+    toIsoTimestamp(data.checkedInAt),
+    asText(data.checkedInBy) || null,
+    asText(data.checkedInByName) || null
+  );
+  push(
+    "checked-out",
+    "Checked out",
+    toIsoTimestamp(data.checkedOutAt),
+    asText(data.checkedOutBy) || null,
+    asText(data.checkedOutByName) || null
+  );
+  const cancelledBy = asText(data.cancelledBy);
+  push(
+    "cancelled",
+    "Booking cancelled",
+    toIsoTimestamp(data.cancelledAt),
+    cancelledBy || null,
+    null,
+    cancelledBy === "guest" ? "guest" : cancelledBy === "system" ? "system" : null
+  );
+  push(
+    "payment-confirmed",
+    "Payment verified",
+    toIsoTimestamp(data.paymentConfirmedAt),
+    null,
+    null
+  );
+  push(
+    "payment-rejected",
+    "Payment rejected",
+    toIsoTimestamp(data.paymentRejectedAt),
+    asText(data.paymentRejectedBy) || null,
+    null
+  );
+  push(
+    "special-requests-updated",
+    "Updated special requests",
+    toIsoTimestamp(data.specialRequestsUpdatedAt),
+    asText(data.specialRequestsUpdatedBy) || null,
+    null
+  );
+  return events.sort((a, b3) => {
+    if (!a.at && !b3.at) return 0;
+    if (!a.at) return 1;
+    if (!b3.at) return -1;
+    return b3.at.localeCompare(a.at);
+  });
+}
+function mergeBookingHistoryEvents(...groups) {
+  const merged = groups.flat().filter((event) => Boolean(event));
+  return merged.sort((a, b3) => {
+    if (!a.at && !b3.at) return 0;
+    if (!a.at) return 1;
+    if (!b3.at) return -1;
+    return b3.at.localeCompare(a.at);
+  });
+}
+function bookingHistoryActorLabel(event, staffNameMap, fallback = "Staff") {
+  if (event.actorRole === "guest") return "Guest";
+  if (event.actorRole === "system") return "System";
+  if (event.actorName) return event.actorName;
+  if (event.actorUid) {
+    const resolved = staffNameFor(staffNameMap, event.actorUid, "");
+    if (resolved) return resolved;
+  }
+  return fallback;
+}
+var init_bookingHistory = __esm({
+  "../shared/utils/bookingHistory.ts"() {
+    "use strict";
+    init_breakfastSlotKey();
+    init_otherAddOnTotal();
+    init_staffNames();
+  }
+});
+
 // ../shared/utils/seasonalRates.ts
 function dateKey(value) {
   return startOfDayUtc(value).toISOString().slice(0, 10);
@@ -152483,93 +152824,6 @@ var init_breakfastCutoff = __esm({
   }
 });
 
-// ../shared/utils/money.ts
-function roundToTwoDecimals(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return 0;
-  return Math.round(numeric * 100) / 100;
-}
-var init_money = __esm({
-  "../shared/utils/money.ts"() {
-    "use strict";
-  }
-});
-
-// ../shared/utils/otherAddOnTotal.ts
-function recomputeOtherAddOnTotal(selections) {
-  if (!selections) return 0;
-  let total = 0;
-  for (const dateKey2 of Object.keys(selections)) {
-    const items = selections[dateKey2];
-    if (!Array.isArray(items)) continue;
-    for (const entry of items) {
-      if (!entry) continue;
-      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
-      const price = Math.max(0, Number(entry.priceSnapshot) || 0);
-      const qty = Math.max(0, Math.floor(Number(entry.quantity) || 0));
-      total += price * qty;
-    }
-  }
-  return roundToTwoDecimals(total);
-}
-function otherAddOnBreakdownByDate(selections) {
-  if (!selections) return [];
-  const rows = [];
-  const dates = Object.keys(selections).sort();
-  for (const date of dates) {
-    const items = selections[date];
-    if (!Array.isArray(items) || items.length === 0) continue;
-    let s4 = 0;
-    let n2 = 0;
-    for (const entry of items) {
-      if (!entry) continue;
-      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
-      const price = Math.max(0, Number(entry.priceSnapshot) || 0);
-      const qty = Math.max(0, Math.floor(Number(entry.quantity) || 0));
-      if (qty > 0) {
-        s4 += price * qty;
-        n2 += 1;
-      }
-    }
-    if (n2 > 0) {
-      rows.push({ date, subtotal: roundToTwoDecimals(s4), itemCount: n2 });
-    }
-  }
-  return rows;
-}
-function hasAnyOtherAddOns(selections) {
-  if (!selections) return false;
-  for (const date of Object.keys(selections)) {
-    const items = selections[date];
-    if (!Array.isArray(items)) continue;
-    for (const entry of items) {
-      if (!entry) continue;
-      if (entry.removedAt !== null && entry.removedAt !== void 0) continue;
-      if (Math.max(0, Math.floor(Number(entry.quantity) || 0)) > 0) return true;
-    }
-  }
-  return false;
-}
-function buildOtherAddOnSelectionKey(date, addOnId) {
-  return `${date}-${String(addOnId).trim()}`;
-}
-function parseOtherAddOnSelectionKey(key) {
-  const trimmed = String(key || "").trim();
-  if (!trimmed) return null;
-  if (trimmed.length < 14) return null;
-  const date = trimmed.slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-  const addOnId = trimmed.slice(11);
-  if (!addOnId) return null;
-  return { date, addOnId };
-}
-var init_otherAddOnTotal = __esm({
-  "../shared/utils/otherAddOnTotal.ts"() {
-    "use strict";
-    init_money();
-  }
-});
-
 // ../shared/utils/bookingAddOnReschedule.ts
 function enumerateStayServiceDates(window2) {
   const dates = [];
@@ -153397,6 +153651,9 @@ __export(shared_exports, {
   assertBookingFinanceInvariant: () => assertBookingFinanceInvariant,
   assertBookingRevenueAllocationInvariant: () => assertBookingRevenueAllocationInvariant,
   assertRevenueFinanceInvariant: () => assertRevenueFinanceInvariant,
+  bookingHistoryActorLabel: () => bookingHistoryActorLabel,
+  bookingMilestoneEvents: () => bookingMilestoneEvents,
+  breakfastAuditEvent: () => breakfastAuditEvent,
   buildArrivalTimeOptions: () => buildArrivalTimeOptions,
   buildAuditEntry: () => buildAuditEntry,
   buildBreakfastRateBreakdownLines: () => buildBreakfastRateBreakdownLines,
@@ -153494,6 +153751,7 @@ __export(shared_exports, {
   hasAnyOtherAddOns: () => hasAnyOtherAddOns,
   hasBookableAddOns: () => hasBookableAddOns,
   inFlowHoldStayMatches: () => inFlowHoldStayMatches,
+  incidentalChargeEvent: () => incidentalChargeEvent,
   interpolateHotelTimes: () => interpolateHotelTimes,
   isAuditAction: () => isAuditAction,
   isAuditRedactedField: () => isAuditRedactedField,
@@ -153520,6 +153778,7 @@ __export(shared_exports, {
   isVatEnabled: () => isVatEnabled,
   isWeekendNight: () => isWeekendNight,
   mapBookingStatusToReservationPaymentStatus: () => mapBookingStatusToReservationPaymentStatus,
+  mergeBookingHistoryEvents: () => mergeBookingHistoryEvents,
   nextSequence: () => nextSequence,
   normalizeAddOn: () => normalizeAddOn,
   normalizeBotProtectionMode: () => normalizeBotProtectionMode,
@@ -153537,6 +153796,7 @@ __export(shared_exports, {
   normalizeSeasonalRateOverrides: () => normalizeSeasonalRateOverrides,
   normalizeStayRange: () => normalizeStayRange,
   normalizeVatConfig: () => normalizeVatConfig,
+  otherAddOnAuditEvent: () => otherAddOnAuditEvent,
   otherAddOnBreakdownByDate: () => otherAddOnBreakdownByDate,
   otherAddOnDraftKey: () => otherAddOnDraftKey,
   parseBreakfastSlotKey: () => parseBreakfastSlotKey,
@@ -153594,6 +153854,7 @@ __export(shared_exports, {
   sweepBookingsStorage: () => sweepBookingsStorage,
   toDateOrNow: () => toDateOrNow,
   toDateOrNull: () => toDateOrNull,
+  toIsoTimestamp: () => toIsoTimestamp,
   toUtcDateKey: () => toUtcDateKey,
   validateCorporateCode: () => validateCorporateCode,
   validatePointsRedemption: () => validatePointsRedemption,
@@ -153643,6 +153904,7 @@ var init_shared = __esm({
     init_reservationFingerprint();
     init_roomTypes();
     init_staffNames();
+    init_bookingHistory();
     init_seasonalRates();
     init_storageJanitor();
     init_storePaymentMethods();
@@ -249001,7 +249263,7 @@ function asRecord3(value) {
 function asString(value, fallback = "") {
   return typeof value === "string" ? value : fallback;
 }
-function asNumber(value, fallback = 0) {
+function asNumber2(value, fallback = 0) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
 }
@@ -249026,12 +249288,12 @@ function buildRoomTypes(raw) {
       bedDefinition: asString(type.bedDefinition),
       description: asString(type.description),
       amenities: asStringArray(type.amenities),
-      maxCapacity: asNumber(type.maxCapacity, 1),
-      maxChildren: asNumber(type.maxChildren, 0),
-      pricePerNight: asNumber(type.pricePerNight, 0),
-      weekendRate: asNumber(type.weekendRate, 0),
-      maxExtraBeds: asNumber(type.maxExtraBeds, 0),
-      extraBedRate: asNumber(type.extraBedRate, 0),
+      maxCapacity: asNumber2(type.maxCapacity, 1),
+      maxChildren: asNumber2(type.maxChildren, 0),
+      pricePerNight: asNumber2(type.pricePerNight, 0),
+      weekendRate: asNumber2(type.weekendRate, 0),
+      maxExtraBeds: asNumber2(type.maxExtraBeds, 0),
+      extraBedRate: asNumber2(type.extraBedRate, 0),
       bedSetupValues: asStringArray(type.bedSetupValues)
       // Per F09 / SEC-6: `corporateRate` is DELIBERATELY not copied.
       // The negotiated corporate ladder never reaches a browser
@@ -249078,7 +249340,7 @@ function buildSeasonalRateOverrides(raw) {
       name: asString(override.name),
       startDate: asString(override.startDate),
       endDate: asString(override.endDate),
-      rate: asNumber(override.rate, 0),
+      rate: asNumber2(override.rate, 0),
       roomTypeValues: asStringArray(override.roomTypeValues),
       isActive: asBoolean(override.isActive, true)
     });
