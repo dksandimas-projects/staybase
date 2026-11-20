@@ -6,6 +6,7 @@ import { doc, getDoc } from "firebase/firestore";
 import config from "@config";
 import { db } from "../firebase/config";
 import { Footer } from "../components/Footer";
+import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 import { Navbar } from "../components/Navbar";
 
 export function TermsPage() {
@@ -24,6 +25,12 @@ export function TermsPage() {
   const [customBody, setCustomBody] = useState<string | null>(null);
   const [customVersion, setCustomVersion] = useState<string | null>(null);
   const [customLastUpdated, setCustomLastUpdated] = useState<string | null>(null);
+  // Per HC-01 (decision #328): the support email in the Contact
+  // section is the hotel's RUNTIME support address (admin-editable
+  // in Settings → Hotel Info), with the deploy-time config as the
+  // fallback.
+  const { contact } = usePublicSiteContent();
+  const supportEmail = contact?.supportEmail || config.supportEmail;
 
   useEffect(() => {
     let cancelled = false;
@@ -191,8 +198,8 @@ export function TermsPage() {
                   <p className="text-sm font-semibold text-gray-900">{config.legalName}</p>
                   <p className="flex items-center gap-2 text-xs text-gray-600">
                     <Mail size={16} className="text-primary" />
-                    <a href={`mailto:${config.supportEmail}`} className="font-bold text-primary hover:underline">
-                      {config.supportEmail}
+                    <a href={`mailto:${supportEmail}`} className="font-bold text-primary hover:underline">
+                      {supportEmail}
                     </a>
                   </p>
                 </div>

@@ -30,7 +30,7 @@ import type {
   PublicVatConfig,
   SeasonalRateOverride
 } from "@spark-inn/shared";
-import { normalizeBotProtectionMode, type BotProtectionMode } from "@spark-inn/shared";
+import { normalizeBotProtectionMode, resolveHotelContact, type BotProtectionMode } from "@spark-inn/shared";
 import { adminDb } from "./firebase-admin";
 
 const DEFAULT_VAT_ENABLED = true;
@@ -220,12 +220,19 @@ export function buildPublicHotelConfig(
 ): PublicHotelConfigProjection {
   const config = asRecord(source);
   const rawMaxStayNights = config.maxStayNights;
+  // Per HC-01 (decision #328): the four CONTACT fields go through the
+  // SHARED resolver, so the public projection normalises the address
+  // the same way every other surface does — it accepts both the
+  // runtime STRING the admin typed and the structured
+  // `{ street, city, region, postalCode }` object, and it never reads
+  // the legacy `contactEmail` / `contactPhone` fields.
+  const contact = resolveHotelContact(config);
   return {
     brandName: asString(config.brandName),
-    address: asString(config.address),
-    frontDeskPhone: asString(config.frontDeskPhone),
-    supportEmail: asString(config.supportEmail),
-    dpoEmail: asString(config.dpoEmail),
+    address: contact.address,
+    frontDeskPhone: contact.frontDeskPhone,
+    supportEmail: contact.supportEmail,
+    dpoEmail: contact.dpoEmail,
     facebookUrl: asString(config.facebookUrl),
     instagramUrl: asString(config.instagramUrl),
     twitterHandle: asString(config.twitterHandle),

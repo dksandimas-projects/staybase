@@ -6,7 +6,7 @@ import config from "@config";
 import { Navbar } from "../components/Navbar";
 import { Footer } from "../components/Footer";
 import { PrimaryButton } from "../components/PrimaryButton";
-import { fadeUp } from "@spark-inn/shared";
+import { fadeUp, formatHotelAddress } from "@spark-inn/shared";
 import { usePublicSiteContent } from "../hooks/usePublicSiteContent";
 import { useTurnstileToken } from "../hooks/useTurnstileToken";
 // Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide bot-protection
@@ -22,7 +22,7 @@ export function ContactPage() {
   // wins when set. Required values use deploy-time fallbacks, while
   // explicitly blank social values hide their matching icons.
   const { contact } = usePublicSiteContent();
-  const addressString = contact?.address || `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
+  const addressString = contact?.address || formatHotelAddress(config.address);
   const phone = contact?.frontDeskPhone || config.frontDeskPhone;
   const supportEmail = contact?.supportEmail || config.supportEmail;
   const facebook = contact?.facebookUrl ?? config.facebookUrl;

@@ -14,6 +14,8 @@ Covers three related concerns: Resend email flows via Vercel API routes, jsPDF r
 
 All email sent through Vercel API routes. From address: `sparkinn.dev@gmail.com` via Resend.
 
+**The hotel's CONTACT details have ONE source of truth (HC-01, decision #328).** The footer of every guest email (the address, the front-desk phone, the support email), the receipt-PDF header, the `mailto:` CTA links and the Resend `replyTo` are resolved from **`settings/hotelConfig`** — the document the admin edits in Settings → Hotel Info — with `hotel.config.ts` as the DEPLOY-TIME FALLBACK for a field the runtime document does not carry. The server reads it through `guest-app/server/lib/hotelContact.ts` (`loadHotelContact()`, 60s cache) and every surface resolves it through the shared `resolveHotelContact` (`shared/utils/hotelContact.ts`), which also normalises the address (a one-line string in the runtime document; a `{ street, city, region, postalCode }` object in `hotel.config.ts`) and NEVER reads the legacy `contactEmail` / `contactPhone` fields. The Resend **sender identity** is a separate concern and stays env-driven (`RESEND_FROM_EMAIL` / `RESEND_ADMIN_EMAIL`).
+
 **All links inside emails (CTAs, my-booking magic links, intercom deep links, store-order chat cards, brand assets) are env-aware** (2026-07-24 fix) — they route through `siteUrl()` / `adminUrl()` in `guest-app/server/handlers/email.ts`, which resolve via `getServerBaseUrl()` / `getServerAdminBaseUrl()` in `guest-app/server/lib/siteUrl.ts`. On `VERCEL_ENV=production` → `https://www.${config.domain}`; on `VERCEL_ENV=preview|development` (the Vercel Preview deploy of `dev`) or unset → `https://stg.${config.domain}`. `SITE_URL` / `ADMIN_SITE_URL` env vars override for white-label clients whose staging host doesn't follow the `stg.` convention. See `plan/docs/ENV-SETUP.md` for the env var reference. SEO canonical URLs and OG image URLs stay hardcoded to production — they must always be the real public URL.
 
 | Trigger | API Route | Recipient | When |
@@ -95,8 +97,8 @@ Triggered by `/api/email/discount-rejected` when staff rejects a Senior Citizen 
 - Payment notice: "Your booking remains confirmed. The full rate of **₱{restoredTotalPrice}** will be collected upon check-in. Please note that we still welcome you to present a valid {OSCA Card / PWD ID} at check-in for our team's manual review."
 - Booking summary: booking ref, room, check-in date, check-out date, updated total
 - CTA button: "View My Booking" → `/my-booking`
-- Closing: "If you believe this is an error, please contact us at {config.contactEmail} or call {config.contactPhone}."
-- Hotel contact block + footer
+- Closing: "If you believe this is an error, please contact our support team right away."
+- Hotel contact block + footer (address / front-desk phone / support email — resolved from `settings/hotelConfig`, see HC-01 above)
 
 **Checklist:**
 - [x] Triggered server-side via `/api/email/discount-rejected` (staff-auth required)

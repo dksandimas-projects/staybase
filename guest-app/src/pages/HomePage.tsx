@@ -2,7 +2,7 @@ import { BedDouble, Car, ChevronDown, Coffee, Gift, MapPin, Minus, Palmtree, Plu
 import { motion, useReducedMotion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { fadeUp, getDateKeyInTimezone, staggerChild, staggerContainer } from "@spark-inn/shared";
+import { fadeUp, formatHotelAddress, getDateKeyInTimezone, staggerChild, staggerContainer } from "@spark-inn/shared";
 import config from "@config";
 import { DateRangePicker } from "../components/DateRangePicker";
 import { Footer } from "../components/Footer";
@@ -55,7 +55,7 @@ export function HomePage() {
   const shouldReduceMotion = useReducedMotion();
   const { rooms, loading } = useRooms();
   const { roomTypes } = useRoomTypes();
-  const { homepage } = usePublicSiteContent();
+  const { homepage, contact } = usePublicSiteContent();
   const { user, memberProfile } = useGuestAuth();
   const [checkIn, setCheckIn] = useState(() => getDateKeyInTimezone(config.timezone, 1));
   const [checkOut, setCheckOut] = useState(() => getDateKeyInTimezone(config.timezone, 2));
@@ -184,7 +184,10 @@ export function HomePage() {
     navigate(`/book?${params.toString()}`);
   }
 
-  const address = `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
+  // Per HC-01 (decision #328): the map pin uses the RUNTIME
+  // address the admin set in Settings → Hotel Info, with the
+  // deploy-time config as the fallback.
+  const address = contact?.address || formatHotelAddress(config.address);
   const mapQuery = encodeURIComponent(address);
   const entranceProps = shouldReduceMotion
     ? {}

@@ -18,7 +18,11 @@ import {
   // the rest of the public hotelConfig read so the live
   // preview is consistent with the admin drawer + Reports.
   DEFAULT_VAT_CONFIG,
-  type VatConfig
+  type VatConfig,
+  // Per HC-01 (decision #328): the SHARED address formatter, so the
+  // deploy-time fallback renders in the same shape as the runtime
+  // string the admin typed on `settings/hotelConfig`.
+  formatHotelAddress
 } from "@spark-inn/shared";
 import {
   homepageHeroImage,
@@ -300,8 +304,13 @@ function buildFallback(): PublicSiteContent {
       // before the Firestore `settings/hotelConfig` doc resolves.
       // Missing Firestore fields fall back here. Explicitly empty
       // social fields are preserved later by `pickOptionalString`.
+      //
+      // Per HC-01 (decision #328): the address goes through the
+      // SHARED `formatHotelAddress` helper, so the deploy-time
+      // fallback renders in exactly the same shape as the runtime
+      // string the admin typed (`street, city, region, postalCode`).
       address: config.address
-        ? `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`
+        ? formatHotelAddress(config.address)
         : "",
       frontDeskPhone: config.frontDeskPhone,
       supportEmail: config.supportEmail,

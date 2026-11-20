@@ -800,6 +800,16 @@ HotelConfig {
   frontDeskPhone: string  // used as tel: fallback in WebRTC intercom call
   supportEmail: string    // public-facing support email (Footer / Contact)
   dpoEmail: string        // Data Protection Officer email (Privacy page)
+  // Per HC-01 (decision #328): the four fields above (address,
+  // frontDeskPhone, supportEmail, dpoEmail) have ONE source of truth
+  // — this document. `hotel.config.ts` is the DEPLOY-TIME FALLBACK
+  // for a field this document does not carry. Every surface resolves
+  // them through the SHARED resolver
+  // (`shared/utils/hotelContact.ts` → `resolveHotelContact`), which
+  // also normalises the `address` (the runtime document stores the
+  // admin's one-line string; `hotel.config.ts` stores a structured
+  // `{ street, city, region, postalCode }` object) and NEVER reads the
+  // legacy `contactEmail` / `contactPhone` fields.
   facebookUrl: string
   instagramUrl: string
   twitterHandle: string

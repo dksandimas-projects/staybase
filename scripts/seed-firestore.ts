@@ -54,14 +54,17 @@ async function seedHotelConfig() {
     roomTypes: [...DEFAULT_ROOM_TYPES],
     legalName: "Spark Inn Hotel Corp",
     tagline: "Where comfort is felt, care is intentional, and every stay is consistent.",
-    address: {
-      street: "J. Borja St",
-      city: "Tagbilaran City",
-      region: "Bohol",
-      postalCode: "6300",
-    },
-    contactEmail: "sparkinn.dev@gmail.com",
-    contactPhone: "+63-38-000-0000",
+    // Per HC-01 (decision #328): the contact details are the
+    // CANONICAL runtime fields — `address` (one line, a STRING),
+    // `frontDeskPhone`, `supportEmail` and `dpoEmail`. The seed used
+    // to write the LEGACY `contactEmail` / `contactPhone` fields (which
+    // the admin stopped writing in Phase 11.8) and a STRUCTURED
+    // `address` object, so a fresh seed produced a document no
+    // surface could read the contact details from.
+    address: "J. Borja St, Poblacion II, Tagbilaran City, Bohol, 6300",
+    frontDeskPhone: "09619863021",
+    supportEmail: "sparkinn.reservations@gmail.com",
+    dpoEmail: "",
     facebookUrl: "",
     instagramUrl: "",
     checkInTime: "14:00",
