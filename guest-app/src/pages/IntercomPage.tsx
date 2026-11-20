@@ -133,6 +133,44 @@ interface ActiveOrder {
   estimatedDelivery: string;
 }
 
+/**
+ * Per IFS-01 (2026-11-20, decision #318): the phone-only fallback
+ * card.
+ *
+ * When the hotel switches the in-room CHAT off, the guest is not
+ * left with a dead panel — they get one calm screen with the ONE next
+ * step that still works: call the front desk. The card mirrors the
+ * existing "this room is not checked in" screen so the two
+ * unavailable states look like the same family.
+ */
+function IntercomUnavailableCard({ phone, title, message }: {
+  phone: string;
+  title: string;
+  message: string;
+}) {
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center px-6 py-10 text-center">
+      <div className="mx-auto h-12 w-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center">
+        <MessageSquare size={24} />
+      </div>
+      <h2 className="mt-4 font-heading text-xl lowercase text-gray-950">{title}</h2>
+      <p className="mt-2 text-sm leading-relaxed text-gray-600 max-w-xs">{message}</p>
+      <a
+        href={`tel:${phone}`}
+        className="mt-5 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-bold text-white"
+      >
+        <Phone size={16} />
+        Call Front Desk
+      </a>
+      {phone && (
+        <p className="mt-3 text-xs text-gray-500">
+          {phone}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function IntercomPage() {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
@@ -176,6 +214,20 @@ export function IntercomPage() {
     resolveHotelContact(null, config)
   );
   const [isStoreEnabled, setIsStoreEnabled] = useState<boolean>(true);
+  // Per IFS-01 (2026-11-20, decision #318): the hotel-wide in-room
+  // feature switches, projected through `GET /api/public/hotel-config`.
+  //
+  // `intercomChatEnabled === false` → the chat surface is replaced by
+  // a phone-only fallback card (the store tab keeps working — it has
+  // its own master switch).
+  // `intercomCallsEnabled === false` → the "Call Desk" button is
+  // hidden and the call handler refuses to start.
+  //
+  // Both default to ON: only an explicit `false` in the settings
+  // document turns a feature off, so a hotel is never left without a
+  // guest service because a field is missing.
+  const [intercomChatEnabled, setIntercomChatEnabled] = useState<boolean>(true);
+  const [intercomCallsEnabled, setIntercomCallsEnabled] = useState<boolean>(true);
   const [isOffline, setIsOffline] = useState<boolean>(!navigator.onLine);
   const [messageError, setMessageError] = useState<string>("");
   const [storeError, setStoreError] = useState<string>("");
@@ -452,6 +504,11 @@ export function IntercomPage() {
             : ["Extra Towels", "Bottled Water", "Room Cleaning", "Extra Pillow", "Do Not Disturb"]
         );
         setIsStoreEnabled(publicConfig?.storeEnabled !== false);
+        // Per IFS-01 (2026-11-20, decision #318): the in-room feature
+        // switches travel in the same public projection. `!== false`
+        // keeps a switch ON unless the hotel explicitly turned it off.
+        setIntercomChatEnabled(publicConfig?.intercomChatEnabled !== false);
+        setIntercomCallsEnabled(publicConfig?.intercomCallsEnabled !== false);
         const paymentMethods = Array.isArray(configuredPaymentMethods)
           ? configuredPaymentMethods
           : [];
@@ -842,6 +899,18 @@ export function IntercomPage() {
 
   // Voice Call Signaling Actions
   const handleStartCall = async () => {
+    // Per IFS-01 (2026-11-20, decision #318): the hotel switched the
+    // voice call off. The button is hidden in that state; this guard
+    // is the belt-and-braces half, so a stale render (or a click on a
+    // screen that was open before the switch flipped) cannot start a
+    // call either.
+    if (!intercomCallsEnabled) {
+      setCallError(
+        "Voice calls are currently unavailable. Please message us or call the front desk."
+      );
+      setCallState("idle");
+      return;
+    }
     if (!roomNumber || !currentStayId || !sessionToken || callState !== "idle") return;
 
     setCallError("");
@@ -1293,8 +1362,27 @@ export function IntercomPage() {
     );
   }
 
-  if (!isValidRoom) {
+  // Per IFS-01 (2026-11-20, decision #318): when BOTH the chat and
+  // the store are switched off, the in-room panel has nothing left to
+  // offer — so the whole panel becomes the phone-only fallback card
+  // instead of showing a set of tabs that lead nowhere.
+  const everyInRoomFeatureIsOff = !intercomChatEnabled && !isStoreEnabled;
+
+  if (!isValidRoom || everyInRoomFeatureIsOff) {
     const isVacantRoom = roomAccessError === "vacant";
+    // Per IFS-01 (2026-11-20, decision #318): a third unavailable
+    // state — the hotel switched every in-room feature off. It gets
+    // its own copy; it is NOT "your QR code is broken".
+    const headline = everyInRoomFeatureIsOff
+      ? "Front desk service is unavailable"
+      : isVacantRoom
+        ? "Intercom not active yet"
+        : "Invalid room QR code";
+    const subcopy = everyInRoomFeatureIsOff
+      ? "In-room chat and the in-room store are switched off at the moment. Please call or visit the front desk so we can help you."
+      : isVacantRoom
+        ? "This room intercom opens after check-in. Please call or visit the front desk so we can help you."
+        : "This intercom link does not match an active room. Please call or visit the front desk so we can help you.";
     return (
       <main className="h-[100dvh] bg-gray-100 flex justify-center items-center font-body p-6">
         <div className="w-full max-w-md rounded-card-lg bg-white p-6 text-center shadow-xl ring-1 ring-gray-200">
@@ -1302,12 +1390,10 @@ export function IntercomPage() {
             <AlertCircle size={24} />
           </div>
           <h1 className="mt-4 font-heading text-2xl lowercase text-gray-950">
-            {isVacantRoom ? "Intercom not active yet" : "Invalid room QR code"}
+            {headline}
           </h1>
           <p className="mt-2 text-sm leading-relaxed text-gray-600">
-            {isVacantRoom
-              ? "This room intercom opens after check-in. Please call or visit the front desk so we can help you."
-              : "This intercom link does not match an active room. Please call or visit the front desk so we can help you."}
+            {subcopy}
           </p>
           <a
             href={`tel:${hotelContact.frontDeskPhone}`}
@@ -1424,13 +1510,19 @@ export function IntercomPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <button
-                onClick={handleStartCall}
-                className="h-9 px-3 flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark active:scale-[0.98] text-xs font-semibold text-white shadow-sm transition"
-              >
-                <Phone size={14} />
-                Call Desk
-              </button>
+              {/* Per IFS-01 (2026-11-20, decision #318): the voice
+                  call is a hotel-wide switch. When it is off the
+                  button is gone entirely — there is no dead control
+                  to tap. */}
+              {intercomCallsEnabled && (
+                <button
+                  onClick={handleStartCall}
+                  className="h-9 px-3 flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary-dark active:scale-[0.98] text-xs font-semibold text-white shadow-sm transition"
+                >
+                  <Phone size={14} />
+                  Call Desk
+                </button>
+              )}
             </div>
           </div>
 
@@ -1489,6 +1581,13 @@ export function IntercomPage() {
           
           {/* Active Chat Tab */}
           {activeTab === "chat" && (
+            // Per IFS-01 (2026-11-20, decision #318): when the hotel
+            // switches the chat off, the Chat tab shows the phone-only
+            // fallback card instead of the thread + composer. The tab
+            // itself stays visible so the guest is not left wondering
+            // where the chat went — the card explains it and offers
+            // the one action that still works.
+            intercomChatEnabled ? (
             <div className="flex-1 flex flex-col justify-between min-h-0">
               
               {/* Message scroll thread */}
@@ -1592,6 +1691,13 @@ export function IntercomPage() {
               </div>
 
             </div>
+            ) : (
+              <IntercomUnavailableCard
+                phone={hotelContact.frontDeskPhone}
+                title="Chat is unavailable"
+                message="Chat support is switched off at the moment. Please call the front desk and we will be happy to help."
+              />
+            )
           )}
 
           {/* Active Store Tab */}

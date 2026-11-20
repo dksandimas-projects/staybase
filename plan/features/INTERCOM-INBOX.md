@@ -92,6 +92,8 @@ The `/intercom` dashboard page is the front desk's side of the guest chat system
 - [x] **Sound mute toggle** *(Per `DECISIONS-FEATURES.md #97`)* — `Bell` / `BellOff` icon in inbox header. Persists in `localStorage` under `notif_sound_muted`. `playNotificationSound` early-returns when muted.
 - [x] **Second concurrent call wins** *(Per `DECISIONS-FEATURES.md #94`)* — accepting a new call writes `status: "ended", endedAt: serverTimestamp()` to the old call doc, then accepts the new one. The previous guest's UI sees the call end via snapshot listener.
 - [x] **Cancellation messages render as greyed-out "Cancelled" cards** *(Per `DECISIONS-FEATURES.md #96`)* — distinct from placed-order cards in both guest chat and admin inbox.
+- [x] **"Calls Off" chip when the hotel switched the voice call off** *(Per IFS-01, decision #318, 2026-11-20)* — `settings/hotelConfig.intercomCallsEnabled === false` → the inbox header shows an amber "Calls Off" chip next to the Audio Settings / sound toggles, so staff can explain to a guest why the "Call Desk" button is missing from their panel.
+- [x] **Incoming calls do NOT ring the desk while the voice call is off** *(Per IFS-01, decision #318)* — the call-session listener ignores the call documents entirely (no banner, no ringtone, nothing to accept). The gate is read through a ref (`intercomCallsEnabledRef`) because the listener is registered once and would otherwise capture a stale closure. An in-flight call is dropped the moment the switch flips — via `clearCallRefsOnly`, NOT `cleanupAdminCall`, because the desk did not *miss* that call, the feature was switched off, so no misleading "Call missed" system message is written to the guest's thread.
 
 ## References
 

@@ -95,6 +95,13 @@ import {
   normalizeBotProtectionMode,
   BOT_PROTECTION_MODE_DEFAULT,
   type BotProtectionMode,
+  // Per IFS-01 (2026-11-20, decision #318): the hotel-wide in-room
+  // feature switches — the intercom CHAT and the intercom VOICE CALL.
+  // Shared with the guest-app server gate and the guest panel so the
+  // stored value and every reader can never disagree on what "off"
+  // means. FAIL OPEN — only an explicit `false` disables a feature.
+  normalizeIntercomChatEnabled,
+  normalizeIntercomCallsEnabled,
   // Per MSL-01 (2026-10-15): the stay-length cap. Stored RESOLVED
   // (`Infinity` when the admin chose "no limit"), so every admin
   // read gets a safe number. The Settings editor maps `Infinity` back
@@ -5763,6 +5770,15 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     adminCallLocalAcceptRef.current = false;
   };
 
+  // Per IFS-01 (2026-11-20, decision #318): the hotel-wide voice-call
+  // switch, mirrored into a ref.
+  //
+  // The call-snapshot listener below is registered ONCE, so reading
+  // `hotelConfig` inside its callback would capture a stale closure —
+  // the desk would keep ringing for calls after the hotel switched the
+  // feature off. The ref is the current value on every snapshot.
+  const intercomCallsEnabledRef = useRef(true);
+
   useEffect(() => {
     if (!currentUser) {
       setIncomingCall(null);
@@ -5780,8 +5796,23 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       // of `callSessions`.
       collectionGroup(db, "callSessions"),
       (snapshot) => {
-        const activeCalls = snapshot.docs
-          .map((docSnap): IncomingCall & { startedAt: number } => {
+        // Per IFS-01 (2026-11-20, decision #318): when the hotel has
+        // switched the in-room VOICE CALL off, the desk does not ring
+        // for incoming calls — no banner, no ringtone, nothing to
+        // accept. The guest's "Call Desk" button is hidden on their
+        // side too, so this only catches a guest on a stale screen.
+        //
+        // The gate is applied to the LIST, not to `nextCall`, so the
+        // `const nextCall = activeCalls[0] || null` line keeps its
+        // literal shape (decision #94's supersede tripwire anchors on
+        // it). With an empty list `nextCall` is null, which also skips
+        // the "second call wins" supersede write below: the desk does
+        // not end other rooms' calls for a feature it is no longer
+        // serving.
+        const activeCalls: Array<IncomingCall & { startedAt: number }> =
+          intercomCallsEnabledRef.current
+            ? snapshot.docs
+                .map((docSnap): IncomingCall & { startedAt: number } => {
             const data = docSnap.data();
             // Per decision #206 (2026-08-19): when the call doc carries
             // `acceptedBy` (the runTransaction claim in `acceptCall`
@@ -5816,7 +5847,8 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           .filter((call) =>
             (call.status === "ringing" || call.status === "active") && !!call.roomId
           )
-          .sort((a, b) => b.startedAt - a.startedAt);
+          .sort((a, b) => b.startedAt - a.startedAt)
+            : [];
 
         const nextCall = activeCalls[0] || null;
         // Per W2.6 / decision #94: "second wins" — if a new active
@@ -6782,6 +6814,16 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
     // The default is `true` so a legacy settings doc without the
     // field never silently switches a hotel's revenue stream off.
     otherAddOnsEnabled: true,
+    // Per IFS-01 (2026-11-20, decision #318): the hotel-wide in-room
+    // feature switches for the intercom — the guest CHAT and the
+    // intercom VOICE CALL. `true` (the default) = the feature is on.
+    //
+    // The defaults are `true` so a legacy settings doc without the
+    // fields never silently switches a guest service off. Only an
+    // explicit `false` disables one — the same rule the Other
+    // Add-Ons master switch uses (OCT-M1 / decision #295).
+    intercomChatEnabled: true,
+    intercomCallsEnabled: true,
     // Per QA-2026-10-23 §3.2 (2026-10-25): the hotel-wide
     // bot-protection mode. `"turnstile"` (the default) = the bot gate
     // is ON for every public guest write endpoint. `"disabled"` = the
@@ -6797,6 +6839,24 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
     botProtectionDisabledAt: "",
     botProtectionReason: ""
   });
+
+  // Per IFS-01 (2026-11-20, decision #318): mirror the hotel-wide
+  // voice-call switch into the ref the call-snapshot callback reads,
+  // and drop an in-flight call the moment the hotel switches the
+  // feature off.
+  //
+  // `clearCallRefsOnly` (not `cleanupAdminCall`) is deliberate: the
+  // desk did not MISS that call — the feature was switched off — so
+  // no "Call missed" system message is written to the guest's thread.
+  useEffect(() => {
+    const enabled = hotelConfig.intercomCallsEnabled !== false;
+    intercomCallsEnabledRef.current = enabled;
+    if (!enabled) {
+      setIncomingCall(null);
+      clearCallRefsOnly();
+      adminPreviousCallRoomIdRef.current = null;
+    }
+  }, [hotelConfig.intercomCallsEnabled]);
 
   // Tracks whether the first `settings/websiteContent` snapshot
   // has been delivered. Used by the Branding tab to render a
@@ -7163,7 +7223,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
           const docId = docSnap.id;
           switch (docId) {
             case "hotelConfig":
-              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope), paymentHoldWindowHours: normalizePaymentHoldWindowHours((data as Partial<typeof hotelConfig>)?.paymentHoldWindowHours), inFlowHoldMinutes: normalizeInFlowHoldMinutes((data as Partial<typeof hotelConfig>)?.inFlowHoldMinutes), vatConfig: normalizeVatConfig((data as Partial<typeof hotelConfig>)?.vatConfig), maxStayNights: resolveMaxStayNights((data as Partial<typeof hotelConfig>)?.maxStayNights), otherAddOnsEnabled: normalizeOtherAddOnsEnabled((data as Partial<typeof hotelConfig>)?.otherAddOnsEnabled), botProtectionMode: normalizeBotProtectionMode((data as Partial<typeof hotelConfig>)?.botProtectionMode), botProtectionDisabledBy: String((data as Partial<typeof hotelConfig>)?.botProtectionDisabledBy || ""), botProtectionDisabledAt: String((data as Partial<typeof hotelConfig>)?.botProtectionDisabledAt || ""), botProtectionReason: String((data as Partial<typeof hotelConfig>)?.botProtectionReason || "") })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`. // Per PEX-01 (2026-08-01): always normalize the incoming window so legacy settings (or values outside the admin-allowed 1..72h range) hydrate to the 24h default. The per-booking `holdExpiresAt` is the only field the rest of the system reads; the Settings window is just the input. // Per VAT-01 (2026-10-12): always normalize the incoming `vatConfig` so legacy settings without the field hydrate to the BIR-compliant default (`enabled: true`); the 12% breakdown keeps showing everywhere until the admin opts out via the Settings → Discounts tab Tax card. // Per OCT-M1 (2026-10-20, decision #295): always normalize the incoming `otherAddOnsEnabled` so a legacy doc without the field hydrates to `true` and a hand-edited `"false"` string is read as the boolean it spells. // Per QA-2026-10-23 §3.2 (2026-10-25): always normalize the incoming `botProtectionMode` so a legacy doc without the field hydrates to `"turnstile"` (the bot gate ON) and a hand-edited typo never opens the gate. // The three audit fields are mirrored explicitly so the admin state mirrors the doc exactly — a doc that no longer carries them (the gate was switched back on) hydrates to an EMPTY audit trail instead of keeping the previous window's values.
+              setHotelConfig((prev) => ({ ...prev, ...(data as Partial<typeof hotelConfig>), discountScope: normalizeDiscountScope((data as Partial<typeof hotelConfig>)?.discountScope), paymentHoldWindowHours: normalizePaymentHoldWindowHours((data as Partial<typeof hotelConfig>)?.paymentHoldWindowHours), inFlowHoldMinutes: normalizeInFlowHoldMinutes((data as Partial<typeof hotelConfig>)?.inFlowHoldMinutes), vatConfig: normalizeVatConfig((data as Partial<typeof hotelConfig>)?.vatConfig), maxStayNights: resolveMaxStayNights((data as Partial<typeof hotelConfig>)?.maxStayNights), otherAddOnsEnabled: normalizeOtherAddOnsEnabled((data as Partial<typeof hotelConfig>)?.otherAddOnsEnabled), intercomChatEnabled: normalizeIntercomChatEnabled((data as Partial<typeof hotelConfig>)?.intercomChatEnabled), intercomCallsEnabled: normalizeIntercomCallsEnabled((data as Partial<typeof hotelConfig>)?.intercomCallsEnabled), botProtectionMode: normalizeBotProtectionMode((data as Partial<typeof hotelConfig>)?.botProtectionMode), botProtectionDisabledBy: String((data as Partial<typeof hotelConfig>)?.botProtectionDisabledBy || ""), botProtectionDisabledAt: String((data as Partial<typeof hotelConfig>)?.botProtectionDisabledAt || ""), botProtectionReason: String((data as Partial<typeof hotelConfig>)?.botProtectionReason || "") })); // Per DSC-01..05 (2026-08-01, per CVQ-06): always normalize the incoming scope so legacy settings without the field (or a partial scope object) hydrate to the broad default. The Settings tab is the only editor; the source of truth is `settings/hotelConfig.discountScope`. // Per PEX-01 (2026-08-01): always normalize the incoming window so legacy settings (or values outside the admin-allowed 1..72h range) hydrate to the 24h default. The per-booking `holdExpiresAt` is the only field the rest of the system reads; the Settings window is just the input. // Per VAT-01 (2026-10-12): always normalize the incoming `vatConfig` so legacy settings without the field hydrate to the BIR-compliant default (`enabled: true`); the 12% breakdown keeps showing everywhere until the admin opts out via the Settings → Discounts tab Tax card. // Per OCT-M1 (2026-10-20, decision #295): always normalize the incoming `otherAddOnsEnabled` so a legacy doc without the field hydrates to `true` and a hand-edited `"false"` string is read as the boolean it spells. // Per QA-2026-10-23 §3.2 (2026-10-25): always normalize the incoming `botProtectionMode` so a legacy doc without the field hydrates to `"turnstile"` (the bot gate ON) and a hand-edited typo never opens the gate. // The three audit fields are mirrored explicitly so the admin state mirrors the doc exactly — a doc that no longer carries them (the gate was switched back on) hydrates to an EMPTY audit trail instead of keeping the previous window's values.
               break;
             case "websiteContent":
               setWebsiteContent(mergeWebsiteContent(data as Record<string, unknown>));

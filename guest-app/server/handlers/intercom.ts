@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { adminDb } from "../lib/firebase-admin";
 import { generateLookupToken } from "@spark-inn/shared";
+import {
+  INTERCOM_CHAT_UNAVAILABLE_ERROR,
+  loadIntercomChatEnabled
+} from "../lib/intercom-settings";
 
 const MAX_ROOM_NUMBER_LENGTH = 12;
 const MAX_LAST_NAME_LENGTH = 80;
@@ -197,6 +201,32 @@ export async function handleSendGuestMessage(req: any, res: any) {
   }
 
   const { roomNumber, sessionToken, text, isQuickRequest, isStoreOrder, orderRef, isEarlyCheckInRequest, isCancelledOrder } = parsed.data;
+
+  // Per IFS-01 (2026-11-20, decision #318): the hotel-wide in-room
+  // CHAT switch (`settings/hotelConfig.intercomChatEnabled`).
+  //
+  // The server owns the ONLY guest message write path, so this is
+  // where "the hotel switched the chat off" is enforced for real —
+  // hiding the composer in the browser would be cosmetic, because a
+  // guest holding a cached session token could keep posting.
+  //
+  // A STORE message — the order badge that follows a Spark Essentials
+  // order — is NOT a chat message. The store has its own master
+  // switch (`settings/storeConfig.isEnabled`), and the desk needs the
+  // order notification even when the chat is off, so the gate lets
+  // store messages through.
+  //
+  // The check runs BEFORE the rate limiter so a switched-off chat does
+  // not burn the guest's message quota.
+  if (!isStoreOrder) {
+    const chatEnabled = await loadIntercomChatEnabled();
+    if (!chatEnabled) {
+      return res.status(403).json({
+        success: false,
+        error: INTERCOM_CHAT_UNAVAILABLE_ERROR
+      });
+    }
+  }
 
   // Per PR-AUDIT-H6 (2026-10-20): `x-vercel-forwarded-for` is
   // Vercel's own sanitized single-value client IP and stays correct

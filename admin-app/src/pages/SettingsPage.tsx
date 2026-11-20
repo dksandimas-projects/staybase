@@ -93,7 +93,16 @@ import {
   // Per HC-02 (decision #329): the house-rules time tokens, resolved
   // against the live `settings/hotelConfig` check-in / check-out
   // values so the admin can see what each token renders.
-  resolveHotelTimes
+  resolveHotelTimes,
+  // Per IFS-01 (2026-11-20, decision #318): the normalizers for the
+  // hotel-wide in-room feature switches
+  // (`settings/hotelConfig.intercomChatEnabled` /
+  // `intercomCallsEnabled`). Shared with the guest-app server gate and
+  // the guest panel so the stored value and every reader can never
+  // disagree on what "off" means. FAIL OPEN — only an explicit
+  // `false` disables a feature.
+  normalizeIntercomChatEnabled,
+  normalizeIntercomCallsEnabled
 } from "@spark-inn/shared";
 import {
   // Per BR-12.1 (2026-10-15, decision #247 reserved): the
@@ -3413,6 +3422,48 @@ export function SettingsPage() {
     Array.isArray(hotelConfig.intercomQuickRequests) ? hotelConfig.intercomQuickRequests : []
   );
   const [notificationSoundUrl, setNotificationSoundUrl] = useState(hotelConfig.notificationSoundUrl || "");
+  // Per IFS-01 (2026-11-20, decision #318): the hotel-wide in-room
+  // feature switches — the guest CHAT and the intercom VOICE CALL.
+  //
+  // Both default to ON (only an explicit `false` in the settings
+  // document turns a feature off), so a settings doc written before
+  // these switches existed keeps working exactly as it did.
+  const [intercomChatEnabled, setIntercomChatEnabled] = useState(
+    normalizeIntercomChatEnabled(hotelConfig.intercomChatEnabled)
+  );
+  const [intercomCallsEnabled, setIntercomCallsEnabled] = useState(
+    normalizeIntercomCallsEnabled(hotelConfig.intercomCallsEnabled)
+  );
+  // Per IFS-01: the sync guard for the two switches above. It mirrors
+  // the OCT-M1 (decision #295) pattern used by the Other Add-Ons
+  // master switch: `useState`'s lazy initializer only runs on the
+  // FIRST render — BEFORE the Firestore snapshot lands — so a direct
+  // load of `/settings` would show the pre-snapshot default instead
+  // of the stored value. The ref records the last SEEN snapshot value
+  // so a snapshot that arrives while the admin is mid-toggle cannot
+  // clobber the in-progress change.
+  const intercomFeatureSwitchesSyncRef = useRef<{ chat: boolean | null; calls: boolean | null }>({
+    chat: null,
+    calls: null
+  });
+
+  // Per IFS-01: re-sync the two switches from the live
+  // `settings/hotelConfig` snapshot. Only a GENUINE change in the
+  // SOURCE value lands, so a snapshot that arrives while the admin is
+  // mid-toggle cannot clobber the in-progress change.
+  useEffect(() => {
+    const nextChat = normalizeIntercomChatEnabled(hotelConfig.intercomChatEnabled);
+    const nextCalls = normalizeIntercomCallsEnabled(hotelConfig.intercomCallsEnabled);
+    const prev = intercomFeatureSwitchesSyncRef.current;
+    intercomFeatureSwitchesSyncRef.current = { chat: nextChat, calls: nextCalls };
+    // First run: the snapshot has not landed yet, so this is the
+    // pre-snapshot default the `useState` initializer already used.
+    // Record it WITHOUT touching the state so the real snapshot is
+    // treated as a genuine change.
+    if (prev.chat === null) return;
+    if (prev.chat !== nextChat) setIntercomChatEnabled(nextChat);
+    if (prev.calls !== nextCalls) setIntercomCallsEnabled(nextCalls);
+  }, [hotelConfig.intercomChatEnabled, hotelConfig.intercomCallsEnabled]);
 
   // 7. Legal Content states
   const [privacyPolicyBody, setPrivacyPolicyBody] = useState(websiteContent.privacyPolicyBody || "");
@@ -4670,7 +4721,13 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
   const handleSaveIntercom = async () => {
     await runSettingsSave("intercom", "Intercom settings saved", () => updateSettings("hotelConfig", {
       intercomQuickRequests,
-      notificationSoundUrl
+      notificationSoundUrl,
+      // Per IFS-01 (2026-11-20, decision #318): the two hotel-wide
+      // in-room feature switches ride along with the rest of the
+      // Intercom settings, so one Save turns the chat / the voice call
+      // off for the whole hotel.
+      intercomChatEnabled,
+      intercomCallsEnabled
     }));
   };
 
@@ -9283,6 +9340,77 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
               </div>
 
               <form onSubmit={(e) => { e.preventDefault(); void handleSaveIntercom(); }} className="space-y-6">
+                {/*
+                 * Per IFS-01 (2026-11-20, decision #318): the
+                 * hotel-wide in-room feature switches. They live at the
+                 * TOP of the Intercom tab because "is the in-room
+                 * service on?" is the first question an operator has
+                 * when a guest says the button is missing.
+                 *
+                 * The Spark Essentials store has its own master switch
+                 * in the In-Room Store tab — this card points there so
+                 * all three live switches are discoverable from one
+                 * place.
+                 */}
+                <div className="space-y-4">
+                  <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">In-Room Service Switches</h4>
+                  <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm space-y-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-xs font-bold text-gray-900">Guest Chat</p>
+                        <p className="mt-1 max-w-2xl text-[10px] leading-relaxed text-gray-500">
+                          OFF → the in-room chat panel shows a phone-only card instead of the chat, and the server refuses guest chat messages. The in-room store keeps working — it has its own switch.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIntercomChatEnabled(!intercomChatEnabled)}
+                        aria-pressed={intercomChatEnabled}
+                        aria-label={intercomChatEnabled ? "Disable guest chat" : "Enable guest chat"}
+                        className={`h-6 w-11 shrink-0 rounded-full p-0.5 transition ${intercomChatEnabled ? "bg-primary" : "bg-gray-200"}`}
+                      >
+                        <span className={`block h-5 w-5 rounded-full bg-white shadow-sm transition ${intercomChatEnabled ? "translate-x-5" : "translate-x-0"}`} />
+                      </button>
+                    </div>
+                    <div className="border-t border-gray-100" />
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-xs font-bold text-gray-900">Voice Calls</p>
+                        <p className="mt-1 max-w-2xl text-[10px] leading-relaxed text-gray-500">
+                          OFF → the guest panel hides the &quot;Call Desk&quot; button and the desk&apos;s inbox stops ringing for incoming calls. The chat keeps working.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIntercomCallsEnabled(!intercomCallsEnabled)}
+                        aria-pressed={intercomCallsEnabled}
+                        aria-label={intercomCallsEnabled ? "Disable voice calls" : "Enable voice calls"}
+                        className={`h-6 w-11 shrink-0 rounded-full p-0.5 transition ${intercomCallsEnabled ? "bg-primary" : "bg-gray-200"}`}
+                      >
+                        <span className={`block h-5 w-5 rounded-full bg-white shadow-sm transition ${intercomCallsEnabled ? "translate-x-5" : "translate-x-0"}`} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-xs font-bold text-gray-900">Spark Essentials Store</p>
+                        <p className="mt-1 max-w-2xl text-[10px] leading-relaxed text-gray-500">
+                          The in-room store has its own master switch, in the In-Room Store tab. OFF → the shop tab disappears for guests and the server refuses new orders.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab("store")}
+                        className="inline-flex min-h-[36px] w-fit items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-[10px] font-bold text-primary transition hover:bg-gray-50"
+                      >
+                        Open store switch
+                        <ChevronRight size={13} aria-hidden="true" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="space-y-4">
                   <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">Quick Request Items</h4>
                   <p className="text-[10px] text-gray-500">These appear as tap-to-send shortcuts in the guest Intercom page. Guests can select one without typing.</p>
