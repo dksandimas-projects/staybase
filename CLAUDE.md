@@ -62,6 +62,7 @@ Load only the bundle for your task type — do not read all MDs.
 | Special requests / bed setup | `plan/features/SPECIAL-REQUESTS.md` + `plan/features/BOOKING-FLOW.md` + `plan/docs/BACKEND.md` |
 | Email / PDF | `plan/features/EMAIL-PDF-STORAGE.md` + `plan/docs/API-ROUTES.md` |
 | Security / PII / compliance | `plan/docs/SECURITY.md` + `plan/docs/GOTCHAS.md` + `plan/docs/DECISIONS-FEATURES.md` |
+| Staff audit trail / who-changed-what | `plan/features/AUDIT-TRAIL.md` + `plan/docs/BACKEND.md` + `plan/docs/SECURITY.md` |
 | New feature / architecture | `plan/docs/DECISIONS-ARCH.md` + `plan/docs/GOTCHAS.md` |
 | Vercel deployment / function count | `plan/docs/VERCEL-FUNCTION-LIMIT.md` + `plan/docs/FILE-STRUCTURE.md` |
 | White-label deployment | `plan/docs/WHITE-LABEL.md` + `plan/docs/DECISIONS-ARCH.md` |
@@ -136,6 +137,7 @@ Load only the bundle for your task type — do not read all MDs.
 - `plan/features/SPECIAL-REQUESTS.md` — Structured guest preferences + bed-setup capture (SR-01..05, shipped 2026-10-12)
 - `plan/features/SEO-OPENGRAPH.md` — Search indexability (Google/Bing/Yahoo) + link-preview cards (Facebook/Messenger/WhatsApp/Viber/X): robots, sitemap, OG image, per-route meta, JSON-LD
 - `plan/features/BOOKING-UNIFIED.md` — BAR-01 booking data-model refactor (rooms denormalized into the booking doc) — deferred spec; tasks in `plan/project/ROADMAP.md §BAR` · BAR-02 (derive counters) + BAR-03 (FOL-05 sibling-flip helper) shipped 2026-08-08; see `plan/docs/DECISIONS-FEATURES.md #203` + `#204`
+- `plan/features/AUDIT-TRAIL.md` — Staff audit trail (ATR-01..08, proposed 2026-11-20): who changed a room, who handled check-in, who created a walk-in — `auditLogs` action vocabulary, PII redaction list, inline attribution fields, admin `/audit` page
 - `plan/features/AVAILABILITY-LOCKING.md` — Double-booking prevention, Firestore transactions
 - `plan/features/EMAIL-PDF-STORAGE.md` — Resend email flows, jsPDF receipts, Storage uploads
 - `plan/features/EMAIL-AUDIT-EXTENSIONS.md` — The 8 W4.4 email templates added by the 2026-06 audit
