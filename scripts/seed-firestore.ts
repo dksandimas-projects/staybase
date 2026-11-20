@@ -219,7 +219,7 @@ async function seedWebsiteContent() {
     cancellationPolicy:
       "Cancellations made 48 hours or more before check-in are eligible for a full refund. Cancellations within 48 hours of check-in are non-refundable. No-shows will be charged the full booking amount.",
     houseRules:
-      "Check-in time is 2:00 PM. Check-out time is 12:00 PM. No smoking inside rooms. Pets are not allowed. Quiet hours from 10:00 PM to 7:00 AM. Visitors must register at the front desk.",
+      "Check-in time is {{checkInTime}}. Check-out time is {{checkOutTime}}. No smoking inside rooms. Pets are not allowed. Quiet hours from 10:00 PM to 7:00 AM. Visitors must register at the front desk.",
     updatedAt: now,
   });
 }

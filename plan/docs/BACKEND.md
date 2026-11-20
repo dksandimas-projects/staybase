@@ -32,7 +32,7 @@ See `plan/docs/API-ROUTES.md` for API layer.
 
 > **Lifecycle:** Create/Update = Staff; Delete = Admin. Deletion is blocked client-side when any active booking references the room. On delete, the cascade cleans up Storage photos under `rooms/{roomId}/*`, `intercoms/{roomNumber}`, and `calls/{roomNumber}`.
 
-*Note: Staff-only room notes live in `roomPrivate/{roomId}`. Room type pricing, photos, capacity, and amenities live on `settings/hotelConfig.roomTypes[]`.*
+*Note: Staff-only room notes live in `roomPrivate/{roomId}`.*
 
 ---
 
@@ -336,11 +336,11 @@ Live WebRTC signalling for the intercom voice call, addressed by the same per-st
 ### `settings/{settingId}`
 
 Single-document collections holding dynamic configuration:
-- `settings/hotelConfig`: `brandName`, `colors`, `logos`, `roomTypes[]` (Maximum 10 photos per type), `paymentMethods[]`, `bookingSources[]`, `discountScope`, `paymentHoldWindowHours`, `inFlowHoldMinutes` (per IFH-01.2, 5..30 min default 15), `unpaidCheckoutApprovalThreshold`, `address`, `frontDeskPhone`, `supportEmail`, `dpoEmail`, `facebookUrl`, `instagramUrl`, `otherAddOnsEnabled` (per OCT-M1 #295 — **only an explicit `false` disables it**; absent hydrates to `true`)
-  - HC-01 (#328): the contact details have ONE source of truth — this doc. `hotel.config.ts` = fallback; legacy `contactEmail`/`contactPhone` are never read.
+- `settings/hotelConfig`: `brandName`, `colors`, `logos`, `roomTypes[]` (Maximum 10 photos per type), `paymentMethods[]`, `bookingSources[]`, `discountScope`, `paymentHoldWindowHours`, `inFlowHoldMinutes` (per IFH-01.2, 5..30 min default 15), `unpaidCheckoutApprovalThreshold`, `address`, `frontDeskPhone`, `supportEmail`, `dpoEmail`, `facebookUrl`, `instagramUrl`, `checkInTime`, `checkOutTime`, `otherAddOnsEnabled` (per OCT-M1 #295 — **only an explicit `false` disables it**; absent hydrates to `true`)
+  - HC-01/HC-02 (#328/#329): the contact details AND the check-in/check-out times have ONE source of truth (this doc; `hotel.config.ts` = fallback); legacy `contactEmail`/`contactPhone` never read; the house rules may quote them via `{{checkInTime}}`/`{{checkOutTime}}`.
 - `settings/websiteContent`: Editable homepage, about, corporate, and legal page copy.
 - `settings/breakfastConfig`: Silog menu items & daily prep settings.
-- `settings/rewardsConfig`: Earning rate, redemption rate, member discount percentage, **Phase 2 (2026-10-12)**: `welcomePoints`, `minPointsToRedeem`, `pointsCanPayUpToBillPct`, `freeNightEvery`, `levels[]` (name, fromStays, discountPct, pointsMultiplier, perks), **PR #9 (2026-10-13)**: `allowMemberPointsRedemption` (admin opt-in toggle for member self-service points redemption at booking Step 3 — default `false` so existing deployments keep the front-desk-mediated model; when `true`, Step 3 exposes an "Apply Your Points" input alongside the voucher code and the member-authenticated `POST /api/members/redeem-points-self` endpoint is enabled). See `shared/schemas/rewardsConfig.ts` for the validation contract and `plan/features/SPARK-REWARDS.md §Phase 2 PR #9` for the rollout detail.
+- `settings/rewardsConfig`: Earning rate, redemption rate, member discount percentage, **Phase 2 (2026-10-12)**: `welcomePoints`, `minPointsToRedeem`, `pointsCanPayUpToBillPct`, `freeNightEvery`, `levels[]` (name, fromStays, discountPct, pointsMultiplier, perks), **PR #9 (2026-10-13)**: `allowMemberPointsRedemption` (admin opt-in for member self-service redemption at booking Step 3 — default `false` keeps the front-desk-mediated model; when `true`, Step 3 exposes "Apply Your Points" and enables `POST /api/members/redeem-points-self`). See `shared/schemas/rewardsConfig.ts` for the validation contract and `plan/features/SPARK-REWARDS.md §Phase 2 PR #9` for the rollout detail.
 
 ---
 

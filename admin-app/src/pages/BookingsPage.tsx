@@ -60,6 +60,9 @@ import {
   // resolved through the SHARED resolver, so the admin PDF footer
   // shows the same values the guest site and the guest emails show.
   resolveHotelContact,
+  // Per HC-02 (decision #329): the house-rules times.
+  resolveHotelTimes,
+  interpolateHotelTimes,
   type DiscountType,
   type HotelContact
 } from "@spark-inn/shared";
@@ -3504,7 +3507,14 @@ export function BookingsPage() {
     y = lowerTop + 45;
 
     // ── House Rules ──
-    const houseRules = websiteContent?.houseRules;
+    // Per HC-02 (decision #329): the rules may quote the check-in /
+    // check-out times by token. Resolve them against the LIVE
+    // `settings/hotelConfig` values so the printed form agrees with
+    // the booking flow and with the guest email.
+    const houseRules = interpolateHotelTimes(
+      websiteContent?.houseRules || "",
+      resolveHotelTimes(hotelConfig, config, config.locale)
+    );
     if (houseRules && houseRules.trim().length > 0) {
       drawCompactSectionTitle("House Rules", marginL, y, marginR - marginL);
       y += 5;
