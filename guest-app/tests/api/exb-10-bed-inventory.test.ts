@@ -136,7 +136,7 @@ describe("EXB-10 — hotel-wide rollaway-bed inventory (helper + 3 server call s
     // guest can see exactly what the inventory ceiling
     // is blocking.
     expect(bookingsHandlerSrc).toMatch(
-      /if\s*\(\s*!inventoryResult\.ok\s*\)\s*\{[\s\S]{0,400}Not enough extra beds:[\s\S]{0,200}already booked across overlapping stays[\s\S]{0,200}rollaway bed\(s\) in inventory/m
+      /if\s*\(\s*!inventoryResult\.ok\s*\)\s*\{[\s\S]{0,400}Not enough extra persons:[\s\S]{0,200}already booked across overlapping stays[\s\S]{0,200}rollaway bed\(s\) in inventory/m
     );
   });
 
@@ -177,7 +177,7 @@ describe("EXB-10 — hotel-wide rollaway-bed inventory (helper + 3 server call s
     // inventory check is the last gate before the
     // booking write.
     expect(bookingsHandlerSrc).toMatch(
-      /if\s*\(\s*!walkinInventoryResult\.ok\s*\)\s*\{[\s\S]{0,400}Not enough extra beds:[\s\S]{0,200}already booked across overlapping stays/m
+      /if\s*\(\s*!walkinInventoryResult\.ok\s*\)\s*\{[\s\S]{0,400}Not enough extra persons:[\s\S]{0,200}already booked across overlapping stays/m
     );
     expect(bookingsHandlerSrc).toMatch(
       /checkExtraBedInventory\([\s\S]{0,200}walkinExtraBedCount\s*\)/
@@ -222,7 +222,7 @@ describe("EXB-10 — hotel-wide rollaway-bed inventory (helper + 3 server call s
     // so the desk sees a consistent message across all
     // 3 surfaces.
     expect(bookingsHandlerSrc).toMatch(
-      /if\s*\(\s*!rescheduleInventoryResult\.ok\s*\)\s*\{[\s\S]{0,400}Not enough extra beds:[\s\S]{0,200}already booked across overlapping stays/m
+      /if\s*\(\s*!rescheduleInventoryResult\.ok\s*\)\s*\{[\s\S]{0,400}Not enough extra persons:[\s\S]{0,200}already booked across overlapping stays/m
     );
   });
 

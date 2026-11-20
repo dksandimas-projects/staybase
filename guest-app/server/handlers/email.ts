@@ -250,7 +250,7 @@ function generateReceiptPdf(booking: any): Buffer {
     text("Rooms:", `${rooms.length} room${rooms.length === 1 ? "" : "s"}`);
     for (const room of rooms) {
       const label = `Room ${room.position || 1} (${String(room.roomType || "Room")})`;
-      const value = `${String(room.bookingRef || "-")} · ${String(room.numAdults || 0)} adult${Number(room.numAdults) === 1 ? "" : "s"}, ${String(room.numChildren || 0)} child${Number(room.numChildren) === 1 ? "" : "ren"}${Number(room.extraBedCount) > 0 ? `, ${String(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " · breakfast" : ""} · ${fmtMoney(Number(room.totalPrice || 0))}`;
+      const value = `${String(room.bookingRef || "-")} · ${String(room.numAdults || 0)} adult${Number(room.numAdults) === 1 ? "" : "s"}, ${String(room.numChildren || 0)} child${Number(room.numChildren) === 1 ? "" : "ren"}${Number(room.extraBedCount) > 0 ? `, ${String(room.extraBedCount)} extra person${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " · breakfast" : ""} · ${fmtMoney(Number(room.totalPrice || 0))}`;
       text(label, value, { gap: 5 });
     }
   } else {
@@ -281,7 +281,7 @@ function generateReceiptPdf(booking: any): Buffer {
       const guestLine = `Guests: ${numAdults} adult${numAdults === 1 ? "" : "s"} + ${numChildren} child${numChildren === 1 ? "" : "ren"} (${booking.numGuests || 1} total)`;
       text(guestLine, "");
       if (Number.isFinite(extraBedCount) && extraBedCount > 0) {
-        text(`Extra beds: ${extraBedCount} (${extraBedCount} × ${fmtMoney((booking as any).extraBedRate)} / bed / night)`, "");
+        text(`Extra persons: ${extraBedCount} (${extraBedCount} × ${fmtMoney((booking as any).extraBedRate)} / person / night)`, "");
       }
     } else {
       text("Guests:", String(booking.numGuests || 1));
@@ -858,8 +858,8 @@ function bookingRows(booking: any) {
             : "";
           return row(`Room ${room.position || 1} (${escapeHtml(String(room.roomType || "Room"))})`,
             room.bookingRef
-              ? `${escapeHtml(String(room.bookingRef))} · ${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " · breakfast" : ""} · ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
-              : `${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " · breakfast" : ""} · ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
+              ? `${escapeHtml(String(room.bookingRef))} · ${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra person${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " · breakfast" : ""} · ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
+              : `${escapeHtml(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra person${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " · breakfast" : ""} · ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
           );
         }).join("")}
       </table>

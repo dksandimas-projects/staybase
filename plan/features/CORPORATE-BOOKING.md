@@ -103,7 +103,7 @@ The shared booking API re-derives and validates the total, normalizes the select
 - [x] "Add another room" picker lists every available room type as a chip; clicking appends a new stay of that type. Disabled when no types have availability.
 - [x] Cart hydrates from the `?rooms=` URL param (round-tripped via `parseBookingRoomCart` / `serializeBookingRoomCart`) so a refresh preserves the selection. Auto-seeds with one stay of the first available type when the URL has no `?rooms=` and no `?roomType=`.
 - [x] Page-level adults + children steppers stay (the user states "we are N adults and M children"); the rebalance helper distributes them across the cart's per-stay occupancy.
-- [x] Page-level "Extra beds" stepper is hidden when N>1 (the per-stay count is derived by the rebalance helper from each room type's `maxExtraBeds` + leftover guests).
+- [x] Page-level "Extra persons" stepper is hidden when N>1 (the per-stay count is derived by the rebalance helper from each room type's `maxExtraBeds` + leftover guests).
 - [x] Sticky footer shows the aggregate total for the whole block and the room count + nights + guests summary.
 - [x] No promo vouchers in corporate bookings (unchanged from `DECISIONS-FEATURES.md #100`); negotiated rates are the only discount.
 - [x] LOU "Charge Back" wording unchanged (per `DECISIONS-FEATURES.md #99`).

@@ -92,9 +92,9 @@ export function BookingSummaryCard({
           <div className="flex items-center gap-2 text-xs text-gray-600">
             <BedDouble size={14} className="text-primary" />
             <span>
-              + {extraBedCountValue} extra bed{extraBedCountValue === 1 ? "" : "s"}
+              + {extraBedCountValue} extra person{extraBedCountValue === 1 ? "" : "s"}
               {Number.isFinite(Number(extraBedRate)) && Number(extraBedRate) > 0
-                ? ` (${formatPrice(Number(extraBedRate))} / bed / night)`
+                ? ` (${formatPrice(Number(extraBedRate))} / person / night)`
                 : ""}
             </span>
           </div>

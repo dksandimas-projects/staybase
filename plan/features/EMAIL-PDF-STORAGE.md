@@ -324,7 +324,7 @@ Used for: room photos, payment proof screenshots, QR notification sounds, websit
 
 ## Extra Bed (EXB-08)
 
-Receipts and booking emails render the stored adult/child split when present and retain the legacy total-only fallback. When `extraBedCount > 0`, both show the extra-bed quantity and the independently stored add-on amount; no extra-bed line appears for zero or absent counts. The authoritative add-on entry comes from the server-built `rateBreakdown.addOns[]`; display surfaces do not recompute pricing.
+Receipts and booking emails render the stored adult/child split when present and retain the legacy total-only fallback. When `extraBedCount > 0`, both show the extra-person quantity and the independently stored add-on amount; no extra-person line appears for zero or absent counts. The receipt line reads "Extra persons: N (N × ₱X / person / night)" (per decision #327); the add-on's stored `rateBreakdown.addOns[].label` is "Extra person add-on" for bookings created after that decision — earlier bookings keep the old stored label (per decision #327 §2). The authoritative add-on entry comes from the server-built `rateBreakdown.addOns[]`; display surfaces do not recompute pricing.
 
 ---
 

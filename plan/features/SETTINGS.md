@@ -65,7 +65,7 @@ Before OCT-M1 the hotel-wide switch was a bare `useState(true)` — no Firestore
 - Protected system keys (`online`, `walk-in`, `corporate`) cannot be deleted or set as front-desk-selectable.
 
 ### 4. Discounts (DSC-01..05 & PEX-01)
-- **Discount Scope Matrix:** 3×3 toggle matrix governing charge components (room, breakfast, extra bed) per discount class (Senior/PWD, Voucher, Member).
+- **Discount Scope Matrix:** 3×3 toggle matrix governing charge components (room, breakfast, extra person) per discount class (Senior/PWD, Voucher, Member). The component label reads "Extra person" (per decision #327); the persisted scope key stays `extraBed`.
 - **Statutory Guardrails:** Senior/PWD scope is Admin-only, defaults to broad scope (all components), and displays an OSCA/RA 9994 compliance advisory.
 - **Payment Hold Window:** Configurable `paymentHoldWindowHours` (1..72h, default 24h) for auto-expiry of unpaid pending bookings.
 - **In-Flow Hold Window (IFH-01.2):** Configurable `inFlowHoldMinutes` (5..30 min, default 15) for the public booking flow's Steps 2 + 3 countdown banner. Per-hotel source of truth: `settings/hotelConfig.inFlowHoldMinutes`. Snapshotted onto the `bookingHolds/{id}` doc as `holdMinutes` at start time — a later Settings change never shortens or lengthens an existing guest's promise. Bounded via `normalizeInFlowHoldMinutes` in `shared/utils/bookingInFlowHold.ts`. **IFH-01.3 follow-up:** the Settings tab editor (Settings → Booking & Holds, admin-only) is now shipped. Two number inputs (payment hold 1..72h, in-flow hold 5..30 min) with inline validation via the shared `clampIntegerInRange` helper. Save is disabled when either value is out of range, hand-typed, or non-finite. The server-side normalize helpers remain the authoritative gate.

@@ -8462,7 +8462,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                     form.reset();
                     toast.success(
                       "Room type added",
-                      `${label} (${shortLabel}) — up to ${maxCapacity} adult${maxCapacity === 1 ? "" : "s"} and ${maxChildren} child${maxChildren === 1 ? "" : "ren"}, base ${formatPrice(pricePerNight)}/night${maxExtraBeds > 0 ? `, +${maxExtraBeds} extra bed${maxExtraBeds === 1 ? "" : "s"} at ${formatPrice(extraBedRate)}/night` : ""}.`
+                      `${label} (${shortLabel}) — up to ${maxCapacity} adult${maxCapacity === 1 ? "" : "s"} and ${maxChildren} child${maxChildren === 1 ? "" : "ren"}, base ${formatPrice(pricePerNight)}/night${maxExtraBeds > 0 ? `, +${maxExtraBeds} extra person${maxExtraBeds === 1 ? "" : "s"} at ${formatPrice(extraBedRate)}/night` : ""}.`
                     );
                   }}
                   className="space-y-4 bg-gray-50 p-5 rounded-xl border border-gray-150"
@@ -8601,7 +8601,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                         gate. Leave at 0 to keep the type's offering
                         unchanged. */}
                     <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                      Max extra beds (0 = not offered)
+                      Max extra persons (0 = not offered)
                       <input
                         name="maxExtraBeds"
                         type="number"
@@ -8613,7 +8613,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                       />
                     </label>
                     <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                      Extra bed rate ({config.currencySymbol} / bed / night)
+                      Extra person rate ({config.currencySymbol} / person / night)
                       <input
                         name="extraBedRate"
                         type="number"
@@ -8898,7 +8898,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                       + rate. The selector appears on the guest
                       /book page only when `maxExtraBeds > 0`. */}
                   <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                    Max extra beds (0 = not offered)
+                    Max extra persons (0 = not offered)
                     <input
                       name="maxExtraBeds"
                       type="number"
@@ -8910,7 +8910,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                     />
                   </label>
                   <label className="flex flex-col gap-2 text-xs font-semibold text-gray-700">
-                    Extra bed rate ({config.currencySymbol} / bed / night)
+                    Extra person rate ({config.currencySymbol} / person / night)
                     <input
                       name="extraBedRate"
                       type="number"
@@ -10362,7 +10362,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
               senior row's checkboxes are additionally disabled
               for non-admins (DSC-03 guardrail — RA 9994 / RA 10754
               statutory scope). The 3×3 matrix controls which
-              charge components (room · breakfast · extra bed)
+              charge components (room · breakfast · extra person)
               each discount class (senior · voucher · member)
               applies to. The "broad" default (all cells true)
               is byte-equivalent to the pre-DSC-01 behavior and
@@ -10375,7 +10375,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                 <div>
                   <h3 className="text-base font-heading text-gray-950 lowercase tracking-tight">Discount Scope</h3>
                   <p className="text-[10px] text-gray-500 mt-0.5">
-                    Choose which charge components (room · breakfast · extra bed) each discount class
+                    Choose which charge components (room · breakfast · extra person) each discount class
                     (senior · voucher · member) applies to. The scope is snapshotted onto every new
                     booking; existing bookings are unaffected. Uncheck a cell to exclude that component
                     from the discount's base.
@@ -10391,7 +10391,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                   const componentLabels: Array<{ key: "room" | "breakfast" | "extraBed"; label: string }> = [
                     { key: "room", label: "Room" },
                     { key: "breakfast", label: "Breakfast" },
-                    { key: "extraBed", label: "Extra bed" }
+                    { key: "extraBed", label: "Extra person" }
                   ];
                   const classLabels: Array<{ key: "senior" | "voucher" | "member"; label: string; hint: string }> = [
                     {

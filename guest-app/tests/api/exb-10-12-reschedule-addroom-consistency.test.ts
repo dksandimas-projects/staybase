@@ -183,8 +183,8 @@ describe("PATCH 2 — buildRateBreakdown includes the extra-bed line", () => {
     });
     const labels = breakdown.addOns.map((line) => line.label);
     expect(labels).toContain("Breakfast add-on");
-    expect(labels).toContain("Extra bed add-on");
-    const extraBedLine = breakdown.addOns.find((line) => line.label === "Extra bed add-on");
+    expect(labels).toContain("Extra person add-on");
+    const extraBedLine = breakdown.addOns.find((line) => line.label === "Extra person add-on");
     expect(extraBedLine?.amount).toBe(600);
   });
 
@@ -421,7 +421,7 @@ describe("Cross-feature sanity — helper composition", () => {
     });
     const labels = breakdown.addOns.map((line) => line.label);
     expect(labels).toContain("Breakfast add-on");
-    expect(labels).toContain("Extra bed add-on");
+    expect(labels).toContain("Extra person add-on");
   });
 
   it.skip("PATCH 3 sanity: countExtraBedsInUse over the new range + inventory check rejects over-capacity", () => {

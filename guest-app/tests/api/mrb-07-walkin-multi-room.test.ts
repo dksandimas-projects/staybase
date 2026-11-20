@@ -626,7 +626,7 @@ describe("MRB-07 — multi-room walk-in creation", () => {
     await handler(req, res);
 
     expect(res.status).toHaveBeenCalledWith(500);
-    expect((res.json as any).mock.calls[0][0].error).toMatch(/Not enough extra beds/);
+    expect((res.json as any).mock.calls[0][0].error).toMatch(/Not enough extra persons/);
     expect(bookingWrites()).toHaveLength(0);
   });
 

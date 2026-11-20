@@ -235,7 +235,7 @@ describe("MRB-15-05 — Email preheaders use natural sentence case (start with a
       // period. Every sentence-style preheader
       // ends with a period (the email client
       // convention).
-      const isReceiptSnippet = text.startsWith("Extra beds:") || text.startsWith("Receipt:");
+      const isReceiptSnippet = text.startsWith("Extra persons:") || text.startsWith("Receipt:");
       const isContactSnippet = text.startsWith("Website contact from");
       if (isReceiptSnippet || isContactSnippet) continue;
       expect(

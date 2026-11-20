@@ -869,7 +869,7 @@ The current extra-bed flow auto-requires extra beds based on the overflow rule. 
 │ Up to 1 adult · 0 children               │
 │                                          │
 │ Extras:                                  │
-│   Extra beds  [−] 0 [+]   ₱500/bed/night │
+│   Extra persons  [−] 0 [+]   ₱500/person/night │
 │                               ₱0 for 2 nights │
 │                                          │
 │ Rooms    [−] 0 [+]                        │
@@ -890,21 +890,21 @@ If the user's group has overflow that the room type's `maxExtraBeds` can't cover
 
 ```
 Extras:
-  Extra beds  [−] 2 [+]   ₱500/bed/night
+  Extra persons  [−] 2 [+]   ₱500/person/night
                           ₱1,000 for 2 nights
 
-  ⚠ Room needs 2 extra beds to fit your group. You can add up to 1 here.
+  ⚠ Room needs 2 extra persons to fit your group. You can add up to 1 here.
 ```
 
 The `[−]` is disabled at the soft floor (clamped at `max(0, requiredExtraBeds)`). The `[+]` is disabled at the soft ceiling (`maxExtraBeds`). The user can still scroll up to see the room-type card's CHD-11 capacity indicator (Fits / Tight / Doesn't fit) and the submit gate catches the overflow at Step 1 → Step 2.
 
-The cart summary (CHD-12) shows the per-type extra-bed count inline: "1× Single Room · 1 adult · 2 children · 2 extra beds".
+The cart summary (CHD-12) shows the per-type extra-person count inline: "1× Single Room · 1 adult · 2 children · 2 extra persons".
 
 ### What the toggle shows
 
-- **Per-bed-per-night rate** — `formatPrice(extraBedRate) + " / bed / night"`, pulled from the type's `extraBedRate` field (EXB-01).
+- **Per-person-per-night rate** — `formatPrice(extraBedRate) + " / person / night"`, pulled from the type's `extraBedRate` field (EXB-01). The COPY says "person" (per decision #327); the FIELD is still `extraBedRate`.
 - **Stay total** — `formatPrice(extraBedRate * extraBedCount * numNights) + " for " + numNights + " nights"`. Hidden when `extraBedCount === 0` (don't show "₱0 for 2 nights" — it's noise).
-- **Soft-floor warning** — "Room needs N extra beds to fit your group" when `requiredExtraBeds > 0` and `requiredExtraBeds < extraBedCount` (the counter is above the soft floor but the room still doesn't have enough capacity to cover the overflow at the type's cap).
+- **Soft-floor warning** — "Room needs N extra persons to fit your group" when `requiredExtraBeds > 0` and `requiredExtraBeds < extraBedCount` (the counter is above the soft floor but the room still doesn't have enough capacity to cover the overflow at the type's cap).
 
 ### What the toggle does NOT do
 
@@ -943,7 +943,7 @@ The `Booking.extraBedCount` server-side write is unchanged — the cart still wr
 - **Binary toggle (0 or maxExtraBeds)** — too coarse. `maxExtraBeds` can be > 1, and the user might want exactly 1 (not all-or-nothing).
 - **Auto-add extra beds to cover the overflow** — the current behavior; the user is asking to flip it. The auto-rebalance is a guess; the user knows their group better than the algorithm.
 - **Hide the price until Step 3** — the current behavior; the user is asking to surface it. Hidden prices on a money decision are a known UX anti-pattern.
-- **A "Breakfast / Extra bed / Voucher" add-on bundle selector** — combines too many unrelated choices into one widget. Each add-on is its own opt-in with its own price; combine them later if the data shows users want it.
+- **A "Breakfast / Extra person / Voucher" add-on bundle selector** — combines too many unrelated choices into one widget. Each add-on is its own opt-in with its own price; combine them later if the data shows users want it.
 - **A separate "Extras" page / modal** — over-engineered for a 1-line counter. The card-level sub-section is the right surface.
 - **Show the per-bed-per-night rate only on hover / "more info"** — hidden prices are the problem this spec is solving. The rate is the primary signal, not a detail.
 - **Apply the toggle to the cart summary (CHD-12) instead of the room-type card** — the card is the *action* surface (where the user picks the type + quantity), the cart is the *read* surface (where the user verifies the cart). The toggle belongs on the card; the cart summary mirrors the result.
@@ -969,7 +969,7 @@ A counter for the binary case also has a soft-floor enforcement problem the chec
 
 Move the existing "Extras" IIFE from `BookingPage.tsx:2456-2565` (right after the CHD-11 capacity chip IIFE) to right after the mixed-rates panel (currently at `BookingPage.tsx:2620-2644`). The IIFE body is unchanged; only the JSX parent changes. The `data-testid` markers (`extras-stepper-${type.value}` + `extras-count-${type.value}` / `extras-checkbox-${type.value}` + `extras-stay-total-${type.value}` + `extras-soft-floor-warning-${type.value}`) stay the same (no test churn for the move alone).
 
-**Discoverability hook**: the existing amenities row at `BookingPage.tsx:2348-2353` already shows "Up to N extra beds" for types with `maxExtraBeds > 0`. The visual cue is still at the top of the card, so the user knows the room type has an extra-bed option before they reach the bottom. The actual toggle lives at the bottom (where the action is) but the discoverability hint lives at the top (where the eye lands first). The `aria-label="${type.label} extras"` on the wrapper section means screen readers still land on the toggle when the user tabs through the card.
+**Discoverability hook**: the existing amenities row at `BookingPage.tsx:2348-2353` already shows "Up to N extra persons" for types with `maxExtraBeds > 0`. The visual cue is still at the top of the card, so the user knows the room type has an extra-bed option before they reach the bottom. The actual toggle lives at the bottom (where the action is) but the discoverability hint lives at the top (where the eye lands first). The `aria-label="${type.label} extras"` on the wrapper section means screen readers still land on the toggle when the user tabs through the card.
 
 ### The fix (Part 2: checkbox when `maxExtraBeds === 1`)
 
@@ -977,7 +977,7 @@ Add a branch in the Extras IIFE: if `typeMaxExtraBeds === 1`, render a checkbox 
 
 The new checkbox shape:
 - `<input type="checkbox" id="extras-checkbox-${type.value}" data-testid="extras-checkbox-${type.value}" />`
-- `<label for="extras-checkbox-${type.value}">` containing "Add an extra bed" + the per-night price inline ("Add an extra bed · ₱500 / bed / night")
+- `<label for="extras-checkbox-${type.value}">` containing "Add an extra person" + the per-night price inline ("Add an extra person · ₱500 / person / night")
 - The `[−] 0 [+]` counter is gone for this case (the `data-testid="extras-count-${type.value}"` testid is also gone for this case — the checkbox replaces it as the testable surface)
 - The stay total + soft-floor warning render the same as the counter case (the data is 0 or 1 either way; the `extras-stay-total-${type.value}` + `extras-soft-floor-warning-${type.value}` testids stay)
 
@@ -985,7 +985,7 @@ The new checkbox shape:
 
   - **`softFloor === 0`** (no overflow; the user is free to choose): checkbox `unchecked`, `enabled`. The user clicks to toggle 0 ↔ 1. The per-night price + stay total update on toggle.
   - **`softFloor === 1`** (overflow exactly matches the cap; the user MUST have the extra bed): checkbox `checked`, `disabled` (with `aria-describedby="extras-soft-floor-warning-${type.value}"` pointing at the warning text). The user can't uncheck it because the room doesn't fit without the bed. The visual is a grayed-out checked box — clear "this is on, and it has to be" affordance.
-  - **`overCap`** (`softFloor > maxExtraBeds`, e.g. 3 adults in a Single with `maxExtraBeds 1` → soft floor 2, cap 1): checkbox `checked`, `disabled`, the soft-floor warning text "This room needs 2 extra beds to fit your group. You can add up to 1 here." renders below. Same as the EXB-11 over-cap case for the counter.
+  - **`overCap`** (`softFloor > maxExtraBeds`, e.g. 3 adults in a Single with `maxExtraBeds 1` → soft floor 2, cap 1): checkbox `checked`, `disabled`, the soft-floor warning text "This room needs 2 extra persons to fit your group. You can add up to 1 here." renders below. Same as the EXB-11 over-cap case for the counter.
 
 **The new `if/else` switch inside the IIFE** (sketch):
 
@@ -994,7 +994,7 @@ if (typeMaxExtraBeds === 0) return null;        // EXB-11: hidden
 if (typeMaxExtraBeds === 1) {
   // EXB-11.1: checkbox branch
   // ... <input type="checkbox" data-testid={`extras-checkbox-${type.value}`} />
-  //     <label>Add an extra bed · {per-bed-per-night price}</label>
+  //     <label>Add an extra person · {per-person-per-night price}</label>
   //     stay total (same as counter case)
   //     soft-floor warning (same condition, same text, same testid)
 } else {
@@ -1009,7 +1009,7 @@ if (typeMaxExtraBeds === 1) {
   - **Render branch for `maxExtraBeds === 1`**: the IIFE returns a different JSX block. The `extras-count-${type.value}` testid is replaced by `extras-checkbox-${type.value}`. All other testids stay.
   - **Data model**: unchanged. `room.extraBedCount: number` (0 or 1 for the checkbox case; 0..maxExtraBeds for the counter case). `rebalanceGuestDistribution` clamping unchanged. `updateExtraBedCount(typeValue, 0|1, maxExtraBeds)` unchanged. The cart URL serialization (`rooms=`) unchanged. The Step 2/3 aside aggregation unchanged. The per-type cart summary pill unchanged. The server-side create transaction unchanged.
   - **Source-text tests** in `guest-app/tests/api/exb-11-user-controlled-extra-bed-toggle.test.ts`: the existing tests pin the counter shape + soft-floor + over-cap + stay total + cap = 0 hide. They still apply — only for the `maxExtraBeds >= 2` branch. EXB-11.1 adds ~6 new tests pinning the checkbox branch + the placement + the disabled-when-soft-floor-states. See "Tests" below.
-  - **Discoverability hook at `BookingPage.tsx:2348-2353`**: the "Up to N extra beds" line in the amenities row stays. The N value comes from `type.maxExtraBeds`, which still works for `maxExtraBeds === 1` (renders "Up to 1 extra bed" — singular, per the existing pluralization).
+  - **Discoverability hook at `BookingPage.tsx:2348-2353`**: the "Up to N extra persons" line in the amenities row stays. The N value comes from `type.maxExtraBeds`, which still works for `maxExtraBeds === 1` (renders "Up to 1 extra person" — singular, per the existing pluralization).
 
 ### What this does NOT change
 
@@ -1023,7 +1023,7 @@ if (typeMaxExtraBeds === 1) {
 ### Edge cases
 
   - **`maxExtraBeds === 0`** — section hidden (per EXB-11). Unchanged.
-  - **`maxExtraBeds === 1`, 0 rooms of this type in the cart** (`typeQuantity === 0`) — checkbox renders but is `disabled` (same as the counter's "both buttons disabled" case in EXB-11); the user has to add a room first. The helper text "Add at least one room to set extra beds" still renders (the spec's `typeQuantity === 0` guard in the EXB-11 IIFE covers both branches).
+  - **`maxExtraBeds === 1`, 0 rooms of this type in the cart** (`typeQuantity === 0`) — checkbox renders but is `disabled` (same as the counter's "both buttons disabled" case in EXB-11); the user has to add a room first. The helper text "Add at least one room to set extra persons" still renders (the spec's `typeQuantity === 0` guard in the EXB-11 IIFE covers both branches).
   - **`maxExtraBeds === 1`, 1+ rooms, `softFloor === 0`** — checkbox unchecked, enabled, no warning.
   - **`maxExtraBeds === 1`, 1+ rooms, `softFloor === 1`** — checkbox checked, disabled, no warning (the chosen value already matches the soft floor; no over-cap message needed). The disabled state is the "you must have this" affordance.
   - **`maxExtraBeds === 1`, 1+ rooms, `overCap`** (`softFloor > 1`) — checkbox checked, disabled, soft-floor warning renders below. Same warning text as the counter case.
@@ -1061,7 +1061,7 @@ if (typeMaxExtraBeds === 1) {
   - **EXB-11** — the underlying contract is unchanged (per-room `extraBedCount: number`, the per-type mirror via `updateExtraBedCount`, the soft-floor derived from `requiredExtraBedsFor`, the per-cart aggregation). Only the placement + render branch for the `maxExtraBeds === 1` case change.
   - **EXB-01..10** — server-side contract is unchanged. The cart writes the same per-room `extraBedCount`. The server still validates against `maxExtraBeds` and snapshots `extraBedRate` onto the booking doc. The Step 3 add-on line is unchanged.
   - **CHD-11** — the capacity chip is at the top of the card (unchanged). The Extras move doesn't touch the chip.
-  - **CHD-12** — the per-type cart summary's "N extra beds" inline pill is unchanged (the data is the same; the surface just renders it from the same cart field).
+  - **CHD-12** — the per-type cart summary's "N extra persons" inline pill is unchanged (the data is the same; the surface just renders it from the same cart field).
   - **MRB-15-10** — the admin surface for editing `maxExtraBeds` and `extraBedRate` is the input side. EXB-11.1 only changes the *client-side selection surface* (placement + checkbox branch).
   - **MRB-15-11** — unrelated (photo gallery, not extras toggle). The two specs are independent.
 
@@ -1121,7 +1121,7 @@ The new stance: **auto-init enforces the floor; the user is still in control of 
 - **EXB-11 + EXB-11.1** — the underlying contract is unchanged. The same `requiredExtraBedsFor` helper derives the soft floor; the same `updateExtraBedCount` helper writes to the cart; the same `room.extraBedCount` field stores the value. EXB-11.2 only adds an auto-sync useEffect + a derived display value.
 - **EXB-01..10** — server-side contract is unchanged. The cart writes the same per-room `extraBedCount`. The server still validates against `maxExtraBeds` and snapshots `extraBedRate`. The Step 3 add-on line is unchanged.
 - **CHD-11** — the capacity chip is at the top of the card and is unchanged. The Extras move + auto-init doesn't touch the chip.
-- **CHD-12** — the per-type cart summary's "N extra beds" inline pill is unchanged (the data is the same; the surface just renders it from the same cart field). The auto-init means the pill will show the soft-floor value for the "Single Room, 2 guests" case (1) instead of 0.
+- **CHD-12** — the per-type cart summary's "N extra persons" inline pill is unchanged (the data is the same; the surface just renders it from the same cart field). The auto-init means the pill will show the soft-floor value for the "Single Room, 2 guests" case (1) instead of 0.
 - **MRB-15-10** — the admin surface for editing `maxExtraBeds` and `extraBedRate` is the input side. EXB-11.2 only changes the *client-side selection surface* (the auto-init).
 - **MRB-15-11** — unrelated (photo gallery, not extras toggle).
 - **CHD-13** — unrelated (homepage search widget, not the /book extras toggle).
@@ -1166,7 +1166,7 @@ The behavioural test (the user adds a room + changes the guest count, the counte
 - **EXB-11 + EXB-11.1** — the underlying contract is unchanged. The auto-init is a constrained `useEffect` that only fires when the soft floor exceeds the cart value, and only when the user has at least one room of the type.
 - **EXB-01..10** — server-side contract is unchanged. The cart writes the same per-room `extraBedCount`. The server still validates against `maxExtraBeds` and snapshots `extraBedRate`.
 - **CHD-11** — the capacity chip is at the top of the card and is unchanged.
-- **CHD-12** — the per-type cart summary's "N extra beds" inline pill now reflects the auto-init value (the data is the same shape, just the initial value is the soft floor instead of 0).
+- **CHD-12** — the per-type cart summary's "N extra persons" inline pill now reflects the auto-init value (the data is the same shape, just the initial value is the soft floor instead of 0).
 - **MRB-15-10** — the admin surface for editing `maxExtraBeds` and `extraBedRate` is the input side.
 - **MRB-15-11** — unrelated (photo gallery, not extras toggle).
 - **CHD-13** — unrelated (homepage search widget, not the /book extras toggle).
@@ -1226,7 +1226,7 @@ The user is the one paying for the extra bed; the user should be the one choosin
 
 ### What this changes for the data model
 
-Nothing. `room.extraBedCount: number` stays. `updateExtraBedCount` helper is unchanged (still clamps to `[0, typeMaxExtraBeds]`). Cart URL serialization (`rooms=`) is unchanged. Per-type cart summary pill is unchanged (reads from the cart, which now starts at 0; the pill shows "0 extra beds" for the under-floor case, which is the honest signal). Step 2/3 aside aggregation is unchanged (`totalExtraBeds` still sums the per-room `extraBedCount`). Server-side validation is unchanged (the server still validates against `maxExtraBeds` and snapshots `extraBedRate`). The over-cap soft-floor warning text is unchanged. The submit gate's `cartFitsGroup` check is unchanged.
+Nothing. `room.extraBedCount: number` stays. `updateExtraBedCount` helper is unchanged (still clamps to `[0, typeMaxExtraBeds]`). Cart URL serialization (`rooms=`) is unchanged. Per-type cart summary pill is unchanged (reads from the cart, which now starts at 0; the pill shows "0 extra persons" for the under-floor case, which is the honest signal). Step 2/3 aside aggregation is unchanged (`totalExtraBeds` still sums the per-room `extraBedCount`). Server-side validation is unchanged (the server still validates against `maxExtraBeds` and snapshots `extraBedRate`). The over-cap soft-floor warning text is unchanged. The submit gate's `cartFitsGroup` check is unchanged.
 
 ### Implementation
 
@@ -1244,7 +1244,7 @@ Nothing. `room.extraBedCount: number` stays. `updateExtraBedCount` helper is unc
 - **EXB-11.1** — the placement + checkbox-for-`maxExtraBeds === 1` shape is unchanged. Only the auto-init is removed.
 - **EXB-11.2** — the auto-init `useEffect` + `displayExtraBeds` derivation are removed. The soft-floor `<= cap` infinite-loop guard added in the 2026-08-06 hotfix is moot.
 - **CHD-11** — the capacity chip is at the top of the card and is unchanged. The Extras move doesn't touch the chip.
-- **CHD-12** — the per-type cart summary's "N extra beds" inline pill is unchanged. It reads from the cart, which now starts at 0; the pill shows "0 extra beds" for the under-floor case, which is the honest signal.
+- **CHD-12** — the per-type cart summary's "N extra persons" inline pill is unchanged. It reads from the cart, which now starts at 0; the pill shows "0 extra persons" for the under-floor case, which is the honest signal.
 - **EXB-01..10** — server-side contract is unchanged. The cart writes the same per-room `extraBedCount`; the server still validates against `maxExtraBeds` and snapshots `extraBedRate`.
 - **Step 2/3 aside** — unchanged. Reads from the cart's `totalExtraBeds`.
 - **MRB-15-10** — the admin surface for editing `maxExtraBeds` and `extraBedRate` is the input side. EXB-11.4 only changes the *client-side selection surface*.
@@ -1485,7 +1485,7 @@ New `guest-app/tests/api/exb-12-extra-bed-breakfast.test.ts` (~16 source-text gu
 - The booking room line type gains an `extraBedBreakfast?: boolean` field.
 - The BookingPage exposes an `updateExtraBedBreakfast` helper (per-type mirror).
 - The BookingPage's `breakfastTotal` passes `extraBedCount` + `extraBedBreakfast` to the helper.
-- The Extras IIFE renders an "Include breakfast for the extra beds" toggle (both branches).
+- The Extras IIFE renders an "Include breakfast for the extra persons" toggle (both branches).
 - The toggle only renders when the breakfast config is enabled.
 - The booking body passes `extraBedBreakfast` to the server (multi-room + single-room).
 - The server handler validates the invariant `extraBedBreakfast implies extraBedCount > 0`.
@@ -1859,7 +1859,7 @@ The new cap `10` (the CHD-11 sanity guard) is:
 - **CHD-05 (server-side children validation)** — the server still validates `numAdults + numChildren === numGuests` and `numAdults >= 1`. The client-side picker is just less restrictive; the server is the authoritative gate.
 - **CHD-11 (soft-constraint picker)** — the picker is now a true exploration surface. The "Fits your group" chip + the submit gate are the commit surfaces. The CHD-11 promise ("exploration-first, validation-on-commit") is now fully realized.
 - **CHD-11.1 (auto-bump guests)** — the auto-bump in `updateChildren` is unchanged. The user's experience is smoother because they can now click `+` repeatedly without manually bumping `guests` first.
-- **CHD-12 (cart summary)** — the per-type "N extra beds" inline pill is unchanged. The data is the same shape; only the picker's cap changes.
+- **CHD-12 (cart summary)** — the per-type "N extra persons" inline pill is unchanged. The data is the same shape; only the picker's cap changes.
 - **EXB-11 + EXB-11.1 + EXB-11.2 (extras toggle + auto-init)** — the extras toggle uses `requiredExtraBedsFor` to compute the soft floor; the auto-init useEffect re-fires when `numAdults` or `numChildren` change. No change.
 - **Step 2/3 aside** — the extra-bed pricing updates live. No change.
 - **MRB-15-10 + MRB-15-11** — unrelated.
@@ -1905,7 +1905,7 @@ The behavioural test (the user clicks `+` on children past 3, sees the "Doesn't 
 - **CHD-05 (server-side children validation)** — the server still validates `numAdults + numChildren === numGuests` and `numAdults >= 1`. The client-side picker is just less restrictive; the server is the authoritative gate.
 - **CHD-11 (soft-constraint picker)** — the picker is now a true exploration surface. The "Fits your group" chip + the submit gate are the commit surfaces. The CHD-11 promise is now fully realized.
 - **CHD-11.1 (auto-bump guests)** — the auto-bump in `updateChildren` is unchanged. The user's experience is smoother because they can now click `+` repeatedly without manually bumping `guests` first.
-- **CHD-12 (cart summary)** — the per-type "N extra beds" inline pill is unchanged. The data is the same shape; only the picker's cap changes.
+- **CHD-12 (cart summary)** — the per-type "N extra persons" inline pill is unchanged. The data is the same shape; only the picker's cap changes.
 - **EXB-11 + EXB-11.1 + EXB-11.2** — the extras toggle + auto-init useEffect are unchanged. The auto-init re-fires when `numAdults` or `numChildren` change.
 - **Step 2/3 aside** — unchanged.
 - **MRB-15-10 + MRB-15-11** — unrelated.
@@ -2040,7 +2040,7 @@ The clamp is a safety net, not an enforcement layer. The enforcement layer is th
 - **CHD-11 (soft-constraint picker)** — the picker is now a true exploration surface. The "Fits your group" chip + the submit gate are the commit surfaces. The CHD-11 promise is now fully realized (the picker is unconstrained; the validation layers do the work).
 - **CHD-11.1 (auto-bump guests from `updateChildren`)** — the auto-bump in `updateChildren` is unchanged. CHD-11.3 adds a symmetric auto-bump in `updateGuests`.
 - **CHD-11.2 (picker cap raised to soft 10)** — the picker cap (10) is unchanged. The per-type cap is now gone from the picker (CHD-11.2 already removed it from the `+` button; CHD-11.3 removes it from the clamping chain).
-- **CHD-12 (cart summary)** — the per-type "N extra beds" inline pill is unchanged. The data is the same shape; only the picker's clamping chain changes.
+- **CHD-12 (cart summary)** — the per-type "N extra persons" inline pill is unchanged. The data is the same shape; only the picker's clamping chain changes.
 - **EXB-11 + EXB-11.1 + EXB-11.2 (extras toggle + auto-init)** — the extras toggle uses `requiredExtraBedsFor` to compute the soft floor; the auto-init useEffect re-fires when `numAdults` or `numChildren` change. No change.
 - **Step 2/3 aside** — the extra-bed pricing updates live. No change.
 - **MRB-15-10 + MRB-15-11** — unrelated.

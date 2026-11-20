@@ -490,7 +490,7 @@ describe("/api/bookings/create", () => {
     expect(res.status).toHaveBeenCalledWith(500);
     expect(res.json).toHaveBeenCalledWith({
       success: false,
-      error: "Not enough extra beds: 1 overflow adult(s) + 0 overflow child(ren) = 1 extra bed(s) needed, but only 0 extra bed(s) selected. The room type allows up to 0 extra bed(s)."
+      error: "Not enough extra persons: 1 overflow adult(s) + 0 overflow child(ren) = 1 extra person(s) needed, but only 0 extra person(s) selected. The room type allows up to 0 extra person(s)."
     });
     expect(setCalls).toHaveLength(0);
   });
@@ -510,7 +510,7 @@ describe("/api/bookings/create", () => {
     expect(res.status).toHaveBeenCalledWith(500);
     expect(res.json).toHaveBeenCalledWith({
       success: false,
-      error: "Not enough extra beds: 0 overflow adult(s) + 1 overflow child(ren) = 1 extra bed(s) needed, but only 0 extra bed(s) selected. The room type allows up to 0 extra bed(s)."
+      error: "Not enough extra persons: 0 overflow adult(s) + 1 overflow child(ren) = 1 extra person(s) needed, but only 0 extra person(s) selected. The room type allows up to 0 extra person(s)."
     });
     expect(setCalls).toHaveLength(0);
   });
@@ -837,7 +837,7 @@ describe("/api/bookings/create", () => {
     expect(res.status).toHaveBeenCalledWith(500);
     expect(res.json).toHaveBeenCalledWith({
       success: false,
-      error: "Not enough extra beds: 6 overflow adult(s) + 0 overflow child(ren) = 6 extra bed(s) needed, but only 0 extra bed(s) selected. The room type allows up to 0 extra bed(s)."
+      error: "Not enough extra persons: 6 overflow adult(s) + 0 overflow child(ren) = 6 extra person(s) needed, but only 0 extra person(s) selected. The room type allows up to 0 extra person(s)."
     });
     
     // Check that no partial writes were made (neither the booking nor the daily counter was incremented)

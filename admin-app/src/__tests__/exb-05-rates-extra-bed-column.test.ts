@@ -146,7 +146,7 @@ describe("EXB-05 — Rates matrix gains the `extraBedRate` column", () => {
     );
     expect(theadRow, "table header row must exist").toBeTruthy();
     expect(theadRow![0]).toMatch(
-      /<th className="py-2\.5">Extra Bed Rate \(per bed \/ night\)<\/th>/
+      /<th className="py-2\.5">Extra Person Rate \(per person \/ night\)<\/th>/
     );
     // The body cell: every existing room type gets a
     // 4th `<td>` whose input is bound to `extraBed`.

@@ -2973,7 +2973,7 @@ export async function handleCreateBooking(req: any, res: any) {
         const maxExtraBeds = Math.max(0, Number(selectionType.maxExtraBeds) || 0);
         if (extraBedCount > maxExtraBeds) {
           throw new Error(
-            `Extra bed count (${extraBedCount}) exceeds ${selectionType.label || selection.roomType}'s allowance (${maxExtraBeds}).`
+            `Extra person count (${extraBedCount}) exceeds ${selectionType.label || selection.roomType}'s allowance (${maxExtraBeds}).`
           );
         }
         const overflow = requiredExtraBedsFor({
@@ -2984,8 +2984,8 @@ export async function handleCreateBooking(req: any, res: any) {
         });
         if (overflow.requiredExtraBeds > extraBedCount) {
           throw new Error(requestedRoomSelections?.length
-            ? `Room ${index + 1} needs ${overflow.requiredExtraBeds} extra bed(s), but only ${extraBedCount} selected.`
-            : `Not enough extra beds: ${overflow.overflowAdults} overflow adult(s) + ${overflow.overflowChildren} overflow child(ren) = ${overflow.requiredExtraBeds} extra bed(s) needed, but only ${extraBedCount} extra bed(s) selected. The room type allows up to ${maxExtraBeds} extra bed(s).`
+            ? `Room ${index + 1} needs ${overflow.requiredExtraBeds} extra person(s), but only ${extraBedCount} selected.`
+            : `Not enough extra persons: ${overflow.overflowAdults} overflow adult(s) + ${overflow.overflowChildren} overflow child(ren) = ${overflow.requiredExtraBeds} extra person(s) needed, but only ${extraBedCount} extra person(s) selected. The room type allows up to ${maxExtraBeds} extra person(s).`
           );
         }
         // Per BR-08 (decision #238, 2026-10-14 — close-out):
@@ -3034,7 +3034,7 @@ export async function handleCreateBooking(req: any, res: any) {
         );
         if (!inventoryResult.ok) {
           throw new Error(
-            `Not enough extra beds: ${extraBedInUse} already booked across overlapping stays + ${totalExtraBeds} requested = ${extraBedInUse + totalExtraBeds}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
+            `Not enough extra persons: ${extraBedInUse} already booked across overlapping stays + ${totalExtraBeds} requested = ${extraBedInUse + totalExtraBeds}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
           );
         }
       }
@@ -3673,8 +3673,8 @@ export async function handleCreateBooking(req: any, res: any) {
             ...(stay.extraBedTotal > 0
               ? [{
                   label: stay.extraBedCount > 1
-                    ? `Extra bed add-on (${stay.extraBedCount} beds × ${numNights} ${numNights === 1 ? "night" : "nights"})`
-                    : "Extra bed add-on",
+                    ? `Extra person add-on (${stay.extraBedCount} persons × ${numNights} ${numNights === 1 ? "night" : "nights"})`
+                    : "Extra person add-on",
                   amount: stay.extraBedTotal
                 }]
               : [])
@@ -5827,7 +5827,7 @@ export async function handleCreateWalkin(req: any, res: any) {
         const lineExtraBedRate = Math.max(0, Number(lineTypeEntry.extraBedRate) || 0);
         if (lineExtraBedCount > lineMaxExtraBeds) {
           throw new Error(
-            `Extra bed count (${lineExtraBedCount}) exceeds the room type's allowance (${lineMaxExtraBeds}).`
+            `Extra person count (${lineExtraBedCount}) exceeds the room type's allowance (${lineMaxExtraBeds}).`
           );
         }
         // Per EXB-03 (2026-08-01, per decision #145): the
@@ -5849,7 +5849,7 @@ export async function handleCreateWalkin(req: any, res: any) {
         });
         if (lineOverflow.requiredExtraBeds > lineExtraBedCount) {
           throw new Error(
-            `Not enough extra beds: ${lineOverflow.overflowAdults} overflow adult(s) + ${lineOverflow.overflowChildren} overflow child(ren) = ${lineOverflow.requiredExtraBeds} extra bed(s) needed, but only ${lineExtraBedCount} extra bed(s) selected. The room type allows up to ${lineMaxExtraBeds} extra bed(s).`
+            `Not enough extra persons: ${lineOverflow.overflowAdults} overflow adult(s) + ${lineOverflow.overflowChildren} overflow child(ren) = ${lineOverflow.requiredExtraBeds} extra person(s) needed, but only ${lineExtraBedCount} extra person(s) selected. The room type allows up to ${lineMaxExtraBeds} extra person(s).`
           );
         }
         return {
@@ -5891,7 +5891,7 @@ export async function handleCreateWalkin(req: any, res: any) {
         );
         if (!walkinInventoryResult.ok) {
           throw new Error(
-            `Not enough extra beds: ${walkinExtraBedInUse} already booked across overlapping stays + ${walkinExtraBedCount} requested = ${walkinExtraBedInUse + walkinExtraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
+            `Not enough extra persons: ${walkinExtraBedInUse} already booked across overlapping stays + ${walkinExtraBedCount} requested = ${walkinExtraBedInUse + walkinExtraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
           );
         }
       }
@@ -13724,7 +13724,7 @@ export async function handleRescheduleBooking(req: any, res: any) {
       });
       if (rescheduleOverflow.requiredExtraBeds > rescheduleExtraBedCount) {
         throw new Error(
-          `Booking does not fit the target room type: ${rescheduleOverflow.overflowAdults} overflow adult(s) + ${rescheduleOverflow.overflowChildren} overflow child(ren) = ${rescheduleOverflow.requiredExtraBeds} extra bed(s) needed, but the booking has ${rescheduleExtraBedCount} extra bed(s) snapshotted. The target room type allows up to ${rescheduleMaxExtraBeds} extra bed(s).`
+          `Booking does not fit the target room type: ${rescheduleOverflow.overflowAdults} overflow adult(s) + ${rescheduleOverflow.overflowChildren} overflow child(ren) = ${rescheduleOverflow.requiredExtraBeds} extra person(s) needed, but the booking has ${rescheduleExtraBedCount} extra person(s) snapshotted. The target room type allows up to ${rescheduleMaxExtraBeds} extra person(s).`
         );
       }
 
@@ -13760,7 +13760,7 @@ export async function handleRescheduleBooking(req: any, res: any) {
         );
         if (!rescheduleInventoryResult.ok) {
           throw new Error(
-            `Not enough extra beds: ${rescheduleExtraBedInUse} already booked across overlapping stays + ${rescheduleExtraBedCount} requested = ${rescheduleExtraBedInUse + rescheduleExtraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
+            `Not enough extra persons: ${rescheduleExtraBedInUse} already booked across overlapping stays + ${rescheduleExtraBedCount} requested = ${rescheduleExtraBedInUse + rescheduleExtraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
           );
         }
       }
@@ -15000,11 +15000,11 @@ export async function handleAddRoomToReservation(req: any, res: any) {
       });
       if (requiredExtraBeds.requiredExtraBeds > extraBedCount) {
         throw new Error(
-          `Target room needs ${requiredExtraBeds.requiredExtraBeds} extra bed(s) for ${numAdults} adult(s) + ${numChildren} child(ren), but only ${extraBedCount} provided.`
+          `Target room needs ${requiredExtraBeds.requiredExtraBeds} extra person(s) for ${numAdults} adult(s) + ${numChildren} child(ren), but only ${extraBedCount} provided.`
         );
       }
       if (Number(targetRoom.maxExtraBeds) >= 0 && extraBedCount > Number(targetRoom.maxExtraBeds)) {
-        throw new Error(`Target room allows at most ${targetRoom.maxExtraBeds} extra bed(s).`);
+        throw new Error(`Target room allows at most ${targetRoom.maxExtraBeds} extra person(s).`);
       }
 
       // 3. Read the existing children. Per MRB-07: the
@@ -15119,7 +15119,7 @@ export async function handleAddRoomToReservation(req: any, res: any) {
         );
         if (!addRoomInventoryResult.ok) {
           throw new Error(
-            `Not enough extra beds: ${addRoomExtraBedInUse} already booked across overlapping stays + ${extraBedCount} requested = ${addRoomExtraBedInUse + extraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
+            `Not enough extra persons: ${addRoomExtraBedInUse} already booked across overlapping stays + ${extraBedCount} requested = ${addRoomExtraBedInUse + extraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
           );
         }
       }

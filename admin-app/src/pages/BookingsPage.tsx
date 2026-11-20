@@ -2719,7 +2719,7 @@ export function BookingsPage() {
           if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
             const splitLabel = `${numAdults}A + ${numChildren}C`;
             const extraLabel = Number.isFinite(extraBedCount) && extraBedCount > 0
-              ? ` + ${extraBedCount} bed${extraBedCount === 1 ? "" : "s"}`
+              ? ` + ${extraBedCount} extra person${extraBedCount === 1 ? "" : "s"}`
               : "";
             return <span title={`${row.numGuests} guest${row.numGuests === 1 ? "" : "s"} total`}>{splitLabel}{extraLabel}</span>;
           }
@@ -3364,7 +3364,7 @@ export function BookingsPage() {
       if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
         const splitLabel = `${numAdults}A + ${numChildren}C (${b.numGuests})`;
         const extraLabel = Number.isFinite(extraBedCount) && extraBedCount > 0
-          ? ` + ${extraBedCount} extra bed${extraBedCount === 1 ? "" : "s"}`
+          ? ` + ${extraBedCount} extra person${extraBedCount === 1 ? "" : "s"}`
           : "";
         pdf.text(`Guests: ${splitLabel}${extraLabel}  |  Nights: ${b.numNights}`, marginL + 5, y);
       } else {
@@ -3859,7 +3859,7 @@ export function BookingsPage() {
           if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
             const splitLabel = `${numAdults}A + ${numChildren}C (${b.numGuests} total)`;
             const extraLabel = Number.isFinite(extraBedCount) && extraBedCount > 0
-              ? ` + ${extraBedCount} extra bed${extraBedCount === 1 ? "" : "s"}`
+              ? ` + ${extraBedCount} extra person${extraBedCount === 1 ? "" : "s"}`
               : "";
             return `${nightsLabel} • ${splitLabel}${extraLabel}`;
           }
@@ -8442,12 +8442,12 @@ export function BookingsPage() {
 
                   {stayMaxExtraBeds > 0 ? (
                     <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700">
-                      <span>Extra beds ({formatPrice(stayExtraBedRate)} / bed / night)</span>
+                      <span>Extra persons ({formatPrice(stayExtraBedRate)} / person / night)</span>
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
                           className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
-                          aria-label={`Decrease extra beds in room ${stayIndex + 1}`}
+                          aria-label={`Decrease extra persons in room ${stayIndex + 1}`}
                           onClick={() => updateWalkinRoomStay(stayIndex, { extraBedCount: Math.max(0, stay.extraBedCount - 1) })}
                           disabled={stay.extraBedCount <= 0}
                         >
@@ -8457,7 +8457,7 @@ export function BookingsPage() {
                         <button
                           type="button"
                           className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
-                          aria-label={`Increase extra beds in room ${stayIndex + 1}`}
+                          aria-label={`Increase extra persons in room ${stayIndex + 1}`}
                           onClick={() => updateWalkinRoomStay(stayIndex, { extraBedCount: Math.min(stay.extraBedCount + 1, stayMaxExtraBeds) })}
                           disabled={stay.extraBedCount >= stayMaxExtraBeds}
                         >
@@ -8471,11 +8471,11 @@ export function BookingsPage() {
                     <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
                       {stayMaxExtraBeds > 0 ? (
                         <>
-                          This room type allows up to {stayMaxCapacity} adult{stayMaxCapacity === 1 ? "" : "s"} + {stayMaxChildren} child{stayMaxChildren === 1 ? "" : "ren"} (or {stayMaxCapacity + stayMaxExtraBeds}/{stayMaxChildren + stayMaxExtraBeds} with {stayMaxExtraBeds} extra bed{stayMaxExtraBeds === 1 ? "" : "s"}). Add {stayOverflow.requiredExtraBeds} extra bed{stayOverflow.requiredExtraBeds === 1 ? "" : "s"} to fit this room's guests, move someone to another room, or pick a different room type.
+                          This room type allows up to {stayMaxCapacity} adult{stayMaxCapacity === 1 ? "" : "s"} + {stayMaxChildren} child{stayMaxChildren === 1 ? "" : "ren"} (or {stayMaxCapacity + stayMaxExtraBeds}/{stayMaxChildren + stayMaxExtraBeds} with {stayMaxExtraBeds} extra person{stayMaxExtraBeds === 1 ? "" : "s"}). Add {stayOverflow.requiredExtraBeds} extra person{stayOverflow.requiredExtraBeds === 1 ? "" : "s"} to fit this room's guests, move someone to another room, or pick a different room type.
                         </>
                       ) : (
                         <>
-                          This room type allows up to {stayMaxCapacity} adult{stayMaxCapacity === 1 ? "" : "s"} + {stayMaxChildren} child{stayMaxChildren === 1 ? "" : "ren"} and does not allow extra beds. Move someone to another room or pick a different room type.
+                          This room type allows up to {stayMaxCapacity} adult{stayMaxCapacity === 1 ? "" : "s"} + {stayMaxChildren} child{stayMaxChildren === 1 ? "" : "ren"} and does not allow extra persons. Move someone to another room or pick a different room type.
                         </>
                       )}
                     </div>
@@ -9701,7 +9701,7 @@ export function BookingsPage() {
       >
         <div className="space-y-4">
           <p className="text-xs text-gray-600">
-            The new room inherits the reservation's current dates. The room must be vacant and pass bed-inventory validation.
+            The new room inherits the reservation's current dates. The room must be vacant and pass extra-person inventory validation.
           </p>
           <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
             Target room
@@ -9747,7 +9747,7 @@ export function BookingsPage() {
               />
             </label>
             <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-600">
-              Extra beds
+              Extra persons
               <input
                 type="number"
                 min={0}
@@ -9988,7 +9988,7 @@ export function BookingsPage() {
             <select value={chargeCategory} onChange={(e) => setChargeCategory(e.target.value as IncidentalChargeCategory)} className="min-h-[44px] rounded-lg border border-gray-200 px-3 text-xs">
               <option value="late-checkout">Late checkout</option>
               <option value="early-checkin">Early check-in</option>
-              <option value="extra-person">Extra person / bed</option>
+              <option value="extra-person">Extra person</option>
               <option value="damage">Damage</option>
               <option value="laundry">Laundry</option>
               <option value="other">Other</option>

@@ -4930,7 +4930,7 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
 	                          {Number(type.maxExtraBeds) > 0 ? (
 	                            <span className="flex items-center gap-2">
 	                              <Plus size={16} className="text-primary" />
-	                              Up to {type.maxExtraBeds} extra bed{Number(type.maxExtraBeds) === 1 ? "" : "s"}
+	                              Up to {type.maxExtraBeds} extra person{Number(type.maxExtraBeds) === 1 ? "" : "s"}
 	                            </span>
 	                          ) : null}
                           <span className="flex items-center gap-2">
@@ -5236,11 +5236,11 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
                                   className="flex min-h-14 cursor-pointer items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4"
                                 >
                                   <span>
-                                    <span className="block text-sm font-semibold text-gray-950">Add an extra bed</span>
+                                    <span className="block text-sm font-semibold text-gray-950">Add an extra person</span>
                                     <span className="block text-xs text-gray-500">
                                       {typeQuantity > 0
-                                        ? `${formatPrice(typeExtraBedRate)} / bed / night`
-                                        : "Add at least one room to set extra beds"}
+                                        ? `${formatPrice(typeExtraBedRate)} / person / night`
+                                        : "Add at least one room to set extra persons"}
                                     </span>
                                   </span>
                                   <input
@@ -5324,7 +5324,7 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
                                     data-testid={`extras-soft-floor-warning-${type.value}`}
                                     role="status"
                                   >
-                                    {type.label} needs {softFloor} extra bed{softFloor === 1 ? "" : "s"} to fit your group. You can add up to {typeMaxExtraBeds} here.
+                                    {type.label} needs {softFloor} extra person{softFloor === 1 ? "" : "s"} to fit your group. You can add up to {typeMaxExtraBeds} here.
                                   </p>
                                 ) : null}
                               </div>
@@ -5340,17 +5340,17 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
                             >
                               <div className="flex min-h-14 items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4">
                                 <span>
-                                  <span className="block text-sm font-semibold text-gray-950">Extra beds</span>
+                                  <span className="block text-sm font-semibold text-gray-950">Extra persons</span>
                                   <span className="block text-xs text-gray-500">
                                     {typeQuantity > 0
-                                      ? `${formatPrice(typeExtraBedRate)} / bed / night`
-                                      : "Add at least one room to set extra beds"}
+                                      ? `${formatPrice(typeExtraBedRate)} / person / night`
+                                      : "Add at least one room to set extra persons"}
                                   </span>
                                 </span>
                                 <span className="flex items-center gap-2">
                                   <button
                                     type="button"
-                                    aria-label={`Remove one extra bed from ${type.label}`}
+                                    aria-label={`Remove one extra person from ${type.label}`}
                                     className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
                                     // Per EXB-11.4: the only
                                     // disable is "no room to
@@ -5379,7 +5379,7 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
                                   </span>
                                   <button
                                     type="button"
-                                    aria-label={`Add one extra bed to ${type.label}`}
+                                    aria-label={`Add one extra person to ${type.label}`}
                                     className="flex h-11 w-11 items-center justify-center rounded-lg bg-white text-gray-700 ring-1 ring-gray-200 transition hover:ring-primary disabled:cursor-not-allowed disabled:opacity-40"
                                     disabled={typeQuantity === 0 || userExtraBeds >= typeMaxExtraBeds}
                                     onClick={() => updateExtraBedCount(type.value, userExtraBeds + 1, typeMaxExtraBeds)}
@@ -5418,7 +5418,7 @@ const addOnsTotal = breakfastTotal + otherAddOnTotal;
                                   data-testid={`extras-soft-floor-warning-${type.value}`}
                                   role="status"
                                 >
-                                  {type.label} needs {softFloor} extra bed{softFloor === 1 ? "" : "s"} to fit your group. You can add up to {typeMaxExtraBeds} here.
+                                  {type.label} needs {softFloor} extra person{softFloor === 1 ? "" : "s"} to fit your group. You can add up to {typeMaxExtraBeds} here.
                                 </p>
                               ) : null}
                             </div>
@@ -5600,7 +5600,7 @@ function buildGuestRateBreakdown(input: {
       ? [{ label: "Breakfast add-on", amount: input.breakfastTotal }]
       : []),
     ...(input.extraBedTotal > 0
-      ? [{ label: "Extra bed add-on", amount: input.extraBedTotal }]
+      ? [{ label: "Extra person add-on", amount: input.extraBedTotal }]
       : [])
   ];
   const subtotal = input.roomSubtotal + input.breakfastTotal + input.extraBedTotal;
@@ -5947,7 +5947,7 @@ function BookingReviewAside({
                   <span className="mt-1 block">
                     {room.numAdults} adult{room.numAdults === 1 ? "" : "s"} ·{" "}
                     {room.numChildren} child{room.numChildren === 1 ? "" : "ren"}
-                    {room.extraBedCount > 0 ? ` · ${room.extraBedCount} extra bed${room.extraBedCount === 1 ? "" : "s"}` : ""}
+                    {room.extraBedCount > 0 ? ` · ${room.extraBedCount} extra person${room.extraBedCount === 1 ? "" : "s"}` : ""}
                     {/* Per BR-08 (decision #238, 2026-10-14 — close-out):
                         the legacy `hasBreakfast: boolean` flag is gone.
                         The per-room summary shows the per-room breakfast
