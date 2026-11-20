@@ -296,7 +296,7 @@ export function BookingDrawerWorkspaceHeader({
                 if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
                   const splitLabel = `${numAdults} adult${numAdults === 1 ? "" : "s"} + ${numChildren} child${numChildren === 1 ? "" : "ren"}`;
                   const extraLabel = Number.isFinite(extraBedCount) && extraBedCount > 0
-                    ? ` + ${extraBedCount} extra bed${extraBedCount === 1 ? "" : "s"}`
+                    ? ` + ${extraBedCount} extra person${extraBedCount === 1 ? "" : "s"}`
                     : "";
                   return (
                     <span title={`${booking.numGuests || 1} guest${(booking.numGuests || 1) === 1 ? "" : "s"} total`}>

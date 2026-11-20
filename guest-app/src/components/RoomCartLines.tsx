@@ -111,7 +111,7 @@ export function RoomCartLines({ rooms, roomTypes, idPrefix = "cart-line" }: Room
             </span>
             {agg.extraBeds > 0 ? (
               <span className="rounded-full bg-primary-light px-2 py-1 font-semibold text-primary">
-                {agg.extraBeds} extra bed{agg.extraBeds === 1 ? "" : "s"}
+                {agg.extraBeds} extra person{agg.extraBeds === 1 ? "" : "s"}
               </span>
             ) : null}
           </div>

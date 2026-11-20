@@ -90,6 +90,6 @@ Planned post-launch enhancement: an Airbnb-style **Rate Calendar** for month-bas
 
 ## Extra Bed (EXB-01..10)
 
-The dynamic room-type matrix includes `extraBedRate` as a fourth, non-negative per-bed-per-night rate and saves it through the same batched room-type update as the other columns. Whether a type offers extra beds is controlled by `maxExtraBeds`, not by the rate; a zero rate is permitted.
+The dynamic room-type matrix includes `extraBedRate` as a fourth, non-negative per-person-per-night rate and saves it through the same batched room-type update as the other columns. Whether a type offers extra persons is controlled by `maxExtraBeds`, not by the rate; a zero rate is permitted. The admin column is labelled "Extra Person Rate (per person / night)" (per decision #327); the field stays `extraBedRate`.
 
-New bookings snapshot the selected type's rate, and rescheduling preserves the booking snapshot. Extra-bed pricing is count × rate × nights and is independent of breakfast. See `plan/features/BOOKING-FLOW.md §Extra Bed` for occupancy, pricing, and inventory rules.
+New bookings snapshot the selected type's rate, and rescheduling preserves the booking snapshot. Extra-person pricing is count × rate × nights and is independent of breakfast. See `plan/features/BOOKING-FLOW.md §Extra Bed` for occupancy, pricing, and inventory rules.

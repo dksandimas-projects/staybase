@@ -60,7 +60,7 @@ describe("NBS-2026-08-08 — Calendar create collects adult/child + extra bed (F
       expect(formMatch).not.toBeNull();
       expect(calendarPageSrc).toMatch(/Adults<input type="number" min=\{1\} max=\{20\} value=\{numAdults\}/);
       expect(calendarPageSrc).toMatch(/Children<input type="number" min=\{0\} max=\{20\} value=\{numChildren\}/);
-      expect(calendarPageSrc).toMatch(/Extra beds<input type="number" min=\{0\} max=\{10\} value=\{extraBedCount\}/);
+      expect(calendarPageSrc).toMatch(/Extra persons<input type="number" min=\{0\} max=\{10\} value=\{extraBedCount\}/);
     });
 
     it("the Guests quick-set field auto-distributes to numAdults + 0 children", () => {

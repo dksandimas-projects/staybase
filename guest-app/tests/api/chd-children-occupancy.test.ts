@@ -176,7 +176,7 @@ describe("CHD-04 — capacity validation splits into two checks (server-authorit
       /const\s+overflow\s*=\s*requiredExtraBedsFor\(\{[\s\S]{0,200}numAdults,[\s\S]{0,200}numChildren,[\s\S]{0,200}maxCapacity,[\s\S]{0,200}maxChildren[\s\S]{0,200}\}\)/
     );
     expect(bookingsHandlerSrc).toMatch(
-      /if\s*\(\s*overflow\.requiredExtraBeds\s*>\s*extraBedCount\s*\)\s*\{[\s\S]{0,300}Not enough extra beds/
+      /if\s*\(\s*overflow\.requiredExtraBeds\s*>\s*extraBedCount\s*\)\s*\{[\s\S]{0,300}Not enough extra persons/
     );
   });
 

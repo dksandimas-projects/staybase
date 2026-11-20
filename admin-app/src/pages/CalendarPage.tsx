@@ -1008,7 +1008,7 @@ export function CalendarPage() {
             <label className="flex flex-col gap-2 font-semibold text-gray-700">Adults<input type="number" min={1} max={20} value={numAdults} onChange={(e) => setNumAdults(Math.max(1, Number(e.target.value) || 1))} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
             <label className="flex flex-col gap-2 font-semibold text-gray-700">Children<input type="number" min={0} max={20} value={numChildren} onChange={(e) => setNumChildren(Math.max(0, Number(e.target.value) || 0))} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
           </div>
-          <label className="flex flex-col gap-2 font-semibold text-gray-700">Extra beds<input type="number" min={0} max={10} value={extraBedCount} onChange={(e) => setExtraBedCount(Math.max(0, Number(e.target.value) || 0))} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
+          <label className="flex flex-col gap-2 font-semibold text-gray-700">Extra persons<input type="number" min={0} max={10} value={extraBedCount} onChange={(e) => setExtraBedCount(Math.max(0, Number(e.target.value) || 0))} className="min-h-[44px] rounded border border-gray-250 px-3 text-sm" /></label>
           {/* Per BR-09 (2026-10-14): the breakfast
               per-date × per-guest meal grid sits on
               Step 2 (Add-ons) of the calendar-create

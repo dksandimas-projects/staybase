@@ -4698,7 +4698,7 @@ function SalesBreakfastTable({ bookings, toDate, isMobile }: { bookings: any[]; 
                   if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
                     const splitLabel = `${numAdults}A + ${numChildren}C`;
                     const extraLabel = Number.isFinite(extraBedCount) && extraBedCount > 0
-                      ? ` + ${extraBedCount} bed${extraBedCount === 1 ? "" : "s"}`
+                      ? ` + ${extraBedCount} extra person${extraBedCount === 1 ? "" : "s"}`
                       : "";
                     return <span title={`${b.numGuests} guest${b.numGuests === 1 ? "" : "s"} total`}>{splitLabel}{extraLabel}</span>;
                   }

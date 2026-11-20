@@ -197,9 +197,9 @@ export function buildRateBreakdown(input: BuildRateBreakdownInput): BookingRateB
               0
             ) || 1;
             if (count > 1 && rate > 0) {
-              return `Extra bed add-on (${count} beds × ${nights} ${nights === 1 ? "night" : "nights"})`;
+              return `Extra person add-on (${count} persons × ${nights} ${nights === 1 ? "night" : "nights"})`;
             }
-            return "Extra bed add-on";
+            return "Extra person add-on";
           })(),
           amount: input.extraBedTotal ?? 0
         }

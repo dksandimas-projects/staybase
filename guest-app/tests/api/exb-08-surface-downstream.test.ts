@@ -123,10 +123,10 @@ describe("EXB-08 — server rate breakdown writes the extra bed add-on line", ()
     // constant-evaluation time.
     expect(rateBreakdownSrc).toMatch(/label:\s*\(\(\) => \{/);
     expect(rateBreakdownSrc).toMatch(
-      /return `Extra bed add-on \(\$\{count\} beds ×/
+      /return `Extra person add-on \(\$\{count\} persons ×/
     );
     expect(rateBreakdownSrc).toMatch(
-      /return "Extra bed add-on"/
+      /return "Extra person add-on"/
     );
     expect(rateBreakdownSrc).toMatch(
       /amount:\s*input\.extraBedTotal\s*\?\?\s*0/
@@ -209,7 +209,7 @@ describe("EXB-08 — server email helper shows the adult/child split + extra bed
     // so the email matches the receipt's currency
     // style.
     expect(emailHandlerSrc).toMatch(
-      /Extra beds: \$\{extraBedCount\} \(\$\{extraBedCount\} × \$\{fmtMoney\(\(booking as any\)\.extraBedRate\)\} \/ bed \/ night\)/
+      /Extra persons: \$\{extraBedCount\} \(\$\{extraBedCount\} × \$\{fmtMoney\(\(booking as any\)\.extraBedRate\)\} \/ person \/ night\)/
     );
   });
 });
@@ -222,7 +222,7 @@ describe("EXB-08 — admin booking drawer header shows the split + extra bed", (
     expect(drawerSrc).toMatch(
       /\$\{numAdults\} adult\$\{numAdults === 1 \? "" : "s"\} \+ \$\{numChildren\} child\$\{numChildren === 1 \? "" : "ren"\}/
     );
-    expect(drawerSrc).toMatch(/\+ \$\{extraBedCount\} extra bed/);
+    expect(drawerSrc).toMatch(/\+ \$\{extraBedCount\} extra person/);
   });
 });
 
@@ -234,7 +234,7 @@ describe("EXB-08 — admin Bookings table row shows the split + extra bed", () =
     // on the `<span>` carries the verbose form for
     // accessibility (hover reads "3 guests total").
     expect(bookingsPageSrc).toMatch(/\$\{numAdults\}A \+ \$\{numChildren\}C/);
-    expect(bookingsPageSrc).toMatch(/\$\{extraBedCount\} bed/);
+    expect(bookingsPageSrc).toMatch(/\$\{extraBedCount\} extra person/);
     expect(bookingsPageSrc).toMatch(/title=\{`\$\{row\.numGuests\} guest/);
   });
 });
@@ -289,7 +289,7 @@ describe("EXB-08 — admin Bookings drawer 'Guests:' + 'Stay' lines show the spl
 describe("EXB-08 — admin Reports line shows the split + extra bed", () => {
   it.skip("Reports line uses the compact '2A + 1C' form + 'N bed(s)' when the split is present", () => {
     expect(reportsPageSrc).toMatch(/\$\{numAdults\}A \+ \$\{numChildren\}C/);
-    expect(reportsPageSrc).toMatch(/\$\{extraBedCount\} bed/);
+    expect(reportsPageSrc).toMatch(/\$\{extraBedCount\} extra person/);
     expect(reportsPageSrc).toMatch(/title=\{`\$\{b\.numGuests\} guest/);
   });
 });
@@ -304,7 +304,7 @@ describe("EXB-08 — guest /my-booking card shows the split + extra bed", () => 
     expect(bookingLookupSrc).toMatch(
       /\$\{numAdults\} adult\$\{numAdults === 1 \? "" : "s"\} \+ \$\{numChildren\} child\$\{numChildren === 1 \? "" : "ren"\} \(\$\{activeBooking\.numGuests\} total\)/
     );
-    expect(bookingLookupSrc).toMatch(/\+ \$\{extraBedCount\} extra bed/);
+    expect(bookingLookupSrc).toMatch(/\+ \$\{extraBedCount\} extra person/);
   });
 
   it.skip("orphan BookingSummaryCard also renders the split (for future importers)", () => {
@@ -322,7 +322,7 @@ describe("EXB-08 — guest /my-booking card shows the split + extra bed", () => 
       /\{Number\(numAdults\)\}\s+adult/
     );
     expect(bookingSummaryCardSrc).toMatch(
-      /\+ \{extraBedCountValue\} extra bed/
+      /\+ \{extraBedCountValue\} extra person/
     );
   });
 });

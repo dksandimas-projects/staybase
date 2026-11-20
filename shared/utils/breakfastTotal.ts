@@ -47,7 +47,7 @@ export const BREAKFAST_RATE_LINE_PREFIX = "Breakfast (";
  *
  *   • breakfast  → `"Breakfast add-on"` (legacy single line) or
  *                  `"Breakfast (Oct 14, 2 meals)"` (BR-03 per-date)
- *   • extra bed  → `"Extra bed add-on"` / `"Extra bed add-on (2 beds × 3 nights)"`
+ *   • extra person  → `"Extra person add-on"` / `"Extra person add-on (2 persons × 3 nights)"`
  *
  * Matching is EXACT against the two known breakfast shapes rather
  * than a loose `startsWith("Breakfast")`, so a future add-on line

@@ -537,7 +537,7 @@ export function BookingConfirmPage() {
                           <span className="mt-1 block text-xs text-gray-500">
                             {room.numAdults} adult{room.numAdults === 1 ? "" : "s"} ·{" "}
                             {room.numChildren} child{room.numChildren === 1 ? "" : "ren"}
-                            {room.extraBedCount > 0 ? ` · ${room.extraBedCount} extra bed${room.extraBedCount === 1 ? "" : "s"}` : ""}
+                            {room.extraBedCount > 0 ? ` · ${room.extraBedCount} extra person${room.extraBedCount === 1 ? "" : "s"}` : ""}
                             {/* Per BR-03 (2026-10-12, decision
                                 #232): the legacy "Breakfast
                                 included" line is replaced by

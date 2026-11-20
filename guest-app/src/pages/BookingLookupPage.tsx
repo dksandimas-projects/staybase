@@ -1506,7 +1506,7 @@ export function BookingLookupPage() {
                             if (Number.isFinite(numAdults) && Number.isFinite(numChildren) && (numAdults > 0 || numChildren > 0)) {
                               const splitLabel = `${numAdults} adult${numAdults === 1 ? "" : "s"} + ${numChildren} child${numChildren === 1 ? "" : "ren"} (${activeBooking.numGuests} total)`;
                               const extraLabel = Number.isFinite(extraBedCount) && extraBedCount > 0
-                                ? ` + ${extraBedCount} extra bed${extraBedCount === 1 ? "" : "s"}`
+                                ? ` + ${extraBedCount} extra person${extraBedCount === 1 ? "" : "s"}`
                                 : "";
                               return <span>{splitLabel}{extraLabel}</span>;
                             }
@@ -1919,7 +1919,7 @@ export function BookingLookupPage() {
                       <p className="text-xs text-gray-500">
                         {room.numAdults} adult{room.numAdults === 1 ? "" : "s"}
                         {room.numChildren > 0 ? `, ${room.numChildren} child${room.numChildren === 1 ? "" : "ren"}` : ""}
-                        {room.extraBedCount > 0 ? `, ${room.extraBedCount} extra bed${room.extraBedCount === 1 ? "" : "s"}` : ""}
+                        {room.extraBedCount > 0 ? `, ${room.extraBedCount} extra person${room.extraBedCount === 1 ? "" : "s"}` : ""}
                       </p>
                     </div>
                   </li>

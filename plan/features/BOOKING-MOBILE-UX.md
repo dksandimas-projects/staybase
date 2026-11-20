@@ -212,15 +212,15 @@ Examples of actionable states:
 
 The existing authoritative capacity and distribution checks remain unchanged.
 
-### Extra beds
+### Extra persons
 
-Extra-bed controls appear only after a room of that type is selected.
+Extra-person controls appear only after a room of that type is selected.
 
-- One allowed extra bed uses a toggle.
+- One allowed extra person uses a toggle.
 - More than one uses a quantity control.
-- If the value is mirrored across every selected room of that type, the label says `Extra beds per room`.
-- Show rate per bed per night and the resulting stay total.
-- Keep over-cap and required-bed guidance adjacent to the control.
+- If the value is mirrored across every selected room of that type, the label says `Extra persons per room`.
+- Show rate per person per night and the resulting stay total.
+- Keep over-cap and required-person guidance adjacent to the control.
 
 ### Step 1 footer
 

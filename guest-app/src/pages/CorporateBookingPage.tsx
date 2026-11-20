@@ -2095,12 +2095,12 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
                       misleading for N>1 — hide it. */}
                   {corpExtraBedsAllowed > 0 && distributedRoomCart.length <= 1 ? (
                     <label className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700">
-                      <span>Extra beds</span>
+                      <span>Extra persons</span>
                       <div className="flex items-center gap-2">
                         <button
                           className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
                           type="button"
-                          aria-label="Decrease extra beds"
+                          aria-label="Decrease extra persons"
                           onClick={() => setExtraBeds(extraBedCount - 1)}
                           disabled={extraBedCount <= 0}
                         >
@@ -2110,7 +2110,7 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
                         <button
                           className="flex h-8 w-8 items-center justify-center rounded bg-gray-100 text-gray-600"
                           type="button"
-                          aria-label="Increase extra beds"
+                          aria-label="Increase extra persons"
                           onClick={() => setExtraBeds(extraBedCount + 1)}
                           disabled={extraBedCount >= corpExtraBedsAllowed}
                         >
@@ -2123,11 +2123,11 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
                     <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
                       {corpExtraBedsAllowed > 0 ? (
                         <>
-                          This room type allows up to {Number(selectedTypeEntry.maxCapacity) || 0} adult{Number(selectedTypeEntry.maxCapacity) === 1 ? "" : "s"} + {Number(selectedTypeEntry.maxChildren) || 0} child{Number(selectedTypeEntry.maxChildren) === 1 ? "" : "ren"} (or {Number(selectedTypeEntry.maxCapacity) + corpExtraBedsAllowed}/{Number(selectedTypeEntry.maxChildren) + corpExtraBedsAllowed} with {corpExtraBedsAllowed} extra bed{corpExtraBedsAllowed === 1 ? "" : "s"}). Add {corpOverflow.requiredExtraBeds} extra bed{corpOverflow.requiredExtraBeds === 1 ? "" : "s"} to fit your group, or pick a different room.
+                          This room type allows up to {Number(selectedTypeEntry.maxCapacity) || 0} adult{Number(selectedTypeEntry.maxCapacity) === 1 ? "" : "s"} + {Number(selectedTypeEntry.maxChildren) || 0} child{Number(selectedTypeEntry.maxChildren) === 1 ? "" : "ren"} (or {Number(selectedTypeEntry.maxCapacity) + corpExtraBedsAllowed}/{Number(selectedTypeEntry.maxChildren) + corpExtraBedsAllowed} with {corpExtraBedsAllowed} extra person{corpExtraBedsAllowed === 1 ? "" : "s"}). Add {corpOverflow.requiredExtraBeds} extra person{corpOverflow.requiredExtraBeds === 1 ? "" : "s"} to fit your group, or pick a different room.
                         </>
                       ) : (
                         <>
-                          This room type allows up to {Number(selectedTypeEntry.maxCapacity) || 0} adult{Number(selectedTypeEntry.maxCapacity) === 1 ? "" : "s"} + {Number(selectedTypeEntry.maxChildren) || 0} child{Number(selectedTypeEntry.maxChildren) === 1 ? "" : "ren"} and does not allow extra beds. Pick a different room type to fit your group.
+                          This room type allows up to {Number(selectedTypeEntry.maxCapacity) || 0} adult{Number(selectedTypeEntry.maxCapacity) === 1 ? "" : "s"} + {Number(selectedTypeEntry.maxChildren) || 0} child{Number(selectedTypeEntry.maxChildren) === 1 ? "" : "ren"} and does not allow extra persons. Pick a different room type to fit your group.
                         </>
                       )}
                     </div>
@@ -2207,7 +2207,7 @@ const currentStepKey = normalizeCorporateStepKey(searchParams.get("step"));
                           <p className="mt-1 text-xs text-gray-500">
                             {stay.numAdults} adult{stay.numAdults === 1 ? "" : "s"}
                             {stay.numChildren > 0 ? `, ${stay.numChildren} child${stay.numChildren === 1 ? "" : "ren"}` : ""}
-                            {stay.extraBedCount > 0 ? `, ${stay.extraBedCount} extra bed${stay.extraBedCount === 1 ? "" : "s"}` : ""}
+                            {stay.extraBedCount > 0 ? `, ${stay.extraBedCount} extra person${stay.extraBedCount === 1 ? "" : "s"}` : ""}
                             {" · "}
                             {formatPrice(stayRate)}/night
                           </p>

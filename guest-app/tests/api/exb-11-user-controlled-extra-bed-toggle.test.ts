@@ -100,7 +100,7 @@ const extrasSlice =
 describe("EXB-11 — per-type user-controlled extra-bed toggle on /book", () => {
   it("the Extras sub-section is present and locatable", () => {
     expect(extrasSlice.length).toBeGreaterThan(0);
-    expect(extrasSlice).toMatch(/Extra beds/);
+    expect(extrasSlice).toMatch(/Extra persons/);
   });
 
   it("hides the sub-section when `maxExtraBeds === 0` per the spec's no-extra-bed edge case", () => {
@@ -134,7 +134,7 @@ describe("EXB-11 — per-type user-controlled extra-bed toggle on /book", () => 
   it("shows the per-bed-per-night rate inline at the point of decision (no Step 3 surprise)", () => {
     // The spec rejects "hide the price until Step 3" — the
     // rate is the primary signal, surfaced on the card.
-    expect(extrasSlice).toMatch(/\$\{formatPrice\(typeExtraBedRate\)\} \/ bed \/ night/);
+    expect(extrasSlice).toMatch(/\$\{formatPrice\(typeExtraBedRate\)\} \/ person \/ night/);
   });
 
   it("hides the stay total when the count is 0 (don't show '₱0 for 2 nights')", () => {
@@ -158,7 +158,7 @@ describe("EXB-11 — per-type user-controlled extra-bed toggle on /book", () => 
     // `softFloor > typeMaxExtraBeds` (the over-cap case).
     expect(extrasSlice).toMatch(/overCap = softFloor > typeMaxExtraBeds/);
     expect(extrasSlice).toMatch(
-      /needs \{softFloor\} extra bed\{softFloor === 1 \? "" : "s"\} to fit your group\. You can add up to \{typeMaxExtraBeds\} here\./
+      /needs \{softFloor\} extra person\{softFloor === 1 \? "" : "s"\} to fit your group\. You can add up to \{typeMaxExtraBeds\} here\./
     );
   });
 
@@ -210,7 +210,7 @@ describe("EXB-11 — per-type user-controlled extra-bed toggle on /book", () => 
     // The helper-text message guides the user: "Add at least
     // one room to set extra beds" — instead of showing the
     // rate when there's no room to apply it to.
-    expect(extrasSlice).toMatch(/Add at least one room to set extra beds/);
+    expect(extrasSlice).toMatch(/Add at least one room to set extra persons/);
   });
 
   it("the `[−]` is NOT disabled at the soft floor (EXB-11.4: user is in full control)", () => {
@@ -390,7 +390,7 @@ describe("EXB-11.1 — bottom-of-card placement + checkbox for `maxExtraBeds ===
     // The checkbox has its own label distinct
     // from the counter's "Extra beds" — a
     // yes/no is "Add an extra bed".
-    expect(extrasSlice).toMatch(/Add an extra bed/);
+    expect(extrasSlice).toMatch(/Add an extra person/);
   });
 
   it("the checkbox's `checked` is `userExtraBeds === 1` and the `onChange` writes 0 or 1 via `updateExtraBedCount`", () => {
@@ -445,12 +445,12 @@ describe("EXB-11.1 — bottom-of-card placement + checkbox for `maxExtraBeds ===
     // `extras-stepper-${type.value}` testids.
     // No checkbox in this branch.
     expect(extrasSlice).toMatch(/data-testid=\{`extras-count-\$\{type\.value\}`\}/);
-    expect(extrasSlice).toMatch(/aria-label=\{`Remove one extra bed from \$\{type\.label\}`\}/);
-    expect(extrasSlice).toMatch(/aria-label=\{`Add one extra bed to \$\{type\.label\}`\}/);
+    expect(extrasSlice).toMatch(/aria-label=\{`Remove one extra person from \$\{type\.label\}`\}/);
+    expect(extrasSlice).toMatch(/aria-label=\{`Add one extra person to \$\{type\.label\}`\}/);
     // The counter label is "Extra beds" (the
     // checkbox's "Add an extra bed" is the
     // distinct label for the yes/no shape).
-    expect(extrasSlice).toMatch(/Extra beds/);
+    expect(extrasSlice).toMatch(/Extra persons/);
   });
 
   it("the data model and helpers are unchanged from EXB-11 (EXB-11.4 removes the auto-init, does not add new state)", () => {

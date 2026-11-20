@@ -1055,7 +1055,7 @@ export function RatesPage() {
     <div className="space-y-8 font-body">
       <header>
         <h1 className="font-heading text-3xl text-gray-950 lowercase">rates & promo configuration</h1>
-        <p className="text-xs text-gray-500 mt-1">Configure base room pricing, weekend surcharges, public corporate rates, extra-bed rates, and payment gateways.</p>
+        <p className="text-xs text-gray-500 mt-1">Configure base room pricing, weekend surcharges, public corporate rates, extra-person rates, and payment gateways.</p>
       </header>
 
       {/* Grid: Core Pricing Systems */}
@@ -1149,7 +1149,7 @@ export function RatesPage() {
                       </div>
                     </div>
                     <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">Extra Bed Rate (per bed / night)</label>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400">Extra Person Rate (per person / night)</label>
                       <div className="relative mt-1 flex items-center">
                         <span className="absolute left-3 text-gray-400 font-semibold">{config.currencySymbol}</span>
                         <input
@@ -1173,7 +1173,7 @@ export function RatesPage() {
                       <th className="py-2.5">Standard Rate (Base)</th>
                       <th className="py-2.5">Weekend Rate (Sat/Sun)</th>
                       <th className="py-2.5">Corporate Rate (Flat)</th>
-                      <th className="py-2.5">Extra Bed Rate (per bed / night)</th>
+                      <th className="py-2.5">Extra Person Rate (per person / night)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">

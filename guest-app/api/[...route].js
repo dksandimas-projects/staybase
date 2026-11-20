@@ -228567,7 +228567,7 @@ function generateReceiptPdf(booking) {
     text("Rooms:", `${rooms.length} room${rooms.length === 1 ? "" : "s"}`);
     for (const room of rooms) {
       const label = `Room ${room.position || 1} (${String(room.roomType || "Room")})`;
-      const value = `${String(room.bookingRef || "-")} \xB7 ${String(room.numAdults || 0)} adult${Number(room.numAdults) === 1 ? "" : "s"}, ${String(room.numChildren || 0)} child${Number(room.numChildren) === 1 ? "" : "ren"}${Number(room.extraBedCount) > 0 ? `, ${String(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " \xB7 breakfast" : ""} \xB7 ${fmtMoney(Number(room.totalPrice || 0))}`;
+      const value = `${String(room.bookingRef || "-")} \xB7 ${String(room.numAdults || 0)} adult${Number(room.numAdults) === 1 ? "" : "s"}, ${String(room.numChildren || 0)} child${Number(room.numChildren) === 1 ? "" : "ren"}${Number(room.extraBedCount) > 0 ? `, ${String(room.extraBedCount)} extra person${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " \xB7 breakfast" : ""} \xB7 ${fmtMoney(Number(room.totalPrice || 0))}`;
       text(label, value, { gap: 5 });
     }
   } else {
@@ -228584,7 +228584,7 @@ function generateReceiptPdf(booking) {
       const guestLine = `Guests: ${numAdults} adult${numAdults === 1 ? "" : "s"} + ${numChildren} child${numChildren === 1 ? "" : "ren"} (${booking.numGuests || 1} total)`;
       text(guestLine, "");
       if (Number.isFinite(extraBedCount) && extraBedCount > 0) {
-        text(`Extra beds: ${extraBedCount} (${extraBedCount} \xD7 ${fmtMoney(booking.extraBedRate)} / bed / night)`, "");
+        text(`Extra persons: ${extraBedCount} (${extraBedCount} \xD7 ${fmtMoney(booking.extraBedRate)} / person / night)`, "");
       }
     } else {
       text("Guests:", String(booking.numGuests || 1));
@@ -228926,7 +228926,7 @@ function bookingRows(booking) {
       const roomDatesSuffix = isDivergent && room.checkIn && room.checkOut ? ` \xB7 ${formatDate(room.checkIn)} \u2192 ${formatDate(room.checkOut)}` : "";
       return row(
         `Room ${room.position || 1} (${escapeHtml2(String(room.roomType || "Room"))})`,
-        room.bookingRef ? `${escapeHtml2(String(room.bookingRef))} \xB7 ${escapeHtml2(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}` : `${escapeHtml2(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra bed${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
+        room.bookingRef ? `${escapeHtml2(String(room.bookingRef))} \xB7 ${escapeHtml2(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra person${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}` : `${escapeHtml2(String(room.numAdults || 0))} adult${Number(room.numAdults) === 1 ? "" : "s"}${Number(room.numChildren) > 0 ? `, ${Number(room.numChildren)} child${Number(room.numChildren) === 1 ? "" : "ren"}` : ""}${Number(room.extraBedCount) > 0 ? `, ${Number(room.extraBedCount)} extra person${Number(room.extraBedCount) === 1 ? "" : "s"}` : ""}${room.hasAnyBreakfast ? " \xB7 breakfast" : ""} \xB7 ${formatMoney(Number(room.totalPrice || 0))}${roomDatesSuffix}`
       );
     }).join("")}
       </table>
@@ -231815,9 +231815,9 @@ function buildRateBreakdown(input) {
         0
       ) || 1;
       if (count > 1 && rate > 0) {
-        return `Extra bed add-on (${count} beds \xD7 ${nights} ${nights === 1 ? "night" : "nights"})`;
+        return `Extra person add-on (${count} persons \xD7 ${nights} ${nights === 1 ? "night" : "nights"})`;
       }
-      return "Extra bed add-on";
+      return "Extra person add-on";
     })(),
     amount: input.extraBedTotal ?? 0
   } : null;
@@ -233322,7 +233322,7 @@ async function handleCreateBooking(req, res) {
         const maxExtraBeds = Math.max(0, Number(selectionType.maxExtraBeds) || 0);
         if (extraBedCount2 > maxExtraBeds) {
           throw new Error(
-            `Extra bed count (${extraBedCount2}) exceeds ${selectionType.label || selection.roomType}'s allowance (${maxExtraBeds}).`
+            `Extra person count (${extraBedCount2}) exceeds ${selectionType.label || selection.roomType}'s allowance (${maxExtraBeds}).`
           );
         }
         const overflow = requiredExtraBedsFor({
@@ -233333,7 +233333,7 @@ async function handleCreateBooking(req, res) {
         });
         if (overflow.requiredExtraBeds > extraBedCount2) {
           throw new Error(
-            requestedRoomSelections?.length ? `Room ${index + 1} needs ${overflow.requiredExtraBeds} extra bed(s), but only ${extraBedCount2} selected.` : `Not enough extra beds: ${overflow.overflowAdults} overflow adult(s) + ${overflow.overflowChildren} overflow child(ren) = ${overflow.requiredExtraBeds} extra bed(s) needed, but only ${extraBedCount2} extra bed(s) selected. The room type allows up to ${maxExtraBeds} extra bed(s).`
+            requestedRoomSelections?.length ? `Room ${index + 1} needs ${overflow.requiredExtraBeds} extra person(s), but only ${extraBedCount2} selected.` : `Not enough extra persons: ${overflow.overflowAdults} overflow adult(s) + ${overflow.overflowChildren} overflow child(ren) = ${overflow.requiredExtraBeds} extra person(s) needed, but only ${extraBedCount2} extra person(s) selected. The room type allows up to ${maxExtraBeds} extra person(s).`
           );
         }
         return {
@@ -233368,7 +233368,7 @@ async function handleCreateBooking(req, res) {
         );
         if (!inventoryResult.ok) {
           throw new Error(
-            `Not enough extra beds: ${extraBedInUse} already booked across overlapping stays + ${totalExtraBeds} requested = ${extraBedInUse + totalExtraBeds}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
+            `Not enough extra persons: ${extraBedInUse} already booked across overlapping stays + ${totalExtraBeds} requested = ${extraBedInUse + totalExtraBeds}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
           );
         }
       }
@@ -233642,7 +233642,7 @@ async function handleCreateBooking(req, res) {
           addOns: [
             ...breakfastRateBreakdownLines && breakfastRateBreakdownLines.length > 0 ? index === 0 ? breakfastRateBreakdownLines : [] : stay.breakfastTotal > 0 ? [{ label: "Breakfast add-on", amount: stay.breakfastTotal }] : [],
             ...stay.extraBedTotal > 0 ? [{
-              label: stay.extraBedCount > 1 ? `Extra bed add-on (${stay.extraBedCount} beds \xD7 ${numNights} ${numNights === 1 ? "night" : "nights"})` : "Extra bed add-on",
+              label: stay.extraBedCount > 1 ? `Extra person add-on (${stay.extraBedCount} persons \xD7 ${numNights} ${numNights === 1 ? "night" : "nights"})` : "Extra person add-on",
               amount: stay.extraBedTotal
             }] : []
           ],
@@ -235142,7 +235142,7 @@ async function handleCreateWalkin(req, res) {
         const lineExtraBedRate = Math.max(0, Number(lineTypeEntry.extraBedRate) || 0);
         if (lineExtraBedCount > lineMaxExtraBeds) {
           throw new Error(
-            `Extra bed count (${lineExtraBedCount}) exceeds the room type's allowance (${lineMaxExtraBeds}).`
+            `Extra person count (${lineExtraBedCount}) exceeds the room type's allowance (${lineMaxExtraBeds}).`
           );
         }
         const lineOverflow = requiredExtraBedsFor({
@@ -235153,7 +235153,7 @@ async function handleCreateWalkin(req, res) {
         });
         if (lineOverflow.requiredExtraBeds > lineExtraBedCount) {
           throw new Error(
-            `Not enough extra beds: ${lineOverflow.overflowAdults} overflow adult(s) + ${lineOverflow.overflowChildren} overflow child(ren) = ${lineOverflow.requiredExtraBeds} extra bed(s) needed, but only ${lineExtraBedCount} extra bed(s) selected. The room type allows up to ${lineMaxExtraBeds} extra bed(s).`
+            `Not enough extra persons: ${lineOverflow.overflowAdults} overflow adult(s) + ${lineOverflow.overflowChildren} overflow child(ren) = ${lineOverflow.requiredExtraBeds} extra person(s) needed, but only ${lineExtraBedCount} extra person(s) selected. The room type allows up to ${lineMaxExtraBeds} extra person(s).`
           );
         }
         return {
@@ -235178,7 +235178,7 @@ async function handleCreateWalkin(req, res) {
         );
         if (!walkinInventoryResult.ok) {
           throw new Error(
-            `Not enough extra beds: ${walkinExtraBedInUse} already booked across overlapping stays + ${walkinExtraBedCount} requested = ${walkinExtraBedInUse + walkinExtraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
+            `Not enough extra persons: ${walkinExtraBedInUse} already booked across overlapping stays + ${walkinExtraBedCount} requested = ${walkinExtraBedInUse + walkinExtraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
           );
         }
       }
@@ -239413,7 +239413,7 @@ async function handleRescheduleBooking(req, res) {
       });
       if (rescheduleOverflow.requiredExtraBeds > rescheduleExtraBedCount) {
         throw new Error(
-          `Booking does not fit the target room type: ${rescheduleOverflow.overflowAdults} overflow adult(s) + ${rescheduleOverflow.overflowChildren} overflow child(ren) = ${rescheduleOverflow.requiredExtraBeds} extra bed(s) needed, but the booking has ${rescheduleExtraBedCount} extra bed(s) snapshotted. The target room type allows up to ${rescheduleMaxExtraBeds} extra bed(s).`
+          `Booking does not fit the target room type: ${rescheduleOverflow.overflowAdults} overflow adult(s) + ${rescheduleOverflow.overflowChildren} overflow child(ren) = ${rescheduleOverflow.requiredExtraBeds} extra person(s) needed, but the booking has ${rescheduleExtraBedCount} extra person(s) snapshotted. The target room type allows up to ${rescheduleMaxExtraBeds} extra person(s).`
         );
       }
       if (rescheduleExtraBedCount > 0) {
@@ -239432,7 +239432,7 @@ async function handleRescheduleBooking(req, res) {
         );
         if (!rescheduleInventoryResult.ok) {
           throw new Error(
-            `Not enough extra beds: ${rescheduleExtraBedInUse} already booked across overlapping stays + ${rescheduleExtraBedCount} requested = ${rescheduleExtraBedInUse + rescheduleExtraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
+            `Not enough extra persons: ${rescheduleExtraBedInUse} already booked across overlapping stays + ${rescheduleExtraBedCount} requested = ${rescheduleExtraBedInUse + rescheduleExtraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
           );
         }
       }
@@ -240254,11 +240254,11 @@ async function handleAddRoomToReservation(req, res) {
       });
       if (requiredExtraBeds.requiredExtraBeds > extraBedCount) {
         throw new Error(
-          `Target room needs ${requiredExtraBeds.requiredExtraBeds} extra bed(s) for ${numAdults} adult(s) + ${numChildren} child(ren), but only ${extraBedCount} provided.`
+          `Target room needs ${requiredExtraBeds.requiredExtraBeds} extra person(s) for ${numAdults} adult(s) + ${numChildren} child(ren), but only ${extraBedCount} provided.`
         );
       }
       if (Number(targetRoom.maxExtraBeds) >= 0 && extraBedCount > Number(targetRoom.maxExtraBeds)) {
-        throw new Error(`Target room allows at most ${targetRoom.maxExtraBeds} extra bed(s).`);
+        throw new Error(`Target room allows at most ${targetRoom.maxExtraBeds} extra person(s).`);
       }
       const existingChildrenQuery = adminDb.collection("bookings").where("reservationId", "==", reservationId);
       const existingChildrenSnap = await transaction.get(existingChildrenQuery);
@@ -240315,7 +240315,7 @@ async function handleAddRoomToReservation(req, res) {
         );
         if (!addRoomInventoryResult.ok) {
           throw new Error(
-            `Not enough extra beds: ${addRoomExtraBedInUse} already booked across overlapping stays + ${extraBedCount} requested = ${addRoomExtraBedInUse + extraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
+            `Not enough extra persons: ${addRoomExtraBedInUse} already booked across overlapping stays + ${extraBedCount} requested = ${addRoomExtraBedInUse + extraBedCount}, but the hotel only has ${hotelConfig.extraBedInventory} rollaway bed(s) in inventory.`
           );
         }
       }

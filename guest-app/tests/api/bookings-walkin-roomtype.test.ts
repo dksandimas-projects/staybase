@@ -440,7 +440,7 @@ describe("BF-02 — handleCreateWalkin reads pricing + max capacity from the roo
     expect(res.status).toHaveBeenCalledWith(500);
     const jsonArg = (res.json as any).mock.calls[0][0];
     expect(jsonArg.error).toBe(
-      "Not enough extra beds: 1 overflow adult(s) + 0 overflow child(ren) = 1 extra bed(s) needed, but only 0 extra bed(s) selected. The room type allows up to 0 extra bed(s)."
+      "Not enough extra persons: 1 overflow adult(s) + 0 overflow child(ren) = 1 extra person(s) needed, but only 0 extra person(s) selected. The room type allows up to 0 extra person(s)."
     );
     expect(setCalls.find((c) => c.path === "bookings/walkinBf02D")).toBeUndefined();
   });

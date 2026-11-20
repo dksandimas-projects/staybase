@@ -272,7 +272,7 @@ describe("CHD-12 — cart-style summary replaces 'Guest distribution'", () => {
     // preserves that shape — the per-type line shows the
     // sum of extra beds across all rooms of that type.
     expect(cartSummarySlice).toMatch(/agg\.extraBeds > 0/);
-    expect(cartSummarySlice).toMatch(/\{agg\.extraBeds\} extra bed/);
+    expect(cartSummarySlice).toMatch(/\{agg\.extraBeds\} extra person/);
   });
 });
 

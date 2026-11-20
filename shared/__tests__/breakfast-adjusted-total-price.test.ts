@@ -78,7 +78,7 @@ describe("computeBreakfastAdjustedTotalPrice", () => {
         { label: "Room rate — 3 nights", amount: 4_500 },
         { label: "Breakfast add-on", amount: 150 },
         { label: "Breakfast (Oct 14, 2 meals)", amount: 300 },
-        { label: "Extra bed add-on", amount: 250 }
+        { label: "Extra person add-on", amount: 250 }
       ]
     };
     const anchor = sumBreakfastRateLines(breakdown);

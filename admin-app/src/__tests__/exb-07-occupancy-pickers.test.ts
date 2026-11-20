@@ -119,9 +119,9 @@ describe("EXB-07 — admin walk-in modal: adult/child split + extra bed steppers
     expect(bookingsPageSrc).toMatch(/aria-label=\{`Decrease children in room \$\{stayIndex \+ 1\}`\}/);
     expect(bookingsPageSrc).toMatch(/aria-label=\{`Increase children in room \$\{stayIndex \+ 1\}`\}/);
     expect(bookingsPageSrc).toMatch(
-      /stayMaxExtraBeds > 0[\s\S]{0,2000}aria-label=\{`Decrease extra beds in room \$\{stayIndex \+ 1\}`\}/
+      /stayMaxExtraBeds > 0[\s\S]{0,2000}aria-label=\{`Decrease extra persons in room \$\{stayIndex \+ 1\}`\}/
     );
-    expect(bookingsPageSrc).toMatch(/aria-label=\{`Increase extra beds in room \$\{stayIndex \+ 1\}`\}/);
+    expect(bookingsPageSrc).toMatch(/aria-label=\{`Increase extra persons in room \$\{stayIndex \+ 1\}`\}/);
   });
 
   it("the walk-in modal renders the 'blocked by cap → add extra bed' contextual hint", () => {
@@ -142,13 +142,13 @@ describe("EXB-07 — admin walk-in modal: adult/child split + extra bed steppers
     // hold more than one room.
     expect(bookingsPageSrc).toMatch(/stayShowOverflowHint/);
     expect(bookingsPageSrc).toMatch(
-      /Add\s+\{stayOverflow\.requiredExtraBeds\} extra bed/
+      /Add\s+\{stayOverflow\.requiredExtraBeds\} extra person/
     );
     expect(bookingsPageSrc).toMatch(
       /This room type allows up to\s+\{stayMaxCapacity\} adult/
     );
     expect(bookingsPageSrc).toMatch(
-      /does not allow extra beds[\s\S]{0,2000}pick a different room type/
+      /does not allow extra persons[\s\S]{0,2000}pick a different room type/
     );
   });
 
@@ -275,10 +275,10 @@ describe("EXB-07 — corporate /book page: adult/child split + extra bed stepper
     expect(corporateBookingSrc).toMatch(/aria-label="Decrease children"/);
     expect(corporateBookingSrc).toMatch(/aria-label="Increase children"/);
     expect(corporateBookingSrc).toMatch(
-      /corpExtraBedsAllowed > 0[\s\S]{0,2000}aria-label="Decrease extra beds"/
+      /corpExtraBedsAllowed > 0[\s\S]{0,2000}aria-label="Decrease extra persons"/
     );
-    expect(corporateBookingSrc).toMatch(/aria-label="Decrease extra beds"/);
-    expect(corporateBookingSrc).toMatch(/aria-label="Increase extra beds"/);
+    expect(corporateBookingSrc).toMatch(/aria-label="Decrease extra persons"/);
+    expect(corporateBookingSrc).toMatch(/aria-label="Increase extra persons"/);
   });
 
   it("the corporate /book renders the 'blocked by cap → add extra bed' contextual hint", () => {
@@ -291,13 +291,13 @@ describe("EXB-07 — corporate /book page: adult/child split + extra bed stepper
     // large.
     expect(corporateBookingSrc).toMatch(/corpShowOverflowHint/);
     expect(corporateBookingSrc).toMatch(
-      /Add\s+\{corpOverflow\.requiredExtraBeds\} extra bed/
+      /Add\s+\{corpOverflow\.requiredExtraBeds\} extra person/
     );
     expect(corporateBookingSrc).toMatch(
       /This room type allows up to\s+\{Number\(selectedTypeEntry\.maxCapacity\) \|\| 0\} adult/
     );
     expect(corporateBookingSrc).toMatch(
-      /does not allow extra beds[\s\S]{0,2000}Pick a different room type/
+      /does not allow extra persons[\s\S]{0,2000}Pick a different room type/
     );
   });
 

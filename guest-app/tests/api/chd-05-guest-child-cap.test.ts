@@ -166,7 +166,7 @@ describe("CHD-05 — guest child-cap guidance and room-charge clarity", () => {
 
   it.skip("shows per-room extra-bed allocation and a clear incomplete-distribution next step", () => {
     expect(bookingPageSrc).toMatch(/room\.extraBedCount > 0/);
-    expect(bookingPageSrc).toMatch(/room\.extraBedCount\} extra bed/);
+    expect(bookingPageSrc).toMatch(/room\.extraBedCount\} extra person/);
     expect(bookingPageSrc).toMatch(/!cartDistributionComplete/);
     expect(bookingPageSrc).toMatch(/Add enough rooms to place every guest/);
     expect(bookingPageSrc).toMatch(/role="status"/);
