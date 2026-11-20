@@ -56,9 +56,17 @@ import {
   type OtherAddOnsCatalogResponse,
   type OtherAddOnsCatalogRow,
   type PublicBreakfastConfig,
-  type PublicBreakfastMeal
+  type PublicBreakfastMeal,
+  // Per ATR-05 (2026-11-20): the ONE shared staff-UID →
+  // display-name resolver.
+  buildStaffNameMap,
+  staffNameFor
 } from "@spark-inn/shared";
 import { cn } from "../utils/cn";
+// Per ATR-05 (2026-11-20, `plan/features/AUDIT-TRAIL.md`): the
+// booking drawer's provenance line — who created this booking, who
+// checked the guest in, who checked them out.
+import { BookingProvenanceLine } from "./BookingProvenanceLine";
 import { formatPrice } from "../utils/format";
 // Per P0-ADMIN-API-BASE (2026-10-22): the admin app is a SEPARATE
 // Vercel project from the guest app that serves `/api/*`. The admin
@@ -323,6 +331,12 @@ export function BookingDrawerWorkspaceHeader({
                     : "No breakfast"}
                 </span>
             </div>
+            {/* Per ATR-05 (2026-11-20): the drawer's provenance
+                line — "who made this booking, who checked the guest
+                in, who checked them out". It renders NOTHING on a
+                legacy booking that carries no attribution, so the
+                header never shows an empty line. */}
+            <BookingProvenanceLine booking={booking} />
           </div>
 
           <div className="grid grid-cols-3 gap-2 lg:min-w-[320px]">
@@ -512,8 +526,13 @@ interface BookingSpecialRequestsEditorProps {
 }
 
 export function BookingSpecialRequestsEditor({ booking }: BookingSpecialRequestsEditorProps) {
-  const { updateBookingSpecialRequests } = useAdmin();
+  const { updateBookingSpecialRequests, staff } = useAdmin();
   const toast = useToast();
+  // Per ATR-05 (2026-11-20): the SHARED staff-UID → display-name
+  // resolver. The "Last edited by" line used to print the raw
+  // 28-character Firebase Auth UID, which tells a front-desk user
+  // nothing.
+  const staffNameMap = useMemo(() => buildStaffNameMap(staff), [staff]);
   // Local state mirrors the booking's stored value; the
   // input is uncontrolled while the user is editing but
   // the source of truth is always the booking doc. We
@@ -578,7 +597,7 @@ export function BookingSpecialRequestsEditor({ booking }: BookingSpecialRequests
             <>
               Last edited by{" "}
               <span className="font-bold text-gray-700">
-                {booking.specialRequestsUpdatedBy ?? "staff"}
+                {staffNameFor(staffNameMap, booking.specialRequestsUpdatedBy, "staff")}
               </span>
               {" · "}
               {formatUpdatedAt(booking.specialRequestsUpdatedAt)}

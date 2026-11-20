@@ -102,7 +102,19 @@ import {
   // disagree on what "off" means. FAIL OPEN — only an explicit
   // `false` disables a feature.
   normalizeIntercomChatEnabled,
-  normalizeIntercomCallsEnabled
+  normalizeIntercomCallsEnabled,
+  // Per ATR-01 (2026-11-20, `plan/features/AUDIT-TRAIL.md`): the
+  // shared audit contract. `buildAuditEntry` is the ONLY sanctioned
+  // way to build an `auditLogs` row — it applies the PII redaction
+  // list (a redacted field is recorded in `changedFields` BY NAME
+  // ONLY, never in `before` / `after`) and computes the changed-field
+  // set as a real diff.
+  //
+  // Per ATR-07: the `auditLogs` rules now REQUIRE `source` and
+  // `changedFields` on every row, so this writer had to move onto the
+  // shared helper — a raw `addDoc` no longer produces a row the rules
+  // accept.
+  buildAuditEntry
 } from "@spark-inn/shared";
 import {
   // Per BR-12.1 (2026-10-15, decision #247 reserved): the
@@ -3178,14 +3190,28 @@ export function SettingsPage() {
     after: AddOn | null;
   }) => {
     try {
-      await addDoc(collection(db, "auditLogs"), {
+      // Per ATR-01 / ATR-07 (2026-11-20): the row is built through
+      // the shared `buildAuditEntry` helper, which applies the PII
+      // redaction list and computes `changedFields` as a real diff
+      // (a field present in both maps with the same value did NOT
+      // change, so it is not listed). The `auditLogs` rules now
+      // require `source` + `changedFields` + `actor == auth.uid` +
+      // `timestamp == request.time`, so a raw `addDoc` would be
+      // rejected — and a rejected audit write is a SILENTLY LOST
+      // audit write, the exact BR-12.1 failure this feature exists
+      // to close.
+      const entry = buildAuditEntry({
         action: input.action,
         targetCollection: "addOns",
         targetId: input.targetId,
-        actor: currentUser?.uid || "staff",
-        actorName: currentUser?.displayName || currentUser?.email || "staff",
-        before: input.before,
-        after: input.after,
+        actor: currentUser?.uid ?? "",
+        actorName: currentUser?.displayName || currentUser?.email || "Staff",
+        source: "client",
+        before: (input.before as unknown as Record<string, unknown>) ?? null,
+        after: (input.after as unknown as Record<string, unknown>) ?? null
+      });
+      await addDoc(collection(db, "auditLogs"), {
+        ...entry,
         timestamp: serverTimestamp()
       });
     } catch (err) {

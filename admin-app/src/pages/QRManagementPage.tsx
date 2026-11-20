@@ -193,7 +193,7 @@ function openPrintWindow(title: string, cardsHtml: string, isAll: boolean, onPop
 }
 
 export function QRManagementPage() {
-  const { rooms } = useAdmin();
+  const { rooms, currentUser } = useAdmin();
   const toast = useToast();
   const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>([]);
   const [hasInitializedSelection, setHasInitializedSelection] = useState(false);
@@ -372,6 +372,12 @@ export function QRManagementPage() {
       setQrError("");
       await updateDoc(doc(db, "rooms", regeneratingRoom.id), {
         qrToken,
+        // Per ATR-03 (2026-11-20): the room's "last updated by"
+        // stamp. A QR regeneration IS a room write, so leaving the
+        // stamp untouched would make the room's inline attribution
+        // claim someone else made this change.
+        updatedBy: currentUser?.uid || "",
+        updatedByName: currentUser?.displayName || currentUser?.email || "",
         updatedAt: serverTimestamp()
       });
       setQrSuccess(`Room ${regeneratingRoom.roomNumber} QR code regenerated.`);

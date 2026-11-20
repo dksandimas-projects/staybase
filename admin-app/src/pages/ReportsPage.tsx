@@ -13,7 +13,14 @@ import {
   // Per F-A4: the backup labels what an Outstanding Balance MEANS,
   // using the hotel's OWN cancellation policy.
   evaluateBookingClosure,
-  createCancellationPolicySnapshot
+  createCancellationPolicySnapshot,
+  // Per ATR-05 (2026-11-20, `plan/features/AUDIT-TRAIL.md`): the ONE
+  // shared staff-UID → display-name resolver. The map used to be built
+  // inline in this page, which is exactly why three other attribution
+  // surfaces grew their own ad-hoc lookups and started printing raw
+  // 28-character UIDs that tell a front-desk user nothing.
+  buildStaffNameMap,
+  staffNameFor
 } from "@spark-inn/shared";
 import {
   AreaChart, Area,
@@ -1023,11 +1030,12 @@ export function ReportsPage() {
     return Array.from(rows.values()).sort((a, b) => b.date.localeCompare(a.date));
   }, [rangePayments]);
 
-  const staffNameMap = useMemo(() => {
-    const map = new Map<string, string>();
-    staff.forEach((s) => map.set(s.uid, s.fullName || s.email || s.uid));
-    return map;
-  }, [staff]);
+  // Per ATR-05 (2026-11-20): the SHARED resolver. The map used to be
+  // built inline here, in the page — which is precisely why the three
+  // other attribution surfaces (incidental charges, member points
+  // history, the drawer's discount block) grew their own ad-hoc
+  // lookups and ended up printing raw UIDs.
+  const staffNameMap = useMemo(() => buildStaffNameMap(staff), [staff]);
 
   const collectionsByStaff = useMemo(() => {
     const rows = new Map<string, { staff: string; count: number; total: number }>();
@@ -2100,7 +2108,10 @@ export function ReportsPage() {
           Label: charge.label || "",
           Amount: Number(charge.amount || 0),
           Note: charge.note || "",
-          "Added By": charge.addedBy || "",
+          // Per ATR-05 (2026-11-20): the export used to carry the raw
+          // staff UID in the "Added By" column — resolved through the
+          // shared `staffNameMap` resolver like every other surface.
+          "Added By": staffNameFor(staffNameMap, charge.addedBy, "Unknown"),
           "Added At": toDate(charge.addedAt)?.toISOString() || "",
           "Void Of": charge.voidOf || ""
         });
@@ -2702,7 +2713,9 @@ export function ReportsPage() {
       charge.label,
       charge.amount,
       charge.note,
-      charge.addedBy,
+      // Per ATR-05 (2026-11-20): resolved through the shared
+      // `staffNameMap` resolver instead of the raw staff UID.
+      staffNameFor(staffNameMap, charge.addedBy, "Unknown"),
       charge.addedAt?.toISOString() || "",
       charge.voidOf || ""
     ]);
@@ -4363,7 +4376,7 @@ function SalesTab(props: {
         )}
 
         {salesSubTab === "charges" && (
-          <SalesChargesTable charges={filteredCharges} isMobile={isMobile} />
+          <SalesChargesTable charges={filteredCharges} isMobile={isMobile} staffNameMap={staffNameMap} />
         )}
       </div>
 
@@ -4613,7 +4626,7 @@ function SalesBookingsTable({ bookings, toDate, isMobile }: { bookings: any[]; t
   );
 }
 
-function SalesChargesTable({ charges, isMobile }: { charges: ReportCharge[]; isMobile?: boolean }) {
+function SalesChargesTable({ charges, isMobile, staffNameMap }: { charges: ReportCharge[]; isMobile?: boolean; staffNameMap: Map<string, string> }) {
   if (charges.length === 0) {
     return <p className="py-8 text-center text-xs text-gray-400">No incidental charges in this range.</p>;
   }
@@ -4628,7 +4641,11 @@ function SalesChargesTable({ charges, isMobile }: { charges: ReportCharge[]; isM
             </div>
             <p className="mt-1 text-sm font-semibold text-gray-900">{charge.label}</p>
             <p className="mt-1 text-[11px] capitalize text-gray-600">Room {charge.roomNumber || "—"} · {charge.category.replace(/-/g, " ")}</p>
-            <p className="mt-1 text-[10px] text-gray-500">{charge.addedAt?.toISOString().slice(0, 10) || "—"} · {charge.addedBy}</p>
+            {/* Per ATR-05 (2026-11-20): the "Added By" column used to
+                print the raw 28-character staff UID, which tells a
+                front-desk user NOTHING. Resolved through the shared
+                `staffNameMap` resolver. */}
+            <p className="mt-1 text-[10px] text-gray-500">{charge.addedAt?.toISOString().slice(0, 10) || "—"} · {staffNameFor(staffNameMap, charge.addedBy, "Unknown")}</p>
           </div>
         ))}
       </div>
@@ -4651,7 +4668,10 @@ function SalesChargesTable({ charges, isMobile }: { charges: ReportCharge[]; isM
               <td className="px-3 py-2.5 text-gray-600">{charge.roomNumber || "—"}</td>
               <td className="px-3 py-2.5 capitalize text-gray-600">{charge.category.replace(/-/g, " ")}</td>
               <td className="px-3 py-2.5 text-gray-700">{charge.label}</td>
-              <td className="px-3 py-2.5 text-gray-600">{charge.addedBy}</td>
+              {/* Per ATR-05 (2026-11-20): resolved through the shared
+                  `staffNameMap` resolver instead of printing the raw
+                  staff UID. */}
+              <td className="px-3 py-2.5 text-gray-600">{staffNameFor(staffNameMap, charge.addedBy, "Unknown")}</td>
               <td className="px-3 py-2.5 text-gray-600">{charge.addedAt?.toISOString().slice(0, 10) || "—"}</td>
               <td className={`px-3 py-2.5 text-right font-bold ${charge.amount < 0 ? "text-red-600" : "text-primary-dark"}`}>{formatPrice(charge.amount)}</td>
             </tr>

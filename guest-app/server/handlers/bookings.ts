@@ -15,6 +15,13 @@ import { writeNotification } from "../lib/notifications";
 // create transaction must keep its own status instead of collapsing to
 // a 500. See `../lib/bookingValidationError.ts`.
 import { BookingValidationError } from "../lib/bookingValidationError";
+// Per ATR-04 (2026-11-20, `plan/features/AUDIT-TRAIL.md`): the
+// server-side staff display-name resolver. The check-in / check-out /
+// walk-in handlers stamp the acting staff member's UID on the booking,
+// and a UID tells a front-desk user nothing — so the server resolves
+// the NAME from the same `guests` document the admin app's shared
+// `staffNameMap` reads.
+import { resolveStaffDisplayName } from "../lib/staffNames";
 // Per BR-06 (Phase 13 — Breakfast Redesign, decision
 // #235, 2026-10-13): the unified refund-write helper.
 // `handleAddRefund` (CRL-01) routes the actual entry
@@ -4022,6 +4029,22 @@ export async function handleCreateBooking(req: any, res: any) {
         source: corporateDetails.isCorporate ? "corporate" : "online",
         notes: "",
         handledBy: "",
+        // Per ATR-04 (2026-11-20, `plan/features/AUDIT-TRAIL.md`):
+        // the booking's CREATOR stamp — stamped ONCE here and NEVER
+        // overwritten by any later write. It answers the owner's
+        // first question: "kinsay nag walkin book?".
+        //
+        // A public online booking has no staff member behind it, so
+        // the stamp is the literal `"guest"`. A walk-in is stamped
+        // with the staff member's uid in the walk-in create path
+        // (`handleCreateWalkin`).
+        //
+        // NOTE: the RESERVATION HEADER carries its own `createdBy`
+        // (`"guest"` / `"staff"`) whose literal shape is pinned by the
+        // MRB-14 guard — this is the CHILD booking doc's field, and
+        // the two are separate documents.
+        createdBy: "guest",
+        createdByName: "Guest",
         // Server-detected Spark Rewards member (per W2.2 / decision #90).
         // Set from the Authorization Bearer token detected above.
         memberId: detectedMemberId,
@@ -5298,6 +5321,13 @@ export async function handleCreateWalkin(req: any, res: any) {
     let finalReservationRef = "";
     let newBooking: Record<string, any> | null = null;
 
+    // Per ATR-04 (2026-11-20): the acting staff member's display
+    // name. Resolved BEFORE the transaction — a Firestore
+    // transaction rejects a read after a write, and this is a read.
+    // The UID stamp is the durable attribution; the name is what the
+    // desk actually reads.
+    const walkinStaffName = await resolveStaffDisplayName(req.staff?.uid);
+
     await adminDb.runTransaction(async (transaction) => {
       const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
       // 1. Fetch Room Details. Read FIRST (before the
@@ -6298,6 +6328,16 @@ export async function handleCreateWalkin(req: any, res: any) {
         source: resolvedSource,
         notes: deriveSourceNote(resolvedSource),
         handledBy: req.staff.uid || "staff",
+        // Per ATR-04 (2026-11-20, `plan/features/AUDIT-TRAIL.md`):
+        // the booking's CREATOR stamp — written ONCE here and NEVER
+        // overwritten by any later write. It answers the owner's
+        // first question: "kinsay nag walkin book?".
+        //
+        // A walk-in has a staff member behind it, so the stamp is
+        // that member's uid (the public online path stamps the
+        // literal `"guest"` instead).
+        createdBy: req.staff.uid || "staff",
+        createdByName: walkinStaffName,
         memberId: null,
         pointsRedeemed: 0,
         pointsRedeemedValue: 0,
@@ -11926,6 +11966,12 @@ export async function handleCheckinBooking(req: any, res: any) {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
     const checkedInBy = req.staff?.uid || "staff";
 
+    // Per ATR-04 (2026-11-20, `plan/features/AUDIT-TRAIL.md`): the
+    // display name companion to the already-written `checkedInBy`.
+    // Resolved BEFORE the transaction — a Firestore transaction
+    // rejects a read after a write, and this is a read.
+    const checkedInByName = await resolveStaffDisplayName(req.staff?.uid);
+
     // Per MRB-05 (2026-08-02, per decision #159): the
     // canonical `now` for the booking update + the
     // room update + the reservation header mirror.
@@ -12040,6 +12086,10 @@ export async function handleCheckinBooking(req: any, res: any) {
         status: "checked-in",
         checkedInAt: now,
         checkedInBy,
+        // Per ATR-04: the display-name companion to `checkedInBy`.
+        // The UID is the durable attribution; the name is what the
+        // desk actually reads.
+        checkedInByName,
         updatedAt: now
       });
       transaction.update(roomRef, {
@@ -12185,6 +12235,12 @@ export async function handleCheckoutBooking(req: any, res: any) {
     const checkedOutBy = req.staff?.uid || "staff";
     const staffRole = req.staff?.role || "front-desk";
 
+    // Per ATR-04 (2026-11-20, `plan/features/AUDIT-TRAIL.md`): the
+    // display name companion to the already-written `checkedOutBy`.
+    // Resolved BEFORE the transaction — a Firestore transaction
+    // rejects a read after a write, and this is a read.
+    const checkedOutByName = await resolveStaffDisplayName(req.staff?.uid);
+
     // Pre-read hotelConfig for unpaid checkout threshold (UCO-03)
     const hotelConfigDoc = await adminDb.collection("settings").doc("hotelConfig").get();
     const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data()! : {};
@@ -12312,6 +12368,8 @@ export async function handleCheckoutBooking(req: any, res: any) {
         status: "checked-out",
         checkedOutAt: now,
         checkedOutBy,
+        // Per ATR-04: the display-name companion to `checkedOutBy`.
+        checkedOutByName,
         checkedOutWithBalance,
         checkedOutFolioTotal: checkoutFolioTotal,
         checkedOutCollectedTotal: collectedTotal,
