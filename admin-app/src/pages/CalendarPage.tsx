@@ -11,6 +11,11 @@ import {
   calculateSeasonalAwareRoomTotal,
   getNumNights,
   PaymentMethodConfig,
+  // Per ATR-05 (2026-11-20, `plan/features/AUDIT-TRAIL.md`): the ONE
+  // shared staff-UID → display-name resolver. The calendar's "last
+  // edited by" line used to print the raw Firebase Auth UID.
+  buildStaffNameMap,
+  staffNameFor,
   generateReservationId
 } from "@spark-inn/shared";
 // Per BR-05 (2026-10-13, decision #234): the shared
@@ -131,9 +136,15 @@ export function CalendarPage() {
     addWalkinBooking,
     updateBookingStatus,
     paymentMethods,
-    rescheduleBooking
+    rescheduleBooking,
+    // Per ATR-05 (2026-11-20): the staff list, for the shared
+    // staff-UID → display-name resolver.
+    staff
   } = useAdmin();
   const toast = useToast();
+  // Per ATR-05: the shared resolver, fed by the admin context's own
+  // `guests` subscription.
+  const staffNameMap = useMemo(() => buildStaffNameMap(staff), [staff]);
 
   const toLocalDateKey = (date: Date) => {
     const tz = config.timezone || "Asia/Manila";
@@ -1207,7 +1218,7 @@ export function CalendarPage() {
                 </p>
                 {(selectedBooking.specialRequestsUpdatedAt || selectedBooking.specialRequestsUpdatedBy) && (
                   <p className="mt-3 text-[10px] text-amber-800/70">
-                    Last edited by {selectedBooking.specialRequestsUpdatedBy || "staff"}
+                    Last edited by {staffNameFor(staffNameMap, selectedBooking.specialRequestsUpdatedBy, "staff")}
                     {formatCalendarDetailDate(selectedBooking.specialRequestsUpdatedAt)
                       ? ` · ${formatCalendarDetailDate(selectedBooking.specialRequestsUpdatedAt)}`
                       : ""}

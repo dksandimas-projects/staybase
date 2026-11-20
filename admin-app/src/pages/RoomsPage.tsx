@@ -6,6 +6,10 @@ import { Modal } from "../components/Modal";
 import { ConfirmForm } from "../components/ConfirmForm";
 import { StatusBadge } from "../components/StatusBadge";
 import { useToast } from "../components/Toast";
+// Per ATR-05 (2026-11-20): the room's attribution note — who last
+// updated this room, who changed its status, who last set its
+// housekeeping.
+import { RoomAttributionNote } from "../components/RoomAttributionNote";
 import { formatPrice } from "../utils/format";
 import { BedDouble, Edit3, Plus, AlertCircle, EyeOff, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import config from "@config";
@@ -364,6 +368,12 @@ export function RoomsPage() {
       >
         {selectedRoom && (
           <div className="space-y-8 text-sm">
+            {/* Per ATR-05 (2026-11-20): the room's attribution note —
+                who last updated this room, who changed its status, who
+                last set its housekeeping. It renders NOTHING on a
+                legacy room written before ATR-03, so the drawer never
+                shows an empty attribution line. */}
+            <RoomAttributionNote room={selectedRoom} />
             <form onSubmit={handleConfigSubmit} className="space-y-4">
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Room Specifications</h3>
 

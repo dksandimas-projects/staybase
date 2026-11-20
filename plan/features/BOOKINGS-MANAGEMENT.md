@@ -7,6 +7,18 @@ The primary operational tool for front desk staff at `/bookings`. Displays all b
 
 ---
 
+## Booking Attribution (ATR-04 / ATR-05, 2026-11-20)
+
+Before ATR-04 a booking carried no answer to the owner's first question — "who made this booking?" — except a raw `handledBy` uid that the drawer never surfaced.
+
+- **Creator stamp:** `createdBy` / `createdByName` are stamped ONCE at every create path and NEVER overwritten — `"guest"` (+ `"Guest"`) for a public online booking, the staff uid (+ display name) for a walk-in. The server stamps both, so the once-only guarantee holds structurally: `bookings` are server-authoritative (`allow create: if false` for clients).
+- **Check-in / check-out companions:** `checkedInByName` and `checkedOutByName` sit beside the `checkedInBy` / `checkedOutBy` uids the server has written since the FOL-03 pass (those two were in no type and no MD until ATR-04). The names are resolved server-side from the `guests` document.
+- **`handledBy` is not renamed.** It keeps its behaviour and is documented as **the LAST staff member to touch this booking**. The Firestore rules pin it (with `discountVerifiedBy` and `specialRequestsUpdatedBy`) to the caller's own uid, so it is a UID, never an email.
+- **Drawer provenance line (ATR-05):** the drawer header renders "Created by X · Checked in by Y · Checked out by Z · Last updated by W". Every field is optional, so a legacy booking written before ATR-04 renders NOTHING rather than an empty attribution.
+- **The discount block** resolves `discountVerifiedBy` through the shared staff resolver instead of printing the raw uid or the literal "Staff".
+
+---
+
 ## Calendar Bulk Selection & Hold-to-Book (CAL-01)
 
 The booking calendar supports one contiguous date range across one or more physical rooms. Staff can add rooms by clicking open cells or using the room-row checkboxes; the toolbar shows the room list, number of nights, and total room-nights.

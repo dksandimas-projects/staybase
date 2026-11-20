@@ -63,6 +63,11 @@ import {
   // Per HC-02 (decision #329): the house-rules times.
   resolveHotelTimes,
   interpolateHotelTimes,
+  // Per ATR-05 (2026-11-20, `plan/features/AUDIT-TRAIL.md`): the ONE
+  // shared staff-UID → display-name resolver. The drawer's discount
+  // block used to print the raw UID (or the literal "Staff").
+  buildStaffNameMap,
+  staffNameFor,
   type DiscountType,
   type HotelContact
 } from "@spark-inn/shared";
@@ -707,6 +712,10 @@ export function BookingsPage() {
     websiteContent,
     rewardsConfig,
     members,
+    // Per ATR-05 (2026-11-20): the staff list, for the shared
+    // staff-UID → display-name resolver. The drawer's discount block
+    // used to print the raw UID (or the literal "Staff").
+    staff,
     rescheduleBooking,
     extendStayBooking,
     // Per RAR-01 (decision #323): the pre-assigned room override.
@@ -732,6 +741,9 @@ export function BookingsPage() {
     () => resolveHotelContact(hotelConfig, config),
     [hotelConfig]
   );
+  // Per ATR-05 (2026-11-20): the shared staff-UID → display-name
+  // resolver, fed by the admin context's own `guests` subscription.
+  const staffNameMap = useMemo(() => buildStaffNameMap(staff), [staff]);
   const toast = useToast();
   const discountApproveConfirm = useTwoClickConfirm<"approve">();
 
@@ -5047,7 +5059,12 @@ export function BookingsPage() {
           }
           : {}),
         guestIdPhotoUrl: null,
-        handledBy: currentUser?.uid || "staff",
+        // Per ATR-04 / ATR-07: the walk-in's creator stamp travels as
+        // the CALLER's uid (never an email), and the server
+        // re-stamps `createdBy` / `createdByName` from the verified
+        // staff session — the client value is a convenience, the
+        // server value is the truth.
+        handledBy: currentUser?.uid || "",
         cancellationReason: "",
         testRunId: walkinTestRunId || null
       });
@@ -6857,7 +6874,16 @@ export function BookingsPage() {
                   try {
                     const updatedFields = {
                       discountVerified: true,
-                      discountVerifiedBy: currentUser?.email || "staff",
+                      // Per ATR-07 / finding 7 (2026-11-20): the UID,
+                      // not the email. The rules now pin
+                      // `discountVerifiedBy` to the CALLER's own uid
+                      // (`bookingActorFieldsOwnedByCaller()`), so a
+                      // client write that claims a colleague is
+                      // rejected at the database — and a write that
+                      // stamps an email would be rejected too, which
+                      // is exactly the point: the attribution has to
+                      // be an identity the rules can check.
+                      discountVerifiedBy: currentUser?.uid || "",
                       discountRejected: false
                     };
                     const bookingDocRef = doc(db, "bookings", selectedBooking.id);
@@ -6940,7 +6966,14 @@ export function BookingsPage() {
                   {selectedBooking.discountVerified && (
                     <div className="text-xs text-green-700 bg-green-50/50 p-3 rounded-lg border border-green-100 leading-relaxed">
                       <p className="font-semibold">✓ Discount Approved</p>
-                      <p className="text-[10px] text-gray-500 mt-0.5">Verified by: {selectedBooking.discountVerifiedBy || "Staff"}</p>
+                      {/* Per ATR-05 (2026-11-20): `discountVerifiedBy`
+                          is the STAFF UID (the rules pin it to the
+                          caller's own uid — see
+                          `bookingActorFieldsOwnedByCaller()`), so it
+                          is resolved through the shared
+                          `staffNameMap` resolver instead of printing
+                          the raw 28-character UID. */}
+                      <p className="text-[10px] text-gray-500 mt-0.5">Verified by: {staffNameFor(staffNameMap, selectedBooking.discountVerifiedBy, "Staff")}</p>
                     </div>
                   )}
 
@@ -6980,7 +7013,10 @@ export function BookingsPage() {
                             try {
                               const updatedFields = {
                                 discountVerified: true,
-                                discountVerifiedBy: currentUser?.email || "staff",
+                                // Per ATR-07 / finding 7: the caller's
+                                // own uid — the rules pin
+                                // `discountVerifiedBy` to it.
+                                discountVerifiedBy: currentUser?.uid || "",
                                 discountRejected: false
                               };
 

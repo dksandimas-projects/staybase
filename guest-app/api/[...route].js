@@ -61890,7 +61890,7 @@ var require_field_value = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.DeleteTransform = exports2.FieldTransform = exports2.FieldValue = exports2.VectorValue = void 0;
-    var deepEqual = require_fast_deep_equal();
+    var deepEqual2 = require_fast_deep_equal();
     var serializer_1 = require_serializer();
     var util_1 = require_util9();
     var validate_1 = require_validate();
@@ -62261,7 +62261,7 @@ var require_field_value = __commonJS({
         };
       }
       isEqual(other) {
-        return this === other || other instanceof _ArrayUnionTransform && deepEqual(this.elements, other.elements);
+        return this === other || other instanceof _ArrayUnionTransform && deepEqual2(this.elements, other.elements);
       }
     };
     var ArrayRemoveTransform = class _ArrayRemoveTransform extends FieldTransform {
@@ -62301,7 +62301,7 @@ var require_field_value = __commonJS({
         };
       }
       isEqual(other) {
-        return this === other || other instanceof _ArrayRemoveTransform && deepEqual(this.elements, other.elements);
+        return this === other || other instanceof _ArrayRemoveTransform && deepEqual2(this.elements, other.elements);
       }
     };
     function validateArrayElement(arg, value, allowUndefined) {
@@ -63363,7 +63363,7 @@ var require_field_filter_internal = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.FieldFilterInternal = void 0;
-    var deepEqual = require_fast_deep_equal();
+    var deepEqual2 = require_fast_deep_equal();
     var filter_internal_1 = require_filter_internal();
     var FieldFilterInternal = class _FieldFilterInternal extends filter_internal_1.FilterInternal {
       getFlattenedFilters() {
@@ -63443,7 +63443,7 @@ var require_field_filter_internal = __commonJS({
         };
       }
       isEqual(other) {
-        return other instanceof _FieldFilterInternal && this.field.isEqual(other.field) && this.op === other.op && deepEqual(this.value, other.value);
+        return other instanceof _FieldFilterInternal && this.field.isEqual(other.field) && this.op === other.op && deepEqual2(this.value, other.value);
       }
     };
     exports2.FieldFilterInternal = FieldFilterInternal;
@@ -64047,7 +64047,7 @@ var require_aggregate_query_snapshot = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.AggregateQuerySnapshot = void 0;
-    var deepEqual = require_fast_deep_equal();
+    var deepEqual2 = require_fast_deep_equal();
     var AggregateQuerySnapshot2 = class _AggregateQuerySnapshot {
       /**
        * @internal
@@ -64105,7 +64105,7 @@ var require_aggregate_query_snapshot = __commonJS({
         if (!this.query.isEqual(other.query)) {
           return false;
         }
-        return deepEqual(this._data, other._data);
+        return deepEqual2(this._data, other._data);
       }
     };
     exports2.AggregateQuerySnapshot = AggregateQuerySnapshot2;
@@ -64119,7 +64119,7 @@ var require_aggregate_query = __commonJS({
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.AggregateQuery = void 0;
     var assert = require("assert");
-    var deepEqual = require_fast_deep_equal();
+    var deepEqual2 = require_fast_deep_equal();
     var aggregate_1 = require_aggregate();
     var timestamp_1 = require_timestamp2();
     var util_1 = require_util9();
@@ -64350,7 +64350,7 @@ var require_aggregate_query = __commonJS({
         if (!this.query.isEqual(other.query)) {
           return false;
         }
-        return deepEqual(this._aggregates, other._aggregates);
+        return deepEqual2(this._aggregates, other._aggregates);
       }
       /**
        * Plans and optionally executes this query. Returns a Promise that will be
@@ -85434,7 +85434,7 @@ var require_query_options = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.QueryOptions = void 0;
-    var deepEqual = require_fast_deep_equal();
+    var deepEqual2 = require_fast_deep_equal();
     var path_1 = require_path2();
     var types_1 = require_types2();
     var helpers_1 = require_helpers2();
@@ -85535,7 +85535,7 @@ var require_query_options = __commonJS({
         if (this === other) {
           return true;
         }
-        return other instanceof _QueryOptions && this.parentPath.isEqual(other.parentPath) && this.filtersEqual(other.filters) && this.collectionId === other.collectionId && this.converter === other.converter && this.allDescendants === other.allDescendants && this.limit === other.limit && this.offset === other.offset && deepEqual(this.fieldOrders, other.fieldOrders) && deepEqual(this.startAt, other.startAt) && deepEqual(this.endAt, other.endAt) && deepEqual(this.projection, other.projection) && this.kindless === other.kindless && this.requireConsistency === other.requireConsistency;
+        return other instanceof _QueryOptions && this.parentPath.isEqual(other.parentPath) && this.filtersEqual(other.filters) && this.collectionId === other.collectionId && this.converter === other.converter && this.allDescendants === other.allDescendants && this.limit === other.limit && this.offset === other.offset && deepEqual2(this.fieldOrders, other.fieldOrders) && deepEqual2(this.startAt, other.startAt) && deepEqual2(this.endAt, other.endAt) && deepEqual2(this.projection, other.projection) && this.kindless === other.kindless && this.requireConsistency === other.requireConsistency;
       }
       filtersEqual(other) {
         if (this.filters.length !== other.length) {
@@ -86297,7 +86297,7 @@ var require_document = __commonJS({
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.Precondition = exports2.DocumentTransform = exports2.DocumentMask = exports2.QueryDocumentSnapshot = exports2.DocumentSnapshot = exports2.DocumentSnapshotBuilder = void 0;
-    var deepEqual = require_fast_deep_equal();
+    var deepEqual2 = require_fast_deep_equal();
     var assert = require("assert");
     var field_value_1 = require_field_value();
     var path_1 = require_path2();
@@ -86677,7 +86677,7 @@ var require_document = __commonJS({
        * value.
        */
       isEqual(other) {
-        return this === other || other instanceof _DocumentSnapshot && this._ref.isEqual(other._ref) && deepEqual(this._fieldsProto, other._fieldsProto);
+        return this === other || other instanceof _DocumentSnapshot && this._ref.isEqual(other._ref) && deepEqual2(this._fieldsProto, other._fieldsProto);
       }
     };
     exports2.DocumentSnapshot = DocumentSnapshot2;
@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.28.0";
+    VERSION2 = "2.29.0";
   }
 });
 
@@ -149302,6 +149302,198 @@ var init_seo = __esm({
   }
 });
 
+// ../shared/schemas/audit.ts
+function isAuditRedactedField(fieldName) {
+  return AUDIT_REDACTED_FIELDS.includes(fieldName) || MEMBERS_REDACTED_FIELDS.includes(fieldName);
+}
+function redactAuditValues(values) {
+  if (!values) return null;
+  const safe = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (isAuditRedactedField(key)) continue;
+    safe[key] = value;
+  }
+  return safe;
+}
+function collectChangedFieldNames(before, after) {
+  const names = /* @__PURE__ */ new Set();
+  const beforeKeys = before ? Object.keys(before) : [];
+  const afterKeys = after ? Object.keys(after) : [];
+  for (const key of beforeKeys) {
+    if (!(key in (after ?? {}))) {
+      names.add(key);
+      continue;
+    }
+    if (!deepEqual(before[key], after[key])) names.add(key);
+  }
+  for (const key of afterKeys) {
+    if (!(key in (before ?? {}))) names.add(key);
+  }
+  return Array.from(names);
+}
+function deepEqual(a, b3) {
+  if (a === b3) return true;
+  if (a === null || b3 === null) return false;
+  if (typeof a !== "object" || typeof b3 !== "object") return false;
+  if (Array.isArray(a) || Array.isArray(b3)) {
+    if (!Array.isArray(a) || !Array.isArray(b3)) return false;
+    if (a.length !== b3.length) return false;
+    return a.every((item, index) => deepEqual(item, b3[index]));
+  }
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b3);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every(
+    (key) => key in b3 && deepEqual(
+      a[key],
+      b3[key]
+    )
+  );
+}
+function buildAuditEntry(input) {
+  const before = input.before ?? null;
+  const after = input.after ?? null;
+  const changedFields = input.changedFields ?? collectChangedFieldNames(before, after);
+  const entry = {
+    ...input,
+    changedFields,
+    before: redactAuditValues(before),
+    after: redactAuditValues(after)
+  };
+  const parsed = AuditLogEntrySchema.parse(entry);
+  for (const key of Object.keys(parsed)) {
+    if (parsed[key] === void 0) {
+      delete parsed[key];
+    }
+  }
+  return parsed;
+}
+function isAuditAction(value) {
+  return typeof value === "string" && AUDIT_ACTIONS.includes(value);
+}
+var AUDIT_ACTIONS, AuditActionSchema, AUDIT_TARGET_COLLECTIONS, AuditTargetCollectionSchema, AUDIT_SOURCES, AuditSourceSchema, AUDIT_ACTOR_ROLES, AuditActorRoleSchema, AUDIT_REDACTED_FIELDS, MEMBERS_REDACTED_FIELDS, AuditLogEntrySchema;
+var init_audit = __esm({
+  "../shared/schemas/audit.ts"() {
+    "use strict";
+    init_zod();
+    AUDIT_ACTIONS = [
+      // bookings.*
+      "bookings.create-walkin",
+      "bookings.checkin",
+      "bookings.checkout",
+      "bookings.confirm",
+      "bookings.cancel",
+      "bookings.reschedule",
+      "bookings.room-reassign",
+      "bookings.payment-add",
+      "bookings.payment-verify",
+      "bookings.payment-reject",
+      "bookings.refund",
+      "bookings.discount-verify",
+      "bookings.discount-reject",
+      "bookings.update",
+      // rooms.*
+      "rooms.create",
+      "rooms.update",
+      "rooms.delete",
+      "rooms.status-change",
+      "rooms.housekeeping",
+      "rooms.block",
+      // addons.*
+      "addons.create",
+      "addons.update",
+      "addons.delete",
+      // settings / rates / vouchers / staff
+      "settings.update",
+      "rates.update",
+      "vouchers.create",
+      "vouchers.update",
+      "staff.create",
+      "staff.disable"
+    ];
+    AuditActionSchema = external_exports.enum(AUDIT_ACTIONS);
+    AUDIT_TARGET_COLLECTIONS = [
+      "bookings",
+      "rooms",
+      "roomPrivate",
+      "addOns",
+      "settings",
+      "rates",
+      "vouchers",
+      "guests"
+    ];
+    AuditTargetCollectionSchema = external_exports.enum(AUDIT_TARGET_COLLECTIONS);
+    AUDIT_SOURCES = ["server", "client"];
+    AuditSourceSchema = external_exports.enum(AUDIT_SOURCES);
+    AUDIT_ACTOR_ROLES = ["admin", "front-desk"];
+    AuditActorRoleSchema = external_exports.enum(AUDIT_ACTOR_ROLES);
+    AUDIT_REDACTED_FIELDS = [
+      "guestName",
+      "guestEmail",
+      "guestPhone",
+      "guestRegistration",
+      "guestIdPhotoUrl",
+      "paymentProofUrl",
+      "paymentProofPath",
+      "discountIdPhotoUrl",
+      "lookupToken",
+      "qrToken",
+      "remarks"
+    ];
+    MEMBERS_REDACTED_FIELDS = [
+      "memberEmail",
+      "memberPhone",
+      "memberFullName",
+      "memberIdUrl"
+    ];
+    AuditLogEntrySchema = external_exports.object({
+      /** `"<domain>.<verb>"` from the closed vocabulary above. */
+      action: AuditActionSchema,
+      /** The collection the change happened in. */
+      targetCollection: AuditTargetCollectionSchema,
+      /** The document id that changed. */
+      targetId: external_exports.string().min(1).max(160),
+      /**
+       * Human-readable label so the log renders without N lookups.
+       * NEVER contains guest PII (e.g. `"SI-20260601-001"`,
+       * `"Room 202 — Executive"`).
+       */
+      targetLabel: external_exports.string().max(200).optional(),
+      /**
+       * The names of the fields that changed. This is the ONLY record of
+       * a REDACTED field's change — a redacted field appears here BY NAME
+       * and never in `before` / `after`.
+       */
+      changedFields: external_exports.array(external_exports.string().max(120)).max(200),
+      /** Non-redacted changed fields only. `null` for a create. */
+      before: external_exports.record(external_exports.unknown()).nullable().default(null),
+      /** Non-redacted changed fields only. `null` for a delete. */
+      after: external_exports.record(external_exports.unknown()).nullable().default(null),
+      /** The staff Firebase Auth UID. */
+      actor: external_exports.string().min(1).max(160),
+      /** The actor's display name AT WRITE TIME (decision 5). */
+      actorName: external_exports.string().max(160).default(""),
+      /** The actor's role AT WRITE TIME (roles change). */
+      actorRole: AuditActorRoleSchema.optional(),
+      /** The trust level of the row (finding 2). */
+      source: AuditSourceSchema,
+      /**
+       * Optional free text where the UI already collects one — the room
+       * block reason, the room-reassignment reason, the cancellation
+       * reason.
+       *
+       * This is the DELIBERATE channel for operational prose, distinct
+       * from the mechanical before/after snapshot. It is not governed by
+       * the redaction list (which governs snapshots), so a writer must
+       * only put an operational reason here — never guest personal data.
+       */
+      reason: external_exports.string().max(500).nullable().optional(),
+      /** `serverTimestamp()`. */
+      timestamp: external_exports.union([external_exports.string(), external_exports.any()]).optional()
+    });
+  }
+});
+
 // ../shared/types/publicHotelConfig.ts
 var init_publicHotelConfig = __esm({
   "../shared/types/publicHotelConfig.ts"() {
@@ -151309,6 +151501,31 @@ var init_roomTypes = __esm({
   }
 });
 
+// ../shared/utils/staffNames.ts
+function resolveStaffName(staff, uid) {
+  if (!uid) return null;
+  const match = staff.find((member) => member.uid === uid);
+  if (!match) return null;
+  return match.fullName || match.email || null;
+}
+function buildStaffNameMap(staff) {
+  const map2 = /* @__PURE__ */ new Map();
+  for (const member of staff) {
+    const name2 = member.fullName || member.email;
+    if (name2) map2.set(member.uid, name2);
+  }
+  return map2;
+}
+function staffNameFor(staffNameMap, uid, fallback) {
+  if (!uid) return fallback;
+  return staffNameMap.get(uid) ?? fallback;
+}
+var init_staffNames = __esm({
+  "../shared/utils/staffNames.ts"() {
+    "use strict";
+  }
+});
+
 // ../shared/utils/seasonalRates.ts
 function dateKey(value) {
   return startOfDayUtc(value).toISOString().slice(0, 10);
@@ -153040,11 +153257,21 @@ __export(shared_exports, {
   ADDITIONAL_REQUEST_MAX_LENGTH: () => ADDITIONAL_REQUEST_MAX_LENGTH,
   AIRPORT_TRANSFER_PRESEED: () => AIRPORT_TRANSFER_PRESEED,
   ARRIVAL_WINDOW_HOURS: () => ARRIVAL_WINDOW_HOURS,
+  AUDIT_ACTIONS: () => AUDIT_ACTIONS,
+  AUDIT_ACTOR_ROLES: () => AUDIT_ACTOR_ROLES,
+  AUDIT_REDACTED_FIELDS: () => AUDIT_REDACTED_FIELDS,
+  AUDIT_SOURCES: () => AUDIT_SOURCES,
+  AUDIT_TARGET_COLLECTIONS: () => AUDIT_TARGET_COLLECTIONS,
   AboutContentSchema: () => AboutContentSchema,
   AddOnCatalogAuditLogSchema: () => AddOnCatalogAuditLogSchema,
   AddOnSchema: () => AddOnSchema,
   AddRoomBookingSchema: () => AddRoomBookingSchema,
   AssignRoomSchema: () => AssignRoomSchema,
+  AuditActionSchema: () => AuditActionSchema,
+  AuditActorRoleSchema: () => AuditActorRoleSchema,
+  AuditLogEntrySchema: () => AuditLogEntrySchema,
+  AuditSourceSchema: () => AuditSourceSchema,
+  AuditTargetCollectionSchema: () => AuditTargetCollectionSchema,
   BOOKING_OCCUPYING_STATUSES: () => BOOKING_OCCUPYING_STATUSES,
   BOOKING_REF_REGEX: () => BOOKING_REF_REGEX,
   BOOKING_SOURCES: () => BOOKING_SOURCES,
@@ -153116,6 +153343,7 @@ __export(shared_exports, {
   MAX_PAYMENT_METHOD_QR_BYTES: () => MAX_PAYMENT_METHOD_QR_BYTES,
   MAX_ROOM_TYPE_PHOTOS: () => MAX_ROOM_TYPE_PHOTOS,
   MAX_STAY_NIGHTS: () => MAX_STAY_NIGHTS,
+  MEMBERS_REDACTED_FIELDS: () => MEMBERS_REDACTED_FIELDS,
   MIN_BREAKFAST_OVERRIDE_REASON_LENGTH: () => MIN_BREAKFAST_OVERRIDE_REASON_LENGTH,
   MIN_IN_FLOW_HOLD_MINUTES: () => MIN_IN_FLOW_HOLD_MINUTES,
   MIN_MAX_STAY_NIGHTS: () => MIN_MAX_STAY_NIGHTS,
@@ -153170,6 +153398,7 @@ __export(shared_exports, {
   assertBookingRevenueAllocationInvariant: () => assertBookingRevenueAllocationInvariant,
   assertRevenueFinanceInvariant: () => assertRevenueFinanceInvariant,
   buildArrivalTimeOptions: () => buildArrivalTimeOptions,
+  buildAuditEntry: () => buildAuditEntry,
   buildBreakfastRateBreakdownLines: () => buildBreakfastRateBreakdownLines,
   buildBreakfastSlotId: () => buildBreakfastSlotId,
   buildBreakfastSlotKey: () => buildBreakfastSlotKey,
@@ -153182,6 +153411,7 @@ __export(shared_exports, {
   buildOtherAddOnManageOps: () => buildOtherAddOnManageOps,
   buildOtherAddOnSelectionKey: () => buildOtherAddOnSelectionKey,
   buildPublicAddOnsCatalog: () => buildPublicAddOnsCatalog,
+  buildStaffNameMap: () => buildStaffNameMap,
   bustPublicSiteContentCache: () => bustPublicSiteContentCache,
   calculateBookingTotal: () => calculateBookingTotal,
   calculateBreakfastMealsTotal: () => calculateBreakfastMealsTotal,
@@ -153265,6 +153495,8 @@ __export(shared_exports, {
   hasBookableAddOns: () => hasBookableAddOns,
   inFlowHoldStayMatches: () => inFlowHoldStayMatches,
   interpolateHotelTimes: () => interpolateHotelTimes,
+  isAuditAction: () => isAuditAction,
+  isAuditRedactedField: () => isAuditRedactedField,
   isBookingOccupyingRoom: () => isBookingOccupyingRoom,
   isBotProtectionDisabled: () => isBotProtectionDisabled,
   isBreakfastRateLine: () => isBreakfastRateLine,
@@ -153321,6 +153553,7 @@ __export(shared_exports, {
   recomputeBreakfastTotal: () => recomputeBreakfastTotal,
   recomputeOtherAddOnTotal: () => recomputeOtherAddOnTotal,
   recordSweepResult: () => recordSweepResult,
+  redactAuditValues: () => redactAuditValues,
   redateBreakfastSelections: () => redateBreakfastSelections,
   redateOtherAddOnSelections: () => redateOtherAddOnSelections,
   requestsOtherAddOns: () => requestsOtherAddOns,
@@ -153336,6 +153569,7 @@ __export(shared_exports, {
   resolveMaxStayNights: () => resolveMaxStayNights,
   resolvePaymentMethodLabel: () => resolvePaymentMethodLabel,
   resolveRangeSelection: () => resolveRangeSelection,
+  resolveStaffName: () => resolveStaffName,
   resolveVerifyPaymentOutcome: () => resolveVerifyPaymentOutcome,
   round2: () => round2,
   roundToTwoDecimals: () => roundToTwoDecimals,
@@ -153347,6 +153581,7 @@ __export(shared_exports, {
   slideInLeft: () => slideInLeft,
   slideInRight: () => slideInRight,
   sortAddOnsByDisplayOrder: () => sortAddOnsByDisplayOrder,
+  staffNameFor: () => staffNameFor,
   staggerChild: () => staggerChild,
   staggerContainer: () => staggerContainer,
   startOfDayUtc: () => startOfDayUtc,
@@ -153376,6 +153611,7 @@ var init_shared = __esm({
     init_room();
     init_websiteContent();
     init_seo();
+    init_audit();
     init_types3();
     init_bookingDates();
     init_stayRange();
@@ -153406,6 +153642,7 @@ var init_shared = __esm({
     init_references();
     init_reservationFingerprint();
     init_roomTypes();
+    init_staffNames();
     init_seasonalRates();
     init_storageJanitor();
     init_storePaymentMethods();
@@ -231372,6 +231609,20 @@ var BookingValidationError = class extends Error {
   }
 };
 
+// server/lib/staffNames.ts
+init_firebase_admin();
+async function resolveStaffDisplayName(uid) {
+  if (!uid) return "";
+  try {
+    const snap = await adminDb.collection("guests").doc(uid).get();
+    if (!snap.exists) return "";
+    const data = snap.data() || {};
+    return typeof data.fullName === "string" && data.fullName.trim() || typeof data.displayName === "string" && data.displayName.trim() || typeof data.email === "string" && data.email.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
 // server/lib/refunds.ts
 init_firestore();
 function trimOrNull(input, maxLen) {
@@ -234113,6 +234364,22 @@ async function handleCreateBooking(req, res) {
         source: corporateDetails.isCorporate ? "corporate" : "online",
         notes: "",
         handledBy: "",
+        // Per ATR-04 (2026-11-20, `plan/features/AUDIT-TRAIL.md`):
+        // the booking's CREATOR stamp — stamped ONCE here and NEVER
+        // overwritten by any later write. It answers the owner's
+        // first question: "kinsay nag walkin book?".
+        //
+        // A public online booking has no staff member behind it, so
+        // the stamp is the literal `"guest"`. A walk-in is stamped
+        // with the staff member's uid in the walk-in create path
+        // (`handleCreateWalkin`).
+        //
+        // NOTE: the RESERVATION HEADER carries its own `createdBy`
+        // (`"guest"` / `"staff"`) whose literal shape is pinned by the
+        // MRB-14 guard — this is the CHILD booking doc's field, and
+        // the two are separate documents.
+        createdBy: "guest",
+        createdByName: "Guest",
         // Server-detected Spark Rewards member (per W2.2 / decision #90).
         // Set from the Authorization Bearer token detected above.
         memberId: detectedMemberId,
@@ -235088,6 +235355,7 @@ async function handleCreateWalkin(req, res) {
     const reservationDocRef = adminDb.collection("reservations").doc(effectiveReservationId);
     let finalReservationRef = "";
     let newBooking = null;
+    const walkinStaffName = await resolveStaffDisplayName(req.staff?.uid);
     await adminDb.runTransaction(async (transaction) => {
       const bookingDocRef = adminDb.collection("bookings").doc(bookingId);
       const walkinAssignedRooms = [];
@@ -235654,6 +235922,16 @@ async function handleCreateWalkin(req, res) {
         source: resolvedSource,
         notes: deriveSourceNote(resolvedSource),
         handledBy: req.staff.uid || "staff",
+        // Per ATR-04 (2026-11-20, `plan/features/AUDIT-TRAIL.md`):
+        // the booking's CREATOR stamp — written ONCE here and NEVER
+        // overwritten by any later write. It answers the owner's
+        // first question: "kinsay nag walkin book?".
+        //
+        // A walk-in has a staff member behind it, so the stamp is
+        // that member's uid (the public online path stamps the
+        // literal `"guest"` instead).
+        createdBy: req.staff.uid || "staff",
+        createdByName: walkinStaffName,
         memberId: null,
         pointsRedeemed: 0,
         pointsRedeemedValue: 0,
@@ -238687,6 +238965,7 @@ async function handleCheckinBooking(req, res) {
   try {
     const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
     const checkedInBy = req.staff?.uid || "staff";
+    const checkedInByName = await resolveStaffDisplayName(req.staff?.uid);
     const now = /* @__PURE__ */ new Date();
     await adminDb.runTransaction(async (transaction) => {
       const bookingDoc = await transaction.get(bookingRef2);
@@ -238734,6 +239013,10 @@ async function handleCheckinBooking(req, res) {
         status: "checked-in",
         checkedInAt: now,
         checkedInBy,
+        // Per ATR-04: the display-name companion to `checkedInBy`.
+        // The UID is the durable attribution; the name is what the
+        // desk actually reads.
+        checkedInByName,
         updatedAt: now
       });
       transaction.update(roomRef, {
@@ -238792,6 +239075,7 @@ async function handleCheckoutBooking(req, res) {
     }
     const checkedOutBy = req.staff?.uid || "staff";
     const staffRole = req.staff?.role || "front-desk";
+    const checkedOutByName = await resolveStaffDisplayName(req.staff?.uid);
     const hotelConfigDoc = await adminDb.collection("settings").doc("hotelConfig").get();
     const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data() : {};
     const unpaidCheckoutThreshold = Number(hotelConfig.unpaidCheckoutApprovalThreshold) || 5e3;
@@ -238859,6 +239143,8 @@ async function handleCheckoutBooking(req, res) {
         status: "checked-out",
         checkedOutAt: now,
         checkedOutBy,
+        // Per ATR-04: the display-name companion to `checkedOutBy`.
+        checkedOutByName,
         checkedOutWithBalance,
         checkedOutFolioTotal: checkoutFolioTotal,
         checkedOutCollectedTotal: collectedTotal,
