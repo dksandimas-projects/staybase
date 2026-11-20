@@ -159,7 +159,14 @@ import {
   // Per HC-01 (decision #328): the SHARED contact resolver, so the
   // admin's pre-snapshot state seeds the same four contact fields
   // (and the same address shape) the runtime document carries.
-  formatHotelAddress
+  formatHotelAddress,
+  // Per ATR-03 (2026-11-20, `plan/features/AUDIT-TRAIL.md`): the
+  // shared audit contract. `buildAuditEntry` is the ONLY sanctioned
+  // way to build an `auditLogs` row — it applies the PII redaction
+  // list, so a redacted field is recorded in `changedFields` BY NAME
+  // ONLY and never in `before` / `after`.
+  buildAuditEntry,
+  type AuditAction
 } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
@@ -297,6 +304,30 @@ export interface Room {
   // intentionally absent — they now live on the RoomType entry. See
   // `plan/features/RATE-MANAGEMENT.md §W3.6` and the W3.7 notes in
   // `plan/features/SETTINGS.md §Room Types`.
+  //
+  // Per ATR-03 (2026-11-20, `plan/features/AUDIT-TRAIL.md`): the
+  // denormalized attribution fields. `updatedBy` is the LAST staff
+  // member to touch the room's CONFIG; housekeeping gets its OWN
+  // triple because it is the highest-frequency room write (a tap per
+  // room per day) and would otherwise bury every other room change
+  // under itself in `updatedBy`.
+  //
+  // The `*By` fields hold the staff Firebase Auth UID; the `*ByName`
+  // fields hold the display name AT WRITE TIME (decision 5), so a
+  // renamed or deleted staff account does not blank out the history
+  // retroactively. Every field is OPTIONAL — a legacy room written
+  // before ATR-03 simply has none of them, and the surfaces omit
+  // the provenance line rather than rendering an empty attribution.
+  updatedBy?: string | null;
+  updatedByName?: string | null;
+  statusChangedAt?: Date | string | null;
+  statusChangedBy?: string | null;
+  statusChangedByName?: string | null;
+  housekeepingUpdatedAt?: Date | string | null;
+  housekeepingUpdatedBy?: string | null;
+  housekeepingUpdatedByName?: string | null;
+  createdBy?: string | null;
+  createdByName?: string | null;
 }
 
 export interface OnsitePayment {
@@ -500,6 +531,29 @@ export interface Booking {
   guestIdPhotoUrl: string | null;
   handledBy: string;
   cancellationReason: string;
+  // Per ATR-04 (2026-11-20, `plan/features/AUDIT-TRAIL.md`): the
+  // non-destructive booking attribution.
+  //
+  // `createdBy` / `createdByName` are stamped ONCE at create and NEVER
+  // overwritten — "guest" for a public online booking, the staff uid
+  // for a walk-in. This is what answers "kinsay nag walkin book?".
+  //
+  // `checkedInByName` / `checkedOutByName` are the display-name
+  // companions to the `checkedInBy` / `checkedOutBy` uids the server
+  // has stamped since the FOL-03 pass (those two were in no type and
+  // no MD until ATR-04).
+  //
+  // Every field is OPTIONAL — a legacy booking written before ATR-04
+  // has none of them, and the surfaces omit the provenance line
+  // rather than rendering an empty attribution.
+  createdBy?: string | null;
+  createdByName?: string | null;
+  checkedInAt?: string | null;
+  checkedInBy?: string | null;
+  checkedInByName?: string | null;
+  checkedOutAt?: string | null;
+  checkedOutBy?: string | null;
+  checkedOutByName?: string | null;
   // Per CRL-02 (2026-08-02): mirror the shared `Booking.cancelledAt`
   // / `cancelledBy` / `cancellationSource` fields on the admin
   // view. Hydrated by the bookings mapper (see line 1281+).
@@ -1591,7 +1645,22 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             remarks: "",
             legacyBlockReason: data.blockReason || "",
             legacyRemarks: data.remarks || "",
-            qrToken: data.qrToken || ""
+            qrToken: data.qrToken || "",
+            // Per ATR-03: the denormalized attribution fields, read
+            // straight off the room document. They are OPTIONAL — a
+            // legacy room written before ATR-03 has none of them, and
+            // the inline surfaces omit the provenance line rather
+            // than rendering an empty attribution.
+            updatedBy: data.updatedBy || "",
+            updatedByName: data.updatedByName || "",
+            statusChangedAt: data.statusChangedAt || null,
+            statusChangedBy: data.statusChangedBy || "",
+            statusChangedByName: data.statusChangedByName || "",
+            housekeepingUpdatedAt: data.housekeepingUpdatedAt || null,
+            housekeepingUpdatedBy: data.housekeepingUpdatedBy || "",
+            housekeepingUpdatedByName: data.housekeepingUpdatedByName || "",
+            createdBy: data.createdBy || "",
+            createdByName: data.createdByName || ""
           });
         });
 
@@ -1629,6 +1698,113 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     };
   }, [currentUser]);
 
+  // ── ATR-03: room attribution + the `rooms.*` audit rows ─────────
+  //
+  // Per `plan/features/AUDIT-TRAIL.md` ATR-03: the room record itself
+  // carries WHO changed it (the denormalized `updatedBy` /
+  // `statusChangedBy` / `housekeepingUpdatedBy` triples), and every
+  // room mutation records a `rooms.*` row in `auditLogs`.
+  //
+  // TWO CONTRACT RULES:
+  //
+  //   1. THE AUDIT WRITE NEVER ROLLS BACK THE PRIMARY MUTATION. The
+  //      row is a side-effect of the save, so a failed write is
+  //      logged and swallowed and the operator still sees the success
+  //      toast. (The BR-12.1 add-on writer already works this way —
+  //      see `writeAddOnAuditLog` in `SettingsPage.tsx`.)
+  //
+  //   2. EVERY ROW GOES THROUGH `buildAuditEntry`. That is what
+  //      applies the PII redaction list: a redacted field lands in
+  //      `changedFields` BY NAME ONLY, never in `before` / `after`.
+
+  /** The acting staff member's display name, AT WRITE TIME. */
+  const currentStaffName = (): string =>
+    currentUser?.displayName || currentUser?.email || "Staff";
+
+  /** The acting staff member's uid, or "" when there is no session. */
+  const currentStaffUid = (): string => currentUser?.uid || "";
+
+  /** A human label for a room row — never guest PII. */
+  const roomTargetLabel = (room: Room): string =>
+    `Room ${room.roomNumber}${room.type ? ` — ${room.type}` : ""}`;
+
+  /**
+   * The difference between the room as it is NOW and the update that
+   * is about to be applied, as `before` / `after` maps.
+   *
+   * Only the fields that ACTUALLY changed are listed, so the audit
+   * row answers "what changed" rather than "what was written".
+   */
+  const diffRoomUpdates = (
+    room: Room,
+    updates: Partial<Room>
+  ): {
+    changed: string[];
+    before: Record<string, unknown>;
+    after: Record<string, unknown>;
+  } => {
+    const changed: string[] = [];
+    const before: Record<string, unknown> = {};
+    const after: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(updates)) {
+      // `id` is not a document field, and `remarks` / `blockReason`
+      // live on `roomPrivate` — they are audited separately, against
+      // that document.
+      if (key === "id" || key === "remarks" || key === "blockReason") continue;
+      const previous = (room as unknown as Record<string, unknown>)[key];
+      if (previous === value) continue;
+      changed.push(key);
+      before[key] = previous ?? null;
+      after[key] = value ?? null;
+    }
+    return { changed, before, after };
+  };
+
+  /**
+   * Write one `rooms.*` audit row.
+   *
+   * Never throws: a failed audit write is logged and swallowed so the
+   * primary mutation is never rolled back.
+   */
+  const writeRoomAuditRow = async (input: {
+    action: AuditAction;
+    targetCollection: "rooms" | "roomPrivate";
+    targetId: string;
+    targetLabel?: string;
+    changedFields: string[];
+    before?: Record<string, unknown> | null;
+    after?: Record<string, unknown> | null;
+    reason?: string | null;
+  }) => {
+    const actor = currentStaffUid();
+    // No session → no attributable actor → no row. A row with an
+    // empty actor is rejected by the rules anyway, and a row nobody
+    // can be named against is worse than no row.
+    if (!actor) return;
+    try {
+      const entry = buildAuditEntry({
+        action: input.action,
+        targetCollection: input.targetCollection,
+        targetId: input.targetId,
+        targetLabel: input.targetLabel,
+        changedFields: input.changedFields,
+        before: input.before ?? null,
+        after: input.after ?? null,
+        actor,
+        actorName: currentStaffName(),
+        source: "client",
+        reason: input.reason ?? null
+      });
+      await addDoc(collection(db, "auditLogs"), {
+        ...entry,
+        timestamp: serverTimestamp()
+      });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn("rooms audit row write failed", error);
+    }
+  };
+
   const toggleHousekeepingStatus = async (roomId: string) => {
     const room = rooms.find(r => r.id === roomId);
     if (!room) return;
@@ -1650,7 +1826,24 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       const roomRef = doc(db, "rooms", roomId);
       await updateDoc(roomRef, {
         housekeepingStatus: nextHK,
+        // Per ATR-03: housekeeping gets its OWN attribution triple,
+        // because it is the highest-frequency room write (a tap per
+        // room per day) and would otherwise bury every other room
+        // change under the general `updatedBy` stamp.
+        housekeepingUpdatedAt: serverTimestamp(),
+        housekeepingUpdatedBy: currentStaffUid(),
+        housekeepingUpdatedByName: currentStaffName(),
         updatedAt: serverTimestamp()
+      });
+      // Per ATR-03: the `rooms.housekeeping` audit row.
+      await writeRoomAuditRow({
+        action: "rooms.housekeeping",
+        targetCollection: "rooms",
+        targetId: roomId,
+        targetLabel: roomTargetLabel(room),
+        changedFields: ["housekeepingStatus"],
+        before: { housekeepingStatus: room.housekeepingStatus },
+        after: { housekeepingStatus: nextHK }
       });
     } catch (error) {
       console.error("Error updating housekeeping status in Firestore:", error);
@@ -1660,6 +1853,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   const updateRoomConfig = async (roomId: string, updates: Partial<Room>) => {
     try {
       const roomRef = doc(db, "rooms", roomId);
+      const existingRoom = rooms.find((r) => r.id === roomId);
       const privateUpdates: Record<string, any> = {};
       if ("remarks" in updates) {
         privateUpdates.remarks = updates.remarks || "";
@@ -1669,18 +1863,96 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
       }
       const dataToUpdate: Record<string, any> = {
         ...updates,
+        // Per ATR-03: the denormalized "who touched this room's
+        // config" stamp. The rules pin `updatedBy` to the CALLER's
+        // own uid (`roomAttributionOwnedByCaller()`), so a forged
+        // stamp is rejected at the database, not just discouraged in
+        // the UI.
+        updatedBy: currentStaffUid(),
+        updatedByName: currentStaffName(),
         updatedAt: serverTimestamp()
       };
       delete dataToUpdate.id; // Exclude ID from updates payload
       delete dataToUpdate.remarks;
       delete dataToUpdate.blockReason;
 
+      // Per ATR-03: a STATUS change gets its own attribution triple,
+      // so the room modal can answer "who blocked this room, and
+      // when" without reading the general "last edited" stamp.
+      const statusChanged =
+        "status" in updates && existingRoom && updates.status !== existingRoom.status;
+      if (statusChanged) {
+        dataToUpdate.statusChangedAt = serverTimestamp();
+        dataToUpdate.statusChangedBy = currentStaffUid();
+        dataToUpdate.statusChangedByName = currentStaffName();
+      }
+
       await updateDoc(roomRef, dataToUpdate);
+
       if (Object.keys(privateUpdates).length > 0) {
         await setDoc(doc(db, "roomPrivate", roomId), {
           ...privateUpdates,
           updatedAt: serverTimestamp()
         }, { merge: true });
+      }
+
+      // Per ATR-03: the `rooms.*` audit rows — one for the room
+      // document, one for the private document when it was written.
+      if (existingRoom) {
+        const { changed, before, after } = diffRoomUpdates(existingRoom, updates);
+        const statusFields = changed.filter((key) => key === "status");
+        const otherFields = changed.filter((key) => key !== "status");
+        if (statusFields.length > 0) {
+          await writeRoomAuditRow({
+            action: "rooms.status-change",
+            targetCollection: "rooms",
+            targetId: roomId,
+            targetLabel: roomTargetLabel(existingRoom),
+            changedFields: statusFields,
+            before: { status: before.status ?? null },
+            after: { status: after.status ?? null }
+          });
+        }
+        if (otherFields.length > 0) {
+          // The before/after maps carry ONLY the fields this row is
+          // about, so `changedFields` and the snapshot always agree.
+          const otherBefore: Record<string, unknown> = {};
+          const otherAfter: Record<string, unknown> = {};
+          for (const key of otherFields) {
+            otherBefore[key] = before[key];
+            otherAfter[key] = after[key];
+          }
+          await writeRoomAuditRow({
+            action: "rooms.update",
+            targetCollection: "rooms",
+            targetId: roomId,
+            targetLabel: roomTargetLabel(existingRoom),
+            changedFields: otherFields,
+            before: otherBefore,
+            after: otherAfter
+          });
+        }
+      }
+      const privateChanged = Object.keys(privateUpdates);
+      if (privateChanged.length > 0 && existingRoom) {
+        // `remarks` is on the PII redaction list (free staff prose
+        // that may quote a guest), so it is recorded BY NAME ONLY.
+        // `blockReason` is the operational reason the room-management
+        // UI already collects, so it travels in the row's `reason`
+        // column — the deliberate channel for free text.
+        await writeRoomAuditRow({
+          action: "rooms.update",
+          targetCollection: "roomPrivate",
+          targetId: roomId,
+          targetLabel: roomTargetLabel(existingRoom),
+          changedFields: privateChanged,
+          before: null,
+          after: null,
+          reason:
+            typeof privateUpdates.blockReason === "string" && privateUpdates.blockReason
+              ? privateUpdates.blockReason
+              : null
+        });
       }
     } catch (error) {
       console.error("Error updating room config in Firestore:", error);
@@ -1690,18 +1962,53 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
   const addRoomBlock = async (roomId: string, dates: { from: string; to: string }, reason: string) => {
     try {
       const roomRef = doc(db, "rooms", roomId);
+      const existingRoom = rooms.find((r) => r.id === roomId);
       const fromDate = new Date(`${dates.from}T00:00:00`);
       const toDate = new Date(`${dates.to}T23:59:59`);
       await updateDoc(roomRef, {
         status: "blocked",
         blockedFrom: Timestamp.fromDate(fromDate),
         blockedTo: Timestamp.fromDate(toDate),
+        // Per ATR-03: a block IS a status change, so it carries the
+        // status attribution triple as well as the general stamp.
+        statusChangedAt: serverTimestamp(),
+        statusChangedBy: currentStaffUid(),
+        statusChangedByName: currentStaffName(),
+        updatedBy: currentStaffUid(),
+        updatedByName: currentStaffName(),
         updatedAt: serverTimestamp()
       });
       await setDoc(doc(db, "roomPrivate", roomId), {
         blockReason: reason,
         updatedAt: serverTimestamp()
       }, { merge: true });
+
+      // Per ATR-03: two `rooms.block` rows — one for the room document
+      // (the status + the date range) and one for the private
+      // document (the reason prose, which travels in the row's
+      // `reason` column — the deliberate channel for the free text
+      // the UI already collects).
+      await writeRoomAuditRow({
+        action: "rooms.block",
+        targetCollection: "rooms",
+        targetId: roomId,
+        targetLabel: existingRoom ? roomTargetLabel(existingRoom) : undefined,
+        changedFields: ["status", "blockedFrom", "blockedTo"],
+        before: existingRoom
+          ? { status: existingRoom.status, blockedFrom: null, blockedTo: null }
+          : null,
+        after: { status: "blocked", blockedFrom: dates.from, blockedTo: dates.to }
+      });
+      await writeRoomAuditRow({
+        action: "rooms.block",
+        targetCollection: "roomPrivate",
+        targetId: roomId,
+        targetLabel: existingRoom ? roomTargetLabel(existingRoom) : undefined,
+        changedFields: ["blockReason"],
+        before: null,
+        after: null,
+        reason
+      });
     } catch (error) {
       console.error("Error adding room block in Firestore:", error);
     }
@@ -1732,6 +2039,11 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         blockedFrom: null,
         blockedTo: null,
         qrToken: "",
+        // Per ATR-03: the denormalized creator stamp. The rules pin
+        // `createdBy` to the CALLER's own uid on create, so a forged
+        // stamp is rejected at the database.
+        createdBy: currentStaffUid(),
+        createdByName: currentStaffName(),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
@@ -1741,6 +2053,37 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           blockReason: input.status === "blocked" ? (input.blockReason || "") : "",
           updatedAt: serverTimestamp()
         }, { merge: true });
+      }
+
+      // Per ATR-03: the `rooms.create` audit rows — one for the room
+      // document, one for the private document when it was written.
+      await writeRoomAuditRow({
+        action: "rooms.create",
+        targetCollection: "rooms",
+        targetId: docRef.id,
+        targetLabel: `Room ${normalizedNumber}${input.type ? ` — ${input.type}` : ""}`,
+        changedFields: ["name", "roomNumber", "type", "isActive", "status", "housekeepingStatus"],
+        before: null,
+        after: {
+          name: input.name.trim(),
+          roomNumber: normalizedNumber,
+          type: input.type,
+          isActive: input.isActive,
+          status: input.status,
+          housekeepingStatus: input.housekeepingStatus
+        }
+      });
+      if (input.remarks || (input.status === "blocked" && input.blockReason)) {
+        await writeRoomAuditRow({
+          action: "rooms.create",
+          targetCollection: "roomPrivate",
+          targetId: docRef.id,
+          targetLabel: `Room ${normalizedNumber}${input.type ? ` — ${input.type}` : ""}`,
+          changedFields: ["remarks", "blockReason"],
+          before: null,
+          after: null,
+          reason: input.status === "blocked" ? (input.blockReason || "") || null : null
+        });
       }
 
       return { success: true, roomId: docRef.id };
@@ -1857,6 +2200,27 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
 
       // 5) Finally, the room document itself.
       await deleteDoc(doc(db, "rooms", roomId));
+
+      // Per ATR-03: the `rooms.delete` audit row. The
+      // `roomDeletionAudit` document above already records the
+      // deletion for the room-management screen; the audit row is
+      // what puts it in the same trail as every other room change.
+      await writeRoomAuditRow({
+        action: "rooms.delete",
+        targetCollection: "rooms",
+        targetId: roomId,
+        targetLabel: roomTargetLabel(room),
+        changedFields: ["name", "roomNumber", "type", "status", "isActive"],
+        before: {
+          name: room.name,
+          roomNumber: room.roomNumber,
+          type: room.type,
+          status: room.status,
+          isActive: room.isActive
+        },
+        after: null,
+        reason: reason.trim() || null
+      });
 
       return { success: true };
     } catch (error) {
@@ -2130,6 +2494,18 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             reminderSentAt: data.reminderSentAt ? parseDateTimeString(data.reminderSentAt) : null,
             guestIdPhotoUrl: data.guestIdPhotoUrl || null,
             handledBy: data.handledBy || "",
+            // Per ATR-04 (2026-11-20): the non-destructive booking
+            // attribution. Hydrated straight off the doc; every field
+            // is optional, so a legacy booking simply carries none of
+            // them and the surfaces omit the provenance line.
+            createdBy: data.createdBy || null,
+            createdByName: data.createdByName || null,
+            checkedInAt: data.checkedInAt ? parseDateTimeString(data.checkedInAt) : null,
+            checkedInBy: data.checkedInBy || null,
+            checkedInByName: data.checkedInByName || null,
+            checkedOutAt: data.checkedOutAt ? parseDateTimeString(data.checkedOutAt) : null,
+            checkedOutBy: data.checkedOutBy || null,
+            checkedOutByName: data.checkedOutByName || null,
             cancellationReason: data.cancellationReason || "",
             // Per CRL-02 (2026-08-02): hydrate the full
             // cancellation audit metadata. `cancelledAt` is the
@@ -3418,7 +3794,10 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         await updateDoc(bookingDocRef, {
           ...details,
           updatedAt: serverTimestamp(),
-          handledBy: currentUser?.uid || currentUser?.email || "staff"
+          // Per ATR-07 / finding 7: the CALLER's own uid, never an
+          // email — the `bookings` update rule pins `handledBy` to
+          // `request.auth.uid`.
+          handledBy: currentUser?.uid || ""
         });
         // No server round-trip → no `emailQueued`
         // flag to surface. The caller can ignore
@@ -6596,7 +6975,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
       isBilled: true,
       billedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-      handledBy: currentUser?.uid || currentUser?.email || ""
+      handledBy: currentUser?.uid || ""
     });
   };
 

@@ -6,6 +6,13 @@ export * from "./schemas/paymentMethod";
 export * from "./schemas/room";
 export * from "./schemas/websiteContent";
 export * from "./schemas/seo";
+// Per ATR-01 (2026-11-20, `plan/features/AUDIT-TRAIL.md`): the
+// Staff Audit Trail contract — the closed action vocabulary, the PII
+// redaction list, the row schema, and the `buildAuditEntry` helper.
+// ONE source of truth for both writers (the server's Admin-SDK writer
+// and the admin app's client writer), so a field can never be
+// redacted in one path and copied in full in the other.
+export * from "./schemas/audit";
 export * from "./types";
 export * from "./utils/bookingDates";
 export * from "./utils/stayRange";
@@ -61,6 +68,14 @@ export * from "./utils/hotelTimes";
 export * from "./utils/references";
 export * from "./utils/reservationFingerprint";
 export * from "./utils/roomTypes";
+// Per ATR-05 (2026-11-20, `plan/features/AUDIT-TRAIL.md`, finding 9):
+// the ONE staff-UID → display-name resolver. Three surfaces used to
+// print a raw 28-character UID (which tells a front-desk user
+// nothing) while a fourth already resolved names. The resolver moved
+// into the shared package so every surface — old and new — uses the
+// same function; a second resolver is how they drifted in the first
+// place.
+export * from "./utils/staffNames";
 export * from "./utils/seasonalRates";
 export * from "./utils/storageJanitor";
 export * from "./utils/storePaymentMethods";

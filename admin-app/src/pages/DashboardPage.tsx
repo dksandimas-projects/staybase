@@ -2146,36 +2146,51 @@ export function DashboardPage() {
                   {/* Housekeeping action toggle button */}
                   <div className="flex items-center justify-between border-t border-gray-100 pt-3">
                     <span className="text-xs font-semibold text-gray-500">Housekeeping:</span>
-                    
-                    <button
-                      type="button"
-                      onClick={() => toggleHousekeepingStatus(room.id)}
-                      className={`min-h-[32px] px-3.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-bold transition shadow-sm active:scale-95 ${
-                        isDirty
-                          ? "bg-red-50 text-red-700 hover:bg-red-100 border border-red-200"
-                          : isInProgress
-                            ? "bg-yellow-50 text-yellow-700 hover:bg-yellow-100 border border-yellow-200"
-                          : "bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"
-                      }`}
-                      title="Click to cycle housekeeping status"
-                    >
-                      {isDirty ? (
-                        <>
-                          <AlertTriangle size={12} />
-                          Dirty
-                        </>
-                      ) : isInProgress ? (
-                        <>
-                          <RefreshCw size={12} />
-                          In Progress
-                        </>
-                      ) : (
-                        <>
-                          <Check size={12} />
-                          Clean
-                        </>
+
+                    <div className="flex flex-col items-end gap-1">
+                      <button
+                        type="button"
+                        onClick={() => toggleHousekeepingStatus(room.id)}
+                        className={`min-h-[32px] px-3.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-bold transition shadow-sm active:scale-95 ${
+                          isDirty
+                            ? "bg-red-50 text-red-700 hover:bg-red-100 border border-red-200"
+                            : isInProgress
+                              ? "bg-yellow-50 text-yellow-700 hover:bg-yellow-100 border border-yellow-200"
+                            : "bg-green-50 text-green-700 hover:bg-green-100 border border-green-200"
+                        }`}
+                        title="Click to cycle housekeeping status"
+                      >
+                        {isDirty ? (
+                          <>
+                            <AlertTriangle size={12} />
+                            Dirty
+                          </>
+                        ) : isInProgress ? (
+                          <>
+                            <RefreshCw size={12} />
+                            In Progress
+                          </>
+                        ) : (
+                          <>
+                            <Check size={12} />
+                            Clean
+                          </>
+                        )}
+                      </button>
+                      {/* Per ATR-05 (2026-11-20): the housekeeping chip
+                          says WHO last set the status. Before ATR-03 a
+                          room carried no trace of that at all, so the
+                          desk could not tell whether "Clean" meant
+                          "cleaned by Juan" or "never touched".
+                          The `*ByName` companion is the display name at
+                          write time; it renders NOTHING on a legacy
+                          room. */}
+                      {room.housekeepingUpdatedByName && (
+                        <span className="text-[9px] font-medium text-gray-400">
+                          by {room.housekeepingUpdatedByName}
+                        </span>
                       )}
-                    </button>
+                    </div>
                   </div>
                 </div>
               );

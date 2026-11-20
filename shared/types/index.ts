@@ -114,6 +114,35 @@ export interface Room {
   qrToken?: string;
   createdAt: Date;
   updatedAt: Date;
+  // Per ATR-03 (2026-11-20, `plan/features/AUDIT-TRAIL.md`): the
+  // denormalized staff attribution on a room. These are the
+  // Front-Desk-READABLE answer to "who changed this room?" — the
+  // global history lives in `auditLogs` (admin-only), but these live
+  // ON the record so the room modal and the dashboard chip can
+  // render provenance from the one read they already do.
+  //
+  // `updatedBy` is the LAST staff member to touch the room's CONFIG
+  // (name / type / status / active flag). Housekeeping gets its OWN
+  // triple because it is the highest-frequency room write (a tap per
+  // room per day) and would otherwise bury every other room change
+  // under itself in `updatedBy`.
+  //
+  // The `*By` fields hold the staff Firebase Auth UID; the `*ByName`
+  // fields hold the display name AT WRITE TIME (decision 5), so a
+  // renamed or deleted staff account does not blank out the history
+  // retroactively. Every field is OPTIONAL — a legacy room written
+  // before ATR-03 simply has none of them, and the surfaces omit
+  // the line rather than rendering an empty attribution.
+  updatedBy?: string | null;
+  updatedByName?: string | null;
+  statusChangedAt?: Date | string | null;
+  statusChangedBy?: string | null;
+  statusChangedByName?: string | null;
+  housekeepingUpdatedAt?: Date | string | null;
+  housekeepingUpdatedBy?: string | null;
+  housekeepingUpdatedByName?: string | null;
+  createdBy?: string | null;
+  createdByName?: string | null;
 }
 
 // `bedDefinition`, `description`, `amenities`, `maxCapacity`,
@@ -923,7 +952,40 @@ export interface Booking {
   discountScopeSnapshot?: DiscountScope | null;
   reminderSentAt: string | null;
   guestIdPhotoUrl: string | null;
+  /**
+   * Per ATR-04 (2026-11-20, `plan/features/AUDIT-TRAIL.md`): the
+   * LAST staff member to touch this booking. **This field is NOT
+   * renamed** (finding 5 — a cross-surface refactor buys nothing) and
+   * its meaning is now pinned here: it is overwritten by every later
+   * staff action, so it answers "who handled this most recently",
+   * NOT "who created it". The creator is `createdBy` below.
+   */
   handledBy: string;
+  // Per ATR-04 (2026-11-20): the NON-DESTRUCTIVE creator stamp.
+  //
+  // `createdBy` is written ONCE at every booking create path and is
+  // NEVER overwritten: `"guest"` for a public online booking, the
+  // staff UID for a walk-in or staff-created booking. This is the
+  // field that answers the owner's question *"kinsay nag walkin
+  // book?"* — `handledBy` cannot, because every later staff action
+  // overwrites it (the walk-in creator is gone after one confirm).
+  //
+  // `createdByName` is the display name AT WRITE TIME (decision 5).
+  // Both are OPTIONAL: a legacy booking written before ATR-04 has
+  // neither, and the surfaces omit the provenance line rather than
+  // rendering an empty attribution.
+  createdBy?: string | null;
+  createdByName?: string | null;
+  // Per ATR-04: the display-name companions to the ALREADY-WRITTEN
+  // `checkedInBy` / `checkedOutBy` (the server has stamped those
+  // since the FOL-03 pass — they were in no type and no MD, which is
+  // why this slice documents them). `checkedInAt` is the companion
+  // timestamp. All three are OPTIONAL for the same legacy reason.
+  checkedInBy?: string | null;
+  checkedInAt?: Date | string | null;
+  checkedInByName?: string | null;
+  checkedOutBy?: string | null;
+  checkedOutByName?: string | null;
   cancellationReason: string;
   // CRL-02 (2026-08-02): full cancellation audit metadata. `cancelledAt`
   // and `cancelledBy` were already on the type (PEX-03 stamped them for

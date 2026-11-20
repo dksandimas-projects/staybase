@@ -117,6 +117,24 @@ Room {
   qrToken?: string             // regenerated QR route token; fallback is room id
   createdAt: Date
   updatedAt: Date
+  // Per ATR-03 (2026-11-20, `plan/features/AUDIT-TRAIL.md`): the
+  // denormalized attribution. The `*By` fields hold the staff
+  // Firebase Auth UID; the `*ByName` fields hold the display name
+  // AT WRITE TIME (decision 5), so a renamed or deleted staff
+  // account does not blank out the history retroactively. Every field
+  // is OPTIONAL — a legacy room written before ATR-03 has none of
+  // them, and the surfaces omit the provenance line rather than
+  // rendering an empty attribution.
+  updatedBy?: string | null
+  updatedByName?: string | null
+  statusChangedAt?: Date | string | null
+  statusChangedBy?: string | null
+  statusChangedByName?: string | null
+  housekeepingUpdatedAt?: Date | string | null
+  housekeepingUpdatedBy?: string | null
+  housekeepingUpdatedByName?: string | null
+  createdBy?: string | null
+  createdByName?: string | null
 }
 
 // `maxCapacity`, `pricePerNight`, `weekendRate`, `corporateRate` (W3.6),
@@ -418,7 +436,30 @@ Booking {
   // mapper so the state survives real-time refresh and is visible across
   // staff sessions. Absent on legacy bookings → mapper defaults to `{}`.
   breakfastServed?: Record<string, boolean>
+  // Per ATR-04 (2026-11-20, `plan/features/AUDIT-TRAIL.md`):
+  // `handledBy` is the LAST staff member to touch this booking. It
+  // is NOT a rename candidate — the field keeps its name and its
+  // behaviour. The rules pin it to the CALLER's own uid
+  // (`bookingActorFieldsOwnedByCaller()`), so it is a UID, never an
+  // email.
   handledBy: string
+  // Per ATR-04: the booking's CREATOR stamp — written ONCE at create
+  // and NEVER overwritten. `"guest"` (+ `"Guest"`) for a public
+  // online booking; the staff uid (+ display name) for a walk-in.
+  // This is what answers "kinsay nag walkin book?".
+  createdBy?: string | null
+  createdByName?: string | null
+  // Per ATR-04: the display-name companions to the ALREADY-WRITTEN
+  // `checkedInBy` / `checkedOutBy` (the server has stamped those
+  // since the FOL-03 pass — they were in no type and no MD until
+  // ATR-04). All three are OPTIONAL: a legacy booking has none of
+  // them, and the surfaces omit the provenance line.
+  checkedInAt?: string | null
+  checkedInBy?: string | null
+  checkedInByName?: string | null
+  checkedOutAt?: string | null
+  checkedOutBy?: string | null
+  checkedOutByName?: string | null
   cancellationReason: string
   // Per CRL-02 (2026-08-02): the full cancellation audit metadata.
   // All three fields are nullable on legacy bookings; CRL-02 stamps
@@ -561,6 +602,59 @@ Required shape:
 - `generatedAt` timestamp for audit/debug context.
 
 Public guest responses may include `BookingRateBreakdown` because it contains no payment proof URLs, admin notes, or unrelated booking PII.
+
+---
+
+## Audit Log Entry (ATR-01 — 2026-11-20)
+
+```
+// The action vocabulary is a CLOSED set. An unknown action is a
+// hard failure (a thrown ZodError / a failed test), never a
+// silently-dropped row — the `NBS-08` failure mode applied to the
+// audit log.
+AuditAction =
+  "bookings.create-walkin" | "bookings.checkin" | "bookings.checkout" |
+  "bookings.confirm" | "bookings.cancel" | "bookings.reschedule" |
+  "bookings.room-reassign" | "bookings.payment-add" | "bookings.payment-verify" |
+  "bookings.payment-reject" | "bookings.refund" | "bookings.discount-verify" |
+  "bookings.discount-reject" | "bookings.update" |
+  "rooms.create" | "rooms.update" | "rooms.delete" | "rooms.status-change" |
+  "rooms.housekeeping" | "rooms.block" |
+  "addons.create" | "addons.update" | "addons.delete" |
+  "settings.update" | "rates.update" |
+  "vouchers.create" | "vouchers.update" |
+  "staff.create" | "staff.disable"
+
+AuditTargetCollection =
+  "bookings" | "rooms" | "roomPrivate" | "addOns" |
+  "settings" | "rates" | "vouchers" | "guests"
+
+// "server" = written via the Admin SDK (forensic — the actor comes
+// from the verified token). "client" = written by the admin app
+// (advisory — trusted staff with a browser console can skip a row).
+AuditSource = "server" | "client"
+AuditActorRole = "admin" | "front-desk"
+
+AuditLogEntry {
+  action: AuditAction
+  targetCollection: AuditTargetCollection
+  targetId: string
+  targetLabel?: string             // denormalised human label; never guest PII
+  changedFields: string[]          // the names of the fields that changed
+  before: Record<string, unknown> | null   // non-redacted changed fields only
+  after: Record<string, unknown> | null    // non-redacted changed fields only
+  actor: string                    // staff Firebase Auth UID
+  actorName: string                // display name AT WRITE TIME (decision 5)
+  actorRole?: AuditActorRole       // the role AS IT WAS, since roles change
+  source: AuditSource              // REQUIRED — tells a reader how much to trust the row
+  reason?: string | null           // operational free text the UI already collects
+  timestamp?: Date
+}
+```
+
+**PII redaction (ATR-01).** A field on the shared redaction list (`AUDIT_REDACTED_FIELDS` in `shared/schemas/audit.ts`) is recorded in `changedFields` **BY NAME ONLY** and is NEVER copied into `before` / `after` — a naive snapshot would copy guest personal data into a second collection with a different retention posture. `buildAuditEntry()` is the only sanctioned way to build a row; it applies the list and computes `changedFields` as a real diff (a field present in both maps with an unchanged value did NOT change, so it is not listed).
+
+The canonical TypeScript types + the Zod schema live in `shared/schemas/audit.ts`.
 
 ---
 
@@ -1173,7 +1267,7 @@ Zod schemas for the 4-step booking form live in `shared/schemas/booking.ts`. Typ
 
 ## Cancellation Liability (CRL-07 — 2026-08-03)
 
-Per decision #173: the durable refund-liability snapshot stamped onto the cancelled entity in the same `runTransaction` as the status flip. Lives on the reservation header (`reservations/{id}.cancellationLiability`) for reservation-scope cancels + new-path N=1, and on the booking doc (`bookings/{id}.cancellationLiability`) for per-child cancels + legacy null-`reservationId` bookings. The stored fields are the immutable `policyResult` + the admin-controlled `approvedAmount` + the latest `exception` audit row. The derived fields — `state`, `outstandingAmount`, `retentionAmount` — are NEVER stored; the pure `computeCancellationLiabilityState` helper in `shared/utils/cancellation.ts` reads the stored snapshot + the cumulative `processedAmount` (from the refunds subcollection) and returns the projection.
+Per decision #173: the durable refund-liability snapshot stamped onto the cancelled entity in the same `runTransaction` as the status flip. Lives on the reservation header for reservation-scope cancels + new-path N=1, and on the booking doc for per-child cancels + legacy null-`reservationId` bookings. The stored fields are the immutable `policyResult` + the admin-controlled `approvedAmount` + the latest `exception` audit row. The derived fields — `state`, `outstandingAmount`, `retentionAmount` — are NEVER stored; `computeCancellationLiabilityState` in `shared/utils/cancellation.ts` reads the stored snapshot + the cumulative `processedAmount` and returns the projection.
 
 ```
 CancellationPolicyResult {           // snapshot at cancel time; immutable post-cancel
@@ -1247,15 +1341,15 @@ computeCancellationLiabilityState({ liability, processedAmount }) → {
 ---
 
 ## Loyalty Earn + Clawback Pairing (MRB-15-07)
-> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-07 sub-item, shipped v0.254.0). The `pointsHistory` ledger uses paired doc ids: `earn-${bookingId}` for the positive earn entry (written on check-out) and `clawback-${bookingId}` for the negative clawback entry (written on cancel). The pairing is the deterministic link between an earn and its subsequent clawback — the same `bookingId` appears in both.
+> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-07, shipped v0.254.0). The `pointsHistory` ledger uses paired doc ids: `earn-${bookingId}` (check-out) and `clawback-${bookingId}` (cancel) — the same `bookingId` appears in both, which is the deterministic link between an earn and its clawback.
 
 ### Pairing contract
 
-- `earn-${bookingId}` is the doc id for the positive earn `pointsHistory` entry on a successful check-out. **Exactly 2 constructions** of `earn-${bookingId}` exist in the codebase: the check-out's `awardNow` flag (the standard path) and the post-settlement path (the deferred award, used when the check-out runs without a confirmed payment). The JSDoc reference is not a construction.
+- `earn-${bookingId}` — the positive earn entry on a successful check-out. **Exactly 2 constructions**: the check-out's `awardNow` flag (standard path) and the post-settlement path (the deferred award). A JSDoc reference is not a construction.
 - `clawback-${bookingId}` is the doc id for the negative clawback `pointsHistory` entry on a cancel. **Exactly 1 construction** of `clawback-${bookingId}` exists in the codebase: `handleCancelBooking`'s per-child CRL-02 + MRB-05 audit stamp block.
-- The map-based invariant `rewardsPoints == sum(pointsHistory.points)` is preserved end-to-end: the earn entry's `+N` is balanced by the clawback entry's `-N` when a check-out is followed by a cancel (the cancel is a destructive action on a checked-out booking — the points were earned, then clawed back).
-- The pairing is the source-text guard for the cross-cutting "no duplicate earn" + "no duplicate clawback" invariants MRB-15-01 pins across the full create → cancel lifecycle.
+- The map-based invariant `rewardsPoints == sum(pointsHistory.points)` is preserved end-to-end: the earn's `+N` is balanced by the clawback's `-N` when a check-out is followed by a cancel.
+- The pairing is the source-text guard for the "no duplicate earn" + "no duplicate clawback" invariants MRB-15-01 pins across the full create → cancel lifecycle.
 
 ### Test coverage
 
-`guest-app/tests/api/mrb-15-01-lifecycle-invariants.test.ts` (14 tests) + `mrb-15-07-checkout-loyalty-earn.test.ts` (13 tests) — 27 source-text tests pin the earn/clawback pairing + the no-duplicate-earn + no-duplicate-clawback invariants.
+27 source-text tests in `guest-app/tests/api/mrb-15-01-lifecycle-invariants.test.ts` + `mrb-15-07-checkout-loyalty-earn.test.ts` pin the earn/clawback pairing + the no-duplicate-earn + no-duplicate-clawback invariants.

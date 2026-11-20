@@ -594,6 +594,151 @@ describe("Firestore rules — regression pins for the PR-AUDIT findings", () => 
   });
 });
 
+// ── ATR (2026-11-20): the Staff Audit Trail rules contract ─────────
+//
+// ATR-07's rules half. These are SOURCE-TEXT pins so the contract is
+// checked on every commit (this file runs in `npm run test:fast`, no
+// emulator, no Java) — the BEHAVIOURAL proof lives in
+// `firebase/tests/atr-audit-trail-rules.emulator.test.ts`, and the
+// last case in this block keeps the two in step.
+//
+// The five properties ATR-07 must guarantee:
+//   1. the trail is append-only — nobody may rewrite or delete a row;
+//   2. a client row may not name ANOTHER staff member as the actor;
+//   3. an action outside the closed vocabulary is rejected;
+//   4. a Front Desk user may not READ the trail (admin-only);
+//   5. a write that claims ANOTHER staff member's UID in one of the
+//      attribution fields is rejected (bookings + rooms).
+
+describe("Firestore rules — ATR (Staff Audit Trail) contract", () => {
+  const auditBlock = ruleBlocks.find((r) => r.pattern === "auditLogs/{auditId}");
+
+  it("ATR-1: the trail is append-only — no update, no delete", () => {
+    expect(auditBlock, "expected a match /auditLogs/{auditId}/ block").toBeTruthy();
+    expect(auditBlock!.body).toMatch(/allow update,\s*delete:\s*if false;/);
+    // Nothing in the block may grant update or delete by another path.
+    expect(auditBlock!.body).not.toMatch(/allow (update|delete)\s*:\s*if (?!false)/);
+  });
+
+  it("ATR-2: a client row may not name ANOTHER staff member as the actor", () => {
+    expect(auditBlock, "expected a match /auditLogs/{auditId}/ block").toBeTruthy();
+    expect(auditBlock!.body).toMatch(
+      /request\.resource\.data\.actor\s*==\s*request\.auth\.uid/
+    );
+  });
+
+  it("ATR-3: an action outside the closed vocabulary is rejected", () => {
+    expect(auditBlock, "expected a match /auditLogs/{auditId}/ block").toBeTruthy();
+    // The create condition must REQUIRE the closed-vocabulary check,
+    // not merely mention it in a comment.
+    expect(auditBlock!.body).toMatch(/&& isAuditAction\(\)/);
+    expect(auditBlock!.body).toMatch(/&& isAuditTargetCollection\(\)/);
+    // The vocabulary itself must be a real list, not an empty one.
+    expect(firestoreRulesSrc).toMatch(
+      /function isAuditAction\(\)\s*\{\s*return request\.resource\.data\.action in \[/
+    );
+    expect(firestoreRulesSrc).toMatch(
+      /function isAuditTargetCollection\(\)\s*\{\s*return request\.resource\.data\.targetCollection in \[/
+    );
+  });
+
+  it("ATR-4: a Front Desk user may NOT read the trail (admin-only)", () => {
+    expect(auditBlock, "expected a match /auditLogs/{auditId}/ block").toBeTruthy();
+    expect(auditBlock!.body).toMatch(/allow read:\s*if isAdmin\(\);/);
+    // `isStaff()` would admit front-desk readers — it must not appear
+    // on the read line.
+    expect(auditBlock!.body).not.toMatch(/allow read:\s*if isStaff\(\)/);
+  });
+
+  it("ATR-5: a write claiming ANOTHER staff member's UID is rejected", () => {
+    // The three booking attribution fields and the four room
+    // attribution fields are each constrained to the caller's uid.
+    for (const field of [
+      "discountVerifiedBy",
+      "specialRequestsUpdatedBy",
+      "handledBy"
+    ]) {
+      expect(firestoreRulesSrc).toMatch(
+        new RegExp(
+          `request\\.resource\\.data\\.${field}\\s*==\\s*request\\.auth\\.uid`
+        )
+      );
+    }
+    for (const field of [
+      "updatedBy",
+      "statusChangedBy",
+      "housekeepingUpdatedBy",
+      "createdBy"
+    ]) {
+      expect(firestoreRulesSrc).toMatch(
+        new RegExp(
+          `request\\.resource\\.data\\.${field}\\s*==\\s*request\\.auth\\.uid`
+        )
+      );
+    }
+
+    // The helpers must be WIRED into the write rules, not merely
+    // defined.
+    const bookingsBlock = ruleBlocks.find((r) => r.pattern === "bookings/{bookingId}");
+    expect(bookingsBlock, "expected a match /bookings/{bookingId}/ block").toBeTruthy();
+    expect(bookingsBlock!.body).toMatch(/&& bookingActorFieldsOwnedByCaller\(\)/);
+
+    const roomsBlock = ruleBlocks.find((r) => r.pattern === "rooms/{roomId}");
+    expect(roomsBlock, "expected a match /rooms/{roomId}/ block").toBeTruthy();
+    expect(roomsBlock!.body).toMatch(/roomAttributionOwnedByCaller\(\)/);
+
+    // A constraint on a field the allowlist never permits is DEAD
+    // CODE — the field would be implicitly denied by omission and the
+    // spoof check would never run. Pin that the three booking fields
+    // remain reachable through the update allowlist.
+    for (const field of [
+      "discountVerifiedBy",
+      "specialRequestsUpdatedBy",
+      "handledBy"
+    ]) {
+      expect(bookingsBlock!.body).toMatch(
+        new RegExp(`"${field}"`)
+      );
+    }
+  });
+
+  it("ATR: the behavioural emulator suite covers the same five properties", () => {
+    // The source-text pins above are cheap but shallow. The emulator
+    // suite is the behavioural proof; if it is renamed or its cases
+    // are dropped, the properties lose their teeth and this file alone
+    // would still pass.
+    const emulatorPath = resolve(
+      repoRoot,
+      "firebase/tests/atr-audit-trail-rules.emulator.test.ts"
+    );
+    let emulatorSrc: string;
+    try {
+      emulatorSrc = readFileSync(emulatorPath, "utf8");
+    } catch {
+      throw new Error(
+        `missing ${emulatorPath.replace(repoRoot + "/", "")} — the ATR rules ` +
+          `behavioural suite must exist alongside these source-text pins`
+      );
+    }
+
+    const required = [
+      /refuses to rewrite a row/,
+      /refuses to delete a row/,
+      /refuses a row that names ANOTHER staff member as the actor/,
+      /refuses an action outside the closed vocabulary/,
+      /refuses a Front Desk READ of the trail/,
+      /refuses a booking write that claims ANOTHER staff member/,
+      /refuses a room write that claims ANOTHER staff member/
+    ];
+    for (const re of required) {
+      expect(
+        emulatorSrc,
+        `the ATR emulator suite no longer contains a case matching ${re}`
+      ).toMatch(re);
+    }
+  });
+});
+
 describe("Storage rules — guest upload paths are bounded", () => {
   const guestWritablePaths = [
     "bookings/{bookingId}/payment-proof/{fileName}",

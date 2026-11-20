@@ -30,6 +30,120 @@ service cloud.firestore {
         || changed.hasAll(["audioRoutingUpdatedAt"]);
     }
 
+    // ── ATR (2026-11-20): the Staff Audit Trail contract ────────────
+    //
+    // Per ATR-01 / ATR-07 and finding 1 in
+    // `plan/features/AUDIT-TRAIL.md`: the rules file REPEATS the
+    // closed action vocabulary because Firestore rules cannot import
+    // from `shared/`. If the two lists drift, a writer produces a row
+    // the rules reject — and a rejected audit write is a SILENTLY LOST
+    // audit write (the exact BR-12.1 failure that lost months of
+    // add-on history). `shared/__tests__/atr-01-audit-contract.test.ts`
+    // pins the two against each other.
+    function isAuditAction() {
+      return request.resource.data.action in [
+        "bookings.create-walkin",
+        "bookings.checkin",
+        "bookings.checkout",
+        "bookings.confirm",
+        "bookings.cancel",
+        "bookings.reschedule",
+        "bookings.room-reassign",
+        "bookings.payment-add",
+        "bookings.payment-verify",
+        "bookings.payment-reject",
+        "bookings.refund",
+        "bookings.discount-verify",
+        "bookings.discount-reject",
+        "bookings.update",
+        "rooms.create",
+        "rooms.update",
+        "rooms.delete",
+        "rooms.status-change",
+        "rooms.housekeeping",
+        "rooms.block",
+        "addons.create",
+        "addons.update",
+        "addons.delete",
+        "settings.update",
+        "rates.update",
+        "vouchers.create",
+        "vouchers.update",
+        "staff.create",
+        "staff.disable"
+      ];
+    }
+
+    // The collections an audit row may target — the same closed set
+    // as `AUDIT_TARGET_COLLECTIONS` in `shared/schemas/audit.ts`.
+    function isAuditTargetCollection() {
+      return request.resource.data.targetCollection in [
+        "bookings",
+        "rooms",
+        "roomPrivate",
+        "addOns",
+        "settings",
+        "rates",
+        "vouchers",
+        "guests"
+      ];
+    }
+
+    // Per ATR-07 / finding 7: the three EXISTING attribution fields
+    // on a booking are client-writable through the update allowlist
+    // with NO `request.auth.uid` constraint — so a front-desk user
+    // with a browser console can approve a 20% senior/PWD discount
+    // and stamp ANOTHER staff member's UID as the approver.
+    //
+    // The constraint is copied from the `charges` block in this same
+    // file (`addedBy == request.auth.uid`, `addedAt == request.time`):
+    // a field that records WHO did something may only name the
+    // caller. The check is scoped to the fields that actually
+    // CHANGED, so a write that leaves them alone is unaffected — and
+    // a LEGACY row that already carries an email in
+    // `discountVerifiedBy` is not retroactively invalid, it simply
+    // cannot be re-written by anyone but its own author.
+    function bookingActorFieldsOwnedByCaller() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return (!changed.hasAny(["discountVerifiedBy"])
+              || request.resource.data.discountVerifiedBy == request.auth.uid)
+        && (!changed.hasAny(["specialRequestsUpdatedBy"])
+              || request.resource.data.specialRequestsUpdatedBy == request.auth.uid)
+        && (!changed.hasAny(["handledBy"])
+              || request.resource.data.handledBy == request.auth.uid);
+    }
+
+    // Per ATR-03 / ATR-07: the denormalized room attribution fields
+    // (`updatedBy`, `statusChangedBy`, `housekeepingUpdatedBy`) carry
+    // the UID of the staff member who made the change, and the room
+    // document is PUBLICLY READABLE (`allow read: if true` — the
+    // guest app subscribes to the collection unauthenticated). A
+    // forgeable attribution field on a publicly-readable document is
+    // worse than none, so the same caller constraint applies here.
+    // `rooms` holds no guest PII — only staff names — so the public
+    // read stays as it is.
+    //
+    // ON CREATE there is no previous document to diff against, so
+    // every field the writer supplied counts as "changed" and each
+    // attribution field present must be the caller's own uid. On
+    // UPDATE only the fields that actually CHANGED are checked — a
+    // write that leaves `updatedBy` alone (the housekeeping toggle
+    // writes `housekeepingUpdatedBy`, not `updatedBy`) must not be
+    // rejected because a colleague touched the room earlier.
+    function roomAttributionOwnedByCaller() {
+      let changed = resource == null
+        ? request.resource.data.keys()
+        : request.resource.data.diff(resource.data).affectedKeys();
+      return (!changed.hasAny(["updatedBy"])
+              || request.resource.data.updatedBy == request.auth.uid)
+        && (!changed.hasAny(["statusChangedBy"])
+              || request.resource.data.statusChangedBy == request.auth.uid)
+        && (!changed.hasAny(["housekeepingUpdatedBy"])
+              || request.resource.data.housekeepingUpdatedBy == request.auth.uid)
+        && (!changed.hasAny(["createdBy"])
+              || request.resource.data.createdBy == request.auth.uid);
+    }
+
     // Per RPT-2 (2026-10-21, re-confirmed 2026-10-27): an
     // incidental CHARGE cannot be added to a booking that has already
     // been checked out.
@@ -68,7 +182,13 @@ service cloud.firestore {
       // Per W3.4 / `plan/features/ROOM-MANAGEMENT.md §Delete`: only
       // admins can hard-delete a room document. Front-desk can still
       // create, edit, and toggle active/blocked status.
-      allow create, update: if isStaff();
+      //
+      // Per ATR-03 / ATR-07: the denormalized attribution fields are
+      // constrained to the CALLER's own uid, the same way the
+      // `charges` block constrains `addedBy`. The check covers both
+      // create and update (on a create there is no previous document
+      // to diff against, so every supplied field counts).
+      allow create, update: if isStaff() && roomAttributionOwnedByCaller();
       allow delete: if isAdmin();
     }
 
@@ -129,9 +249,76 @@ service cloud.firestore {
     // Append-only: staff may record a row, nobody may rewrite
     // or delete one. Reads are admin-only (the trail is a
     // settings-level audit surface, not a front-desk one).
+    //
+    // Per ATR-01 / ATR-07 (2026-11-20): field validation on CREATE.
+    //
+    // WHY: the collection shipped in BR-12.1 with NO rule block, so
+    // Firestore's default-deny rejected every row for months while
+    // the writer swallowed the rejection (finding 1). The rule block
+    // now exists — but a rule block alone is not enough: without
+    // field validation a front-desk client could write a row naming
+    // another staff member as the actor, or carrying an action
+    // outside the closed vocabulary, and the row would be STORED as
+    // if it were true.
+    //
+    // The three checks below are the contract:
+    //   - `action` is in the CLOSED vocabulary (`isAuditAction()`),
+    //     so a typo is a rejected write rather than a silently
+    //     unfilterable row.
+    //   - `actor == request.auth.uid`, so a client row cannot name
+    //     someone else — the same pattern the `charges` block uses
+    //     for `addedBy`.
+    //   - `timestamp == request.time`, so the row cannot claim a
+    //     time other than the moment it was written.
+    //
+    // `source` and `changedFields` are REQUIRED, not optional: the
+    // source is what tells a reader whether the row is forensic
+    // (server, Admin SDK) or advisory (client), and `changedFields`
+    // is the ONLY record that a redacted field changed — without it
+    // a redacted change would leave no trace at all.
     match /auditLogs/{auditId} {
       allow read: if isAdmin();
-      allow create: if isStaff();
+      allow create: if isStaff()
+        && request.resource.data.keys().hasOnly([
+          "action",
+          "targetCollection",
+          "targetId",
+          "targetLabel",
+          "changedFields",
+          "before",
+          "after",
+          "actor",
+          "actorName",
+          "actorRole",
+          "source",
+          "reason",
+          "timestamp"
+        ])
+        && isAuditAction()
+        && isAuditTargetCollection()
+        && request.resource.data.targetId is string
+        && request.resource.data.targetId.size() > 0
+        && request.resource.data.targetId.size() <= 160
+        && (!("targetLabel" in request.resource.data.keys())
+            || (request.resource.data.targetLabel is string
+                && request.resource.data.targetLabel.size() <= 200))
+        && (!("reason" in request.resource.data.keys())
+            || request.resource.data.reason == null
+            || (request.resource.data.reason is string
+                && request.resource.data.reason.size() <= 500))
+        && (!("actorRole" in request.resource.data.keys())
+            || request.resource.data.actorRole in ["admin", "front-desk"])
+        && (request.resource.data.before == null
+            || request.resource.data.before is map)
+        && (request.resource.data.after == null
+            || request.resource.data.after is map)
+        && request.resource.data.actor == request.auth.uid
+        && request.resource.data.actorName is string
+        && request.resource.data.actorName.size() <= 160
+        && request.resource.data.source in ["server", "client"]
+        && request.resource.data.changedFields is list
+        && request.resource.data.changedFields.size() <= 200
+        && request.resource.data.timestamp == request.time;
       allow update, delete: if false;
     }
 
@@ -172,7 +359,18 @@ service cloud.firestore {
           "specialRequestsUpdatedBy",
           "handledBy",
           "updatedAt"
-        ]);
+        ])
+        // Per ATR-07 / finding 7: the three attribution fields in
+        // the allowlist above (`discountVerifiedBy`,
+        // `specialRequestsUpdatedBy`, `handledBy`) used to be
+        // writable with NO constraint on WHO was named — so a
+        // front-desk client could approve a 20% senior/PWD discount
+        // and stamp another staff member's UID as the approver.
+        // Each is now pinned to the CALLER's own uid, the same
+        // pattern the `charges` block in this file uses for
+        // `addedBy`. The check only applies to a field that
+        // actually CHANGED, so an unrelated write is unaffected.
+        && bookingActorFieldsOwnedByCaller();
       allow delete: if isAdmin();
 
       match /payments/{paymentId} {

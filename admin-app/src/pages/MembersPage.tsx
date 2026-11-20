@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAdmin, Member, PointsLog } from "../context/AdminContext";
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
@@ -8,15 +8,38 @@ import { Award, User, Mail, Phone, Calendar, Plus, ShieldAlert, AwardIcon, Coins
 import config from "@config";
 import { collection, onSnapshot, orderBy, query } from "firebase/firestore";
 import { db } from "../firebase/config";
+// Per ATR-05 (2026-11-20, `plan/features/AUDIT-TRAIL.md`): the ONE
+// shared staff-UID → display-name resolver. The points ledger used to
+// print the raw 28-character staff UID next to every transaction.
+import { buildStaffNameMap, staffNameFor } from "@spark-inn/shared";
 
 export function MembersPage() {
   const {
     members,
+    staff,
     updateMemberPoints,
     toggleMemberActive,
     linkBookingToMember
   } = useAdmin();
   const toast = useToast();
+
+  // Per ATR-05: the shared resolver, fed by the admin context's own
+  // `guests` subscription (the same list the reports page uses).
+  const staffNameMap = useMemo(() => buildStaffNameMap(staff), [staff]);
+
+  /**
+   * The "By" attribution on a points-ledger row.
+   *
+   * The `by` value is not always a staff UID: a member's OWN
+   * redemption writes `self:<uid>`, and the welcome-credit row
+   * carries no `by` at all. Everything else is a staff UID, resolved
+   * through the shared map.
+   */
+  const pointsActorLabel = (by: string): string => {
+    if (!by) return "System";
+    if (by.startsWith("self:")) return "Member (self)";
+    return staffNameFor(staffNameMap, by, "Staff");
+  };
 
   // Search and Drawer state
   const [searchText, setSearchText] = useState("");
@@ -481,7 +504,7 @@ export function MembersPage() {
                         <div>
                           <p className="font-semibold text-gray-800 capitalize">{log.description}</p>
                           <p className="text-[9px] text-gray-450 mt-0.5 leading-normal">
-                            Reason: {log.reason} • By {log.by} at {log.at.split("T")[0]}
+                            Reason: {log.reason} • By {pointsActorLabel(log.by)} at {log.at.split("T")[0]}
                           </p>
                         </div>
 
