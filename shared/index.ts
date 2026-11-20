@@ -76,6 +76,15 @@ export * from "./utils/roomTypes";
 // same function; a second resolver is how they drifted in the first
 // place.
 export * from "./utils/staffNames";
+// Per ATR-08 follow-up (2026-11-21): the booking drawer's HISTORY tab
+// — the per-booking timeline of who changed what, and when. The
+// normalization lives in the shared package because it merges FOUR
+// differently-shaped sources (the breakfast trail, the other-add-on
+// trail, the incidental-charge ledger, and the booking's own milestone
+// stamps) and because the admin app has no component-test harness — a
+// pure module is the only place these rules can be unit-tested for
+// real.
+export * from "./utils/bookingHistory";
 export * from "./utils/seasonalRates";
 export * from "./utils/storageJanitor";
 export * from "./utils/storePaymentMethods";

@@ -128,6 +128,9 @@ import {
 import { BookingRegistrationForm } from "../components/BookingRegistrationForm";
 import { BookingEmailActions } from "../components/BookingEmailActions";
 import { IncidentalChargeList } from "../components/IncidentalChargeList";
+// Per ATR-08 follow-up (2026-11-21): the booking drawer's HISTORY
+// tab — the per-booking timeline of who changed what, and when.
+import { BookingHistoryTab } from "../components/BookingHistoryTab";
 // Per SR-01..05 (2026-10-12): the read-only "Guest
 // special requests" block in the booking drawer. The
 // staff `BookingSpecialRequestsEditor` stays for
@@ -6109,6 +6112,32 @@ export function BookingsPage() {
                 </div>
               </div>
             )}
+            </BookingDrawerSectionPanel>
+
+            {/*
+              Per ATR-08 follow-up (2026-11-21): the booking
+              drawer's HISTORY tab — the per-booking timeline of
+              who changed what, and when.
+
+              It merges the two server-written audit trails
+              (`breakfastAudit` + `otherAddOnAudit`), the
+              incidental-charge ledger the drawer ALREADY loads
+              (reused, not re-listened), and the booking's own
+              milestone stamps.
+
+              The trails are only read while this section is the
+              ACTIVE one — the drawer mounts every section panel
+              at once, so an always-on subscription would attach
+              for every staff member who opens a booking.
+            */}
+            <BookingDrawerSectionPanel section="history" activeSection={activeBookingSection}>
+              {selectedBooking && (
+                <BookingHistoryTab
+                  booking={selectedBooking}
+                  charges={selectedBookingCharges}
+                  active={activeBookingSection === "history"}
+                />
+              )}
             </BookingDrawerSectionPanel>
 
             {/* Move booking form */}
