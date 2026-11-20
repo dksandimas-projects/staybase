@@ -59490,9 +59490,9 @@ var require_fallback = __commonJS({
       }
       loadProtoJSON(json, ignoreCache = false) {
         const hash = objectHash(JSON.stringify(json)).toString();
-        const cached = _GrpcClient.protoCache.get(hash);
-        if (cached && !ignoreCache) {
-          return cached;
+        const cached2 = _GrpcClient.protoCache.get(hash);
+        if (cached2 && !ignoreCache) {
+          return cached2;
         }
         const root = protobuf.Root.fromJSON(json);
         _GrpcClient.protoCache.set(hash, root);
@@ -83474,9 +83474,9 @@ var require_grpc = __commonJS({
       }
       loadProtoJSON(json, ignoreCache = false) {
         const hash = objectHash(JSON.stringify(json)).toString();
-        const cached = _GrpcClient.protoCache.get(hash);
-        if (cached && !ignoreCache) {
-          return cached;
+        const cached2 = _GrpcClient.protoCache.get(hash);
+        if (cached2 && !ignoreCache) {
+          return cached2;
         }
         const options = _GrpcClient.defaultOptions();
         const packageDefinition = grpcProtoLoader.fromJSON(json, options);
@@ -109722,9 +109722,9 @@ var require_range = __commonJS({
         range = range.replace(BUILDSTRIPRE, "");
         const memoOpts = (this.options.includePrerelease && FLAG_INCLUDE_PRERELEASE) | (this.options.loose && FLAG_LOOSE);
         const memoKey = memoOpts + ":" + range;
-        const cached = cache.get(memoKey);
-        if (cached) {
-          return cached;
+        const cached2 = cache.get(memoKey);
+        if (cached2) {
+          return cached2;
         }
         const loose = this.options.loose;
         const hr3 = loose ? re3[t3.HYPHENRANGELOOSE] : re3[t3.HYPHENRANGE];
@@ -115819,15 +115819,15 @@ var require_local = __commonJS({
     };
     exports2.LocalJWKSet = LocalJWKSet;
     async function importWithAlgCache(cache, jwk, alg) {
-      const cached = cache.get(jwk) || cache.set(jwk, {}).get(jwk);
-      if (cached[alg] === void 0) {
+      const cached2 = cache.get(jwk) || cache.set(jwk, {}).get(jwk);
+      if (cached2[alg] === void 0) {
         const key = await (0, import_js_1.importJWK)({ ...jwk, ext: true }, alg);
         if (key instanceof Uint8Array || key.type !== "public") {
           throw new errors_js_1.JWKSInvalid("JSON Web Key Set members must be public keys");
         }
-        cached[alg] = key;
+        cached2[alg] = key;
       }
-      return cached[alg];
+      return cached2[alg];
     }
     function createLocalJWKSet(jwks) {
       const set = new LocalJWKSet(jwks);
@@ -128653,15 +128653,15 @@ var require_stubs = __commonJS({
       cfg.callthrough = cfg.callthrough || false;
       cfg.calls = cfg.calls || 0;
       var norevert = cfg.calls === 0;
-      var cached = obj[method].bind(obj);
+      var cached2 = obj[method].bind(obj);
       obj[method] = function() {
         var args = [].slice.call(arguments);
         var returnVal;
         if (cfg.callthrough)
-          returnVal = cached.apply(obj, args);
+          returnVal = cached2.apply(obj, args);
         returnVal = stub.apply(obj, args) || returnVal;
         if (!norevert && --cfg.calls === 0)
-          obj[method] = cached;
+          obj[method] = cached2;
         return returnVal;
       };
     };
@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.27.0";
+    VERSION2 = "2.27.1";
   }
 });
 
@@ -150892,6 +150892,35 @@ var init_publicSiteCache = __esm({
   }
 });
 
+// ../shared/utils/hotelContact.ts
+function asRecord(value) {
+  return value && typeof value === "object" ? value : {};
+}
+function asTrimmedString(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+function formatHotelAddress(value) {
+  if (typeof value === "string") return value.trim();
+  const record = asRecord(value);
+  return ["street", "city", "region", "postalCode"].map((key) => asTrimmedString(record[key])).filter((part) => part.length > 0).join(", ");
+}
+function resolveHotelContact(runtime, fallback) {
+  const r4 = asRecord(runtime);
+  const f5 = asRecord(fallback);
+  const pick = (key) => asTrimmedString(r4[key]) || asTrimmedString(f5[key]);
+  return {
+    address: formatHotelAddress(r4.address) || formatHotelAddress(f5.address),
+    frontDeskPhone: pick("frontDeskPhone"),
+    supportEmail: pick("supportEmail"),
+    dpoEmail: pick("dpoEmail")
+  };
+}
+var init_hotelContact = __esm({
+  "../shared/utils/hotelContact.ts"() {
+    "use strict";
+  }
+});
+
 // ../shared/utils/reservationFingerprint.ts
 function defaultHasher() {
   const { createHash } = require("node:crypto");
@@ -153110,6 +153139,7 @@ __export(shared_exports, {
   evaluateCancellation: () => evaluateCancellation,
   fadeIn: () => fadeIn,
   fadeUp: () => fadeUp,
+  formatHotelAddress: () => formatHotelAddress,
   generateBookingRef: () => generateBookingRef,
   generateFreeNightVoucherCode: () => generateFreeNightVoucherCode,
   generateHoldId: () => generateHoldId,
@@ -153201,6 +153231,7 @@ __export(shared_exports, {
   resolveBookingPreferenceValues: () => resolveBookingPreferenceValues,
   resolveBreakfastSlotGuestIndex: () => resolveBreakfastSlotGuestIndex,
   resolveCurrentLevel: () => resolveCurrentLevel,
+  resolveHotelContact: () => resolveHotelContact,
   resolveKitchenGuestName: () => resolveKitchenGuestName,
   resolveMaxStayNights: () => resolveMaxStayNights,
   resolvePaymentMethodLabel: () => resolvePaymentMethodLabel,
@@ -153270,6 +153301,7 @@ var init_shared = __esm({
     init_paymentVerification();
     init_pricing();
     init_publicSiteCache();
+    init_hotelContact();
     init_references();
     init_reservationFingerprint();
     init_roomTypes();
@@ -228304,6 +228336,43 @@ var init_siteUrl = __esm({
   }
 });
 
+// server/lib/hotelContact.ts
+function deployTimeHotelContact() {
+  return resolveHotelContact(null, hotel_config_default);
+}
+async function loadHotelContact() {
+  const now = Date.now();
+  if (cached && now - cachedAt2 < CACHE_TTL_MS2) {
+    return cached;
+  }
+  let resolved;
+  try {
+    const doc = await adminDb.collection("settings").doc("hotelConfig").get();
+    resolved = resolveHotelContact(doc.exists ? doc.data() : null, hotel_config_default);
+  } catch (error) {
+    console.warn(
+      "[hotel-contact] Failed to load settings/hotelConfig; using the deploy-time fallback.",
+      error
+    );
+    resolved = deployTimeHotelContact();
+  }
+  cached = resolved;
+  cachedAt2 = Date.now();
+  return resolved;
+}
+var CACHE_TTL_MS2, cached, cachedAt2;
+var init_hotelContact2 = __esm({
+  "server/lib/hotelContact.ts"() {
+    "use strict";
+    init_shared();
+    init_hotel_config();
+    init_firebase_admin();
+    CACHE_TTL_MS2 = 6e4;
+    cached = null;
+    cachedAt2 = 0;
+  }
+});
+
 // server/lib/notifications.ts
 var notifications_exports = {};
 __export(notifications_exports, {
@@ -228534,14 +228603,15 @@ function generateReceiptPdf(booking) {
     doc.text(pdfSafe(value), left2, top);
     top += gap;
   }
+  const contact = contactForRender();
   doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
   doc.text(pdfSafe(hotel_config_default.legalName || hotel_config_default.brandName), left2, top);
   top += 7;
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
-  plain(`${hotel_config_default.address.street}, ${hotel_config_default.address.city}, ${hotel_config_default.address.region}`, 5);
-  plain(`Tel: ${hotel_config_default.frontDeskPhone} | Email: ${hotel_config_default.supportEmail}`, 8);
+  plain(contact.address, 5);
+  plain(`Tel: ${contact.frontDeskPhone} | Email: ${contact.supportEmail}`, 8);
   line(top);
   top += 6;
   doc.setFontSize(14);
@@ -228859,7 +228929,25 @@ function lookupUrl(booking) {
   return siteUrl(`/my-booking?ref=${ref}&token=${token2}`);
 }
 function addressLine() {
-  return `${hotel_config_default.address.street}, ${hotel_config_default.address.city}, ${hotel_config_default.address.region}, ${hotel_config_default.address.postalCode}`;
+  return contactForRender().address;
+}
+function contactForRender() {
+  return renderContact ?? DEPLOY_TIME_CONTACT;
+}
+function beginContactRender(contact) {
+  const previous = renderContact;
+  renderContact = contact;
+  return () => {
+    renderContact = previous;
+  };
+}
+function renderWithContact(contact, build) {
+  const restore = beginContactRender(contact);
+  try {
+    return build();
+  } finally {
+    restore();
+  }
 }
 function brandLogoUrl() {
   return siteUrl(`/brand/${encodeURIComponent(hotel_config_default.logos.white)}`);
@@ -228993,6 +229081,7 @@ function callout2(tone, title, body) {
 function emailLayout(options) {
   const primary = hotel_config_default.colors.primary;
   const sidebar = hotel_config_default.colors.sidebar;
+  const contact = contactForRender();
   return `<!doctype html>
 <html>
   <head>
@@ -229038,9 +229127,9 @@ function emailLayout(options) {
                         </tr>
                       </table>` : ""}
                 <p style="margin: 28px 0 0; color: #6b7280; font-size: 13px; line-height: 1.6;">
-                  ${escapeHtml2(addressLine())}<br>
-                  Front desk: <a href="tel:${escapeHtml2(hotel_config_default.frontDeskPhone)}" style="color: ${primary}; text-decoration: none;">${escapeHtml2(hotel_config_default.frontDeskPhone)}</a><br>
-                  Support: <a href="mailto:${escapeHtml2(hotel_config_default.supportEmail)}" style="color: ${primary}; text-decoration: none;">${escapeHtml2(hotel_config_default.supportEmail)}</a>
+                  ${escapeHtml2(contact.address)}<br>
+                  Front desk: <a href="tel:${escapeHtml2(contact.frontDeskPhone)}" style="color: ${primary}; text-decoration: none;">${escapeHtml2(contact.frontDeskPhone)}</a><br>
+                  Support: <a href="mailto:${escapeHtml2(contact.supportEmail)}" style="color: ${primary}; text-decoration: none;">${escapeHtml2(contact.supportEmail)}</a>
                 </p>
               </td>
             </tr>
@@ -229062,12 +229151,13 @@ async function sendEmail(to3, subject, html, attachments, banner) {
   });
   const finalSubject = prefix + subject;
   try {
+    const replyContact = await loadHotelContact();
     await resend.emails.send({
       from: FROM_EMAIL,
       to: to3,
       subject: finalSubject,
       html,
-      replyTo: hotel_config_default.supportEmail,
+      replyTo: replyContact.supportEmail,
       attachments
     });
   } catch (error) {
@@ -229312,7 +229402,7 @@ function bookingCancelledEmail(booking) {
       <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If this cancellation was unexpected, please contact our support team right away.</p>
     `,
     ctaLabel: "Contact support",
-    ctaUrl: `mailto:${hotel_config_default.supportEmail}`,
+    ctaUrl: `mailto:${contactForRender().supportEmail}`,
     bannerHtml: environmentBannerFromBooking(booking)
   });
 }
@@ -229357,7 +229447,7 @@ function bookingCancelledReservationEmail(booking) {
       <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If this change was unexpected, please contact our support team right away.</p>
     `,
     ctaLabel: "Contact support",
-    ctaUrl: `mailto:${hotel_config_default.supportEmail}`,
+    ctaUrl: `mailto:${contactForRender().supportEmail}`,
     bannerHtml: environmentBannerFromBooking(booking)
   });
 }
@@ -229389,7 +229479,7 @@ function bookingRefundProcessedEmail(booking) {
         <p style="margin: 12px 0 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If you have any questions, please contact our support team.</p>
       `,
       ctaLabel: "Contact support",
-      ctaUrl: `mailto:${hotel_config_default.supportEmail}`,
+      ctaUrl: `mailto:${contactForRender().supportEmail}`,
       bannerHtml: environmentBannerFromBooking(booking)
     })
   };
@@ -229471,10 +229561,11 @@ function corporateInquiryEmail(inquiry) {
   });
 }
 async function sendCorporateInquiryTrigger(inquiry) {
+  const contact = await loadHotelContact();
   await sendEmail(
     ADMIN_EMAIL,
     `[${hotel_config_default.brandName}] New corporate inquiry: ${inquiry.companyName || "Website inquiry"}`,
-    corporateInquiryEmail(inquiry)
+    renderWithContact(contact, () => corporateInquiryEmail(inquiry))
   );
 }
 function corporateInquiryConfirmationEmail(inquiry) {
@@ -229501,10 +229592,11 @@ function corporateInquiryConfirmationEmail(inquiry) {
 }
 async function sendCorporateInquiryConfirmationTrigger(inquiry) {
   if (!inquiry.email) return;
+  const contact = await loadHotelContact();
   await sendEmail(
     inquiry.email,
     `[${hotel_config_default.brandName}] We received your corporate inquiry`,
-    corporateInquiryConfirmationEmail(inquiry)
+    renderWithContact(contact, () => corporateInquiryConfirmationEmail(inquiry))
   );
 }
 function contactInquiryEmail(inquiry) {
@@ -229528,10 +229620,11 @@ function contactInquiryEmail(inquiry) {
   });
 }
 async function sendContactInquiryTrigger(inquiry) {
+  const contact = await loadHotelContact();
   await sendEmail(
     ADMIN_EMAIL,
     `[${hotel_config_default.brandName}] New contact: ${inquiry.subject || "Website message"}`,
-    contactInquiryEmail(inquiry)
+    renderWithContact(contact, () => contactInquiryEmail(inquiry))
   );
 }
 function contactConfirmationEmail(inquiry) {
@@ -229552,10 +229645,11 @@ function contactConfirmationEmail(inquiry) {
 }
 async function sendContactConfirmationTrigger(inquiry) {
   if (!inquiry.email) return;
+  const contact = await loadHotelContact();
   await sendEmail(
     inquiry.email,
     `[${hotel_config_default.brandName}] We received your message`,
-    contactConfirmationEmail(inquiry)
+    renderWithContact(contact, () => contactConfirmationEmail(inquiry))
   );
 }
 function earlyCheckinRequestEmail(booking, request) {
@@ -229591,6 +229685,7 @@ function earlyCheckinRequestEmail(booking, request) {
   });
 }
 async function sendEarlyCheckinRequestTrigger(booking, request) {
+  const contact = await loadHotelContact();
   const banner = {
     isTestData: booking?.isTestData === true,
     testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : void 0,
@@ -229599,7 +229694,7 @@ async function sendEarlyCheckinRequestTrigger(booking, request) {
   await sendEmail(
     ADMIN_EMAIL,
     `[${hotel_config_default.brandName}] Early check-in request: ${booking.bookingRef}`,
-    earlyCheckinRequestEmail(booking, request),
+    renderWithContact(contact, () => earlyCheckinRequestEmail(booking, request)),
     void 0,
     banner
   );
@@ -229632,6 +229727,7 @@ function earlyCheckinResolveEmail(booking, status, staffNote) {
   });
 }
 async function sendEarlyCheckinResolveTrigger(booking, status, staffNote) {
+  const contact = await loadHotelContact();
   const isStaffGranted = booking.earlyCheckIn?.source === "staff-granted";
   const subject = isStaffGranted ? `[${hotel_config_default.brandName}] Early check-in ${status === "approved" ? "added" : "updated"}: ${booking.bookingRef}` : `[${hotel_config_default.brandName}] Early check-in status: ${booking.bookingRef}`;
   const banner = {
@@ -229642,7 +229738,7 @@ async function sendEarlyCheckinResolveTrigger(booking, status, staffNote) {
   await sendEmail(
     booking.guestEmail,
     subject,
-    earlyCheckinResolveEmail(booking, status, staffNote),
+    renderWithContact(contact, () => earlyCheckinResolveEmail(booking, status, staffNote)),
     void 0,
     banner
   );
@@ -229684,10 +229780,11 @@ function voucherIssuedEmail(voucher) {
 }
 async function sendVoucherIssuedTrigger(voucher) {
   if (!voucher?.guestEmail) return;
+  const contact = await loadHotelContact();
   await sendEmail(
     voucher.guestEmail,
     `[${hotel_config_default.brandName}] Your voucher: ${voucher.code}`,
-    voucherIssuedEmail(voucher)
+    renderWithContact(contact, () => voucherIssuedEmail(voucher))
   );
 }
 function sparkRewardsEmailVerificationEmail(data) {
@@ -229717,10 +229814,11 @@ function sparkRewardsEmailVerificationEmail(data) {
 }
 async function sendVerificationEmailTrigger(data) {
   if (!data.email) return;
+  const contact = await loadHotelContact();
   await sendEmail(
     data.email,
     `[${hotel_config_default.brandName}] Verify your email address for ${hotel_config_default.rewardsName}`,
-    sparkRewardsEmailVerificationEmail(data)
+    renderWithContact(contact, () => sparkRewardsEmailVerificationEmail(data))
   );
 }
 function storeOrderItemsTable(items = []) {
@@ -229802,13 +229900,14 @@ function storeOrderCancelledEmail(order) {
       </table>`)}
     `,
     ctaLabel: "Contact support",
-    ctaUrl: `mailto:${hotel_config_default.supportEmail}`,
+    ctaUrl: `mailto:${contactForRender().supportEmail}`,
     bannerHtml: environmentBanner({})
   });
 }
 async function sendStoreOrderTrigger(action, order) {
   if (!order?.guestEmail) return;
-  const map2 = {
+  const contact = await loadHotelContact();
+  const map2 = renderWithContact(contact, () => ({
     "store-order-delivered": {
       subject: `[${hotel_config_default.brandName}] Order delivered: ${order.orderRef || "in-room"}`,
       html: storeOrderDeliveredEmail(order)
@@ -229817,7 +229916,7 @@ async function sendStoreOrderTrigger(action, order) {
       subject: `[${hotel_config_default.brandName}] Order cancelled: ${order.orderRef || "in-room"}`,
       html: storeOrderCancelledEmail(order)
     }
-  };
+  }));
   const template = map2[action];
   if (!template) {
     throw new Error("Unsupported store order email trigger.");
@@ -229878,6 +229977,7 @@ function staffNewPaymentEmail(booking, payment) {
   });
 }
 async function sendStaffNewBookingTrigger(booking) {
+  const contact = await loadHotelContact();
   const banner = {
     isTestData: booking?.isTestData === true,
     testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : void 0,
@@ -229886,12 +229986,13 @@ async function sendStaffNewBookingTrigger(booking) {
   await sendEmail(
     ADMIN_EMAIL,
     `[${hotel_config_default.brandName}] New online booking: ${booking.bookingRef}`,
-    staffNewBookingEmail(booking),
+    renderWithContact(contact, () => staffNewBookingEmail(booking)),
     void 0,
     banner
   );
 }
 async function sendStaffNewPaymentTrigger(booking, payment) {
+  const contact = await loadHotelContact();
   const banner = {
     isTestData: booking?.isTestData === true,
     testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : void 0,
@@ -229900,7 +230001,7 @@ async function sendStaffNewPaymentTrigger(booking, payment) {
   await sendEmail(
     ADMIN_EMAIL,
     `[${hotel_config_default.brandName}] New payment proof: ${booking.bookingRef}`,
-    staffNewPaymentEmail(booking, payment),
+    renderWithContact(contact, () => staffNewPaymentEmail(booking, payment)),
     void 0,
     banner
   );
@@ -229929,10 +230030,11 @@ function staffRefundReviewEmail(order) {
   });
 }
 async function sendStaffRefundReviewTrigger(order) {
+  const contact = await loadHotelContact();
   await sendEmail(
     ADMIN_EMAIL,
     `[${hotel_config_default.brandName}] Refund review: cancelled paid store order ${order.orderRef}`,
-    staffRefundReviewEmail(order)
+    renderWithContact(contact, () => staffRefundReviewEmail(order))
   );
 }
 async function getTomorrowConfirmedBookings() {
@@ -229961,7 +230063,8 @@ async function sendBookingTrigger(action, booking) {
       houseRules = null;
     }
   }
-  const templates = {
+  const contact = await loadHotelContact();
+  const templates = renderWithContact(contact, () => ({
     "booking-submitted": {
       // Per MRB-09 (2026-08-02, per decision #168): the
       // subject uses the reservation ref when the view
@@ -230041,7 +230144,7 @@ async function sendBookingTrigger(action, booking) {
     // refund entry, used for the "Latest refund"
     // row).
     "booking-refund-processed": bookingRefundProcessedEmail(booking)
-  };
+  }));
   const template = templates[action];
   if (!template) {
     throw new Error("Unsupported booking email trigger.");
@@ -230057,11 +230160,17 @@ async function sendBookingConfirmedWithBalanceTrigger(booking, balance, reason) 
   const safeBalance = Number.isFinite(balance) ? Math.max(Number(balance), 0) : 0;
   const safeReason = typeof reason === "string" ? reason.trim().slice(0, 500) : "";
   const subject = `[${hotel_config_default.brandName}] Booking confirmed: ${booking.bookingRef} (\u20B1${safeBalance.toLocaleString("en-PH")} due at check-in)`;
-  const html = bookingConfirmedWithBalanceEmail(booking, safeBalance, safeReason);
-  const attachments = [{
-    filename: `receipt-${String(booking.bookingRef || "booking").replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`,
-    content: generateReceiptPdf(booking)
-  }];
+  const contact = await loadHotelContact();
+  const { html, attachments } = renderWithContact(contact, () => ({
+    html: bookingConfirmedWithBalanceEmail(booking, safeBalance, safeReason),
+    // Reuse the same receipt PDF attached to the standard
+    // booking-confirmed email — the folio snapshot at confirm
+    // time is the same.
+    attachments: [{
+      filename: `receipt-${String(booking.bookingRef || "booking").replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`,
+      content: generateReceiptPdf(booking)
+    }]
+  }));
   const banner = {
     isTestData: booking?.isTestData === true,
     testRunName: typeof booking?.testRunName === "string" ? booking.testRunName : void 0,
@@ -230382,116 +230491,122 @@ async function handleEmailPreview(req, res) {
     } catch (previewRunErr) {
       console.error("Failed to enrich preview with active test run:", previewRunErr);
     }
+    const contact = await loadHotelContact();
+    const restoreContact = beginContactRender(contact);
     let html = "";
-    switch (template) {
-      case "booking-submitted":
-        html = bookingSubmittedEmail(enrichedMockBooking);
-        break;
-      case "payment-confirmed":
-        html = paymentConfirmedEmail(enrichedMockBooking, typeof houseRules === "string" ? houseRules : null);
-        break;
-      case "booking-confirmed":
-        html = bookingConfirmedEmail(enrichedMockBooking, typeof houseRules === "string" ? houseRules : null);
-        break;
-      case "booking-confirmed-with-balance":
-        html = bookingConfirmedWithBalanceEmail(
-          { ...enrichedMockBooking, roomNumber: "" },
-          2750,
-          "Guest paid a 70% deposit; remaining 30% will be collected at check-in."
-        );
-        break;
-      case "checkin-reminder":
-        html = checkinReminderEmail(enrichedMockBooking, typeof houseRules === "string" ? houseRules : null);
-        break;
-      case "booking-cancelled":
-        html = bookingCancelledEmail(enrichedMockBooking);
-        break;
-      case "booking-cancelled-reservation":
-        html = bookingCancelledReservationEmail({
-          ...enrichedMockBooking,
-          reservationRef: "R-20260802-00001",
-          reservationId: "rsv-mock",
-          isReservation: true,
-          roomCount: 3,
-          activeRoomCount: 2,
-          rooms: [
-            { position: 1, bookingRef: "SI-20260802-00001", roomType: "Deluxe Sea View", numAdults: 2, numChildren: 0, extraBedCount: 0, hasAnyBreakfast: false, totalPrice: 7200 },
-            { position: 2, bookingRef: "SI-20260802-00002", roomType: "Standard Twin", numAdults: 1, numChildren: 0, extraBedCount: 0, hasAnyBreakfast: false, totalPrice: 3600, cancelledAt: (/* @__PURE__ */ new Date()).toISOString() },
-            { position: 3, bookingRef: "SI-20260802-00003", roomType: "Family Suite", numAdults: 2, numChildren: 1, extraBedCount: 0, hasAnyBreakfast: true, totalPrice: 9800 }
-          ],
-          cancellationReason: "Guest requested partial cancellation.",
-          cancellationSource: "guest"
-        });
-        break;
-      case "discount-rejected":
-        html = discountRejectedEmail(enrichedMockBooking);
-        break;
-      case "payment-rejected":
-        html = paymentRejectedEmail({
-          ...enrichedMockBooking,
-          // Per 2026-07-24 (refactor/unify-payment-reference-fields):
-          // the canonical reference lives on the payment ledger,
-          // not on the booking doc. Mock a single onsitePayments
-          // entry so the "Reference on file" callout renders in
-          // the preview.
-          onsitePayments: [{ transactionReference: "1234567890" }],
-          paymentRejectionReason: "Reference number does not match the bank record. Please re-upload a corrected proof with the correct reference number."
-        });
-        break;
-      case "corporate-inquiry":
-        html = corporateInquiryEmail(mockInquiry);
-        break;
-      case "corporate-inquiry-confirmation":
-        html = corporateInquiryConfirmationEmail(mockInquiry);
-        break;
-      case "contact-inquiry":
-        html = contactInquiryEmail(mockContactInquiry);
-        break;
-      case "contact-confirmation":
-        html = contactConfirmationEmail(mockContactInquiry);
-        break;
-      case "early-checkin-request":
-        html = earlyCheckinRequestEmail(enrichedMockBooking, mockEarlyCheckinRequest);
-        break;
-      case "early-checkin-resolve":
-        const bookingForResolve = {
-          ...enrichedMockBooking,
-          earlyCheckIn: {
-            status: "approved",
-            requestedTime: "10:30 AM",
-            confirmedTime: "11:00 AM",
-            notes: "Arriving early from Bohol airport. Hoping to check in early to rest."
-          }
-        };
-        html = earlyCheckinResolveEmail(bookingForResolve, "approved", "Room will be ready by 11:00 AM. Safe travels!");
-        break;
-      case "booking-rescheduled":
-        html = bookingRescheduledEmail(enrichedMockBooking);
-        break;
-      case "voucher-issued":
-        html = voucherIssuedEmail(mockVoucher);
-        break;
-      case "store-order-delivered":
-        html = storeOrderDeliveredEmail(mockStoreOrder);
-        break;
-      case "store-order-cancelled":
-        html = storeOrderCancelledEmail(mockStoreOrder);
-        break;
-      case "staff-new-booking":
-        html = staffNewBookingEmail(enrichedMockBooking);
-        break;
-      case "staff-new-payment":
-        html = staffNewPaymentEmail(enrichedMockBooking, mockPaymentProof);
-        break;
-      case "spark-rewards-email-verification":
-        html = sparkRewardsEmailVerificationEmail({
-          guestName: "Maria Santos",
-          email: "maria.santos@example.com",
-          verificationLink: siteUrl("/account/profile?emailVerified=true")
-        });
-        break;
-      default:
-        return res.status(400).json({ success: false, error: `Unknown email template: ${template}` });
+    try {
+      switch (template) {
+        case "booking-submitted":
+          html = bookingSubmittedEmail(enrichedMockBooking);
+          break;
+        case "payment-confirmed":
+          html = paymentConfirmedEmail(enrichedMockBooking, typeof houseRules === "string" ? houseRules : null);
+          break;
+        case "booking-confirmed":
+          html = bookingConfirmedEmail(enrichedMockBooking, typeof houseRules === "string" ? houseRules : null);
+          break;
+        case "booking-confirmed-with-balance":
+          html = bookingConfirmedWithBalanceEmail(
+            { ...enrichedMockBooking, roomNumber: "" },
+            2750,
+            "Guest paid a 70% deposit; remaining 30% will be collected at check-in."
+          );
+          break;
+        case "checkin-reminder":
+          html = checkinReminderEmail(enrichedMockBooking, typeof houseRules === "string" ? houseRules : null);
+          break;
+        case "booking-cancelled":
+          html = bookingCancelledEmail(enrichedMockBooking);
+          break;
+        case "booking-cancelled-reservation":
+          html = bookingCancelledReservationEmail({
+            ...enrichedMockBooking,
+            reservationRef: "R-20260802-00001",
+            reservationId: "rsv-mock",
+            isReservation: true,
+            roomCount: 3,
+            activeRoomCount: 2,
+            rooms: [
+              { position: 1, bookingRef: "SI-20260802-00001", roomType: "Deluxe Sea View", numAdults: 2, numChildren: 0, extraBedCount: 0, hasAnyBreakfast: false, totalPrice: 7200 },
+              { position: 2, bookingRef: "SI-20260802-00002", roomType: "Standard Twin", numAdults: 1, numChildren: 0, extraBedCount: 0, hasAnyBreakfast: false, totalPrice: 3600, cancelledAt: (/* @__PURE__ */ new Date()).toISOString() },
+              { position: 3, bookingRef: "SI-20260802-00003", roomType: "Family Suite", numAdults: 2, numChildren: 1, extraBedCount: 0, hasAnyBreakfast: true, totalPrice: 9800 }
+            ],
+            cancellationReason: "Guest requested partial cancellation.",
+            cancellationSource: "guest"
+          });
+          break;
+        case "discount-rejected":
+          html = discountRejectedEmail(enrichedMockBooking);
+          break;
+        case "payment-rejected":
+          html = paymentRejectedEmail({
+            ...enrichedMockBooking,
+            // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+            // the canonical reference lives on the payment ledger,
+            // not on the booking doc. Mock a single onsitePayments
+            // entry so the "Reference on file" callout renders in
+            // the preview.
+            onsitePayments: [{ transactionReference: "1234567890" }],
+            paymentRejectionReason: "Reference number does not match the bank record. Please re-upload a corrected proof with the correct reference number."
+          });
+          break;
+        case "corporate-inquiry":
+          html = corporateInquiryEmail(mockInquiry);
+          break;
+        case "corporate-inquiry-confirmation":
+          html = corporateInquiryConfirmationEmail(mockInquiry);
+          break;
+        case "contact-inquiry":
+          html = contactInquiryEmail(mockContactInquiry);
+          break;
+        case "contact-confirmation":
+          html = contactConfirmationEmail(mockContactInquiry);
+          break;
+        case "early-checkin-request":
+          html = earlyCheckinRequestEmail(enrichedMockBooking, mockEarlyCheckinRequest);
+          break;
+        case "early-checkin-resolve":
+          const bookingForResolve = {
+            ...enrichedMockBooking,
+            earlyCheckIn: {
+              status: "approved",
+              requestedTime: "10:30 AM",
+              confirmedTime: "11:00 AM",
+              notes: "Arriving early from Bohol airport. Hoping to check in early to rest."
+            }
+          };
+          html = earlyCheckinResolveEmail(bookingForResolve, "approved", "Room will be ready by 11:00 AM. Safe travels!");
+          break;
+        case "booking-rescheduled":
+          html = bookingRescheduledEmail(enrichedMockBooking);
+          break;
+        case "voucher-issued":
+          html = voucherIssuedEmail(mockVoucher);
+          break;
+        case "store-order-delivered":
+          html = storeOrderDeliveredEmail(mockStoreOrder);
+          break;
+        case "store-order-cancelled":
+          html = storeOrderCancelledEmail(mockStoreOrder);
+          break;
+        case "staff-new-booking":
+          html = staffNewBookingEmail(enrichedMockBooking);
+          break;
+        case "staff-new-payment":
+          html = staffNewPaymentEmail(enrichedMockBooking, mockPaymentProof);
+          break;
+        case "spark-rewards-email-verification":
+          html = sparkRewardsEmailVerificationEmail({
+            guestName: "Maria Santos",
+            email: "maria.santos@example.com",
+            verificationLink: siteUrl("/account/profile?emailVerified=true")
+          });
+          break;
+        default:
+          return res.status(400).json({ success: false, error: `Unknown email template: ${template}` });
+      }
+    } finally {
+      restoreContact();
     }
     res.setHeader("Content-Type", "text/html");
     return res.status(200).send(html);
@@ -230501,7 +230616,7 @@ async function handleEmailPreview(req, res) {
     return res.status(500).json({ success: false, error: message });
   }
 }
-var import_jspdf, FROM_ADDRESS, FROM_DISPLAY_NAME, FROM_EMAIL, ADMIN_EMAIL;
+var import_jspdf, FROM_ADDRESS, FROM_DISPLAY_NAME, FROM_EMAIL, ADMIN_EMAIL, renderContact, DEPLOY_TIME_CONTACT;
 var init_email = __esm({
   "server/handlers/email.ts"() {
     "use strict";
@@ -230512,6 +230627,8 @@ var init_email = __esm({
     init_resend();
     init_siteUrl();
     init_shared();
+    init_shared();
+    init_hotelContact2();
     init_notifications();
     init_email_banner();
     init_test_runs();
@@ -230519,6 +230636,8 @@ var init_email = __esm({
     FROM_DISPLAY_NAME = process.env.RESEND_FROM_DISPLAY_NAME || "Spark Inn";
     FROM_EMAIL = FROM_ADDRESS.includes("<") ? FROM_ADDRESS : `${FROM_DISPLAY_NAME} <${FROM_ADDRESS}>`;
     ADMIN_EMAIL = process.env.RESEND_ADMIN_EMAIL || hotel_config_default.supportEmail;
+    renderContact = null;
+    DEPLOY_TIME_CONTACT = resolveHotelContact(null, hotel_config_default);
   }
 });
 
@@ -247136,13 +247255,13 @@ var acknowledgeBodySchema = external_exports.object({
   // to be future-proof.
   auditId: external_exports.string().trim().min(8).max(80)
 }).passthrough();
-var CACHE_TTL_MS2 = 3e4;
+var CACHE_TTL_MS3 = 3e4;
 var CACHE_MAX_ENTRIES = 64;
 var responseCache = /* @__PURE__ */ new Map();
 function cacheGet(date) {
   const entry = responseCache.get(date);
   if (!entry) return null;
-  if (Date.now() - entry.cachedAt > CACHE_TTL_MS2) {
+  if (Date.now() - entry.cachedAt > CACHE_TTL_MS3) {
     responseCache.delete(date);
     return null;
   }
@@ -247431,10 +247550,10 @@ async function handleGetKitchenList(req, res) {
     });
   }
   const cacheKey = dateRaw;
-  const cached = cacheGet(cacheKey);
-  if (cached) {
+  const cached2 = cacheGet(cacheKey);
+  if (cached2) {
     res.setHeader("X-Cache", "HIT");
-    return res.status(200).json(cached);
+    return res.status(200).json(cached2);
   }
   const payload = await computeKitchenList(dateRaw);
   cacheSet(cacheKey, payload);
@@ -248449,7 +248568,7 @@ init_firebase_admin();
 init_shared();
 init_firebase_admin();
 var DEFAULT_VAT_ENABLED = true;
-function asRecord(value) {
+function asRecord2(value) {
   return value && typeof value === "object" ? value : {};
 }
 function asString(value, fallback = "") {
@@ -248469,7 +248588,7 @@ function buildRoomTypes(raw) {
   if (!Array.isArray(raw)) return [];
   const out = [];
   for (const entry of raw) {
-    const type = asRecord(entry);
+    const type = asRecord2(entry);
     const value = asString(type.value);
     if (!value) continue;
     out.push({
@@ -248498,7 +248617,7 @@ function buildPaymentMethods(raw) {
   if (!Array.isArray(raw)) return [];
   const out = [];
   for (const entry of raw) {
-    const method = asRecord(entry);
+    const method = asRecord2(entry);
     const key = asString(method.method);
     if (!key) continue;
     const showInCorporate = asBoolean(method.showInCorporate, true);
@@ -248524,7 +248643,7 @@ function buildSeasonalRateOverrides(raw) {
   if (!Array.isArray(raw)) return [];
   const out = [];
   for (const entry of raw) {
-    const override = asRecord(entry);
+    const override = asRecord2(entry);
     const id = asString(override.id);
     if (!id) continue;
     out.push({
@@ -248543,7 +248662,7 @@ function buildBedSetups(raw) {
   if (!Array.isArray(raw)) return void 0;
   const out = [];
   for (const entry of raw) {
-    const option2 = asRecord(entry);
+    const option2 = asRecord2(entry);
     const value = asString(option2.value);
     const label = asString(option2.label);
     if (!value || !label) continue;
@@ -248556,7 +248675,7 @@ function buildBookingPreferences(raw) {
   if (!Array.isArray(raw)) return void 0;
   const out = [];
   for (const entry of raw) {
-    const option2 = asRecord(entry);
+    const option2 = asRecord2(entry);
     const value = asString(option2.value);
     const label = asString(option2.label);
     if (!value || !label) continue;
@@ -248572,18 +248691,19 @@ function buildBookingPreferences(raw) {
   return out;
 }
 function buildVatConfig(raw) {
-  const vat = asRecord(raw);
+  const vat = asRecord2(raw);
   return { enabled: asBoolean(vat.enabled, DEFAULT_VAT_ENABLED) };
 }
 function buildPublicHotelConfig(source, options) {
-  const config2 = asRecord(source);
+  const config2 = asRecord2(source);
   const rawMaxStayNights = config2.maxStayNights;
+  const contact = resolveHotelContact(config2);
   return {
     brandName: asString(config2.brandName),
-    address: asString(config2.address),
-    frontDeskPhone: asString(config2.frontDeskPhone),
-    supportEmail: asString(config2.supportEmail),
-    dpoEmail: asString(config2.dpoEmail),
+    address: contact.address,
+    frontDeskPhone: contact.frontDeskPhone,
+    supportEmail: contact.supportEmail,
+    dpoEmail: contact.dpoEmail,
     facebookUrl: asString(config2.facebookUrl),
     instagramUrl: asString(config2.instagramUrl),
     twitterHandle: asString(config2.twitterHandle),
@@ -248617,7 +248737,7 @@ async function loadPublicHotelConfig() {
     adminDb.collection("settings").doc("hotelConfig").get(),
     adminDb.collection("settings").doc("storeConfig").get()
   ]);
-  const storeConfig = storeSnapshot.exists ? asRecord(storeSnapshot.data()) : {};
+  const storeConfig = storeSnapshot.exists ? asRecord2(storeSnapshot.data()) : {};
   return buildPublicHotelConfig(hotelSnapshot.exists ? hotelSnapshot.data() : null, {
     storeEnabled: storeConfig.isEnabled !== false
   });
