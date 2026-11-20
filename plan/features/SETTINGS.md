@@ -85,6 +85,17 @@ Before OCT-M1 the hotel-wide switch was a bare `useState(true)` — no Firestore
 - Configurable quick request items for in-room QR chat (`/intercom/{roomId}`).
 - Admin-only — Front Desk records guest selections
 - Admin-only — Front Desk processes store orders
+- **In-Room Service Switches (IFS-01, decision #318, 2026-11-20)** — the top of the Intercom tab carries the hotel-wide switches for the in-room features:
+
+| Switch | Stored where | Effect when OFF |
+|---|---|---|
+| **"Guest Chat"** | `settings/hotelConfig.intercomChatEnabled` | The guest panel shows a phone-only fallback card instead of the chat, and the server refuses guest chat messages (403). The in-room store keeps working — it has its own switch. |
+| **"Voice Calls"** | `settings/hotelConfig.intercomCallsEnabled` | The guest panel hides the "Call Desk" button and the desk's inbox stops ringing for incoming calls (plus a "Calls Off" chip). The chat keeps working. |
+| **"Spark Essentials Store"** | `settings/storeConfig.isEnabled` | Already shipped — the switch lives in the **In-Room Store** tab; the Intercom tab carries a pointer to it so all three live switches are discoverable from one place. |
+
+**Both new switches default to ON** — only an explicit `false` disables a feature, so a settings document written before IFS-01 keeps behaving exactly as it did (the same rule the Other Add-Ons master switch uses, OCT-M1 / decision #295). The shared normalisers (`normalizeIntercomChatEnabled` / `normalizeIntercomCallsEnabled`) are the single definition of "off" for the Settings tab, the guest panel and the server gate, so the three can never disagree.
+
+The switches re-sync from the live `settings/hotelConfig` snapshot through a guarded ref (the OCT-M1 pattern), so a snapshot arriving mid-toggle cannot clobber an in-progress change. They are saved by the existing **Save Intercom Settings** action.
 
 ### 8. Website Content & Room Types
 - Editable text for Homepage, About Us, Corporate Stays, and legal pages.

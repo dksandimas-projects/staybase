@@ -159,6 +159,13 @@ export * from "./utils/addOns";
 // "disabled" opens the gate.
 export * from "./utils/botProtection";
 
+// Per IFS-01 (2026-11-20, decision #318): the hotel-wide in-room
+// feature switches — the intercom CHAT and the intercom VOICE CALL.
+// Shared so the server gate, the guest panel and the admin Settings
+// toggles can never disagree about what "off" means. FAIL OPEN —
+// only an explicit `false` disables a feature.
+export * from "./utils/intercomFeatures";
+
 // Per OCT-L3 (2026-10-20, decision #299): the single shared
 // money-rounding rule (`roundToTwoDecimals`). Lives in its own module
 // so the other-add-on path, the refund liability and the breakfast

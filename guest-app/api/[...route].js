@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.27.2";
+    VERSION2 = "2.28.0";
   }
 });
 
@@ -152937,6 +152937,32 @@ var init_botProtection = __esm({
   }
 });
 
+// ../shared/utils/intercomFeatures.ts
+function normalizeBooleanFlag(raw, fallback) {
+  if (raw === false) return false;
+  if (raw === true) return true;
+  if (typeof raw === "string") {
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === "false") return false;
+    if (normalized === "true") return true;
+  }
+  return fallback;
+}
+function normalizeIntercomChatEnabled(raw) {
+  return normalizeBooleanFlag(raw, INTERCOM_CHAT_ENABLED_DEFAULT);
+}
+function normalizeIntercomCallsEnabled(raw) {
+  return normalizeBooleanFlag(raw, INTERCOM_CALLS_ENABLED_DEFAULT);
+}
+var INTERCOM_CHAT_ENABLED_DEFAULT, INTERCOM_CALLS_ENABLED_DEFAULT;
+var init_intercomFeatures = __esm({
+  "../shared/utils/intercomFeatures.ts"() {
+    "use strict";
+    INTERCOM_CHAT_ENABLED_DEFAULT = true;
+    INTERCOM_CALLS_ENABLED_DEFAULT = true;
+  }
+});
+
 // ../shared/schemas/rewardsConfig.ts
 var LevelDefSchema, RewardsConfigSchema;
 var init_rewardsConfig = __esm({
@@ -153070,6 +153096,8 @@ __export(shared_exports, {
   HOUSE_RULES_TIME_TOKENS: () => HOUSE_RULES_TIME_TOKENS,
   HomepageContentSchema: () => HomepageContentSchema,
   HousekeepingStatusEnum: () => HousekeepingStatusEnum,
+  INTERCOM_CALLS_ENABLED_DEFAULT: () => INTERCOM_CALLS_ENABLED_DEFAULT,
+  INTERCOM_CHAT_ENABLED_DEFAULT: () => INTERCOM_CHAT_ENABLED_DEFAULT,
   IN_FLOW_HOLD_EXTENSION_STATUSES: () => IN_FLOW_HOLD_EXTENSION_STATUSES,
   IN_FLOW_HOLD_MINUTES: () => IN_FLOW_HOLD_MINUTES,
   IN_FLOW_HOLD_STATUSES: () => IN_FLOW_HOLD_STATUSES,
@@ -153267,6 +153295,8 @@ __export(shared_exports, {
   normalizeBreakfastSelections: () => normalizeBreakfastSelections,
   normalizeDiscountScope: () => normalizeDiscountScope,
   normalizeInFlowHoldMinutes: () => normalizeInFlowHoldMinutes,
+  normalizeIntercomCallsEnabled: () => normalizeIntercomCallsEnabled,
+  normalizeIntercomChatEnabled: () => normalizeIntercomChatEnabled,
   normalizeMaxChildren: () => normalizeMaxChildren,
   normalizeOtherAddOnsEnabled: () => normalizeOtherAddOnsEnabled,
   normalizePaymentHoldWindowHours: () => normalizePaymentHoldWindowHours,
@@ -153400,6 +153430,7 @@ var init_shared = __esm({
     init_otherAddOnDrafts();
     init_addOns();
     init_botProtection();
+    init_intercomFeatures();
     init_money();
     init_rewardsConfig();
   }
@@ -244240,6 +244271,26 @@ function formatUnknownEndpoint(pathSegments) {
 init_zod();
 init_firebase_admin();
 init_shared();
+
+// server/lib/intercom-settings.ts
+init_firebase_admin();
+init_shared();
+async function loadIntercomChatEnabled() {
+  try {
+    const snap = await adminDb.collection("settings").doc("hotelConfig").get();
+    if (!snap.exists) return true;
+    return normalizeIntercomChatEnabled(snap.data()?.intercomChatEnabled);
+  } catch (err) {
+    console.error(
+      "Failed to read settings/hotelConfig.intercomChatEnabled; treating the intercom chat as enabled:",
+      err
+    );
+    return true;
+  }
+}
+var INTERCOM_CHAT_UNAVAILABLE_ERROR = "Chat is currently unavailable. Please call the front desk.";
+
+// server/handlers/intercom.ts
 var MAX_ROOM_NUMBER_LENGTH2 = 12;
 var MAX_LAST_NAME_LENGTH = 80;
 var MAX_BOOKING_ID_LENGTH = 128;
@@ -244336,6 +244387,15 @@ async function handleSendGuestMessage(req, res) {
     });
   }
   const { roomNumber, sessionToken, text, isQuickRequest, isStoreOrder, orderRef, isEarlyCheckInRequest, isCancelledOrder } = parsed.data;
+  if (!isStoreOrder) {
+    const chatEnabled = await loadIntercomChatEnabled();
+    if (!chatEnabled) {
+      return res.status(403).json({
+        success: false,
+        error: INTERCOM_CHAT_UNAVAILABLE_ERROR
+      });
+    }
+  }
   const rawIp = req.headers["x-vercel-forwarded-for"] || req.headers["x-forwarded-for"] || req.headers["x-real-ip"] || req.socket.remoteAddress || "unknown";
   const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp).split(",")[0].trim();
   if (isGuestMessageRateLimited(`intercom-msg:${ip}:${roomNumber}`, 30, 10 * 60 * 1e3)) {
@@ -248810,7 +248870,13 @@ function buildPublicHotelConfig(source, options) {
     bookingPreferences: buildBookingPreferences(config2.bookingPreferences),
     paymentMethods: buildPaymentMethods(config2.paymentMethods),
     intercomQuickRequests: asStringArray(config2.intercomQuickRequests),
-    storeEnabled: options?.storeEnabled !== false
+    storeEnabled: options?.storeEnabled !== false,
+    // Per IFS-01 (2026-11-20, decision #318): the two in-room feature
+    // switches. Normalised with the SHARED normalisers so the guest
+    // client and the server gate can never disagree about what "off"
+    // means — and so a missing field keeps BOTH features ON.
+    intercomChatEnabled: normalizeIntercomChatEnabled(config2.intercomChatEnabled),
+    intercomCallsEnabled: normalizeIntercomCallsEnabled(config2.intercomCallsEnabled)
   };
 }
 async function loadPublicHotelConfig() {
