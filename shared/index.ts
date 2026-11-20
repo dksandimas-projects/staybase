@@ -42,6 +42,14 @@ export * from "./utils/paymentReference";
 export * from "./utils/paymentVerification";
 export * from "./utils/pricing";
 export * from "./utils/publicSiteCache";
+// Per HC-01 (decision #328, 2026-11-20): the hotel's CONTACT
+// details (address / front-desk phone / support email / DPO email)
+// have ONE source of truth — `settings/hotelConfig` (the document
+// the admin edits), with `hotel.config.ts` as the deploy-time
+// fallback. The resolver is shared so the guest site, the guest
+// EMAILS, the receipt PDF and the admin app all derive the same
+// values from the same function.
+export * from "./utils/hotelContact";
 export * from "./utils/references";
 export * from "./utils/reservationFingerprint";
 export * from "./utils/roomTypes";

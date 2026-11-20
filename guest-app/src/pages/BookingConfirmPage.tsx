@@ -4,8 +4,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase/config";
-import { buildGoogleCalendarUrl, buildIcsContent, downloadIcsFile, resolvePaymentMethodLabel, scaleIn, staggerChild, staggerContainer } from "@spark-inn/shared";
-import type { BookingRateBreakdown } from "@spark-inn/shared";
+import { buildGoogleCalendarUrl, buildIcsContent, downloadIcsFile, resolveHotelContact, resolvePaymentMethodLabel, scaleIn, staggerChild, staggerContainer } from "@spark-inn/shared";
+import type { BookingRateBreakdown, HotelContact } from "@spark-inn/shared";
 import config from "@config";
 import { Footer } from "../components/Footer";
 import { GhostButton } from "../components/GhostButton";
@@ -88,6 +88,13 @@ export function BookingConfirmPage() {
   // helper (decision #200, 2026-08-07) so the confirm page + the
   // my-booking single card + the my-booking reservation card all
   // read through the same legacy-fallback logic.
+  // Per HC-01 (decision #328): the hotel's CONTACT details (the
+  // address the calendar event carries) come from the RUNTIME hotel
+  // config, with the deploy-time config as the fallback. Resolved
+  // through the shared resolver so both sources normalise the same way.
+  const [hotelContact, setHotelContact] = useState<HotelContact>(() =>
+    resolveHotelContact(null, config)
+  );
   const [dynamicPaymentMethods, setDynamicPaymentMethods] = useState<
     ReadonlyArray<{ method: string; label: string }> | null
   >(null);
@@ -102,6 +109,7 @@ export function BookingConfirmPage() {
         // unauthenticated client.
         const publicConfig = await fetchPublicHotelConfig();
         if (cancelled) return;
+        if (!cancelled) setHotelContact(resolveHotelContact(publicConfig, config));
         const raw = publicConfig ? publicConfig.paymentMethods : null;
         const safe: ReadonlyArray<{ method: string; label: string }> = Array.isArray(raw)
           ? (raw as Array<{ method?: unknown; label?: unknown }>)
@@ -164,7 +172,7 @@ export function BookingConfirmPage() {
   const paymentMethodLabel = resolvedPaymentMethodLabel;
 
   function handleAddToCalendar() {
-    const address = `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
+    const address = hotelContact.address;
     // Per the refactor/room-number-visibility change: only the
     // room type is surfaced on the post-booking confirmation
     // page (and the calendar event it generates). Room
@@ -204,7 +212,7 @@ export function BookingConfirmPage() {
       const roomLine = roomSummaryLabel;
       return `Booking reference: ${bookingRef}\nGuests: ${guests}\nRoom: ${roomLine}\nTotal: ${formatPrice(total)}\nPayment: ${paymentMethodLabel}`;
     })(),
-    location: `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`,
+    location: hotelContact.address,
     start: checkIn,
     end: checkOut,
     allDay: true,

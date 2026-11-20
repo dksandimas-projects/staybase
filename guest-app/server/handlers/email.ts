@@ -7,6 +7,13 @@ import { adminDb } from "../lib/firebase-admin";
 import { resend } from "../lib/resend";
 import { getServerBaseUrl, getServerAdminBaseUrl } from "../lib/siteUrl";
 import { toDateOrNull, getManilaDateInfo, generateLookupToken, RESERVATION_REF_REGEX } from "@spark-inn/shared";
+// Per HC-01 (decision #328, 2026-11-20): the hotel's CONTACT details
+// have ONE source of truth — `settings/hotelConfig` (admin-editable),
+// with `hotel.config.ts` as the deploy-time fallback. `loadHotelContact`
+// reads the runtime document; `resolveHotelContact` is the shared pure
+// resolver that normalises it (including the two `address` shapes).
+import { resolveHotelContact, type HotelContact } from "@spark-inn/shared";
+import { loadHotelContact } from "../lib/hotelContact";
 // Per BF-42 (booking-flow audit 2026-06-26): the
 // `getManilaDateInfo()` helper was duplicated in 5 server-side
 // files. The shared implementation lives in
@@ -205,14 +212,18 @@ function generateReceiptPdf(booking: any): Buffer {
   }
 
   // Header
+  // Per HC-01 (decision #328): the address / phone / email come from
+  // the resolved contact, so the receipt PDF shows the same values the
+  // guest site and the email footer show.
+  const contact = contactForRender();
   doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
   doc.text(pdfSafe(config.legalName || config.brandName), left, top);
   top += 7;
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
-  plain(`${config.address.street}, ${config.address.city}, ${config.address.region}`, 5);
-  plain(`Tel: ${config.frontDeskPhone} | Email: ${config.supportEmail}`, 8);
+  plain(contact.address, 5);
+  plain(`Tel: ${contact.frontDeskPhone} | Email: ${contact.supportEmail}`, 8);
   line(top);
   top += 6;
 
@@ -744,7 +755,63 @@ function lookupUrl(booking: any) {
 }
 
 function addressLine() {
-  return `${config.address.street}, ${config.address.city}, ${config.address.region}, ${config.address.postalCode}`;
+  return contactForRender().address;
+}
+
+// ─── HC-01 (decision #328): the hotel's CONTACT details ─────────────
+//
+// ONE source of truth: `settings/hotelConfig` — the document the
+// admin edits in Settings → Hotel Info. `hotel.config.ts` is the
+// DEPLOY-TIME FALLBACK, used only for a field the runtime document
+// does not carry. Before this change the emails read `hotel.config.ts`
+// directly, so a hotel that corrected its phone number in the admin
+// app still emailed guests the OLD number while the website showed the
+// new one.
+//
+// THE RENDER CONTEXT
+// ------------------
+// The email templates are SYNCHRONOUS, so the resolved contact cannot
+// be awaited inside them. It is carried in a module-scoped context
+// that `renderWithContact` sets and clears inside ONE synchronous
+// block. Because that block contains no `await`, two email triggers
+// running concurrently (the resend path fans out with `Promise.all`)
+// can never observe each other's contact.
+let renderContact: HotelContact | null = null;
+
+/** The deploy-time fallback — used when no contact has been resolved yet. */
+const DEPLOY_TIME_CONTACT = resolveHotelContact(null, config);
+
+/** The contact the current render should use. */
+function contactForRender(): HotelContact {
+  return renderContact ?? DEPLOY_TIME_CONTACT;
+}
+
+/**
+ * Sets the contact render context and returns a function that
+ * restores the previous one. Used where the render is not a single
+ * expression — the preview handler's switch can `return` from inside
+ * the render, so it needs the `try / finally` shape rather than a
+ * callback.
+ */
+function beginContactRender(contact: HotelContact): () => void {
+  const previous = renderContact;
+  renderContact = contact;
+  return () => {
+    renderContact = previous;
+  };
+}
+
+/**
+ * Builds `build()` with `contact` as the render context. The context
+ * is restored afterwards, so a nested / concurrent render is safe.
+ */
+function renderWithContact<T>(contact: HotelContact, build: () => T): T {
+  const restore = beginContactRender(contact);
+  try {
+    return build();
+  } finally {
+    restore();
+  }
 }
 
 function brandLogoUrl() {
@@ -953,6 +1020,10 @@ function emailLayout(options: {
 }) {
   const primary = config.colors.primary;
   const sidebar = config.colors.sidebar;
+  // Per HC-01 (decision #328): the footer contact block comes from the
+  // resolved contact (runtime `settings/hotelConfig` first, deploy-time
+  // fallback second) — never from `hotel.config.ts` directly.
+  const contact = contactForRender();
   return `<!doctype html>
 <html>
   <head>
@@ -1002,9 +1073,9 @@ function emailLayout(options: {
                     : ""
                 }
                 <p style="margin: 28px 0 0; color: #6b7280; font-size: 13px; line-height: 1.6;">
-                  ${escapeHtml(addressLine())}<br>
-                  Front desk: <a href="tel:${escapeHtml(config.frontDeskPhone)}" style="color: ${primary}; text-decoration: none;">${escapeHtml(config.frontDeskPhone)}</a><br>
-                  Support: <a href="mailto:${escapeHtml(config.supportEmail)}" style="color: ${primary}; text-decoration: none;">${escapeHtml(config.supportEmail)}</a>
+                  ${escapeHtml(contact.address)}<br>
+                  Front desk: <a href="tel:${escapeHtml(contact.frontDeskPhone)}" style="color: ${primary}; text-decoration: none;">${escapeHtml(contact.frontDeskPhone)}</a><br>
+                  Support: <a href="mailto:${escapeHtml(contact.supportEmail)}" style="color: ${primary}; text-decoration: none;">${escapeHtml(contact.supportEmail)}</a>
                 </p>
               </td>
             </tr>
@@ -1072,12 +1143,18 @@ async function sendEmail(
   // + raw error for any future caller that doesn't go
   // through the trigger orchestrator.
   try {
+    // Per HC-01 (decision #328): the reply-to address is the hotel's
+    // runtime SUPPORT email (`settings/hotelConfig.supportEmail`), not
+    // the deploy-time placeholder. The Resend SENDER identity stays
+    // env-driven (`RESEND_FROM_EMAIL`) — that is a different concern
+    // from the contact details the guest sees.
+    const replyContact = await loadHotelContact();
     await resend.emails.send({
       from: FROM_EMAIL,
       to,
       subject: finalSubject,
       html,
-      replyTo: config.supportEmail,
+      replyTo: replyContact.supportEmail,
       attachments
     });
   } catch (error: any) {
@@ -1544,7 +1621,7 @@ function bookingCancelledEmail(booking: any) {
       <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If this cancellation was unexpected, please contact our support team right away.</p>
     `,
     ctaLabel: "Contact support",
-    ctaUrl: `mailto:${config.supportEmail}`,
+    ctaUrl: `mailto:${contactForRender().supportEmail}`,
     bannerHtml: environmentBannerFromBooking(booking)
   });
 }
@@ -1641,7 +1718,7 @@ function bookingCancelledReservationEmail(booking: any) {
       <p style="margin: 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If this change was unexpected, please contact our support team right away.</p>
     `,
     ctaLabel: "Contact support",
-    ctaUrl: `mailto:${config.supportEmail}`,
+    ctaUrl: `mailto:${contactForRender().supportEmail}`,
     bannerHtml: environmentBannerFromBooking(booking)
   });
 }
@@ -1712,7 +1789,7 @@ function bookingRefundProcessedEmail(booking: any) {
         <p style="margin: 12px 0 0; color: #4b5563; font-size: 14px; line-height: 1.7;">If you have any questions, please contact our support team.</p>
       `,
       ctaLabel: "Contact support",
-      ctaUrl: `mailto:${config.supportEmail}`,
+      ctaUrl: `mailto:${contactForRender().supportEmail}`,
       bannerHtml: environmentBannerFromBooking(booking)
     })
   };
@@ -1815,10 +1892,11 @@ function corporateInquiryEmail(inquiry: any) {
 }
 
 export async function sendCorporateInquiryTrigger(inquiry: any) {
+  const contact = await loadHotelContact();
   await sendEmail(
     ADMIN_EMAIL,
     `[${config.brandName}] New corporate inquiry: ${inquiry.companyName || "Website inquiry"}`,
-    corporateInquiryEmail(inquiry)
+    renderWithContact(contact, () => corporateInquiryEmail(inquiry))
   );
 }
 
@@ -1848,10 +1926,11 @@ function corporateInquiryConfirmationEmail(inquiry: any) {
 
 export async function sendCorporateInquiryConfirmationTrigger(inquiry: any) {
   if (!inquiry.email) return;
+  const contact = await loadHotelContact();
   await sendEmail(
     inquiry.email,
     `[${config.brandName}] We received your corporate inquiry`,
-    corporateInquiryConfirmationEmail(inquiry)
+    renderWithContact(contact, () => corporateInquiryConfirmationEmail(inquiry))
   );
 }
 
@@ -1877,10 +1956,11 @@ function contactInquiryEmail(inquiry: any) {
 }
 
 export async function sendContactInquiryTrigger(inquiry: any) {
+  const contact = await loadHotelContact();
   await sendEmail(
     ADMIN_EMAIL,
     `[${config.brandName}] New contact: ${inquiry.subject || "Website message"}`,
-    contactInquiryEmail(inquiry)
+    renderWithContact(contact, () => contactInquiryEmail(inquiry))
   );
 }
 
@@ -1903,10 +1983,11 @@ function contactConfirmationEmail(inquiry: any) {
 
 export async function sendContactConfirmationTrigger(inquiry: any) {
   if (!inquiry.email) return;
+  const contact = await loadHotelContact();
   await sendEmail(
     inquiry.email,
     `[${config.brandName}] We received your message`,
-    contactConfirmationEmail(inquiry)
+    renderWithContact(contact, () => contactConfirmationEmail(inquiry))
   );
 }
 
@@ -1944,6 +2025,7 @@ function earlyCheckinRequestEmail(booking: any, request: any) {
 }
 
 export async function sendEarlyCheckinRequestTrigger(booking: any, request: any) {
+  const contact = await loadHotelContact();
   // ETR-22.10: subject prefix from the booking's test-run
   // banner state. Staging auto-detects inside `sendEmail`.
   const banner = {
@@ -1956,7 +2038,7 @@ export async function sendEarlyCheckinRequestTrigger(booking: any, request: any)
   await sendEmail(
     ADMIN_EMAIL,
     `[${config.brandName}] Early check-in request: ${booking.bookingRef}`,
-    earlyCheckinRequestEmail(booking, request),
+    renderWithContact(contact, () => earlyCheckinRequestEmail(booking, request)),
     undefined,
     banner
   );
@@ -2007,6 +2089,7 @@ function earlyCheckinResolveEmail(booking: any, status: "approved" | "declined",
 }
 
 export async function sendEarlyCheckinResolveTrigger(booking: any, status: "approved" | "declined", staffNote?: string) {
+  const contact = await loadHotelContact();
   const isStaffGranted = booking.earlyCheckIn?.source === "staff-granted";
   const subject = isStaffGranted
     ? `[${config.brandName}] Early check-in ${status === "approved" ? "added" : "updated"}: ${booking.bookingRef}`
@@ -2023,7 +2106,7 @@ export async function sendEarlyCheckinResolveTrigger(booking: any, status: "appr
   await sendEmail(
     booking.guestEmail,
     subject,
-    earlyCheckinResolveEmail(booking, status, staffNote),
+    renderWithContact(contact, () => earlyCheckinResolveEmail(booking, status, staffNote)),
     undefined,
     banner
   );
@@ -2080,10 +2163,11 @@ function voucherIssuedEmail(voucher: any) {
 
 export async function sendVoucherIssuedTrigger(voucher: any) {
   if (!voucher?.guestEmail) return;
+  const contact = await loadHotelContact();
   await sendEmail(
     voucher.guestEmail,
     `[${config.brandName}] Your voucher: ${voucher.code}`,
-    voucherIssuedEmail(voucher)
+    renderWithContact(contact, () => voucherIssuedEmail(voucher))
   );
 }
 
@@ -2115,10 +2199,11 @@ function sparkRewardsEmailVerificationEmail(data: { guestName?: string; email: s
 
 export async function sendVerificationEmailTrigger(data: { guestName?: string; email: string; verificationLink: string }) {
   if (!data.email) return;
+  const contact = await loadHotelContact();
   await sendEmail(
     data.email,
     `[${config.brandName}] Verify your email address for ${config.rewardsName}`,
-    sparkRewardsEmailVerificationEmail(data)
+    renderWithContact(contact, () => sparkRewardsEmailVerificationEmail(data))
   );
 }
 
@@ -2214,14 +2299,15 @@ function storeOrderCancelledEmail(order: any) {
       </table>`)}
     `,
     ctaLabel: "Contact support",
-    ctaUrl: `mailto:${config.supportEmail}`,
+    ctaUrl: `mailto:${contactForRender().supportEmail}`,
     bannerHtml: environmentBanner({})
   });
 }
 
 export async function sendStoreOrderTrigger(action: EmailAction, order: any) {
   if (!order?.guestEmail) return;
-  const map: Partial<Record<EmailAction, { subject: string; html: string }>> = {
+  const contact = await loadHotelContact();
+  const map: Partial<Record<EmailAction, { subject: string; html: string }>> = renderWithContact(contact, () => ({
     "store-order-delivered": {
       subject: `[${config.brandName}] Order delivered: ${order.orderRef || "in-room"}`,
       html: storeOrderDeliveredEmail(order)
@@ -2230,7 +2316,7 @@ export async function sendStoreOrderTrigger(action: EmailAction, order: any) {
       subject: `[${config.brandName}] Order cancelled: ${order.orderRef || "in-room"}`,
       html: storeOrderCancelledEmail(order)
     }
-  };
+  }));
   const template = map[action];
   if (!template) {
     throw new Error("Unsupported store order email trigger.");
@@ -2296,6 +2382,7 @@ function staffNewPaymentEmail(booking: any, payment: any) {
 }
 
 export async function sendStaffNewBookingTrigger(booking: any) {
+  const contact = await loadHotelContact();
   // ETR-22.10: subject prefix from the booking's test-run
   // banner state. Staging auto-detects inside `sendEmail`.
   const banner = {
@@ -2308,13 +2395,14 @@ export async function sendStaffNewBookingTrigger(booking: any) {
   await sendEmail(
     ADMIN_EMAIL,
     `[${config.brandName}] New online booking: ${booking.bookingRef}`,
-    staffNewBookingEmail(booking),
+    renderWithContact(contact, () => staffNewBookingEmail(booking)),
     undefined,
     banner
   );
 }
 
 export async function sendStaffNewPaymentTrigger(booking: any, payment: any) {
+  const contact = await loadHotelContact();
   // ETR-22.10: subject prefix from the booking's test-run
   // banner state. Staging auto-detects inside `sendEmail`.
   const banner = {
@@ -2327,7 +2415,7 @@ export async function sendStaffNewPaymentTrigger(booking: any, payment: any) {
   await sendEmail(
     ADMIN_EMAIL,
     `[${config.brandName}] New payment proof: ${booking.bookingRef}`,
-    staffNewPaymentEmail(booking, payment),
+    renderWithContact(contact, () => staffNewPaymentEmail(booking, payment)),
     undefined,
     banner
   );
@@ -2370,10 +2458,11 @@ function staffRefundReviewEmail(order: any) {
 }
 
 export async function sendStaffRefundReviewTrigger(order: any) {
+  const contact = await loadHotelContact();
   await sendEmail(
     ADMIN_EMAIL,
     `[${config.brandName}] Refund review: cancelled paid store order ${order.orderRef}`,
-    staffRefundReviewEmail(order)
+    renderWithContact(contact, () => staffRefundReviewEmail(order))
   );
 }
 
@@ -2443,7 +2532,13 @@ export async function sendBookingTrigger(action: EmailAction, booking: any) {
     }
   }
 
-  const templates: Record<string, { subject: string; html: string; attachments?: Array<{ filename: string; content: Buffer }> }> = {
+  // Per HC-01 (decision #328): the templates below render the hotel's
+  // contact details, so they are built INSIDE the contact render
+  // context. The context is set and cleared synchronously, so the
+  // concurrent fan-out in `handleEmailTrigger` cannot interleave two
+  // different contacts.
+  const contact = await loadHotelContact();
+  const templates: Record<string, { subject: string; html: string; attachments?: Array<{ filename: string; content: Buffer }> }> = renderWithContact(contact, () => ({
     "booking-submitted": {
       // Per MRB-09 (2026-08-02, per decision #168): the
       // subject uses the reservation ref when the view
@@ -2539,7 +2634,7 @@ export async function sendBookingTrigger(action: EmailAction, booking: any) {
     // refund entry, used for the "Latest refund"
     // row).
     "booking-refund-processed": bookingRefundProcessedEmail(booking)
-  };
+  }));
 
   const template = templates[action];
   if (!template) {
@@ -2576,14 +2671,20 @@ export async function sendBookingConfirmedWithBalanceTrigger(booking: any, balan
   const safeBalance = Number.isFinite(balance) ? Math.max(Number(balance), 0) : 0;
   const safeReason = typeof reason === "string" ? reason.trim().slice(0, 500) : "";
   const subject = `[${config.brandName}] Booking confirmed: ${booking.bookingRef} (₱${safeBalance.toLocaleString("en-PH")} due at check-in)`;
-  const html = bookingConfirmedWithBalanceEmail(booking, safeBalance, safeReason);
-  // Reuse the same receipt PDF attached to the standard
-  // booking-confirmed email — the folio snapshot at confirm
-  // time is the same.
-  const attachments = [{
-    filename: `receipt-${String(booking.bookingRef || "booking").replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`,
-    content: generateReceiptPdf(booking)
-  }];
+  // Per HC-01 (decision #328): both the body AND the receipt PDF
+  // render the hotel's contact details, so they are built inside the
+  // contact render context.
+  const contact = await loadHotelContact();
+  const { html, attachments } = renderWithContact(contact, () => ({
+    html: bookingConfirmedWithBalanceEmail(booking, safeBalance, safeReason),
+    // Reuse the same receipt PDF attached to the standard
+    // booking-confirmed email — the folio snapshot at confirm
+    // time is the same.
+    attachments: [{
+      filename: `receipt-${String(booking.bookingRef || "booking").replace(/[^a-zA-Z0-9_-]/g, "")}.pdf`,
+      content: generateReceiptPdf(booking)
+    }]
+  }));
   // ETR-22.10: pass the booking's test-run banner state for
   // the subject prefix. Staging auto-detects inside `sendEmail`.
   const banner = {
@@ -3091,135 +3192,144 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
       console.error("Failed to enrich preview with active test run:", previewRunErr);
     }
 
+    // Per HC-01 (decision #328): the preview renders the hotel's
+    // contact details exactly as the guest will see them, so it
+    // resolves the same runtime contact the real send does.
+    const contact = await loadHotelContact();
+    const restoreContact = beginContactRender(contact);
     let html = "";
-    switch (template) {
-      case "booking-submitted":
-        html = bookingSubmittedEmail(enrichedMockBooking);
-        break;
-      case "payment-confirmed":
-        // ECE-01: pass houseRules from request body so the staff can
-        // preview exactly what the guest will see.
-        html = paymentConfirmedEmail(enrichedMockBooking, typeof houseRules === "string" ? houseRules : null);
-        break;
-      case "booking-confirmed":
-        // ECE-02: pass houseRules from request body so the staff can
-        // preview exactly what the guest will see (mirrors the
-        // payment-confirmed preview above).
-        html = bookingConfirmedEmail(enrichedMockBooking, typeof houseRules === "string" ? houseRules : null);
-        break;
-      case "booking-confirmed-with-balance":
-        // Per CWB-02: preview uses mock balance + reason so
-        // the design / copy is reviewable from the email
-        // preview panel without a real confirm-with-balance
-        // flow. The room number is intentionally omitted
-        // (booking is not yet `checked-in`).
-        html = bookingConfirmedWithBalanceEmail(
-          { ...enrichedMockBooking, roomNumber: "" },
-          2750,
-          "Guest paid a 70% deposit; remaining 30% will be collected at check-in."
-        );
-        break;
-      case "checkin-reminder":
-        // ECE-02: pass houseRules from request body so the staff can
-        // preview exactly what the guest will see (mirrors the
-        // payment-confirmed preview above).
-        html = checkinReminderEmail(enrichedMockBooking, typeof houseRules === "string" ? houseRules : null);
-        break;
-      case "booking-cancelled":
-        html = bookingCancelledEmail(enrichedMockBooking);
-        break;
-      case "booking-cancelled-reservation":
-        // Per MRB-09 (2026-08-02, per decision #168):
-        // the reservation-scope cancel preview. Use a
-        // mock reservation view (3 rooms, one
-        // cancelled) so staff can sanity-check both
-        // the full-cancel and the partial-cancel
-        // shape from the preview pane.
-        html = bookingCancelledReservationEmail({
-          ...enrichedMockBooking,
-          reservationRef: "R-20260802-00001",
-          reservationId: "rsv-mock",
-          isReservation: true,
-          roomCount: 3,
-          activeRoomCount: 2,
-          rooms: [
-            { position: 1, bookingRef: "SI-20260802-00001", roomType: "Deluxe Sea View", numAdults: 2, numChildren: 0, extraBedCount: 0, hasAnyBreakfast: false, totalPrice: 7200 },
-            { position: 2, bookingRef: "SI-20260802-00002", roomType: "Standard Twin", numAdults: 1, numChildren: 0, extraBedCount: 0, hasAnyBreakfast: false, totalPrice: 3600, cancelledAt: new Date().toISOString() },
-            { position: 3, bookingRef: "SI-20260802-00003", roomType: "Family Suite", numAdults: 2, numChildren: 1, extraBedCount: 0, hasAnyBreakfast: true, totalPrice: 9800 }
-          ],
-          cancellationReason: "Guest requested partial cancellation.",
-          cancellationSource: "guest"
-        });
-        break;
-      case "discount-rejected":
-        html = discountRejectedEmail(enrichedMockBooking);
-        break;
-      case "payment-rejected":
-        html = paymentRejectedEmail({
-          ...enrichedMockBooking,
-          // Per 2026-07-24 (refactor/unify-payment-reference-fields):
-          // the canonical reference lives on the payment ledger,
-          // not on the booking doc. Mock a single onsitePayments
-          // entry so the "Reference on file" callout renders in
-          // the preview.
-          onsitePayments: [{ transactionReference: "1234567890" }],
-          paymentRejectionReason: "Reference number does not match the bank record. Please re-upload a corrected proof with the correct reference number."
-        });
-        break;
-      case "corporate-inquiry":
-        html = corporateInquiryEmail(mockInquiry);
-        break;
-      case "corporate-inquiry-confirmation":
-        html = corporateInquiryConfirmationEmail(mockInquiry);
-        break;
-      case "contact-inquiry":
-        html = contactInquiryEmail(mockContactInquiry);
-        break;
-      case "contact-confirmation":
-        html = contactConfirmationEmail(mockContactInquiry);
-        break;
-      case "early-checkin-request":
-        html = earlyCheckinRequestEmail(enrichedMockBooking, mockEarlyCheckinRequest);
-        break;
-      case "early-checkin-resolve":
-        const bookingForResolve = {
-          ...enrichedMockBooking,
-          earlyCheckIn: {
-            status: "approved",
-            requestedTime: "10:30 AM",
-            confirmedTime: "11:00 AM",
-            notes: "Arriving early from Bohol airport. Hoping to check in early to rest."
-          }
-        };
-        html = earlyCheckinResolveEmail(bookingForResolve, "approved", "Room will be ready by 11:00 AM. Safe travels!");
-        break;
-      case "booking-rescheduled":
-        html = bookingRescheduledEmail(enrichedMockBooking);
-        break;
-      case "voucher-issued":
-        html = voucherIssuedEmail(mockVoucher);
-        break;
-      case "store-order-delivered":
-        html = storeOrderDeliveredEmail(mockStoreOrder);
-        break;
-      case "store-order-cancelled":
-        html = storeOrderCancelledEmail(mockStoreOrder);
-        break;
-      case "staff-new-booking":
-        html = staffNewBookingEmail(enrichedMockBooking);
-        break;
-      case "staff-new-payment":
-        html = staffNewPaymentEmail(enrichedMockBooking, mockPaymentProof);
-        break;
-      case "spark-rewards-email-verification":
-        html = sparkRewardsEmailVerificationEmail({
-          guestName: "Maria Santos",
-          email: "maria.santos@example.com",
-          verificationLink: siteUrl("/account/profile?emailVerified=true")
-        });
-        break;
-      default:
-        return res.status(400).json({ success: false, error: `Unknown email template: ${template}` });
+    try {
+      switch (template) {
+        case "booking-submitted":
+          html = bookingSubmittedEmail(enrichedMockBooking);
+          break;
+        case "payment-confirmed":
+          // ECE-01: pass houseRules from request body so the staff can
+          // preview exactly what the guest will see.
+          html = paymentConfirmedEmail(enrichedMockBooking, typeof houseRules === "string" ? houseRules : null);
+          break;
+        case "booking-confirmed":
+          // ECE-02: pass houseRules from request body so the staff can
+          // preview exactly what the guest will see (mirrors the
+          // payment-confirmed preview above).
+          html = bookingConfirmedEmail(enrichedMockBooking, typeof houseRules === "string" ? houseRules : null);
+          break;
+        case "booking-confirmed-with-balance":
+          // Per CWB-02: preview uses mock balance + reason so
+          // the design / copy is reviewable from the email
+          // preview panel without a real confirm-with-balance
+          // flow. The room number is intentionally omitted
+          // (booking is not yet `checked-in`).
+          html = bookingConfirmedWithBalanceEmail(
+            { ...enrichedMockBooking, roomNumber: "" },
+            2750,
+            "Guest paid a 70% deposit; remaining 30% will be collected at check-in."
+          );
+          break;
+        case "checkin-reminder":
+          // ECE-02: pass houseRules from request body so the staff can
+          // preview exactly what the guest will see (mirrors the
+          // payment-confirmed preview above).
+          html = checkinReminderEmail(enrichedMockBooking, typeof houseRules === "string" ? houseRules : null);
+          break;
+        case "booking-cancelled":
+          html = bookingCancelledEmail(enrichedMockBooking);
+          break;
+        case "booking-cancelled-reservation":
+          // Per MRB-09 (2026-08-02, per decision #168):
+          // the reservation-scope cancel preview. Use a
+          // mock reservation view (3 rooms, one
+          // cancelled) so staff can sanity-check both
+          // the full-cancel and the partial-cancel
+          // shape from the preview pane.
+          html = bookingCancelledReservationEmail({
+            ...enrichedMockBooking,
+            reservationRef: "R-20260802-00001",
+            reservationId: "rsv-mock",
+            isReservation: true,
+            roomCount: 3,
+            activeRoomCount: 2,
+            rooms: [
+              { position: 1, bookingRef: "SI-20260802-00001", roomType: "Deluxe Sea View", numAdults: 2, numChildren: 0, extraBedCount: 0, hasAnyBreakfast: false, totalPrice: 7200 },
+              { position: 2, bookingRef: "SI-20260802-00002", roomType: "Standard Twin", numAdults: 1, numChildren: 0, extraBedCount: 0, hasAnyBreakfast: false, totalPrice: 3600, cancelledAt: new Date().toISOString() },
+              { position: 3, bookingRef: "SI-20260802-00003", roomType: "Family Suite", numAdults: 2, numChildren: 1, extraBedCount: 0, hasAnyBreakfast: true, totalPrice: 9800 }
+            ],
+            cancellationReason: "Guest requested partial cancellation.",
+            cancellationSource: "guest"
+          });
+          break;
+        case "discount-rejected":
+          html = discountRejectedEmail(enrichedMockBooking);
+          break;
+        case "payment-rejected":
+          html = paymentRejectedEmail({
+            ...enrichedMockBooking,
+            // Per 2026-07-24 (refactor/unify-payment-reference-fields):
+            // the canonical reference lives on the payment ledger,
+            // not on the booking doc. Mock a single onsitePayments
+            // entry so the "Reference on file" callout renders in
+            // the preview.
+            onsitePayments: [{ transactionReference: "1234567890" }],
+            paymentRejectionReason: "Reference number does not match the bank record. Please re-upload a corrected proof with the correct reference number."
+          });
+          break;
+        case "corporate-inquiry":
+          html = corporateInquiryEmail(mockInquiry);
+          break;
+        case "corporate-inquiry-confirmation":
+          html = corporateInquiryConfirmationEmail(mockInquiry);
+          break;
+        case "contact-inquiry":
+          html = contactInquiryEmail(mockContactInquiry);
+          break;
+        case "contact-confirmation":
+          html = contactConfirmationEmail(mockContactInquiry);
+          break;
+        case "early-checkin-request":
+          html = earlyCheckinRequestEmail(enrichedMockBooking, mockEarlyCheckinRequest);
+          break;
+        case "early-checkin-resolve":
+          const bookingForResolve = {
+            ...enrichedMockBooking,
+            earlyCheckIn: {
+              status: "approved",
+              requestedTime: "10:30 AM",
+              confirmedTime: "11:00 AM",
+              notes: "Arriving early from Bohol airport. Hoping to check in early to rest."
+            }
+          };
+          html = earlyCheckinResolveEmail(bookingForResolve, "approved", "Room will be ready by 11:00 AM. Safe travels!");
+          break;
+        case "booking-rescheduled":
+          html = bookingRescheduledEmail(enrichedMockBooking);
+          break;
+        case "voucher-issued":
+          html = voucherIssuedEmail(mockVoucher);
+          break;
+        case "store-order-delivered":
+          html = storeOrderDeliveredEmail(mockStoreOrder);
+          break;
+        case "store-order-cancelled":
+          html = storeOrderCancelledEmail(mockStoreOrder);
+          break;
+        case "staff-new-booking":
+          html = staffNewBookingEmail(enrichedMockBooking);
+          break;
+        case "staff-new-payment":
+          html = staffNewPaymentEmail(enrichedMockBooking, mockPaymentProof);
+          break;
+        case "spark-rewards-email-verification":
+          html = sparkRewardsEmailVerificationEmail({
+            guestName: "Maria Santos",
+            email: "maria.santos@example.com",
+            verificationLink: siteUrl("/account/profile?emailVerified=true")
+          });
+          break;
+        default:
+          return res.status(400).json({ success: false, error: `Unknown email template: ${template}` });
+      }
+    } finally {
+      restoreContact();
     }
 
     res.setHeader("Content-Type", "text/html");

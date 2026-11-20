@@ -148,7 +148,11 @@ import {
   // `undefined`-valued key inside a settings payload made EVERY
   // save of that section fail. See
   // `shared/utils/firestorePayload.ts`.
-  stripUndefinedValues
+  stripUndefinedValues,
+  // Per HC-01 (decision #328): the SHARED contact resolver, so the
+  // admin's pre-snapshot state seeds the same four contact fields
+  // (and the same address shape) the runtime document carries.
+  formatHotelAddress
 } from "@spark-inn/shared";
 import config from "@config";
 import { auth } from "../firebase/auth";
@@ -6686,8 +6690,15 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
 
   // Settings Mock States
   const [hotelConfig, setHotelConfig] = useState({
-    address: `${config.address.street}, ${config.address.city}, ${config.address.region}`,
+    // Per HC-01 (decision #328): the deploy-time contact is seeded
+    // through the SHARED resolver, so the admin's pre-snapshot state
+    // carries the same four fields (and the same address shape) the
+    // runtime document does. The Firestore snapshot overwrites these
+    // with the hotel's live values.
+    address: formatHotelAddress(config.address),
     frontDeskPhone: config.frontDeskPhone,
+    supportEmail: config.supportEmail,
+    dpoEmail: config.dpoEmail,
     facebookUrl: `https://facebook.com/${config.brandName}`,
     instagramUrl: `https://instagram.com/${config.brandName}`,
     twitterHandle: config.twitterHandle,

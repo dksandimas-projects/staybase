@@ -19,7 +19,20 @@ const mockResponse = () => {
   return res;
 };
 
-let settingsDocReadCount = 0;
+// Per HC-01 (decision #328, 2026-11-20): the read counter is PER
+// DOCUMENT, not one global bucket. The email layer now reads
+// `settings/hotelConfig` (the hotel's contact details — the address,
+// the front-desk phone, the support email) IN ADDITION to
+// `settings/websiteContent` (the house rules), and the guard this
+// file carries is about the HOUSE RULES document specifically: "the
+// websiteContent doc is read for the three house-rules actions and
+// not for the others". Counting every `settings/*` read in one
+// bucket conflated the two documents and made this assertion depend
+// on an unrelated read.
+//
+// The `hotelConfig` read has its own guard, in
+// `email-hotel-contact.test.ts`.
+let settingsDocReads: Record<string, number> = {};
 let mockWebsiteContent: Record<string, any> = {};
 let forceSettingsDocThrow = false;
 
@@ -29,7 +42,7 @@ vi.mock("../../server/lib/firebase-admin", () => {
       return {
         doc: (id: string) => ({
           get: vi.fn(async () => {
-            settingsDocReadCount += 1;
+            settingsDocReads[id] = (settingsDocReads[id] || 0) + 1;
             if (forceSettingsDocThrow) {
               throw new Error("Firestore unavailable");
             }
@@ -53,7 +66,7 @@ vi.mock("../../server/lib/resend", () => ({
 
 beforeEach(() => {
   mockWebsiteContent = {};
-  settingsDocReadCount = 0;
+  settingsDocReads = {};
   forceSettingsDocThrow = false;
   vi.clearAllMocks();
 });
@@ -71,7 +84,7 @@ describe("ECE-02 — booking-confirmed email includes the House rules card", () 
       lookupToken: "abc"
     } as any);
 
-    expect(settingsDocReadCount).toBe(1);
+    expect(settingsDocReads.websiteContent).toBe(1);
   });
 
   test("omits the card when settings.websiteContent.houseRules is blank", async () => {
@@ -123,7 +136,7 @@ describe("ECE-02 — checkin-reminder email includes the House rules card", () =
       lookupToken: "xyz"
     } as any);
 
-    expect(settingsDocReadCount).toBe(1);
+    expect(settingsDocReads.websiteContent).toBe(1);
   });
 
   test("omits the card when settings.websiteContent.houseRules is missing", async () => {
@@ -147,7 +160,7 @@ describe("ECE-02 — non-arrival triggers still skip the websiteContent read", (
       lookupToken: "abc"
     } as any);
 
-    expect(settingsDocReadCount).toBe(0);
+    expect(settingsDocReads.websiteContent ?? 0).toBe(0);
   });
 
   test("booking-submitted does NOT touch the settings/websiteContent doc", async () => {
@@ -158,7 +171,7 @@ describe("ECE-02 — non-arrival triggers still skip the websiteContent read", (
       lookupToken: "abc"
     } as any);
 
-    expect(settingsDocReadCount).toBe(0);
+    expect(settingsDocReads.websiteContent ?? 0).toBe(0);
   });
 
   test("discount-rejected does NOT touch the settings/websiteContent doc", async () => {
@@ -170,7 +183,7 @@ describe("ECE-02 — non-arrival triggers still skip the websiteContent read", (
       lookupToken: "abc"
     } as any);
 
-    expect(settingsDocReadCount).toBe(0);
+    expect(settingsDocReads.websiteContent ?? 0).toBe(0);
   });
 });
 

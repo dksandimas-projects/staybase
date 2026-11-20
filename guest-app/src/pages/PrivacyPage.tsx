@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Shield, Mail, Calendar, FileText } from "lucide-react";
-import { VERSION } from "@spark-inn/shared";
+import { VERSION, formatHotelAddress } from "@spark-inn/shared";
 import { doc, getDoc } from "firebase/firestore";
 import config from "@config";
 import { db } from "../firebase/config";
@@ -18,7 +18,7 @@ export function PrivacyPage() {
   const dpoEmail = contact?.dpoEmail || config.dpoEmail;
   const addressLine = contact?.address
     ? contact.address
-    : `${config.address.street}, ${config.address.city}, ${config.address.region}`;
+    : formatHotelAddress(config.address);
 
   useEffect(() => {
     let cancelled = false;

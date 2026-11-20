@@ -30,7 +30,7 @@ import { PrimaryButton } from "../components/PrimaryButton";
 // full-size view + download.
 import { PaymentQrCode } from "../components/PaymentQrCode";
 import { GhostButton } from "../components/GhostButton";
-import { getEffectiveStorePaymentMethods, type EffectiveStorePaymentMethod } from "@spark-inn/shared";
+import { getEffectiveStorePaymentMethods, resolveHotelContact, type EffectiveStorePaymentMethod, type HotelContact } from "@spark-inn/shared";
 import { fetchPublicHotelConfig } from "../hooks/usePublicHotelConfig";
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
@@ -169,6 +169,12 @@ export function IntercomPage() {
   const [roomAccessError, setRoomAccessError] = useState<"invalid" | "vacant" | "">("");
   const [roomNumber, setRoomNumber] = useState<string>(roomId || "");
   const [quickRequests, setQuickRequests] = useState<string[]>([]);
+  // Per HC-01 (decision #328): the front-desk phone the panel shows
+  // comes from the RUNTIME hotel config, with the deploy-time config
+  // as the fallback.
+  const [hotelContact, setHotelContact] = useState<HotelContact>(() =>
+    resolveHotelContact(null, config)
+  );
   const [isStoreEnabled, setIsStoreEnabled] = useState<boolean>(true);
   const [isOffline, setIsOffline] = useState<boolean>(!navigator.onLine);
   const [messageError, setMessageError] = useState<string>("");
@@ -433,6 +439,7 @@ export function IntercomPage() {
         const configuredPaymentMethods = publicConfig?.paymentMethods;
 
         if (!isMounted) return;
+        setHotelContact(resolveHotelContact(publicConfig, config));
         setRoomNumber(resolvedRoomNumber);
         setIsValidRoom(true);
         setRoomAccessError("");
@@ -1303,7 +1310,7 @@ export function IntercomPage() {
               : "This intercom link does not match an active room. Please call or visit the front desk so we can help you."}
           </p>
           <a
-            href={`tel:${config.frontDeskPhone}`}
+            href={`tel:${hotelContact.frontDeskPhone}`}
             className="mt-5 inline-flex min-h-[44px] items-center justify-center rounded-lg bg-primary px-5 text-sm font-bold text-white"
           >
             Call Front Desk
@@ -1435,8 +1442,8 @@ export function IntercomPage() {
                 <p className="font-semibold">{callError}</p>
                 <p className="mt-1">
                   Direct Line:{" "}
-                  <a href={`tel:${config.frontDeskPhone}`} className="underline font-bold text-white">
-                    {config.frontDeskPhone}
+                  <a href={`tel:${hotelContact.frontDeskPhone}`} className="underline font-bold text-white">
+                    {hotelContact.frontDeskPhone}
                   </a>
                 </p>
               </div>

@@ -3,7 +3,10 @@ import { motion, useReducedMotion } from "framer-motion";
 import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { GUEST_CANCELLABLE_STATUSES, RESERVATION_REF_REGEX, resolvePaymentMethodLabel, scaleIn, addDaysToIsoDate, isValidIsoDate } from "@spark-inn/shared";
-import type { BookingRateBreakdown, CancellationPreview } from "@spark-inn/shared";
+// Per HC-01 (decision #328): `resolveHotelContact` lives in its own
+// import statement because the one above is pinned verbatim by the
+// RFO-01 source-text guard.
+import { resolveHotelContact, type BookingRateBreakdown, type CancellationPreview, type HotelContact } from "@spark-inn/shared";
 import config from "@config";
 import { Footer } from "../components/Footer";
 import { GhostButton } from "../components/GhostButton";
@@ -276,6 +279,13 @@ export function BookingLookupPage() {
   // reservation-scope card both render through this state. The
   // fetch is gated on a successful lookup so an empty search
   // form does not pay the Firestore read.
+  // Per HC-01 (decision #328): the hotel's CONTACT details (the
+  // front-desk phone + the support email the guest is told to write
+  // to) come from the RUNTIME hotel config, with the deploy-time
+  // config as the fallback.
+  const [hotelContact, setHotelContact] = useState<HotelContact>(() =>
+    resolveHotelContact(null, config)
+  );
   const [paymentMethodConfigs, setPaymentMethodConfigs] = useState<
     ReadonlyArray<{ method: string; label: string }> | null
   >(null);
@@ -448,6 +458,7 @@ export function BookingLookupPage() {
         // unauthenticated client.
         const publicConfig = await fetchPublicHotelConfig();
         if (cancelled) return;
+        setHotelContact(resolveHotelContact(publicConfig, config));
         const raw = publicConfig && Array.isArray(publicConfig.paymentMethods)
           ? (publicConfig.paymentMethods as Array<{ method?: unknown; label?: unknown }>)
           : null;
@@ -1930,7 +1941,7 @@ export function BookingLookupPage() {
             <div className="rounded-card-lg bg-primary-light/30 border border-primary/20 p-5 text-sm text-gray-700">
               <p className="font-semibold text-gray-900">Need to change something?</p>
               <p className="mt-1 text-xs leading-relaxed">
-                To change check-in dates, guest count, or breakfast selections for a specific room, please call our front desk directly at {config.frontDeskPhone}. To cancel the whole reservation, use the button above — every room in the reservation will be cancelled in one step.
+                To change check-in dates, guest count, or breakfast selections for a specific room, please call our front desk directly at {hotelContact.frontDeskPhone}. To cancel the whole reservation, use the button above — every room in the reservation will be cancelled in one step.
               </p>
             </div>
           </div>
@@ -2046,14 +2057,14 @@ export function BookingLookupPage() {
                   </div>
                   <div className="flex flex-col gap-2 pt-1">
                     <a
-                      href={`tel:${config.frontDeskPhone}`}
+                      href={`tel:${hotelContact.frontDeskPhone}`}
                       className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-bold text-white hover:bg-primary-dark transition-colors"
                     >
                       <Calendar size={15} />
-                      Call front desk — {config.frontDeskPhone}
+                      Call front desk — {hotelContact.frontDeskPhone}
                     </a>
                     <a
-                      href={`mailto:${config.supportEmail}?subject=Extend stay — ${activeBooking.bookingRef}`}
+                      href={`mailto:${hotelContact.supportEmail}?subject=Extend stay — ${activeBooking.bookingRef}`}
                       className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
                     >
                       <Mail size={15} />

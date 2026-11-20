@@ -1,4 +1,4 @@
-import { VERSION } from "@spark-inn/shared";
+import { VERSION, formatHotelAddress } from "@spark-inn/shared";
 import { Facebook, Instagram, Mail, MapPin, Phone, Twitter } from "lucide-react";
 import { Link } from "react-router-dom";
 import config from "@config";
@@ -23,7 +23,11 @@ export function Footer() {
   // deploy-time `hotel.config.ts` is the safe fallback for required
   // contact details. Social values use nullish fallback so an explicit
   // empty string remains empty and hides that icon.
-  const address = contact?.address || `${config.address.street}, ${config.address.city}, ${config.address.region} ${config.address.postalCode}`;
+  // Per HC-01 (decision #328): the deploy-time fallback address goes
+  // through the SHARED formatter, so it renders in the same shape as
+  // the runtime string the admin typed (`street, city, region,
+  // postalCode`).
+  const address = contact?.address || formatHotelAddress(config.address);
   const phone = contact?.frontDeskPhone || config.frontDeskPhone;
   const email = contact?.supportEmail || config.supportEmail;
   const facebook = contact?.facebookUrl ?? config.facebookUrl;
