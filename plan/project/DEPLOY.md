@@ -115,6 +115,39 @@ The repo-root `vercel.json` belongs to **no** Vercel project (both projects set 
 root directory). It is kept for its CSP headers only — its `crons` array was
 dead config and was removed.
 
+### Deploying Firestore composite indexes
+
+`firebase/firestore.indexes.json` is the source of index declarations. A query
+that needs a composite index throws `FAILED_PRECONDITION: The query requires an
+index` until that index is deployed **and built**.
+
+```bash
+firebase deploy --only firestore:indexes --project <project-id>
+```
+
+**The deploy is asynchronous — the index is NOT usable the moment the command
+returns.** Firestore creates the index in the background and it reports
+`CREATING` for several minutes. Until it flips to `READY` the query still
+throws, with a different message:
+
+```
+FAILED_PRECONDITION: The query requires an index. That index is currently
+building and cannot be used yet.
+```
+
+Verify the real state before calling the fix done — run the query itself, or
+read the index state from the admin API
+(`GET https://firestore.googleapis.com/v1/projects/<id>/databases/(default)/collectionGroups/<collection>/indexes`,
+which reports each index's `state`). **A successful deploy is not a working
+index.** Deploy to BOTH projects (`spark-inn-stg-7a7ad` + `spark-inn-prod`) —
+staging is where a query is exercised first.
+
+**An index-only change is infrastructure, not a release.** Commit it as
+`chore(firestore):` — it touches `firebase/firestore.indexes.json` alone, so
+`shared/VERSION.ts` does not move, the committed API bundle stays valid (the
+bundle's input watch list is `guest-app/server`, `shared` and
+`hotel.config.ts`), and no bundle rebuild or app deploy is needed.
+
 ### Deploying a release — use the deploy hook, not the GitHub webhook
 
 > **Re-verified 2026-11-19 (decision #318 deploy).** The statement below ("the
