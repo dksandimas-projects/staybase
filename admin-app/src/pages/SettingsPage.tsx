@@ -89,7 +89,11 @@ import {
   // payload — used for client-side validation before save (the
   // API also re-validates as defense-in-depth).
   RewardsConfigSchema,
-  type LevelDef
+  type LevelDef,
+  // Per HC-02 (decision #329): the house-rules time tokens, resolved
+  // against the live `settings/hotelConfig` check-in / check-out
+  // values so the admin can see what each token renders.
+  resolveHotelTimes
 } from "@spark-inn/shared";
 import {
   // Per BR-12.1 (2026-10-15, decision #247 reserved): the
@@ -3423,6 +3427,10 @@ export function SettingsPage() {
     websiteContent.cancellationRefundPctAfter !== undefined ? String(websiteContent.cancellationRefundPctAfter) : "0"
   );
   const [houseRules, setHouseRules] = useState(websiteContent.houseRules || "");
+  // Per HC-02 (decision #329): the check-in / check-out times the
+  // house-rules tokens resolve to, shown in the helper text below so
+  // the admin can see the live values without leaving the form.
+  const houseRulesTimes = resolveHotelTimes(hotelConfig, config, config.locale);
   // Per LCE-01 (decision #137, 2026-07-25): the Terms of
   // Service body + version + last-updated are now admin-
   // editable. The version is server-bumped on every save
@@ -4422,7 +4430,11 @@ const handleAddLevel = () => {
           "Content-Type": "application/json",
           "Authorization": token ? `Bearer ${token}` : ""
         },
-        body: JSON.stringify({ template: action })
+        // Per HC-02 (decision #329): send the hotel's house rules so
+        // the preview renders the SAME card the guest receives. The
+        // server resolves the check-in / check-out time tokens against
+        // the live `settings/hotelConfig` values.
+        body: JSON.stringify({ template: action, houseRules: websiteContent?.houseRules || "" })
       });
 
       if (!res.ok) {
@@ -9497,7 +9509,14 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                       className="w-full rounded border border-gray-250 bg-gray-50/50 p-3 text-sm font-medium focus:bg-white leading-relaxed"
                     />
                   </label>
-                  <p className="text-[10px] text-gray-500">Used in the guest registration PDF at check-in. If left blank, the field is omitted from the printed form.</p>
+                  <p className="text-[10px] text-gray-500">Shown in the guest confirmation emails and on the registration PDF at check-in. If left blank, the card is omitted.</p>
+                  <p className="text-[10px] text-gray-500">
+                    Pull the times from Settings → Hotel Info with{" "}
+                    <code className="font-mono text-gray-700">{"{{checkInTime}}"}</code>{" "}
+                    ({houseRulesTimes.checkInTime || "not set"}) and{" "}
+                    <code className="font-mono text-gray-700">{"{{checkOutTime}}"}</code>{" "}
+                    ({houseRulesTimes.checkOutTime || "not set"}) — they update automatically when the hotel changes them.
+                  </p>
                 </div>
 
                 <SaveActionFooter label="Save Legal Content" status={getSaveStatus("legal")} />

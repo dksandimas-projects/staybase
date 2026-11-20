@@ -50,6 +50,14 @@ export * from "./utils/publicSiteCache";
 // EMAILS, the receipt PDF and the admin app all derive the same
 // values from the same function.
 export * from "./utils/hotelContact";
+// Per HC-02 (decision #329, 2026-11-20): the hotel's CHECK-IN /
+// CHECK-OUT TIMES have ONE source of truth — `settings/hotelConfig`,
+// the same document the contact details live on. The house-rules
+// prose can carry `{{checkInTime}}` / `{{checkOutTime}}` tokens, and
+// every surface that renders the rules resolves them against the live
+// values, so the email and the printed registration form can never
+// disagree with the booking flow.
+export * from "./utils/hotelTimes";
 export * from "./utils/references";
 export * from "./utils/reservationFingerprint";
 export * from "./utils/roomTypes";

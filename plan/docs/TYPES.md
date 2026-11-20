@@ -815,6 +815,13 @@ HotelConfig {
   twitterHandle: string
   checkInTime: string
   checkOutTime: string
+  // Per HC-02 (decision #329): these two are the ONE source of truth
+  // for the hotel's check-in / check-out times. The house-rules prose
+  // may quote them by token (`{{checkInTime}}` / `{{checkOutTime}}`);
+  // every surface resolves the tokens against this document (via the
+  // shared `resolveHotelTimes` / `interpolateHotelTimes`) before
+  // rendering, so the email, the staff preview and the registration
+  // PDF can never contradict the booking Step 2 dropdown.
   // Dynamic booking payment methods. Per
   // `plan/features/SETTINGS.md §Payment Methods` the list is
   // fully admin-managed from the Payment Methods tab. "Pay at
@@ -910,6 +917,9 @@ WebsiteContent {
   }
   privacyPolicyBody: string
   cancellationPolicy: string
+  // Per HC-02 (decision #329): may contain the `{{checkInTime}}` /
+  // `{{checkOutTime}}` tokens, resolved against `hotelConfig`'s times
+  // before the rules render in an email or the registration PDF.
   houseRules: string
 }
 ```

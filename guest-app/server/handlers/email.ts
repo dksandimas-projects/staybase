@@ -12,8 +12,8 @@ import { toDateOrNull, getManilaDateInfo, generateLookupToken, RESERVATION_REF_R
 // with `hotel.config.ts` as the deploy-time fallback. `loadHotelContact`
 // reads the runtime document; `resolveHotelContact` is the shared pure
 // resolver that normalises it (including the two `address` shapes).
-import { resolveHotelContact, type HotelContact } from "@spark-inn/shared";
-import { loadHotelContact } from "../lib/hotelContact";
+import { resolveHotelContact, interpolateHotelTimes, type HotelContact } from "@spark-inn/shared";
+import { loadHotelContact, loadHotelTimes } from "../lib/hotelContact";
 // Per BF-42 (booking-flow audit 2026-06-26): the
 // `getManilaDateInfo()` helper was duplicated in 5 server-side
 // files. The shared implementation lives in
@@ -1406,6 +1406,24 @@ function houseRulesCard(houseRules?: string | null): string {
   );
 }
 
+// Per HC-02 (decision #329, 2026-11-20): the house rules may quote the
+// hotel's check-in / check-out times by TOKEN (`{{checkInTime}}` /
+// `{{checkOutTime}}`). The times live on `settings/hotelConfig` — the
+// same document the booking Step 2 arrival-time dropdown reads — so
+// the rules are resolved against the LIVE values before they render.
+//
+// Without this, the house-rules prose carried its own hand-typed times
+// and could contradict the booking flow (it already did: the email
+// said check-out 12:00 PM while `hotelConfig.checkOutTime` said 11:00).
+//
+// THIS HELPER IS THE SINGLE RESOLUTION POINT for the email layer: the
+// live send path and the staff preview both call it, so the preview
+// can never show a different house-rules block than the guest gets.
+async function resolveHouseRulesTimes(houseRules: string | null): Promise<string | null> {
+  if (!houseRules) return houseRules;
+  return interpolateHotelTimes(houseRules, await loadHotelTimes());
+}
+
 function paymentConfirmedEmail(booking: any, houseRules?: string | null) {
   return emailLayout({
     preheader: `Payment received for booking ${booking.bookingRef}.`,
@@ -2530,6 +2548,10 @@ export async function sendBookingTrigger(action: EmailAction, booking: any) {
       console.warn(`Failed to load websiteContent.houseRules for ${action} email; continuing without it.`, error);
       houseRules = null;
     }
+    // Per HC-02 (decision #329): resolve the check-in / check-out time
+    // tokens against the LIVE `settings/hotelConfig` values, so the
+    // rules can never quote a time the booking flow contradicts.
+    houseRules = await resolveHouseRulesTimes(houseRules);
   }
 
   // Per HC-01 (decision #328): the templates below render the hotel's
@@ -3050,10 +3072,16 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
     return res.status(401).json({ success: false, error: "Staff authentication is required." });
   }
 
-  const { template, houseRules } = req.body || {};
+  const { template } = req.body || {};
   if (!template) {
     return res.status(400).json({ success: false, error: "Template parameter is required." });
   }
+  // The staff preview sends the hotel's house rules so the preview
+  // matches what the guest actually receives. It is resolved against
+  // the LIVE check-in / check-out times below, exactly like the live
+  // send path, so the two can never disagree (HC-02, decision #329).
+  let houseRules: string | null =
+    typeof (req.body || {}).houseRules === "string" ? (req.body || {}).houseRules : null;
 
   const mockBooking = {
     bookingRef: "BK-2026-MOCK",
@@ -3196,6 +3224,8 @@ export async function handleEmailPreview(req: VercelRequest, res: VercelResponse
     // contact details exactly as the guest will see them, so it
     // resolves the same runtime contact the real send does.
     const contact = await loadHotelContact();
+    // Per HC-02 (decision #329): same for the house-rules times.
+    houseRules = await resolveHouseRulesTimes(houseRules);
     const restoreContact = beginContactRender(contact);
     let html = "";
     try {

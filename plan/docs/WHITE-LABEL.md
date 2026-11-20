@@ -260,7 +260,7 @@ These fields are editable by the hotel admin from Settings — no redeploy neede
 
 - `privacyPolicyBody` — full privacy policy text (plain text or light markdown)
 - `cancellationPolicy` — displayed at booking Step 3 and in confirmation emails
-- `houseRules` — used in guest registration PDF at check-in
+- `houseRules` — guest-facing house rules (guest emails + the registration PDF at check-in). May contain the `{{checkInTime}}` / `{{checkOutTime}}` tokens, resolved against the live `settings/hotelConfig` times.
 
 ---
 

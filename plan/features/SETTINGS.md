@@ -88,6 +88,7 @@ Before OCT-M1 the hotel-wide switch was a bare `useState(true)` — no Firestore
 
 ### 8. Website Content & Room Types
 - Editable text for Homepage, About Us, Corporate Stays, and legal pages.
+- **House Rules** (Legal tab) — free prose the hotel writes, shown in the guest emails and on the printed registration form. It may quote the hotel's check-in / check-out times by the tokens `{{checkInTime}}` / `{{checkOutTime}}`; those are resolved against the LIVE `settings/hotelConfig` values (the same ones the booking Step 2 arrival-time dropdown uses) before they render, so the rules can never contradict the booking flow. The helper text under the field shows both tokens and their current values (HC-02, decision #329).
 - **Room Type Photos:** Managed under rates/room types with `imageUrls` (Maximum 10 photos per type).
 
 ---
