@@ -371,6 +371,23 @@ export function IntercomInboxPage() {
         </div>
         <div className="flex items-center gap-2">
           {/*
+           * Per IFS-01 (2026-11-20, decision #318): the hotel-wide
+           * voice-call switch. When the hotel switched it off, the
+           * desk does not ring for incoming calls — so a guest who
+           * says "the call button is missing" has an explanation
+           * waiting here instead of a shrug. The switch lives in
+           * Settings → Intercom.
+           */}
+          {hotelConfig?.intercomCallsEnabled === false && (
+            <span
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 text-[10px] font-bold uppercase tracking-wider text-amber-700"
+              title="The hotel switched the in-room voice call off in Settings → Intercom. Incoming calls are not ringing."
+            >
+              <PhoneOff size={14} aria-hidden="true" />
+              Calls Off
+            </span>
+          )}
+          {/*
            * Audio settings shortcut (refactor/audio-discovery). The
            * /audio route owns per-staff call + ringtone output device
            * routing and is the natural place to tune the sounds this

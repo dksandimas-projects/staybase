@@ -103,6 +103,76 @@ calls/{roomId}/iceCandidates/{id}
 
 ---
 
+## In-Room Feature Switches (IFS-01, decision #318, 2026-11-20)
+
+The hotel asked for the ability to switch off the in-room features for a while. Two
+new hotel-wide switches live on `settings/hotelConfig`:
+
+| Switch | Stored where | OFF means |
+|---|---|---|
+| `intercomChatEnabled` | `settings/hotelConfig` | The Chat tab renders a **phone-only fallback card** instead of the thread + composer, and the server refuses guest chat messages (403). The in-room **store keeps working** — it has its own master switch (`settings/storeConfig.isEnabled`). |
+| `intercomCallsEnabled` | `settings/hotelConfig` | The **"Call Desk" button is gone** from the panel header, the call handler refuses to start, and the desk's inbox does not ring for incoming calls. The chat keeps working. |
+
+**Both default to ON.** Only an explicit `false` disables a feature, so a settings
+document written before IFS-01 keeps behaving exactly as it did. The shared
+normalisers (`normalizeIntercomChatEnabled` / `normalizeIntercomCallsEnabled`,
+`shared/utils/intercomFeatures.ts`) are the single definition of "off" for the
+server gate, the guest panel and the admin Settings tab.
+
+**Where the switches are read**
+
+- **Server (the real gate):** `handleSendGuestMessage` reads
+  `settings/hotelConfig.intercomChatEnabled` through
+  `guest-app/server/lib/intercom-settings.ts` and answers **403** with
+  *"Chat is currently unavailable. Please call the front desk."* The check runs
+  **before** the rate limiter, so a switched-off chat does not burn the guest's
+  message quota. It **fails OPEN** — a transient Firestore error leaves the chat on.
+- **Guest panel:** both switches travel in the existing public projection
+  (`GET /api/public/hotel-config`), which the panel already fetches on mount.
+  They apply on the guest's next page load.
+- **Desk:** the admin inbox ignores incoming call sessions while the voice call is
+  off (no banner, no ringtone) and shows a **"Calls Off"** chip.
+
+**The STORE message carve-out.** The order badge that follows a Spark Essentials
+order travels through the same `/api/intercom/send-message` endpoint. It is **not**
+gated: the store has its own master switch, and the desk needs the order
+notification even when the chat is off. So the gate applies to chat messages only
+(`isStoreOrder: false`).
+
+**What "off" does NOT do.** The voice call is a **client-side** switch: the guest
+writes the WebRTC signalling straight to Firestore (`callSessions/{sessionToken}`),
+so there is no server endpoint to refuse. Hiding the button plus suppressing the
+desk's banner covers the real case (a guest on a stale screen), but it is not an
+airtight enforcement — that would need a Firestore-rules gate on a new public flag
+document. The chat, by contrast, IS enforced server-side.
+
+### Edge cases
+
+- [x] Chat off + store on → the Chat tab shows the fallback card; the shop tab works normally.
+- [x] Chat off + store off → the whole panel becomes the fallback card (no tabs).
+- [x] Calls off → no "Call Desk" button; the chat and the store are untouched.
+- [x] A guest on a screen that was open before the switch flipped cannot start a call (the handler re-checks).
+- [x] The desk sees a "Calls Off" chip, so staff can explain the missing button to a guest.
+- [x] The switches apply on the guest's next page load / refresh (the public config is read on mount).
+
+### Manual QA
+
+- [x] Settings → Intercom → turn OFF "Guest Chat" → a guest's panel shows the phone-only card; sending a message is rejected server-side
+- [x] Settings → Intercom → turn ON "Guest Chat" → the panel is back to normal
+- [x] Settings → Intercom → turn OFF "Voice Calls" → the "Call Desk" button disappears; the desk's inbox does not ring
+- [x] With the voice call off, a Spark Essentials order still reaches the desk (the store badge message is not gated)
+- [x] With both the chat and the store off, the panel is the fallback card
+
+### References
+
+- Desk counterpart: `plan/features/INTERCOM-INBOX.md`
+- The switches' settings surface: `plan/features/SETTINGS.md §7 Intercom`
+- Store counterpart: `plan/features/STORE-GUEST.md`
+- Schema: `plan/docs/BACKEND.md §settings`
+- Decision: `plan/docs/DECISIONS-FEATURES.md` #318
+
+---
+
 ## Edge Cases & States
 
 - [x] Invalid room ID in URL — show "This QR code is not valid. Please contact the front desk."

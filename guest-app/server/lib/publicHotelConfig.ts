@@ -30,7 +30,7 @@ import type {
   PublicVatConfig,
   SeasonalRateOverride
 } from "@spark-inn/shared";
-import { normalizeBotProtectionMode, resolveHotelContact, type BotProtectionMode } from "@spark-inn/shared";
+import { normalizeBotProtectionMode, normalizeIntercomCallsEnabled, normalizeIntercomChatEnabled, resolveHotelContact, type BotProtectionMode } from "@spark-inn/shared";
 import { adminDb } from "./firebase-admin";
 
 const DEFAULT_VAT_ENABLED = true;
@@ -263,7 +263,13 @@ export function buildPublicHotelConfig(
     bookingPreferences: buildBookingPreferences(config.bookingPreferences),
     paymentMethods: buildPaymentMethods(config.paymentMethods),
     intercomQuickRequests: asStringArray(config.intercomQuickRequests),
-    storeEnabled: options?.storeEnabled !== false
+    storeEnabled: options?.storeEnabled !== false,
+    // Per IFS-01 (2026-11-20, decision #318): the two in-room feature
+    // switches. Normalised with the SHARED normalisers so the guest
+    // client and the server gate can never disagree about what "off"
+    // means — and so a missing field keeps BOTH features ON.
+    intercomChatEnabled: normalizeIntercomChatEnabled(config.intercomChatEnabled),
+    intercomCallsEnabled: normalizeIntercomCallsEnabled(config.intercomCallsEnabled)
   };
 }
 

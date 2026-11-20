@@ -160,6 +160,26 @@ export interface PublicHotelConfig {
    * guest never reads it directly.
    */
   storeEnabled: boolean;
+  /**
+   * Per IFS-01 (2026-11-20, decision #318): the hotel-wide switch for
+   * the in-room intercom CHAT (`settings/hotelConfig.intercomChatEnabled`).
+   *
+   * `false` → the guest panel shows a phone-only fallback card
+   * instead of the chat, and the server refuses guest chat messages.
+   * Only an explicit `false` disables it; an absent field means the
+   * chat is ON (the guest's service is never switched off by a
+   * missing field).
+   */
+  intercomChatEnabled: boolean;
+  /**
+   * Per IFS-01 (2026-11-20, decision #318): the hotel-wide switch for
+   * the intercom VOICE CALL (`settings/hotelConfig.intercomCallsEnabled`).
+   *
+   * `false` → the guest panel hides the "Call Desk" button and the
+   * desk's inbox does not ring for incoming calls. Only an explicit
+   * `false` disables it.
+   */
+  intercomCallsEnabled: boolean;
 }
 
 /**
