@@ -37,13 +37,29 @@ The confirmation and hold are group-scoped: the operation is all-or-nothing and 
 The drawer is a status-aware workspace (`BookingDrawerWorkspace.tsx`):
 
 - **Sticky Header:** Booking context (guest, room, stay, status, source), lifecycle indicator, Total/Paid/Balance summary, and actionable alerts.
-- **Four Task-Based Sections:**
+- **Task-Based Sections:**
   - **Overview:** Time-sensitive early check-in decision/grant first, followed by staff-captured special requests. Guest, room, dates, duration, occupancy, breakfast inclusion, payment method, reference, and the compact financial summary live once in the global header above the tabs.
   - **Check-in:** Readiness checklist, registration, signature, guest ID photo, discount verification, breakfast selections.
   - **Folio:** The sole detailed home for money ledgers, discounts, payment proof review, receipts, incidental & store charges. A pending proof has one labelled View action plus the verification action.
+  - **Breakfast:** The per-date × per-guest meal grid, the served toggles, and the refund-liability panel.
+  - **Other Add-Ons:** The per-day × per-add-on selection grid with the served-stamp badge.
+  - **History:** The per-booking timeline of who changed what, and when (2026-11-21).
   - **Activity & More:** Booking actions first (confirm-with-balance, move/upgrade, add room, cancellation), followed by transactional email history/resend controls.
 - **Sticky Footer:** Context-aware primary action button for the current status plus a **More actions** dropdown menu.
 - **Focused Task Modals:** Bounded responsive modals for discount verification, payment recording, refund recording, charge adding/voiding, and cancellation.
+
+### History Tab
+
+Per ATR-08 follow-up (2026-11-21): the drawer's **History** tab renders one reverse-chronological timeline of who changed this booking, and when. It merges four differently-shaped sources — the `breakfastAudit` + `otherAddOnAudit` subcollections (server-written inside the mutation's own transaction), the incidental-charge ledger the drawer already loads, and the booking's own milestone stamps (created / checked in / checked out / cancelled / payment verified / special requests updated).
+
+**Rules.**
+
+- The actor resolves through the ONE shared resolver (`shared/utils/staffNames.ts`). A raw uid never reaches the screen; a guest's row renders as "Guest" (the trail rows carry their own `actorRole`, so the tab answers "the GUEST changed this, or the desk?").
+- The mapping lives in `shared/utils/bookingHistory.ts` (pure, unit-tested in `shared/__tests__/booking-history.test.ts`) because the admin app has no component-test harness.
+- **The tab renders for real in `admin-app/src/__tests__/booking-history-render.test.tsx`** (7 cases, `react-dom/server` — no new dependency and no new vitest config: the admin app's `vite.config.ts` already carries the `@config` alias and the React JSX transform). It proves what a source-text test cannot: that a staff actor renders as their NAME and never as a raw uid, that a guest's row renders as "Guest", that a charge renders its label and its currency-formatted amount, and that the empty / loading / error states each render their own message.
+- The two trails are read ONLY while the History section is the active one — the drawer mounts every section panel at once, so an always-on subscription would attach for every staff member who opens a booking.
+- The charge ledger is REUSED from the drawer's existing listener, not re-listened: that listener is reservation-scoped (it reads `reservations/{id}/charges` plus every child's charges).
+- **It is NOT the ATR-02 forensic trail.** The booking mutations (confirm / cancel / reschedule / payment verify / discount verify) do not write event rows yet, so this is the history of the operational changes — not a complete audit of every field write.
 
 ### Drawer De-duplication Contract
 
