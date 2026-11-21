@@ -812,6 +812,27 @@ export interface Booking {
   // it as a `Date`; the admin mapper hydrates it as an ISO string
   // (the `parseDateTimeString` convention).
   paymentConfirmedAt?: Date | null;
+  // Per ATR-09 (2026-11-21): the payment VERIFIER's stamp.
+  //
+  // `paymentConfirmedAt` records WHEN the money was verified but not
+  // WHO verified it — and `handledBy`, the field that used to stand in
+  // for the actor, is OVERWRITTEN by every later staff action (AUDIT-
+  // TRAIL.md §Attribution fields). So the desk's history tab showed a
+  // bare "Staff" for every payment verification.
+  //
+  // `paymentConfirmedBy` is the staff UID that verified the payment.
+  // It is written in the SAME write as `paymentConfirmedAt` — and since
+  // `paymentConfirmedAt` is only ever written on the transition, the
+  // stamp is effectively write-once and never rewritten.
+  //
+  // `paymentConfirmedByName` is the display name AT WRITE TIME (the
+  // ATR-04 `createdByName` pattern): it survives a rename or a deleted
+  // staff account, which is why the trail carries one.
+  //
+  // Both are OPTIONAL: a booking whose payment was verified before
+  // ATR-09 has neither, and the surfaces fall back to `handledBy`.
+  paymentConfirmedBy?: string | null;
+  paymentConfirmedByName?: string | null;
   // Per PEX-01 (2026-08-01, per CVQ-12 + decision #147): the
   // snapshotted deadline at which a `pending` booking's hold on
   // the room expires. Written by `handleCreateBooking` (and the

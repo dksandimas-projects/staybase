@@ -10388,7 +10388,22 @@ export async function handleAddPayment(req: any, res: any) {
                   status: "payment-confirmed",
                   paymentConfirmedAt: now,
                   handledBy: staffUid,
-                  updatedAt: now
+                  updatedAt: now,
+                  // Per ATR-09 (2026-11-21): the verifier's stamp.
+                  // Written in the SAME write as `paymentConfirmedAt`
+                  // — and never overwritten, because
+                  // `paymentConfirmedAt` is only ever written on the
+                  // transition. `handledBy` cannot answer this: it is
+                  // overwritten by every later staff action, so the
+                  // desk's history tab could not say WHO verified the
+                  // money.
+                  //
+                  // It sits AFTER `updatedAt` on purpose: the FOL-05
+                  // guard pins the literal adjacency of the payload's
+                  // first four fields. A source-text guard is a
+                  // contract — move your field, do not loosen it.
+                  paymentConfirmedBy: staffUid,
+                  paymentConfirmedByName: auditActor.name || null
                 },
                 newStatus: "payment-confirmed"
               };
@@ -10487,6 +10502,13 @@ export async function handleAddPayment(req: any, res: any) {
           status: "payment-confirmed",
           handledBy: staffUid,
           paymentConfirmedAt: now,
+          // Per ATR-09 (2026-11-21): the verifier's stamp, written in
+          // the SAME write as `paymentConfirmedAt` and never
+          // overwritten. `handledBy` cannot answer this — it is
+          // overwritten by every later staff action, so the desk's
+          // history tab could not say WHO verified the money.
+          paymentConfirmedBy: staffUid,
+          paymentConfirmedByName: auditActor.name || null,
           updatedAt
         });
         transitionedToPaymentConfirmed = true;
@@ -11588,6 +11610,12 @@ export async function handleMarkPaymentConfirmed(req: any, res: any) {
         status: "payment-confirmed",
         handledBy,
         paymentConfirmedAt: now,
+        // Per ATR-09 (2026-11-21): the verifier's stamp, written in
+        // the SAME write as `paymentConfirmedAt` and never
+        // overwritten — `handledBy` is overwritten by every later
+        // staff action, so it cannot answer "who verified this?".
+        paymentConfirmedBy: handledBy,
+        paymentConfirmedByName: auditActor.name || null,
         updatedAt: now
       });
     });
@@ -11861,7 +11889,22 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
                   status: "payment-confirmed",
                   paymentConfirmedAt: now,
                   handledBy: staffUid,
-                  updatedAt: now
+                  updatedAt: now,
+                  // Per ATR-09 (2026-11-21): the verifier's stamp.
+                  // Written in the SAME write as `paymentConfirmedAt`
+                  // — and never overwritten, because
+                  // `paymentConfirmedAt` is only ever written on the
+                  // transition. `handledBy` cannot answer this: it is
+                  // overwritten by every later staff action, so the
+                  // desk's history tab could not say WHO verified the
+                  // money.
+                  //
+                  // It sits AFTER `updatedAt` on purpose: the FOL-05
+                  // guard pins the literal adjacency of the payload's
+                  // first four fields. A source-text guard is a
+                  // contract — move your field, do not loosen it.
+                  paymentConfirmedBy: staffUid,
+                  paymentConfirmedByName: auditActor.name || null
                 },
                 newStatus: "payment-confirmed"
               };
@@ -11964,6 +12007,12 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
         bookingUpdates.status = targetPostStatus;
         bookingUpdates.handledBy = staffUid;
         bookingUpdates.paymentConfirmedAt = now;
+        // Per ATR-09 (2026-11-21): the verifier's stamp, written in
+        // the SAME write as `paymentConfirmedAt` and never
+        // overwritten — `handledBy` is overwritten by every later
+        // staff action, so it cannot answer "who verified this?".
+        bookingUpdates.paymentConfirmedBy = staffUid;
+        bookingUpdates.paymentConfirmedByName = auditActor.name || null;
       }
       if (Object.keys(bookingUpdates).length > 0) {
         transaction.update(bookingRef, bookingUpdates);
@@ -12576,6 +12625,14 @@ export async function handleConfirmBookingWithBalance(req: any, res: any) {
         // receipt paths light up uniformly.
         confirmedAt: now,
         paymentConfirmedAt: now,
+        // Per ATR-09 (2026-11-21): the verifier's stamp, written in
+        // the SAME write as `paymentConfirmedAt` and never
+        // overwritten — `handledBy` is overwritten by every later
+        // staff action, so it cannot answer "who verified this?".
+        // On this path the confirmer IS the verifier: they confirmed
+        // the booking with a balance outstanding.
+        paymentConfirmedBy: confirmedBy,
+        paymentConfirmedByName: auditActor.name || null,
         handledBy: confirmedBy,
         updatedAt: now
       });

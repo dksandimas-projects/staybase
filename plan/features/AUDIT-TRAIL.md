@@ -16,25 +16,23 @@ Three questions: **who changed a room**, **who handled a check-in**, **who creat
 
 ### What existed when the investigation ran (verified against code 2026-11-20)
 
-Each row is RESOLVED by ATR-03 / ATR-04; the evidence lives in the findings below.
-
 | The owner's question | Then | Now |
 |---|---|---|
 | Who changed a room? | **Nothing.** Zero attribution on `rooms` / `roomPrivate`. | ATR-03. |
 | Who handled check-in? | **Written, but invisible and untyped.** `checkedInBy` / `checkedInAt` were stamped and read by no screen. | ATR-04 + ATR-05. |
 | Who created the walk-in? | **Recorded at create, then destroyed.** `handledBy` is one mutable field every later action overwrites. | ATR-04. |
 
-### What does exist, scattered
+### What did exist, scattered
 
 Single-value "last person who did this one thing" stamps, never a history:
 
 - **`bookings/*`** — `handledBy` (overwritten), `checkedInBy`, `checkedOutBy`, `cancelledBy`, `discountVerifiedBy`, `discountRejectedBy`, `paymentRejectedBy`, `louReceivedBy`, `pointsRedeemedBy`, `specialRequestsUpdatedBy`
-- **`reservations/*/payments/*`** — `recordedBy`. **The only surface that renders a staff NAME**: `admin-app/src/pages/ReportsPage.tsx:1026` builds a `staffNameMap`, used at `:3810` + `:5654`. This is the shape to copy. (Incidental charges and member points history also have readers, but print raw UIDs — finding 9.)
-- **`bookings/*/breakfastAudit`, `bookings/*/otherAddOnAudit`** — real append-only per-booking trails carrying `actorUid`, server-written. Read at `ReportsPage.tsx:581` + `:604` **only to compute a late-change counter** — the rows are never rendered (finding 8).
+- **`reservations/*/payments/*`** — `recordedBy`. **The only surface that rendered a staff NAME**: `ReportsPage.tsx:1026` builds a `staffNameMap`, used at `:3810` + `:5654`. This is the shape to copy. (Incidental charges and member points history also had readers, but printed raw UIDs — finding 9.)
+- **`bookings/*/breakfastAudit`, `bookings/*/otherAddOnAudit`** — real append-only per-booking trails carrying `actorUid`, server-written. Read at `ReportsPage.tsx:581` + `:604` **only to compute a late-change counter** — the rows were never rendered (finding 8).
 - **`roomBlocks/*`, `vouchers/*`, `guests/*`** — `createdBy`
-- **`auditLogs/{auditId}`** — the right shape already (`action`, `targetCollection`, `targetId`, `actor`, `actorName`, `before`, `after`, `timestamp`), with append-only rules at `firebase/firestore.rules:132`. Written from **one** place for **one** action family: add-on catalog CRUD (`admin-app/src/pages/SettingsPage.tsx:3172`). The comment at `:3159` states the position plainly: *"`auditLogs` is a write-only trail as far as the product is concerned."*
+- **`auditLogs/{auditId}`** — the right shape already, with append-only rules. Written from **one** place for **one** action family: add-on catalog CRUD.
 
-**So the foundation was built and unused.** The collection existed, its rules were correct, and a staff-UID→name resolver already shipped in Reports. What was missing: writers on the other mutations, attribution on rooms, a non-destructive booking-creator field, and any screen that reads it. ATR-02 closed the first two; ATR-06 owns the last.
+**So the foundation was built and unused.** The collection, its rules, and a staff-UID→name resolver already existed. What was missing: writers on the other mutations, attribution on rooms, a non-destructive booking-creator field, and any screen that reads it. ATR-02 closed the first two; ATR-06 owns the last.
 
 ---
 
@@ -44,10 +42,10 @@ Single-value "last person who did this one thing" stamps, never a history:
 2. **CONFIRMED — a client-written audit row is advisory, not forensic.** Anyone with staff credentials and a browser console can write a direct Firestore mutation and simply not write the audit row, or write a row naming someone else (`actor` is client-supplied). Rules can enforce append-only; they cannot enforce *append*. Client-side rows are not worthless — they catch the ordinary "who moved this?" question — but the trail must be **labelled with its own trust level** (`source: "client" | "server"`) so a reader does not treat them as evidence they are not. Server rows are the forensic ones: the client never supplies the actor.
 3. **CONFIRMED — `auditLogs` reads are admin-only** (`firestore.rules:133`), so Front Desk cannot read the trail at all. The owner's question is partly a *front-desk* question ("who checked this guest in?" gets asked at the desk, by the desk). Inline attribution therefore must **not** come from `auditLogs` — it comes from denormalized fields on the record itself, which Front Desk can already read. The global log stays admin-only. This split is a feature, not a workaround: the desk sees the current record's provenance, the admin sees everyone's history.
 4. **⚠ PII — a naive `before`/`after` snapshot copies guest personal data into a second collection with different retention.** A booking diff would carry `guestName`, `guestEmail`, `guestPhone`, `guestRegistration`, `guestIdPhotoUrl` and `paymentProofUrl` into `auditLogs`. `plan/docs/GOTCHAS.md §Security & PII` forbids exposing payment-proof URLs outside admin surfaces and forbids logging PII; `plan/docs/SECURITY.md` carries the RA 10173 data-minimisation posture. The audit row records **what changed**, not **what it changed to**, for any field on the redaction list.
-5. **ADJACENT FINDING — `handledBy` is load-bearing and misnamed.** Three server handlers and one client path write it as "the staff member who last touched this booking", while the walk-in modal writes it as "the staff member who created this booking". Both readings are live in the same field. Renaming it is a cross-surface refactor with no behavioural payoff; the fix is to add the field that was actually missing (`createdBy`, stamped once) and document `handledBy` as last-touch in `TYPES.md` so the next reader stops guessing.
+5. **ADJACENT FINDING — `handledBy` is load-bearing and misnamed.** Three server handlers and one client path write it as "the staff member who last touched this booking", while the walk-in modal writes it as "the staff member who created this booking". Renaming it is a cross-surface refactor with no behavioural payoff; the fix is to add the field that was missing (`createdBy`, stamped once) and document `handledBy` as last-touch in `TYPES.md`.
 6. **ADJACENT FINDING — ✅ RESOLVED (first slice).** `BACKEND.md` was compacted first (finding 6 was a budget blocker), then the `checkedInAt` / `checkedInBy` schema rows shipped.
 7. **⚠ CONFIRMED — ✅ RESOLVED (first slice) — three attribution fields were client-writable with NO `request.auth.uid` constraint, and one of them gated a money decision.** The `bookings` update rule's `affectedKeys().hasOnly([...])` allowlist let a staff client write **`discountVerifiedBy`**, **`specialRequestsUpdatedBy`** and **`handledBy`** with no rule tying any of them to the caller's own UID — so a Front Desk user with a browser console could approve a 20% senior/PWD discount and stamp **another staff member's UID** as the approver. The `charges` block in the same file already enforced `addedBy == request.auth.uid`; ATR-07 now applies the same pattern to the three fields, with emulator cases denying a write that claims another staff member's UID.
-8. **CONFIRMED — ✅ PARTIALLY RESOLVED (booking drawer, 2026-11-21) — the existing add-on trails have no row-level reader, and the rules promise a Settings audit view that was never built.** `ReportsPage.tsx:581` + `:604` subscribe to `breakfastAudit` / `otherAddOnAudit` only to increment a counter on `occurredAfterCutoff === true` — **one integer**; the rows are never rendered. And the `firestore.rules` comment on the ETR access audit claims it is *"read by Admin (for the audit-log view in Settings)"*, while a repo-wide grep returns **zero** reads of `refresh-access-audit` — the same comment drift as the `auditLogs` claim corrected on 2026-10-20. **Consequence:** decision 6 and ATR-06 are amended below — "link to the existing trails" assumed those rows were readable. ATR-06 must build the reader.
+8. **CONFIRMED — ✅ PARTIALLY RESOLVED (booking drawer, 2026-11-21) — the add-on trails had no row-level reader, and the rules promised a Settings audit view that was never built.** `ReportsPage.tsx:581` + `:604` subscribe to `breakfastAudit` / `otherAddOnAudit` only to increment a counter on `occurredAfterCutoff === true` — **one integer**. And the `firestore.rules` comment on the ETR access audit claims it is *"read by Admin (for the audit-log view in Settings)"*, while a repo-wide grep returns **zero** reads of `refresh-access-audit` — the same comment drift as the `auditLogs` claim corrected on 2026-10-20. **Consequence:** decision 6 and ATR-06 are amended below — ATR-06 must build the reader.
 9. **CONFIRMED — ✅ RESOLVED (first slice) — three of the four existing attribution surfaces printed raw UIDs.** `staffNameMap` (`ReportsPage.tsx:1026`) resolved a UID to a display name in exactly **one** place: the payments/refunds tables. Raw 28-character UIDs appeared in incidental charges (+ both CSV exports), member points history and the drawer's discount block (falling back to the literal `"Staff"`). ATR-05 lifted the resolver into `shared/utils/staffNames.ts` and retrofitted every surface onto it.
 
 ---
@@ -67,9 +65,9 @@ Decided from code and convention; no owner input needed unless marked. Numbers r
 
 ### Rejected alternatives
 
-- **Per-record `bookings/{id}/history` subcollections only** — cannot answer "what did staff X do today" without a `collectionGroup` scan across every record, and gives rooms, settings and rates no uniform home. The per-booking add-on trails already prove the pattern's ceiling: they exist, they work, and they are read by exactly one metric because a per-record trail is invisible from anywhere else.
-- **Firestore triggers / Cloud Functions to capture diffs automatically** — forbidden by `CLAUDE.md §Hard Rules` (Firebase Auth + Firestore + Storage only; no Cloud Functions). Would also have been the only approach that cannot be skipped by a direct client write, which is worth recording as the real cost of that rule.
-- **Full `before` / `after` document snapshots** — PII (finding 4) and unbounded row size. A booking document with `breakfastSelections` and `otherAddOnSelections` maps is large; two copies per edit, forever, is the FLR-03 linear-growth trap with a compliance surface attached.
+- **Per-record `bookings/{id}/history` subcollections only** — cannot answer "what did staff X do today" without a `collectionGroup` scan across every record, and gives rooms, settings and rates no uniform home. The per-booking add-on trails already prove the pattern's ceiling: they exist, they work, and they are read by exactly one metric — a per-record trail is invisible from anywhere else.
+- **Firestore triggers / Cloud Functions to capture diffs automatically** — forbidden by `CLAUDE.md §Hard Rules`. Would also have been the only approach that cannot be skipped by a direct client write, which is worth recording as the real cost of that rule.
+- **Full `before` / `after` document snapshots** — PII (finding 4) and unbounded row size. A booking document with its selection maps is large; two copies per edit, forever, is the FLR-03 linear-growth trap with a compliance surface attached.
 - **Reusing `notifications`** — 30-day retention, a `readBy` mutation surface, and a deliberately bounded 50-row query. It is a read-state surface, not an immutable record.
 - **A new Vercel function per audit route** — the Hobby plan caps the deployment at 12 functions (`plan/docs/VERCEL-FUNCTION-LIMIT.md`). Everything dispatches through the existing `api/[...route].js` catch-all. **This block adds zero functions.**
 
@@ -143,6 +141,7 @@ Housekeeping gets its own triple because it is the highest-frequency room write 
 | `createdBy` / `createdByName` | string \| null | **Stamped once at create, never overwritten.** This is what answers *"kinsay nag walkin book?"*. `"guest"` for public online bookings, the staff UID for walk-ins and staff-created bookings. |
 | `checkedInByName` | string \| null | Companion to the **already-written** `checkedInBy` (finding: it exists in production and is in no type or MD). |
 | `checkedOutByName` | string \| null | Companion to the existing `checkedOutBy`. |
+| `paymentConfirmedBy` / `paymentConfirmedByName` | string \| null | **ATR-09.** The payment VERIFIER's stamp, written in the same write as `paymentConfirmedAt` and never overwritten — `handledBy` is last-touch, so it cannot answer "who verified?". |
 
 `handledBy` keeps its current behaviour and is documented in `TYPES.md` as **last staff to touch this booking** (finding 5). No rename.
 
@@ -199,13 +198,12 @@ Items are tracked in `plan/project/ROADMAP.md §Staff Audit Trail (ATR)`; this f
 - ✅ **ATR-05** — **SHIPPED (first slice).** Inline surfaces: the booking drawer provenance line, the room modal note, the dashboard housekeeping chip. Front-Desk-readable, no `auditLogs` read. Every UID resolves through the SHARED resolver (`shared/utils/staffNames.ts`, lifted out of `ReportsPage` — finding 9), and the three raw-UID surfaces (charges + both exports, points history, the discount block) are retrofitted onto it.
 - ⬜ **ATR-06** — Admin-only `/audit` page: filters, pagination, CSV export, mobile card list, deep links.
 - 🟡 **ATR-07** — **RULES HALF SHIPPED (first slice):** the `auditLogs` create-time field validation, the three composite indexes, and the three-field `request.auth.uid` constraint on the `bookings` update rule — `discountVerifiedBy` / `specialRequestsUpdatedBy` / `handledBy` (finding 7), copying the constraint the `charges` block in the same file already uses, with emulator cases denying a write that claims another staff member's UID. ⬜ **STILL OPEN:** `/api/janitor/audit-prune` + the `vercel.json §crons` entry (retention — CVQ-ATR-01).
-- 🟡 **ATR-08** — **Tests + MD sync ride with each item.** ✅ for this slice: shared (schema, redaction, action vocabulary), admin (inline surfaces render + omit cleanly on legacy records; the staffNameMap retrofit), rules (`firebase/tests/atr-audit-trail-rules.emulator.test.ts` — append-only, actor spoofing, unknown action, Front Desk read, and a write claiming another staff UID all denied). ⬜ still open with ATR-02 / ATR-06: the guest-api writer-per-action-family tests, the `/audit` page's query + pagination, and the retention MDs (`API-ROUTES.md`, `SECURITY.md`, `WHITE-LABEL.md`).
+- 🟡 **ATR-08** — **Tests + MD sync ride with each item.** ✅ for this slice: shared (schema, redaction, action vocabulary), admin (inline surfaces render + omit cleanly on legacy records; the staffNameMap retrofit), guest-api (the ATR-02 writer-per-action-family tests), rules (`firebase/tests/atr-audit-trail-rules.emulator.test.ts` — append-only, actor spoofing, unknown action, Front Desk read, and a write claiming another staff UID all denied). ⬜ still open with ATR-06: the `/audit` page's query + pagination, and the retention MDs (`API-ROUTES.md`, `SECURITY.md`, `WHITE-LABEL.md`).
+- ✅ **ATR-09** — **SHIPPED (2026-11-21).** Every milestone on the drawer timeline names its actor. The "Payment verified" row resolves `paymentConfirmedBy` (the verifier, above); the "Booking created" row resolves `createdBy` (the creator); a record written before either stamp existed falls back to `handledBy` — documented, not silent. The desk no longer sees a bare "Staff".
 
 ### Suggested sequencing
 
 ATR-01 → ATR-03 + ATR-04 → ATR-05 (the first slice — **shipped**) → ATR-02 (the forensic writers, the largest item) → ATR-07 (rules half shipped) → ATR-06 (the page is worth least until there are rows in it) → ATR-08 rides with each item.
-
-ATR-03 + ATR-04 + ATR-05 alone answer all three of the owner's questions for everything that happens *after* they ship.
 
 ### Second-slice notes (2026-11-21)
 
@@ -214,15 +212,16 @@ ATR-02 shipped the writers (`guest-app/server/lib/audit-writer.ts`). The contrac
 - **Rows are BUILT inside the transaction, after every read** — `before` / `after` carry the real values; Firestore requires reads before writes (FOL-03). A commit-time failure fails the transaction: the booking and its record should agree.
 - **Free text is recorded BY NAME ONLY** — `specialRequests` / `notes` name, no value; operational prose (a cancellation / refund / room-reassignment reason) rides `reason`.
 - **Reservation-scope facts are recorded per child booking** — `AUDIT_TARGET_COLLECTIONS` has no `reservations` entry, so a reservation-scope cancel writes one row per child.
+- **A milestone with no actor renders a bare "Staff"** (ATR-09) — the desk reported it. The actor resolution lives in `shared/utils/bookingHistory.ts`: `paymentConfirmedBy` names the verifier, `createdBy` names the creator, and `handledBy` is the documented fallback for a record written before either stamp existed.
 
 The slice's other decisions are in `plan/project/ROADMAP.md §Staff Audit Trail (ATR)`.
 
 ### First-slice notes (2026-11-20)
 
-The first slice shipped ATR-01 + ATR-03 + ATR-04 + ATR-05 + the ATR-07 rules half. Five things it decided that the contract above did not pre-answer:
+The first slice shipped ATR-01 + ATR-03 + ATR-04 + ATR-05 + the ATR-07 rules half. Five things it decided:
 
-- **`reason` is the channel for operational prose; the redaction list governs snapshots.** The row's `reason` carries the free text the UI already collects (the room block reason). `blockReason` is therefore NOT on the list — it is operational, and the row shape names it as a `reason` use case.
+- **`reason` is the channel for operational prose; the redaction list governs snapshots.** The row's `reason` carries the free text the UI already collects (the room block reason) — `blockReason` is therefore NOT on the list.
 - **ONE resolver.** The `staffNameMap` was lifted out of `ReportsPage` into `shared/utils/staffNames.ts`; every surface routes through it. A second resolver is how the three surfaces drifted in the first place.
-- **`rooms` is PUBLICLY READABLE.** The ATR-03 attribution fields live on the `rooms` document, so the staff display names on them are visible to anyone who queries the collection. `rooms` carries no guest PII, and `roomPrivate` stays staff-only.
+- **`rooms` is PUBLICLY READABLE.** The ATR-03 attribution fields live on the `rooms` document, so the staff display names on them are publicly visible. `rooms` carries no guest PII, and `roomPrivate` stays staff-only.
 - **The `auditLogs` create rule requires `source` + `changedFields`.** The source says how far to trust a row; `changedFields` is the only record that a redacted field changed at all.
-- **The per-booking trails finally have a reader (2026-11-21).** The drawer's new History tab merges `breakfastAudit` + `otherAddOnAudit` + the charge ledger + the milestone stamps into one reverse-chron timeline — finding 8 was a READER gap, not a data gap. ATR-02 has since landed the writers, so the tab and the log together answer the owner's question.
+- **The per-booking trails finally have a reader (2026-11-21).** The drawer's History tab merges `breakfastAudit` + `otherAddOnAudit` + the charge ledger + the milestone stamps into one timeline — finding 8 was a READER gap, not a data gap.

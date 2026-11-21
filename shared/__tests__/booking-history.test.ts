@@ -221,6 +221,110 @@ describe("bookingHistory — bookingMilestoneEvents", () => {
   });
 });
 
+// Per ATR-09 (2026-11-21): the desk's Activity history showed a bare
+// "Staff" on every row whose actor could not be resolved. The two
+// milestones that were affected:
+//
+//   1. "Payment verified" — the milestone carried NO actor at all, so
+//      it ALWAYS rendered the generic fallback. It now resolves the
+//      verifier from `paymentConfirmedBy` (the stamp the server writes
+//      in the same write as `paymentConfirmedAt`).
+//   2. "Booking created" — a LEGACY desk booking (written before
+//      ATR-04) has no `createdBy` stamp, so its creator was
+//      unrecoverable. It now falls back to `handledBy`.
+describe("bookingHistory — ATR-09 the milestone actors resolve to a NAME", () => {
+  const staffNameMap = new Map([
+    ["uid-juan", "Juan Dela Cruz"],
+    ["uid-maria", "Maria Santos"]
+  ]);
+
+  const milestone = (events: BookingHistoryEvent[], kind: string) =>
+    events.find((event) => event.kind === kind);
+
+  it("attributes the payment verification to the verifier", () => {
+    const events = bookingMilestoneEvents({
+      paymentConfirmedAt: "2026-11-19T08:14:00.000Z",
+      paymentConfirmedBy: "uid-maria",
+      paymentConfirmedByName: "Maria Santos",
+      handledBy: "uid-juan"
+    });
+    const event = milestone(events, "payment-confirmed");
+    expect(event?.actorUid).toBe("uid-maria");
+    expect(event?.actorName).toBe("Maria Santos");
+    expect(bookingHistoryActorLabel(event!, staffNameMap)).toBe("Maria Santos");
+  });
+
+  it("prefers the verifier over `handledBy` (which is overwritten by later actions)", () => {
+    // `handledBy` names the LAST staff member who touched the booking.
+    // It must not win over the dedicated verifier stamp.
+    const events = bookingMilestoneEvents({
+      paymentConfirmedAt: "2026-11-19T08:14:00.000Z",
+      paymentConfirmedBy: "uid-maria",
+      handledBy: "uid-juan"
+    });
+    expect(milestone(events, "payment-confirmed")?.actorUid).toBe("uid-maria");
+  });
+
+  it("falls back to `handledBy` for a payment verified before ATR-09", () => {
+    const events = bookingMilestoneEvents({
+      paymentConfirmedAt: "2026-11-19T08:14:00.000Z",
+      handledBy: "uid-juan"
+    });
+    const event = milestone(events, "payment-confirmed");
+    expect(event?.actorUid).toBe("uid-juan");
+    expect(bookingHistoryActorLabel(event!, staffNameMap)).toBe("Juan Dela Cruz");
+  });
+
+  it("attributes a desk-created booking to its creator", () => {
+    const events = bookingMilestoneEvents({
+      createdAt: "2026-11-19T08:14:00.000Z",
+      createdBy: "uid-juan",
+      createdByName: "Juan Dela Cruz"
+    });
+    const event = milestone(events, "created");
+    expect(event?.actorUid).toBe("uid-juan");
+    expect(bookingHistoryActorLabel(event!, staffNameMap)).toBe("Juan Dela Cruz");
+  });
+
+  it("falls back to `handledBy` for a legacy desk booking with no `createdBy` stamp", () => {
+    // A booking written before ATR-04 carries no `createdBy` at all.
+    const events = bookingMilestoneEvents({
+      createdAt: "2026-11-19T08:14:00.000Z",
+      handledBy: "uid-juan"
+    });
+    const event = milestone(events, "created");
+    expect(event?.actorUid).toBe("uid-juan");
+    expect(bookingHistoryActorLabel(event!, staffNameMap)).toBe("Juan Dela Cruz");
+  });
+
+  it("never treats a reserved literal as a staff uid", () => {
+    // "guest" / "system" / "staff" are NOT uids — passing one to the
+    // resolver would look up a staff member that does not exist.
+    const events = bookingMilestoneEvents({
+      createdAt: "2026-11-19T08:14:00.000Z",
+      createdBy: "staff",
+      paymentConfirmedAt: "2026-11-19T08:14:00.000Z",
+      paymentConfirmedBy: "system",
+      handledBy: ""
+    });
+    expect(milestone(events, "created")?.actorUid).toBeNull();
+    expect(milestone(events, "payment-confirmed")?.actorUid).toBeNull();
+  });
+
+  it("keeps a guest-created booking on the guest role and off the staff map", () => {
+    const events = bookingMilestoneEvents({
+      createdAt: "2026-11-19T08:14:00.000Z",
+      createdBy: "guest",
+      createdByName: "Guest",
+      handledBy: "uid-juan"
+    });
+    const event = milestone(events, "created");
+    expect(event?.actorRole).toBe("guest");
+    expect(event?.actorUid).toBeNull();
+    expect(bookingHistoryActorLabel(event!, staffNameMap)).toBe("Guest");
+  });
+});
+
 describe("bookingHistory — mergeBookingHistoryEvents", () => {
   const at = (iso: string): BookingHistoryEvent => ({
     id: iso,
