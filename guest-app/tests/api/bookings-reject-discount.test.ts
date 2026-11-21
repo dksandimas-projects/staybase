@@ -60,6 +60,10 @@ vi.mock("../../server/lib/firebase-admin", () => {
       })),
       runTransaction: vi.fn().mockImplementation(async (callback: any) => callback({
         get: async (ref: any) => ref.get(),
+        // Per ATR-02: the audit row is staged in the SAME transaction as
+        // the mutation, so the mock transaction needs `set` (a real
+        // Firestore transaction always has it).
+        set: async () => {},
         update: async (ref: any, data: any) => ref.update(data)
       }))
     },

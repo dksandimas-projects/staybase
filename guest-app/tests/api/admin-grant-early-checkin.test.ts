@@ -29,6 +29,12 @@ vi.mock("../../server/lib/firebase-admin", () => {
       collection: vi.fn().mockImplementation((name: string) => ({ doc: (id: string) => docRef(`${name}/${id}`) })),
       runTransaction: vi.fn().mockImplementation(async (callback: any) => callback({
         get: vi.fn().mockImplementation((ref: any) => ref.get()),
+        // Per ATR-02: the audit row is staged in the SAME transaction as
+        // the mutation, so the mock transaction needs `set` (a real
+        // Firestore transaction always has it).
+        set: vi.fn().mockImplementation((ref: any, data: any) => {
+          mockWrites.push({ path: ref.path, data });
+        }),
         update: vi.fn().mockImplementation((ref: any, data: any) => {
           Object.assign(mockBookings[ref.id], data);
           mockWrites.push({ path: ref.path, data });
