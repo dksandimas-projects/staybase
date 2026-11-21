@@ -83,9 +83,7 @@ describe("IFS-01 — the guest panel honours both switches", () => {
     const cardBody = guestSrc.slice(cardStart, cardStart + 3000);
     expect(cardBody).toMatch(/href=\{`tel:\$\{phone\}`\}/);
     expect(cardBody).toMatch(/Call Front Desk/);
-  });
-
-  it("falls back to the whole-panel card only when EVERY in-room feature is off", () => {
+  });  it("falls back to the whole-panel card only when EVERY in-room feature is off", () => {
     // Per IFS-01 follow-up (decision #335, 2026-11-21): the whole-panel
     // card has NO header, so it takes the "Call Desk" button with it.
     // It must therefore only appear when the voice call is off too —
@@ -133,8 +131,7 @@ describe("IFS-01 follow-up — the guest panel honours the switch MATRIX (decisi
 
   it("chat OFF + call OFF → the card is phone-only (no in-app call)", () => {
     // Both switches off: there is no in-room channel left, so the phone
-    // number is the action. The phone link ALWAYS renders — the guest
-    // never lands on a dead panel.
+    // number is the action.
     expect(guestSrc).toMatch(
       /onCallDesk=\{inRoomChatTabSurface === "call" \? handleStartCall : undefined\}/
     );
@@ -142,6 +139,22 @@ describe("IFS-01 follow-up — the guest panel honours the switch MATRIX (decisi
     const cardBody = guestSrc.slice(cardStart, cardStart + 3000);
     expect(cardBody).toMatch(/href=\{`tel:\$\{phone\}`\}/);
     expect(cardBody).toMatch(/Call Front Desk/);
+  });
+
+  it("the two call affordances are MUTUALLY EXCLUSIVE (owner-specified 2026-11-21)", () => {
+    // "Call Desk" via the intercom while the voice call is ON;
+    // "Call Front Desk" via the phone ONLY while it is off. A guest is
+    // never offered both at the same time.
+    const cardStart = guestSrc.indexOf("function IntercomUnavailableCard");
+    expect(cardStart).toBeGreaterThan(-1);
+    const cardBody = guestSrc.slice(cardStart, cardStart + 3000);
+    // The in-app call lives in the `onCallDesk` branch…
+    expect(cardBody).toMatch(/\{onCallDesk && \([\s\S]{0,400}?Call Desk/);
+    // …and the PHONE lives in the `!onCallDesk` branch, i.e. it can
+    // never render alongside the in-app call.
+    expect(cardBody).toMatch(
+      /\{!onCallDesk && \([\s\S]{0,400}?href=\{`tel:\$\{phone\}`\}/
+    );
   });
 
   it("chat ON + call OFF → the header carries NO call button", () => {

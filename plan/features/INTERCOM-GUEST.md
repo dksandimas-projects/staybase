@@ -164,13 +164,19 @@ PAIR the hotel left on — not of the chat switch alone.
 |---|---|---|
 | ON | ON | The chat thread, plus the **"Call Desk"** button in the panel header. |
 | ON | OFF | The chat thread. **No call control anywhere** — the button is gone entirely, not disabled. |
-| OFF | ON | The chat tab replaces the thread with a fallback card whose **primary action is the in-room "Call Desk" button** (the same handler as the header button — the one in the middle). The phone number stays as a quiet secondary line. |
+| OFF | ON | The chat tab replaces the thread with a fallback card whose action is the in-room **"Call Desk"** button (the same handler as the header button — the one in the middle). The **phone is NOT offered alongside it**. |
 | OFF | OFF | The phone-only fallback card: **"Call Front Desk"** with the front-desk number. No in-room channel is left. |
 
 **The rule that matters:** with the chat off and the call ON, the guest must NOT be
 pushed to the phone. The hotel left the voice call open on purpose, so the in-room
 call IS the next step — degrading to a phone card would hide a channel the hotel
 deliberately left available.
+
+**THE TWO CALL AFFORDANCES ARE MUTUALLY EXCLUSIVE** (owner-specified 2026-11-21):
+**"Call Desk"** — the in-app intercom call — appears **only while the voice call is
+ON**, and **"Call Front Desk"** — the phone number — appears **only while it is
+OFF**. A guest is never offered both at once: while the intercom call works, it is
+the channel; the phone belongs to the world where the intercom call is switched off.
 
 **The whole-panel card counts the call too.** When the chat AND the store are off,
 the panel used to collapse into the phone-only card — a card with **no header**, so
@@ -187,11 +193,15 @@ unit-tested in `shared/__tests__/ifs-01-in-room-feature-matrix.test.ts`; the wir
 pinned by source-text tripwires in
 `admin-app/src/__tests__/ifs-01-intercom-feature-switches.test.ts`.
 
-**The phone link always renders.** Whatever the switches say, the fallback card keeps
-a tap-to-call link — the guest never lands on a dead panel (FRONTEND.md §UX
-Philosophy: *"Every error has a next step"*). When the in-room call is available it
-is the PRIMARY action and the phone drops to a secondary line, so there is still only
-ONE obvious primary action on screen.
+**The guest never lands on a dead panel.** The fallback card always carries ONE
+action that works: the in-app call while the voice call is on, the tap-to-call phone
+line while it is off (FRONTEND.md §UX Philosophy: *"Every error has a next step"*),
+and there is still only ONE obvious primary action on screen.
+
+**One deliberate exception.** The phone number is not offered while the intercom call
+is on — EXCEPT in the call-ERROR banner in the panel header (no mic permission, no
+answer). There the intercom call is on but it FAILED, so the direct line is the
+guest's recovery; without it the guest would be stuck.
 
 ### Edge cases
 

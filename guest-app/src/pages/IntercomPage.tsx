@@ -134,14 +134,20 @@ interface ActiveOrder {
 }
 
 /**
- * Per IFS-01 (2026-11-20, decision #318): the phone-only fallback
- * card.
+ * Per IFS-01 (2026-11-20, decision #318): the fallback card the guest
+ * gets when the in-room CHAT is switched off.
  *
- * When the hotel switches the in-room CHAT off, the guest is not
- * left with a dead panel — they get one calm screen with the ONE next
- * step that still works: call the front desk. The card mirrors the
- * existing "this room is not checked in" screen so the two
- * unavailable states look like the same family.
+ * The guest is not left with a dead panel — they get one calm screen
+ * with the ONE next step that still works. WHICH next step depends on
+ * the VOICE CALL switch (decision #335, owner-specified 2026-11-21):
+ *
+ *   call ON  → the in-app intercom call ("Call Desk"). The phone is
+ *              NOT offered alongside it — the two are mutually
+ *              exclusive.
+ *   call OFF → the phone ("Call Front Desk" + the number).
+ *
+ * The card mirrors the existing "this room is not checked in" screen so
+ * the two unavailable states look like the same family.
  */
 function IntercomUnavailableCard({ phone, title, message, icon, onCallDesk }: {
   phone: string;
@@ -151,10 +157,15 @@ function IntercomUnavailableCard({ phone, title, message, icon, onCallDesk }: {
   /**
    * Per IFS-01 follow-up (2026-11-21, decision #335): when the hotel
    * switched the CHAT off but the VOICE CALL is still on, the in-room
-   * call is the guest's next step — so it becomes the card's PRIMARY
-   * action (the one in the middle) and the phone number drops to a
-   * quiet secondary line. WITHOUT this prop the card is the phone-only
-   * fallback, which is what a hotel with BOTH switches off must show.
+   * call is the guest's next step — so the card's action is the "Call
+   * Desk" button (the one in the middle). WITHOUT this prop the card is
+   * the phone-only fallback, which is what a hotel with BOTH switches
+   * off must show.
+   *
+   * The two affordances are MUTUALLY EXCLUSIVE (owner-specified
+   * 2026-11-21): "Call Desk" via the intercom while the voice call is
+   * on, "Call Front Desk" via the phone only while it is off. A guest
+   * is never offered both.
    */
   onCallDesk?: () => void;
 }) {
@@ -181,26 +192,29 @@ function IntercomUnavailableCard({ phone, title, message, icon, onCallDesk }: {
         </button>
       )}
       {/*
-       * The phone line ALWAYS renders — the guest is never left with a
-       * dead panel (FRONTEND.md §UX Philosophy: "Every error has a next
-       * step"). It is the PRIMARY action only when there is no in-room
-       * call to offer.
+       * The PHONE line renders ONLY when there is no in-room call to
+       * offer (owner-specified 2026-11-21): "Call Front Desk" via the
+       * phone belongs to the voice-call-OFF world. While the intercom
+       * call is on, the guest is offered the intercom call — never both.
+       * The guest is still never left with a dead panel: when the call
+       * is off, this link IS the next step (FRONTEND.md §UX Philosophy:
+       * "Every error has a next step").
        */}
-      <a
-        href={`tel:${phone}`}
-        className={
-          onCallDesk
-            ? "mt-3 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
-            : "mt-5 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-bold text-white"
-        }
-      >
-        <Phone size={16} />
-        Call Front Desk
-      </a>
-      {phone && (
-        <p className="mt-3 text-xs text-gray-500">
-          {phone}
-        </p>
+      {!onCallDesk && (
+        <>
+          <a
+            href={`tel:${phone}`}
+            className="mt-5 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-bold text-white"
+          >
+            <Phone size={16} />
+            Call Front Desk
+          </a>
+          {phone && (
+            <p className="mt-3 text-xs text-gray-500">
+              {phone}
+            </p>
+          )}
+        </>
       )}
     </div>
   );
@@ -1590,6 +1604,13 @@ export function IntercomPage() {
               <AlertCircle size={14} className="shrink-0 text-red-400 mt-0.5" />
               <div>
                 <p className="font-semibold">{callError}</p>
+                {/*
+                 * The ONE exception to "the phone belongs to the
+                 * voice-call-OFF world" (decision #335): the intercom
+                 * call is on but it FAILED (no mic permission, no
+                 * answer). The direct line is the guest's recovery
+                 * there — without it the guest would be stuck.
+                 */}
                 <p className="mt-1">
                   Direct Line:{" "}
                   <a href={`tel:${hotelContact.frontDeskPhone}`} className="underline font-bold text-white">
