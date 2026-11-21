@@ -666,31 +666,36 @@ The canonical TypeScript types + the Zod schema live in `shared/schemas/audit.ts
 
 ## Booking History Event (2026-11-21)
 
-The normalized VIEW model the admin booking drawer's **History tab** renders — one timeline of who changed what on a booking, and when. It is NOT a persisted document: it is assembled at render time from four differently-shaped sources (the `breakfastAudit` + `otherAddOnAudit` subcollections, the incidental-charge ledger, and the booking's own milestone stamps) by the pure helpers in `shared/utils/bookingHistory.ts`. The rules live in the shared package because the admin app has no component-test harness, so this is the only layer where the mapping can be unit-tested for real.
+The normalized VIEW model the admin booking drawer's **History tab** renders — one timeline of who changed what on a booking, and when. It is NOT a persisted document: it is assembled at render time from five differently-shaped sources (the `breakfastAudit` + `otherAddOnAudit` subcollections, the incidental-charge ledger, the booking's own milestone stamps, and the booking's own `rescheduleHistory[]` — the ROOM CHANGE trail) by the pure helpers in `shared/utils/bookingHistory.ts`. The rules live in the shared package because the admin app has no component-test harness, so this is the only layer where the mapping can be unit-tested for real.
 
 ```
 BookingHistoryEvent {
   id: string                              // stable React key
   kind: "created" | "checked-in" | "checked-out" | "cancelled"
       | "payment-confirmed" | "payment-rejected" | "special-requests-updated"
-      | "breakfast-change" | "add-on-change" | "charge"
+      | "breakfast-change" | "add-on-change" | "charge" | "room-change"
   at: string | null                       // ISO timestamp; null sorts LAST, never first
   actorUid: string | null
   actorRole: "guest" | "front-desk" | "admin" | "system" | null
   actorName: string | null                // display-name snapshot at write time, when present
   summary: string                         // human-readable "what happened"
-  subject: string | null                  // the meal / add-on / charge label
+  subject: string | null                  // the meal / add-on / charge label, or "Room 201 → Room 202"
   serviceDate: string | null              // YYYY-MM-DD the change applies to
   guestIndex: number | null               // the breakfast slot's guest index (0-based)
   reason: string | null
   note: string | null
-  amount: number | null                   // money, for charge events
+  amount: number | null                   // money: a charge's amount, or the price delta a move produced
   quantity: number | null                 // count, for add-on events
   lateChange: boolean                     // landed after the cut-off window
 }
 ```
 
 **Actor resolution.** `bookingHistoryActorLabel()` resolves the display name in ONE order: a non-staff role's own label ("Guest" / "System") → the write-time `actorName` snapshot → the uid through the ONE shared resolver (`shared/utils/staffNames.ts`) → the caller's fallback label. A raw uid never reaches the screen.
+
+**The room-change source (ATR-10, 2026-11-21).** `rescheduleHistory[]` is an array ON the booking document, not a subcollection. The server appends one entry per change, inside the same transaction that performs it (`handleAssignBookingRoom` → `kind: "room"`; `handleRescheduleBooking` → `kind: "move"` / `"extend"`), and the array is append-only. `rescheduleHistoryEvents(booking)` maps it into `room-change` events; `rescheduleHistoryEvent(entry, fallbackId)` maps one entry. Two rules matter:
+
+- **The actor is a staff uid, and it is never printed.** The server writes `req.staff?.uid || req.staff?.email || "staff"`. A uid resolves through the shared resolver; an EMAIL is PII and is DROPPED (the row falls back to the generic "Staff" label); the reserved literals (`"staff"` / `"guest"` / `"system"`) are not uids.
+- **`amount` is the price DELTA for a room change, and `null` when no money moved.** A room override preserves the money by construction (`pricingBasis: "preserved"`, `deltaTotalPrice: 0`), so it renders no badge — a "₱0" would read as a money movement that did not happen. A move's delta renders with its sign.
 
 ---
 

@@ -2070,6 +2070,18 @@ interface StayHistoryProps {
 }
 
 export function StayHistory({ entries }: StayHistoryProps) {
+  // Per ATR-10 (2026-11-21): the actor of a stay change is a STAFF
+  // UID (the server writes `req.staff?.uid`). It resolves through the
+  // ONE shared resolver — a raw 28-character uid tells the desk
+  // nothing, and printing one is a PII leak (GOTCHAS §Security & PII).
+  //
+  // This panel used to print the uid verbatim. It was invisible while
+  // the mapper dropped `rescheduleHistory[]` (so the panel never
+  // rendered at all) — which is exactly how the raw-uid leak stayed
+  // hidden. Now that the field is hydrated, the leak would ship.
+  const { staff } = useAdmin();
+  const staffNameMap = useMemo(() => buildStaffNameMap(staff), [staff]);
+
   if (!entries || entries.length === 0) {
     return (
       <section className="rounded-lg border border-gray-100 bg-gray-50 p-4">
@@ -2091,6 +2103,10 @@ export function StayHistory({ entries }: StayHistoryProps) {
       <ol className="mt-3 space-y-3" aria-label="Stay change timeline">
         {entries.slice().reverse().map((entry, index) => {
           const isExtend = entry.kind === "extend";
+          // Per ATR-10 (2026-11-21): a room OVERRIDE (`kind: "room"`)
+          // keeps the same dates and only swaps the room — the
+          // "Moved / upgraded room" label would misdescribe it.
+          const isRoomOverride = entry.kind === "room";
           const nightsDelta = (() => {
             const from = entry.fromCheckOut ? new Date(entry.fromCheckOut) : null;
             const to = entry.toCheckOut ? new Date(entry.toCheckOut) : null;
@@ -2098,7 +2114,11 @@ export function StayHistory({ entries }: StayHistoryProps) {
             const diff = Math.round((to.getTime() - from.getTime()) / 86400000);
             return diff !== 0 ? diff : null;
           })();
-          const byLabel = entry.by?.includes("@") ? entry.by.split("@")[0] : (entry.by || "staff");
+          // Per ATR-10 (2026-11-21): resolve the staff uid to a NAME
+          // through the ONE shared resolver. The old line printed the
+          // raw uid (or an email's local part) — a PII leak on a
+          // staff-facing surface.
+          const byLabel = staffNameFor(staffNameMap, entry.by, "Staff");
 
           return (
             <li key={index} className="relative pl-6">
@@ -2124,7 +2144,7 @@ export function StayHistory({ entries }: StayHistoryProps) {
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-[11px] font-bold text-gray-900">
-                      {isExtend ? "Extended stay" : "Moved / upgraded room"}
+                      {isExtend ? "Extended stay" : isRoomOverride ? "Room changed" : "Moved / upgraded room"}
                     </p>
                     <p className="mt-0.5 text-[10px] text-gray-500">
                       {byLabel} · {formatTimelineDate(entry.at)}

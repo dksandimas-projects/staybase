@@ -267,3 +267,89 @@ describe("booking history tab — the milestones name their actor", () => {
     expect(html).not.toContain("uid-juan");
   });
 });
+
+// Per ATR-10 (2026-11-21): the desk reported "I did a room change for
+// the booking, it was not tracked in the history in the booking
+// drawer".
+//
+// The server ALWAYS appended the change to `booking.rescheduleHistory[]`
+// — inside the same transaction that moved the room — so the write was
+// never the bug. The drawer's History tab merged four sources and
+// never read the fifth, and the admin mapper never hydrated the field,
+// so the change was invisible.
+//
+// This is the ONE test that proves the REPORTED BUG is gone at the
+// RENDER level: the room change appears, it names the staff member,
+// and the raw uid never reaches the screen.
+describe("booking history tab — the room change is tracked", () => {
+  it("renders a room override with the staff NAME, never the raw uid", () => {
+    reset();
+    const booking = {
+      id: "BK-3",
+      discountVerified: false,
+      discountVerifiedBy: null,
+      rescheduleHistory: [
+        {
+          kind: "room",
+          fromRoomId: "room-a",
+          fromRoomNumber: "201",
+          fromCheckIn: "2026-11-20",
+          fromCheckOut: "2026-11-22",
+          toRoomId: "room-b",
+          toRoomNumber: "202",
+          toCheckIn: "2026-11-20",
+          toCheckOut: "2026-11-22",
+          reason: "Guest requested a quieter room",
+          by: "uid-juan",
+          at: "2026-11-21T04:30:00.000Z",
+          pricingBasis: "preserved",
+          deltaTotalPrice: 0
+        }
+      ]
+    } as never;
+
+    const html = render({ booking });
+    expect(html).toContain("Changed room");
+    expect(html).toContain("Room 201 → Room 202");
+    expect(html).toContain("Juan Dela Cruz");
+    expect(html).toContain("Front Desk");
+    expect(html).toContain("Guest requested a quieter room");
+    // The raw uid must never reach the screen.
+    expect(html).not.toContain("uid-juan");
+    // A room override moves NO money — a "₱0" badge would read as a
+    // money movement that did not happen.
+    expect(html).not.toContain("0.00");
+  });
+
+  it("renders a room MOVE with its price delta and its date change", () => {
+    reset();
+    const booking = {
+      id: "BK-4",
+      discountVerified: false,
+      discountVerifiedBy: null,
+      rescheduleHistory: [
+        {
+          kind: "move",
+          fromRoomNumber: "201",
+          toRoomNumber: "302",
+          fromCheckIn: "2026-11-20",
+          fromCheckOut: "2026-11-22",
+          toCheckIn: "2026-11-21",
+          toCheckOut: "2026-11-24",
+          by: "uid-maria",
+          at: "2026-11-21T05:00:00.000Z",
+          pricingBasis: "recalculated",
+          deltaTotalPrice: 2400
+        }
+      ]
+    } as never;
+
+    const html = render({ booking });
+    expect(html).toContain("Moved to another room");
+    expect(html).toContain("Room 201 → Room 302");
+    expect(html).toContain("Check-out 2026-11-22 → 2026-11-24");
+    expect(html).toContain("Maria Santos");
+    expect(html).toMatch(/2,?400/);
+    expect(html).not.toContain("uid-maria");
+  });
+});

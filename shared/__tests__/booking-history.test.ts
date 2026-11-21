@@ -2,13 +2,14 @@
 //
 // WHY THIS TEST EXISTS
 // --------------------
-// The History tab merges FOUR differently-shaped sources into one
+// The History tab merges FIVE differently-shaped sources into one
 // reverse-chronological timeline:
 //
 //   1. `breakfastAudit` rows   (server-written, BR-01)
 //   2. `otherAddOnAudit` rows  (server-written, BR-12)
 //   3. `charges` rows          (client-written, rules-pinned actor)
 //   4. the booking's own milestone stamps (created / check-in / …)
+//   5. the booking's own `rescheduleHistory[]` (the ROOM CHANGE trail)
 //
 // The admin app has NO component-test harness (no
 // @testing-library/react), so the admin-side test can only assert on
@@ -28,6 +29,8 @@ import {
   incidentalChargeEvent,
   mergeBookingHistoryEvents,
   otherAddOnAuditEvent,
+  rescheduleHistoryEvent,
+  rescheduleHistoryEvents,
   toIsoTimestamp,
   type BookingHistoryEvent
 } from "@spark-inn/shared";
@@ -419,5 +422,159 @@ describe("bookingHistory — bookingHistoryActorLabel", () => {
     );
     expect(label).toBe("Staff");
     expect(label).not.toContain("uid-deleted-account");
+  });
+});
+
+// Per ATR-10 (2026-11-21): the ROOM CHANGE trail.
+//
+// The desk reported "I did a room change for the booking, it was not
+// tracked in the history in the booking drawer". The server ALWAYS
+// appended the change to `booking.rescheduleHistory[]` — inside the
+// same transaction that moved the room — so the write was never the
+// bug. The drawer's History tab simply merged four sources and never
+// read the fifth, and the admin mapper never hydrated the field.
+//
+// These tests pin the mapping that makes the change visible.
+describe("bookingHistory — rescheduleHistoryEvents (the room-change trail)", () => {
+  // The exact shape `handleAssignBookingRoom` writes (RAR-01).
+  const ROOM_OVERRIDE = {
+    kind: "room",
+    fromRoomId: "room-a",
+    fromRoomNumber: "201",
+    fromCheckIn: "2026-11-20",
+    fromCheckOut: "2026-11-22",
+    toRoomId: "room-b",
+    toRoomNumber: "202",
+    toCheckIn: "2026-11-20",
+    toCheckOut: "2026-11-22",
+    reason: "Guest requested a quieter room",
+    by: "uid-juan",
+    at: "2026-11-21T04:30:00.000Z",
+    pricingBasis: "preserved",
+    deltaTotalPrice: 0
+  };
+
+  it("maps a room override to a `room-change` event", () => {
+    const event = rescheduleHistoryEvent(ROOM_OVERRIDE, "0");
+    expect(event?.kind).toBe("room-change");
+    expect(event?.summary).toBe("Changed room");
+    expect(event?.subject).toBe("Room 201 → Room 202");
+    expect(event?.at).toBe("2026-11-21T04:30:00.000Z");
+    expect(event?.reason).toBe("Guest requested a quieter room");
+    expect(event?.actorUid).toBe("uid-juan");
+  });
+
+  it("shows NO money badge for a room override (its delta is always 0)", () => {
+    // A room override preserves the money by construction
+    // (`pricingBasis: "preserved"`, `deltaTotalPrice: 0`). Rendering
+    // "₱0" would read as a money movement that did not happen.
+    expect(rescheduleHistoryEvent(ROOM_OVERRIDE, "0")?.amount).toBeNull();
+  });
+
+  it("maps a move to a `room-change` event WITH its date change and price delta", () => {
+    const event = rescheduleHistoryEvent(
+      {
+        kind: "move",
+        fromRoomNumber: "201",
+        toRoomNumber: "302",
+        fromCheckIn: "2026-11-20T00:00:00.000Z",
+        fromCheckOut: "2026-11-22T00:00:00.000Z",
+        toCheckIn: "2026-11-21",
+        toCheckOut: "2026-11-24",
+        by: "uid-maria",
+        at: "2026-11-21T05:00:00.000Z",
+        pricingBasis: "recalculated",
+        deltaTotalPrice: 2400
+      },
+      "0"
+    );
+    expect(event?.summary).toBe("Moved to another room");
+    expect(event?.subject).toBe("Room 201 → Room 302");
+    // A move RE-DATES the stay — that is half of what happened.
+    expect(event?.note).toContain("Check-in 2026-11-20 → 2026-11-21");
+    expect(event?.note).toContain("Check-out 2026-11-22 → 2026-11-24");
+    expect(event?.amount).toBe(2400);
+  });
+
+  it("maps an extend to a `room-change` event showing the check-out move", () => {
+    const event = rescheduleHistoryEvent(
+      {
+        kind: "extend",
+        fromRoomNumber: "201",
+        toRoomNumber: "201",
+        fromCheckOut: "2026-11-22T00:00:00.000Z",
+        toCheckOut: "2026-11-24",
+        by: "guest",
+        at: "2026-11-21T06:00:00.000Z",
+        deltaTotalPrice: 1800
+      },
+      "0"
+    );
+    expect(event?.summary).toBe("Extended stay");
+    expect(event?.subject).toBe("Check-out 2026-11-22 → 2026-11-24");
+    expect(event?.amount).toBe(1800);
+  });
+
+  it("never turns an EMAIL actor into a uid (an address is PII, not an identity)", () => {
+    // The server writes `req.staff?.uid || req.staff?.email`. The
+    // email branch is NOT a uid and must never reach the screen.
+    const event = rescheduleHistoryEvent({ ...ROOM_OVERRIDE, by: "juan@sparkinn.com" }, "0");
+    expect(event?.actorUid).toBeNull();
+    expect(bookingHistoryActorLabel(event!, new Map())).toBe("Staff");
+  });
+
+  it("treats the reserved literals as no actor", () => {
+    expect(rescheduleHistoryEvent({ ...ROOM_OVERRIDE, by: "staff" }, "0")?.actorUid).toBeNull();
+    expect(rescheduleHistoryEvent({ ...ROOM_OVERRIDE, by: "system" }, "0")?.actorUid).toBeNull();
+    expect(rescheduleHistoryEvent({ ...ROOM_OVERRIDE, by: "" }, "0")?.actorUid).toBeNull();
+  });
+
+  it("resolves the room-change actor to a NAME through the ONE shared resolver", () => {
+    const event = rescheduleHistoryEvent(ROOM_OVERRIDE, "0")!;
+    const label = bookingHistoryActorLabel(event, new Map([["uid-juan", "Juan Dela Cruz"]]));
+    expect(label).toBe("Juan Dela Cruz");
+    expect(label).not.toContain("uid-juan");
+  });
+
+  it("reads the trail off the booking document", () => {
+    const events = rescheduleHistoryEvents({ rescheduleHistory: [ROOM_OVERRIDE] });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.kind).toBe("room-change");
+  });
+
+  it("returns an empty list for a booking with no room change", () => {
+    expect(rescheduleHistoryEvents({ id: "BK-1" })).toEqual([]);
+    expect(rescheduleHistoryEvents(null)).toEqual([]);
+    expect(rescheduleHistoryEvents({ rescheduleHistory: "not-an-array" })).toEqual([]);
+  });
+
+  it("drops a malformed entry instead of throwing", () => {
+    expect(rescheduleHistoryEvent(null, "0")).toBeNull();
+    expect(rescheduleHistoryEvent("nope", "0")).toBeNull();
+  });
+
+  it("keeps EVERY change in the trail (the array is append-only)", () => {
+    const events = rescheduleHistoryEvents({
+      rescheduleHistory: [
+        ROOM_OVERRIDE,
+        { ...ROOM_OVERRIDE, toRoomNumber: "203", at: "2026-11-21T09:00:00.000Z" }
+      ]
+    });
+    expect(events).toHaveLength(2);
+    // Newest-first — the same order the merged timeline uses.
+    expect(events.map((event) => event.subject)).toEqual([
+      "Room 201 → Room 203",
+      "Room 201 → Room 202"
+    ]);
+  });
+
+  it("lands the room change in the merged timeline at its own moment", () => {
+    const merged = mergeBookingHistoryEvents(
+      rescheduleHistoryEvents({ rescheduleHistory: [ROOM_OVERRIDE] }),
+      bookingMilestoneEvents({ createdAt: "2026-11-19T06:00:00.000Z", createdBy: "uid-juan" })
+    );
+    expect(merged[0]?.kind).toBe("room-change");
+    expect(merged[0]?.at).toBe("2026-11-21T04:30:00.000Z");
+    expect(merged[1]?.kind).toBe("created");
   });
 });

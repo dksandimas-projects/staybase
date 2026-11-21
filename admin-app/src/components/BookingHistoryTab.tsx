@@ -2,13 +2,17 @@
 // booking drawer's HISTORY tab.
 //
 // WHAT IT SHOWS: one reverse-chronological timeline of who changed
-// what on THIS booking, and when. It merges four sources:
+// what on THIS booking, and when. It merges five sources:
 //
 //   - the breakfast trail   (`bookings/{id}/breakfastAudit`)
 //   - the other-add-on trail (`bookings/{id}/otherAddOnAudit`)
 //   - the incidental-charge ledger (already loaded by the drawer)
 //   - the booking's own milestone stamps (created / checked in /
 //     checked out / cancelled / payment verified / special requests)
+//   - the booking's own `rescheduleHistory[]` — the ROOM CHANGE trail
+//     (a room re-assignment, a move, or an extend), server-written
+//     inside the same transaction that performed the change
+//     (ATR-10, 2026-11-21)
 //
 // WHO IT IS FOR: the front desk. Every row resolves its actor to a
 // NAME through the ONE shared resolver (`shared/utils/staffNames.ts`) —
@@ -31,7 +35,16 @@
 // fallback for a record written before those stamps existed.
 
 import { useMemo } from "react";
-import { History, Receipt, Utensils, Sparkles, LogIn, LogOut, CreditCard } from "lucide-react";
+import {
+  History,
+  Receipt,
+  Utensils,
+  Sparkles,
+  LogIn,
+  LogOut,
+  CreditCard,
+  BedDouble
+} from "lucide-react";
 import { useAdmin, type Booking, type IncidentalCharge } from "../context/AdminContext";
 import {
   bookingHistoryActorLabel,
@@ -39,6 +52,7 @@ import {
   buildStaffNameMap,
   incidentalChargeEvent,
   mergeBookingHistoryEvents,
+  rescheduleHistoryEvents,
   type BookingHistoryEvent
 } from "@spark-inn/shared";
 import { useBookingHistory } from "../hooks/useBookingHistory";
@@ -69,6 +83,8 @@ function EventIcon({ event }: { event: BookingHistoryEvent }) {
     case "payment-confirmed":
     case "payment-rejected":
       return <CreditCard size={14} className={className} aria-hidden="true" />;
+    case "room-change":
+      return <BedDouble size={14} className={className} aria-hidden="true" />;
     default:
       return <History size={14} className={className} aria-hidden="true" />;
   }
@@ -108,9 +124,16 @@ export function BookingHistoryTab({ booking, charges, active }: BookingHistoryTa
 
   const milestoneEvents = useMemo(() => bookingMilestoneEvents(booking), [booking]);
 
+  // Per ATR-10 (2026-11-21): the ROOM CHANGE trail. It lives on the
+  // booking document itself (`rescheduleHistory[]`), server-written
+  // inside the transaction that moved the room — so there is no
+  // second listener to attach and no extra read.
+  const rescheduleEvents = useMemo(() => rescheduleHistoryEvents(booking), [booking]);
+
   const timeline = useMemo(
-    () => mergeBookingHistoryEvents(trailEvents, chargeEvents, milestoneEvents),
-    [trailEvents, chargeEvents, milestoneEvents]
+    () =>
+      mergeBookingHistoryEvents(trailEvents, chargeEvents, milestoneEvents, rescheduleEvents),
+    [trailEvents, chargeEvents, milestoneEvents, rescheduleEvents]
   );
 
   /**
@@ -203,7 +226,7 @@ export function BookingHistoryTab({ booking, charges, active }: BookingHistoryTa
           className="mt-4 rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-4 text-[11px] leading-relaxed text-gray-500"
         >
           Nothing recorded yet. Breakfast changes, add-on changes, incidental
-          charges and check-ins appear here as they happen.
+          charges, room changes and check-ins appear here as they happen.
         </p>
       )}
 
@@ -248,15 +271,17 @@ export function BookingHistoryTab({ booking, charges, active }: BookingHistoryTa
                   </p>
                   <p className="mt-0.5 text-xs font-medium text-gray-800">
                     {event.summary}
-                    {event.kind === "charge" && event.amount !== null && (
-                      <span
-                        className={`ml-1.5 font-bold ${
-                          event.amount < 0 ? "text-red-600" : "text-gray-900"
-                        }`}
-                      >
-                        {formatPrice(event.amount)}
-                      </span>
-                    )}
+                    {(event.kind === "charge" || event.kind === "room-change") &&
+                      event.amount !== null && (
+                        <span
+                          className={`ml-1.5 font-bold ${
+                            event.amount < 0 ? "text-red-600" : "text-gray-900"
+                          }`}
+                        >
+                          {event.kind === "room-change" && event.amount > 0 ? "+" : ""}
+                          {formatPrice(event.amount)}
+                        </span>
+                      )}
                   </p>
                   {details.length > 0 && (
                     <p className="mt-0.5 text-[11px] text-gray-500">
