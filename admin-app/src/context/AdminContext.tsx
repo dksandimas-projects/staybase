@@ -526,6 +526,15 @@ export interface Booking {
   // authoritative read; per-render `status === "payment-confirmed"`
   // checks are the bug this field fixes.
   paymentConfirmedAt?: string | null;
+  // Per ATR-09 (2026-11-21): the payment VERIFIER's stamp — the staff
+  // uid + display name, written by the server in the same write as
+  // `paymentConfirmedAt` and never overwritten. `handledBy` cannot
+  // answer this (it is overwritten by every later staff action), which
+  // is why the history tab showed a bare "Staff".
+  //
+  // Both are OPTIONAL — a booking verified before ATR-09 has neither.
+  paymentConfirmedBy?: string | null;
+  paymentConfirmedByName?: string | null;
   rescheduleHistory?: any[];
   reminderSentAt: string | null;
   guestIdPhotoUrl: string | null;
@@ -2450,6 +2459,12 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             paymentConfirmedAt: data.paymentConfirmedAt
               ? parseDateTimeString(data.paymentConfirmedAt)
               : null,
+            // Per ATR-09 (2026-11-21): the verifier's stamp. Hydrated
+            // here for the same reason `paymentConfirmedAt` is — a
+            // field the type declares but the mapper drops is a field
+            // the UI cannot read (FOL-02 / MRB-15-10).
+            paymentConfirmedBy: data.paymentConfirmedBy || null,
+            paymentConfirmedByName: data.paymentConfirmedByName || null,
             // Per Phase 12 — Dashboard Payment Rejection & Reference
             // Verification (2026-07-15): the reject-payment handler
             // stamps these three fields on the booking doc. The

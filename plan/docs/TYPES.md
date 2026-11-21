@@ -460,6 +460,12 @@ Booking {
   checkedOutAt?: string | null
   checkedOutBy?: string | null
   checkedOutByName?: string | null
+  // Per ATR-09 (2026-11-21): the payment VERIFIER's stamp. Written in
+  // the SAME write as `paymentConfirmedAt` and never overwritten —
+  // `handledBy` is last-touch, so it cannot answer "who verified?".
+  // Both OPTIONAL: a booking verified before ATR-09 has neither.
+  paymentConfirmedBy?: string | null
+  paymentConfirmedByName?: string | null
   cancellationReason: string
   // Per CRL-02 (2026-08-02): the full cancellation audit metadata.
   // All three fields are nullable on legacy bookings; CRL-02 stamps

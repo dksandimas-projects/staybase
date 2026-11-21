@@ -107,6 +107,21 @@ function asText(value: unknown): string {
   return "";
 }
 
+/**
+ * A staff uid — or `""` when the value is NOT one.
+ *
+ * The booking document carries three RESERVED literals in its actor
+ * fields: `"guest"` (the guest's own action), `"system"` (a
+ * server-initiated one) and `"staff"` (a legacy write with no uid).
+ * None of them is a uid, and passing one to the staff-name resolver
+ * would look up a staff member that does not exist.
+ */
+function staffUidFrom(value: string): string {
+  if (!value) return "";
+  if (value === "guest" || value === "system" || value === "staff") return "";
+  return value;
+}
+
 function asNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim() !== "") {
@@ -340,12 +355,28 @@ export function bookingMilestoneEvents(booking: unknown): BookingHistoryEvent[] 
   };
 
   const createdBy = asText(data.createdBy);
+  // Per ATR-09 (2026-11-21): the creator's uid.
+  //
+  // `createdBy` is the stamp ATR-04 added — "guest" for a public online
+  // booking, the staff uid for a desk booking. A LEGACY desk booking
+  // (written before ATR-04) has NO `createdBy` at all, so the row
+  // rendered the generic "Staff" fallback with no name.
+  //
+  // For those records the creator is unrecoverable from the booking
+  // document, so the BEST-EFFORT fallback is `handledBy` — the last
+  // staff member who handled the booking. On a desk booking created and
+  // paid at the counter that is the same person; on a booking later
+  // touched by another member it is that member. It is a name, and it
+  // is the only one the record carries — which is strictly more useful
+  // to the desk than "Staff", and no more of a claim than the drawer
+  // header's existing "Last updated by" segment.
+  const createdActorUid = staffUidFrom(createdBy) || staffUidFrom(asText(data.handledBy));
   push(
     "created",
     "Booking created",
     toIsoTimestamp(data.createdAt),
-    createdBy || null,
-    asText(data.createdByName) || null,
+    createdBy === "guest" ? null : createdActorUid || null,
+    createdBy === "guest" ? null : asText(data.createdByName) || null,
     createdBy === "guest" ? "guest" : null
   );
 
@@ -353,7 +384,7 @@ export function bookingMilestoneEvents(booking: unknown): BookingHistoryEvent[] 
     "checked-in",
     "Checked in",
     toIsoTimestamp(data.checkedInAt),
-    asText(data.checkedInBy) || null,
+    staffUidFrom(asText(data.checkedInBy)) || null,
     asText(data.checkedInByName) || null
   );
 
@@ -361,7 +392,7 @@ export function bookingMilestoneEvents(booking: unknown): BookingHistoryEvent[] 
     "checked-out",
     "Checked out",
     toIsoTimestamp(data.checkedOutAt),
-    asText(data.checkedOutBy) || null,
+    staffUidFrom(asText(data.checkedOutBy)) || null,
     asText(data.checkedOutByName) || null
   );
 
@@ -370,24 +401,41 @@ export function bookingMilestoneEvents(booking: unknown): BookingHistoryEvent[] 
     "cancelled",
     "Booking cancelled",
     toIsoTimestamp(data.cancelledAt),
-    cancelledBy || null,
+    staffUidFrom(cancelledBy) || null,
     null,
     cancelledBy === "guest" ? "guest" : cancelledBy === "system" ? "system" : null
   );
 
+  // Per ATR-09 (2026-11-21): the payment verifier.
+  //
+  // This milestone used to carry NO actor at all, so it ALWAYS rendered
+  // the generic "Staff" fallback — the desk could see that a payment was
+  // verified but never by whom.
+  //
+  // `paymentConfirmedBy` is the stamp the server writes in the SAME
+  // transaction that stamps `paymentConfirmedAt` (ATR-09): the uid of
+  // the staff member who verified the money. It is the exact answer.
+  //
+  // `handledBy` is the FALLBACK for a legacy booking (one whose payment
+  // was verified before ATR-09): the server has always stamped
+  // `handledBy` next to `paymentConfirmedAt`, but it is OVERWRITTEN by
+  // every later staff action (AUDIT-TRAIL.md §Attribution fields), so it
+  // names the last member who handled the booking rather than
+  // necessarily the verifier. A name beats "Staff"; the fallback is
+  // documented rather than silent.
   push(
     "payment-confirmed",
     "Payment verified",
     toIsoTimestamp(data.paymentConfirmedAt),
-    null,
-    null
+    staffUidFrom(asText(data.paymentConfirmedBy)) || staffUidFrom(asText(data.handledBy)) || null,
+    asText(data.paymentConfirmedByName) || null
   );
 
   push(
     "payment-rejected",
     "Payment rejected",
     toIsoTimestamp(data.paymentRejectedAt),
-    asText(data.paymentRejectedBy) || null,
+    staffUidFrom(asText(data.paymentRejectedBy)) || null,
     null
   );
 
@@ -395,7 +443,7 @@ export function bookingMilestoneEvents(booking: unknown): BookingHistoryEvent[] 
     "special-requests-updated",
     "Updated special requests",
     toIsoTimestamp(data.specialRequestsUpdatedAt),
-    asText(data.specialRequestsUpdatedBy) || null,
+    staffUidFrom(asText(data.specialRequestsUpdatedBy)) || null,
     null
   );
 

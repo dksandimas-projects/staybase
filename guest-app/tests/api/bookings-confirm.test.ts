@@ -1,12 +1,15 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { mockBookings, mockRooms, mockSettings, mockCounters, mockWrites, sendBookingTrigger } = vi.hoisted(() => {
+const { mockBookings, mockRooms, mockSettings, mockCounters, mockGuests, mockWrites, sendBookingTrigger } = vi.hoisted(() => {
   const mockWrites: Array<{ type: string; path: string; data: any }> = [];
   return {
     mockBookings: {} as Record<string, any>,
     mockRooms: {} as Record<string, any>,
     mockSettings: {} as Record<string, any>,
     mockCounters: {} as Record<string, any>,
+    // Per ATR-09: the server resolves a staff member's display name
+    // from `guests/{uid}` (the same document the admin app reads).
+    mockGuests: {} as Record<string, any>,
     mockWrites,
     sendBookingTrigger: vi.fn().mockResolvedValue(undefined)
   };
@@ -31,6 +34,7 @@ vi.mock("../../server/lib/firebase-admin", () => {
         else if (coll === "rooms") store = mockRooms;
         else if (coll === "settings") store = mockSettings;
         else if (coll === "counters") store = mockCounters;
+        else if (coll === "guests") store = mockGuests;
         const data = store[docId];
         return data
           ? { exists: true, id: docId, data: () => data }
@@ -321,6 +325,7 @@ describe("/api/bookings/confirm", () => {
 describe("/api/bookings/mark-payment-confirmed", () => {
   beforeEach(() => {
     Object.keys(mockBookings).forEach((k) => delete mockBookings[k]);
+    Object.keys(mockGuests).forEach((k) => delete mockGuests[k]);
     mockWrites.length = 0;
     sendBookingTrigger.mockClear();
   });
@@ -377,6 +382,60 @@ describe("/api/bookings/mark-payment-confirmed", () => {
 
     expect(res.status).toHaveBeenCalledWith(400);
     expect(sendBookingTrigger).not.toHaveBeenCalled();
+  });
+
+  // Per ATR-09 (2026-11-21): the desk's Activity history showed a bare
+  // "Staff" on the "Payment verified" row because `handledBy` — the
+  // only staff stamp on the document — is OVERWRITTEN by every later
+  // staff action. The verifier gets its OWN write-once stamp, written
+  // in the same write as `paymentConfirmedAt`.
+  test("stamps the VERIFIER alongside `paymentConfirmedAt` (ATR-09)", async () => {
+    mockBookings["booking_1"] = {
+      bookingRef: "SI-20260615-005",
+      status: "payment-uploaded",
+      totalPrice: 5000
+    };
+    mockGuests["staff_1"] = { fullName: "Juan Dela Cruz", role: "front-desk" };
+    const res = mockResponse();
+
+    await handleMarkPaymentConfirmed({
+      staff: { uid: "staff_1", email: "juan@sparkinn.com", role: "front-desk" },
+      body: { bookingId: "booking_1" }
+    }, res);
+
+    expect(mockBookings["booking_1"]).toMatchObject({
+      status: "payment-confirmed",
+      handledBy: "staff_1",
+      paymentConfirmedBy: "staff_1",
+      paymentConfirmedByName: "Juan Dela Cruz"
+    });
+    // The stamp travels with the transition — the booking document
+    // carries BOTH the moment and the member who verified it.
+    expect(mockBookings["booking_1"].paymentConfirmedAt).toBeTruthy();
+  });
+
+  test("keeps the FIRST verifier's stamp when the payment is already confirmed", async () => {
+    // The stamp is write-once: the handler returns early when the
+    // payment is already confirmed, so the member who verified the
+    // money is never silently replaced by whoever touched the booking
+    // next.
+    mockBookings["booking_1"] = {
+      bookingRef: "SI-20260615-006",
+      status: "payment-confirmed",
+      totalPrice: 5000,
+      paymentConfirmedBy: "uid-maria",
+      paymentConfirmedByName: "Maria Santos"
+    };
+    mockGuests["staff_1"] = { fullName: "Juan Dela Cruz", role: "front-desk" };
+    const res = mockResponse();
+
+    await handleMarkPaymentConfirmed({
+      staff: { uid: "staff_1", email: "juan@sparkinn.com", role: "front-desk" },
+      body: { bookingId: "booking_1" }
+    }, res);
+
+    expect(mockBookings["booking_1"].paymentConfirmedBy).toBe("uid-maria");
+    expect(mockBookings["booking_1"].paymentConfirmedByName).toBe("Maria Santos");
   });
 });
 
