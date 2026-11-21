@@ -32,7 +32,7 @@ import { PaymentQrCode } from "../components/PaymentQrCode";
 import { GhostButton } from "../components/GhostButton";
 import { getEffectiveStorePaymentMethods, resolveHotelContact, resolveInRoomChatTabSurface, everyInRoomFeatureIsOff as everyInRoomFeatureIsOffResolver, type EffectiveStorePaymentMethod, type HotelContact } from "@spark-inn/shared";
 import { fetchPublicHotelConfig } from "../hooks/usePublicHotelConfig";
-import { resolveIntercomTab, withIntercomTab, type IntercomTab } from "../utils/intercomTab";
+import { resolveIntercomTab, withIntercomTab, resolveIntercomLandingTab, type IntercomTab } from "../utils/intercomTab";
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const ACCEPTED_UPLOAD_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -257,7 +257,23 @@ export function IntercomPage() {
     resolveIntercomTab(location.search)
   );
 
-  const handleTabChange = useCallback((tab: IntercomTab) => {
+  // Per IFS-01 follow-up (2026-11-21, decision #336): the panel must
+  // LAND on the shop when the hotel switched the CHAT off but left the
+  // store on — the chat QR must not open on the "chat is unavailable"
+  // card. The landing is ONE-SHOT: it is decided once, when the public
+  // config arrives, and it is NOT a standing redirect. A guest who taps
+  // "Chat Support" stays on Chat.
+  //
+  // `guestChoseTabRef` — the guest picked a tab by hand; the landing
+  // must never fight them.
+  // `landingAppliedRef` — the landing already happened.
+  const guestChoseTabRef = useRef<boolean>(false);
+  const landingAppliedRef = useRef<boolean>(false);
+
+  const handleTabChange = useCallback((tab: IntercomTab, source: "guest" | "system" = "system") => {
+    if (source === "guest") {
+      guestChoseTabRef.current = true;
+    }
     setActiveTab(tab);
     // `replace` keeps the tab switch out of the history stack — the
     // guest's Back button still leaves the intercom, it does not walk
@@ -776,6 +792,38 @@ export function IntercomPage() {
       handleTabChange("chat");
     }
   }, [activeTab, isStoreEnabled, handleTabChange]);
+
+  // Per IFS-01 follow-up (2026-11-21, decision #336): WHERE the panel
+  // lands once the public config is known.
+  //
+  // The hotel can switch the CHAT off and leave the STORE on. The chat
+  // QR then opened on the "chat is unavailable" card — a dead end for a
+  // guest whose only working surface was the shop. The landing moves
+  // them to the shop instead.
+  //
+  // THREE rules keep this honest:
+  //   1. ONE-SHOT — `landingAppliedRef` makes it a single decision,
+  //      never a standing redirect that drags the guest back.
+  //   2. It never fights the guest — `guestChoseTabRef` short-circuits
+  //      the landing the moment the guest taps a tab by hand.
+  //   3. It waits for the config — `isRoomLoading` is still true until
+  //      the public projection lands, so the switches are known before
+  //      the landing is taken.
+  useEffect(() => {
+    if (landingAppliedRef.current) return;
+    if (guestChoseTabRef.current) return;
+    if (isRoomLoading) return;
+
+    const landingTab = resolveIntercomLandingTab(
+      activeTab,
+      intercomChatEnabled,
+      isStoreEnabled
+    );
+    if (landingTab === activeTab) return;
+
+    landingAppliedRef.current = true;
+    handleTabChange(landingTab);
+  }, [activeTab, intercomChatEnabled, isStoreEnabled, isRoomLoading, handleTabChange]);
 
   useEffect(() => {
     if (!activeOrder || !roomNumber || activeOrder.status === "delivered" || activeOrder.status === "cancelled") return;
@@ -1657,7 +1705,7 @@ export function IntercomPage() {
           {/* Navigation Tabs */}
           <div className="flex gap-2 border-t border-white/10 pt-3 mt-1">
             <button
-              onClick={() => handleTabChange("chat")}
+              onClick={() => handleTabChange("chat", "guest")}
               className={`flex-1 min-h-[44px] rounded-lg text-center text-sm font-bold transition flex items-center justify-center gap-2 relative ${
                 activeTab === "chat" 
                   ? "bg-primary text-white shadow-sm"
@@ -1674,7 +1722,7 @@ export function IntercomPage() {
             </button>
             {isStoreEnabled && (
               <button
-                onClick={() => handleTabChange("shop")}
+                onClick={() => handleTabChange("shop", "guest")}
                 className={`flex-1 min-h-[44px] rounded-lg text-center text-sm font-bold transition flex items-center justify-center gap-2 ${
                   activeTab === "shop"
                     ? "bg-primary text-white shadow-sm"
@@ -1931,6 +1979,33 @@ export function IntercomPage() {
                 </p>
               </div>
 
+              {/*
+               * Per IFS-01 follow-up (2026-11-21, decision #336): with the
+               * VOICE CALL switched off, the phone is the guest's only way
+               * to reach the front desk from the shop surface — and the
+               * shop IS a working surface, so it must carry the same next
+               * step the chat card carries. It is the one place the
+               * guest can still get a human while the in-room chat and
+               * the in-room call are both dark.
+               *
+               * The two call affordances stay MUTUALLY EXCLUSIVE
+               * (decision #335): while the intercom call is ON the
+               * header's "Call Desk" button is the channel, and this
+               * phone link is NOT rendered.
+               */}
+              {!intercomCallsEnabled && (
+                <a
+                  href={`tel:${hotelContact.frontDeskPhone}`}
+                  className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-primary/30 bg-white px-4 text-xs font-bold text-primary-dark shadow-sm transition hover:bg-primary-light/40 active:scale-[0.98]"
+                >
+                  <Phone size={14} />
+                  Call Front Desk
+                  {hotelContact.frontDeskPhone && (
+                    <span className="font-normal text-gray-500">{hotelContact.frontDeskPhone}</span>
+                  )}
+                </a>
+              )}
+
               {/* GSD-01: Catalog Discovery — search + category chips
                   + result count + clear-all. Hidden while the live
                   catalog is still empty so the unavailable/empty
@@ -2039,7 +2114,11 @@ export function IntercomPage() {
                   <div className="sm:col-span-2 rounded-card bg-white p-6 text-center shadow-sm ring-1 ring-gray-200">
                     <ShoppingBag size={28} className="mx-auto text-gray-300" />
                     <p className="mt-3 text-sm font-bold text-gray-900">The shop is currently unavailable.</p>
-                    <p className="mt-1 text-xs text-gray-500">Please send a chat message for anything you need.</p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {intercomChatEnabled
+                        ? "Please send a chat message for anything you need."
+                        : "Chat support is switched off at the moment — please call the front desk and we will be happy to help."}
+                    </p>
                   </div>
                 )}
 

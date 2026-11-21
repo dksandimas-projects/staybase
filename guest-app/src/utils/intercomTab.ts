@@ -25,6 +25,45 @@ export function resolveIntercomTab(search: string | URLSearchParams): IntercomTa
 }
 
 /**
+ * WHERE the in-room panel lands, per IFS-01 follow-up (2026-11-21,
+ * decision #336).
+ *
+ * The panel has two tabs — Chat and the Spark Essentials shop — and the
+ * hotel can switch the CHAT off while leaving the store on. The chat QR
+ * used to land the guest on the "chat is unavailable" card: a dead end
+ * for a guest whose only working surface was the shop. When the chat is
+ * off and the store is on, the guest lands on the STORE instead — the
+ * one surface that still works. The Chat tab stays one tap away, so a
+ * guest who wants to read why the chat is gone still can.
+ *
+ * The rules, in order:
+ *
+ *   requested "shop"          → "shop" while the store is on; "chat"
+ *                               when the store is off as well (the
+ *                               store-off fallback owns that case in
+ *                               the panel).
+ *   requested "chat", chat ON  → "chat" — the chat works.
+ *   requested "chat", chat OFF → "shop" when the store is on (the chat
+ *                               is switched off, the store is not);
+ *                               "chat" when the store is off too — the
+ *                               chat tab then carries the "Call Desk"
+ *                               card (call ON) or the whole-panel
+ *                               fallback card (everything off).
+ *
+ * Pure, so the landing rule is unit-testable on its own and the panel
+ * can never disagree with itself about where it opens.
+ */
+export function resolveIntercomLandingTab(
+  requestedTab: IntercomTab,
+  chatEnabled: boolean,
+  storeEnabled: boolean
+): IntercomTab {
+  if (requestedTab === "shop") return storeEnabled ? "shop" : "chat";
+  if (chatEnabled) return "chat";
+  return storeEnabled ? "shop" : "chat";
+}
+
+/**
  * Build the search string for a tab, preserving any other query params
  * the URL already carries. The chat tab carries no param (the plain QR
  * URL stays plain); the shop tab carries `tab=shop`.

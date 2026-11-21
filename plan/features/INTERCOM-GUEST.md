@@ -168,40 +168,64 @@ PAIR the hotel left on — not of the chat switch alone.
 | OFF | OFF | The phone-only fallback card: **"Call Front Desk"** with the front-desk number. No in-room channel is left. |
 
 **The rule that matters:** with the chat off and the call ON, the guest must NOT be
-pushed to the phone. The hotel left the voice call open on purpose, so the in-room
-call IS the next step — degrading to a phone card would hide a channel the hotel
-deliberately left available.
+pushed to the phone — the hotel left the voice call open on purpose, so the in-room call
+IS the next step.
 
 **THE TWO CALL AFFORDANCES ARE MUTUALLY EXCLUSIVE** (owner-specified 2026-11-21):
-**"Call Desk"** — the in-app intercom call — appears **only while the voice call is
-ON**, and **"Call Front Desk"** — the phone number — appears **only while it is
-OFF**. A guest is never offered both at once: while the intercom call works, it is
-the channel; the phone belongs to the world where the intercom call is switched off.
+**"Call Desk"** — the in-app intercom call — appears **only while the voice call is ON**,
+and **"Call Front Desk"** — the phone number — **only while it is OFF**. While the
+intercom call works, it is the channel; the phone belongs to the world where the
+intercom call is switched off.
 
-**The whole-panel card counts the call too.** When the chat AND the store are off,
-the panel used to collapse into the phone-only card — a card with **no header**, so
-it took the "Call Desk" button with it. The voice call is a live in-room channel, so
-the collapse now happens only when **every** in-room feature is off (chat + calls +
-store). With the call still ON, the panel keeps its header and offers the call.
+**The whole-panel card counts the call too.** The panel collapses into the phone-only
+card only when **every** in-room feature is off (chat + calls + store). With the call
+still ON, the panel keeps its header — and the header is where the "Call Desk" button
+lives.
 
-**One definition, shared.** The matrix lives in
-`shared/utils/intercomFeatures.ts` — `resolveInRoomChatTabSurface(chatEnabled,
-callsEnabled)` returns `"chat" | "call" | "phone"`, and `everyInRoomFeatureIsOff(chat,
-calls, store)` decides the collapse. The guest panel calls both, so the panel and any
-future surface cannot drift apart on what the guest is offered. The matrix itself is
-unit-tested in `shared/__tests__/ifs-01-in-room-feature-matrix.test.ts`; the wiring is
-pinned by source-text tripwires in
+**One definition, shared.** The matrix lives in `shared/utils/intercomFeatures.ts` —
+`resolveInRoomChatTabSurface(chatEnabled, callsEnabled)` returns `"chat" | "call" |
+"phone"`, and `everyInRoomFeatureIsOff(chat, calls, store)` decides the collapse. The
+matrix is unit-tested in `shared/__tests__/ifs-01-in-room-feature-matrix.test.ts`; the
+wiring is pinned by source-text tripwires in
 `admin-app/src/__tests__/ifs-01-intercom-feature-switches.test.ts`.
 
-**The guest never lands on a dead panel.** The fallback card always carries ONE
-action that works: the in-app call while the voice call is on, the tap-to-call phone
-line while it is off (FRONTEND.md §UX Philosophy: *"Every error has a next step"*),
-and there is still only ONE obvious primary action on screen.
+**The guest never lands on a dead panel.** The fallback card always carries ONE action
+that works (FRONTEND.md §UX Philosophy: *"Every error has a next step"*).
 
 **One deliberate exception.** The phone number is not offered while the intercom call
 is on — EXCEPT in the call-ERROR banner in the panel header (no mic permission, no
 answer). There the intercom call is on but it FAILED, so the direct line is the
 guest's recovery; without it the guest would be stuck.
+
+### Where the panel lands, and the shop's phone line (decision #336, 2026-11-21)
+
+The chat QR landed the guest on the **"chat is unavailable"** card whenever the hotel
+had switched the chat off. With the STORE left on, that card was a dead end — the one
+working surface was one tap away.
+**The panel lands on the shop** — chat off + store on → the guest opens on the **Shop**
+tab. The Chat tab stays one tap away.
+
+| Requested | Chat | Store | Lands on |
+|---|---|---|---|
+| Chat (the chat QR) | ON | any | Chat |
+| Chat (the chat QR) | OFF | ON | **Shop** |
+| Chat (the chat QR) | OFF | OFF | Chat — the "Call Desk" card, or the whole-panel card |
+| Shop (the store QR) | any | ON | **Shop** — never overridden |
+| Shop (the store QR) | any | OFF | Chat — the store-off fallback owns this case |
+
+**The landing is ONE-SHOT and never fights the guest** — decided once, when the public
+config arrives, NOT a standing redirect; a guest who taps "Chat Support" by hand stays
+on Chat.
+
+**The shop carries the phone line while the call is off** — with the voice call off the
+phone is the guest's only way to reach the desk from the shop, so the shop tab shows a
+**"Call Front Desk"** link with the front-desk number, **only while the voice call is
+off** (mutual exclusivity above is unchanged).
+
+**One definition.** The landing rule is a pure resolver,
+`resolveIntercomLandingTab(requestedTab, chatEnabled, storeEnabled)` in
+`guest-app/src/utils/intercomTab.ts` — the table above is its spec. The rule is
+unit-tested; the wiring is pinned by source-text tripwires.
 
 ### Edge cases
 
@@ -210,6 +234,9 @@ guest's recovery; without it the guest would be stuck.
 - [x] Chat off + store off + call on → the panel keeps its header and the "Call Desk" button (the whole-panel collapse waits for every feature to be off).
 - [x] Chat off + store off + call off → the whole panel becomes the phone-only card (no tabs).
 - [x] Chat on + call off → no "Call Desk" button anywhere; the chat and the store are untouched.
+- [x] Chat off + store on → the panel lands on the Shop tab, not on the "chat is unavailable" card; the guest may tap "Chat Support" and STAY there.
+- [x] Chat off + store on + call off → the shop tab shows the "Call Front Desk" phone link; with the call on it shows NO phone link (the header's "Call Desk" is the channel).
+- [x] The store QR (`?tab=shop`) still lands on the shop even when the chat is off.
 - [x] A guest on a screen that was open before the switch flipped cannot start a call (the handler re-checks).
 - [x] The desk sees a "Calls Off" chip, so staff can explain the missing button to a guest.
 - [x] The switches apply on the guest's next page load / refresh (the public config is read on mount).
@@ -221,6 +248,8 @@ guest's recovery; without it the guest would be stuck.
 - [x] Settings → Intercom → turn OFF "Voice Calls" → the "Call Desk" button disappears; the desk's inbox does not ring
 - [x] With the voice call off, a Spark Essentials order still reaches the desk (the store badge message is not gated)
 - [x] With both the chat and the store off, the panel is the fallback card
+- [x] With the chat off and the store on, the panel opens on the Shop tab (not on the "chat is unavailable" card)
+- [x] With the chat off, the store on and the voice call off, the shop tab shows the "Call Front Desk" phone link
 
 ### References
 

@@ -302,7 +302,7 @@ Spec: `plan/features/INTERCOM-GUEST.md`
 
 **Expected:** "This QR code is not valid. Please contact the front desk."
 
-### IC-06 — The in-room feature switch MATRIX (decision #335)
+### IC-07 — The in-room feature switch MATRIX (decision #335, landing per #336)
 **Actor:** Guest checked into an occupied room (any QA test-run booking).
 **Setup:** Admin toggles the two switches in **Settings → Intercom**. Each toggle now persists **on click** (no Save step) — but the guest's panel reads a public projection cached for **60 seconds**, so **wait ~75 s after each flip** before reloading the guest page.
 
@@ -314,6 +314,13 @@ Spec: `plan/features/INTERCOM-GUEST.md`
 | OFF | OFF | The **phone-only** card: "Chat is unavailable" + **"Call Front Desk"** with the front-desk number. No in-room call control. |
 
 **Also check:** chat OFF + store OFF + call ON → the panel keeps its header and the "Call Desk" button (the whole-panel phone card only appears once EVERY in-room feature is off). The guest is never offered BOTH "Call Desk" and "Call Front Desk" at the same time.
+
+**The landing (decision #336)** — chat OFF + store ON:
+
+1. Open the room QR **without** a `tab` param (the chat QR).
+2. Then open `/intercom/{roomId}?tab=shop` (the store QR).
+
+**Expected:** the chat QR now opens on the **Shop** tab, NOT on the "chat is unavailable" card. The store QR still opens on the Shop tab. The Chat tab is one tap away either way, and the guest may tap it and STAY there — the landing never fights a guest who chooses by hand. With the voice call ON, the shop shows **no phone number** (the header's "Call Desk" is the channel); with the voice call OFF, the shop shows the **"Call Front Desk"** link with the front-desk number.
 
 **Note:** the first load after a guest deploy can serve the PREVIOUS bundle from the PWA service worker — hard-refresh before judging the panel (see `plan/project/DEPLOY.md`).
 

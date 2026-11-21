@@ -27,6 +27,8 @@ The store is accessible from the guest intercom page via QR scan. Guests browse 
 ## UI Checklist
 
 - [x] "Shop" tab or panel within the intercom page — alongside the chat interface
+- [x] The panel LANDS on the Shop tab when the hotel switched the in-room chat off but left the store on (decision #336) — the chat QR must not open on the "chat is unavailable" card. The landing is one-shot and never overrides a tab the guest tapped by hand. See `plan/features/INTERCOM-GUEST.md §Where the panel lands`.
+- [x] "Call Front Desk" phone link in the shop tab **while the in-room voice call is switched off** (decision #336) — with the call off, the phone is the guest's only way to reach the front desk from the shop. It is **absent while the call is on**: the header's "Call Desk" button is the channel then, and the two affordances are mutually exclusive (decision #335).
 - [x] Item grid — name, photo (optional), short description, price, stock badge (Available / Out of Stock)
 - [x] Items with `stock: null` (unlimited) show no stock count — just "Available"
 - [x] Items with `stock: 0` show "Out of Stock" and are not orderable
