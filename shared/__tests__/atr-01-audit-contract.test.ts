@@ -154,6 +154,32 @@ describe("ATR-01 — the PII redaction list", () => {
     }
   });
 
+  it("covers the booking documents' ACTUAL guest-identity field names (the `leadGuest*` family)", () => {
+    // Per ATR-02 (2026-11-21): the spec's redaction list names
+    // `guestName` / `guestEmail` / `guestPhone`, but the booking
+    // documents carry the guest's identity under `leadGuestName` /
+    // `leadGuestEmail` / `leadGuestPhone` (plus a nested
+    // `leadGuestDetails` / `guestDetails` object). The list as
+    // shipped did not cover the names the real documents use, so a
+    // writer that snapshotted a booking doc would have copied the
+    // guest's personal data into `auditLogs` — a SECOND copy, under
+    // a different retention.
+    for (const field of [
+      "leadGuestName",
+      "leadGuestEmail",
+      "leadGuestPhone",
+      "leadGuestDetails",
+      "guestDetails",
+      "discountIdPhotoPath",
+    ]) {
+      expect(isAuditRedactedField(field), `${field} must be redacted`).toBe(true);
+    }
+    // The redaction must not over-match the neighbouring field names
+    // the trail legitimately needs.
+    expect(isAuditRedactedField("leadGuest")).toBe(false);
+    expect(isAuditRedactedField("guest")).toBe(false);
+  });
+
   it("does NOT over-match — a longer field name is not redacted", () => {
     // An over-broad match would silently drop legitimate audit
     // values, so the match is EXACT.
