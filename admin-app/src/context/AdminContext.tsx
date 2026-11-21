@@ -2521,6 +2521,29 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             checkedOutAt: data.checkedOutAt ? parseDateTimeString(data.checkedOutAt) : null,
             checkedOutBy: data.checkedOutBy || null,
             checkedOutByName: data.checkedOutByName || null,
+            // Per ATR-10 (2026-11-21): the ROOM CHANGE trail.
+            //
+            // The server appends to `rescheduleHistory[]` inside the
+            // same transaction that re-assigns the room
+            // (`handleAssignBookingRoom`) or re-dates the stay
+            // (`handleRescheduleBooking`). The WRITE was always
+            // correct — but this mapper never read the field, so the
+            // drawer saw `undefined` and the room change was
+            // INVISIBLE in the drawer's history (the desk reported
+            // exactly that). This is the same bug class as FOL-01 /
+            // FOL-02: the type declares a field, the mapper forgets
+            // to read it from the snapshot.
+            //
+            // The entries are kept in their RAW shape on purpose:
+            // the drawer's Stay History panel renders the
+            // before / after room numbers and the price delta, and
+            // the shared History mapper (`shared/utils/
+            // bookingHistory.ts`) reads the same fields. Floors at
+            // `[]` so a booking without a room change reads as "no
+            // change", never as `undefined`.
+            rescheduleHistory: Array.isArray(data.rescheduleHistory)
+              ? data.rescheduleHistory
+              : [],
             cancellationReason: data.cancellationReason || "",
             // Per CRL-02 (2026-08-02): hydrate the full
             // cancellation audit metadata. `cancelledAt` is the
