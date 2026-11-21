@@ -137,7 +137,7 @@ Load only the bundle for your task type — do not read all MDs.
 - `plan/features/SPECIAL-REQUESTS.md` — Structured guest preferences + bed-setup capture (SR-01..05, shipped 2026-10-12)
 - `plan/features/SEO-OPENGRAPH.md` — Search indexability (Google/Bing/Yahoo) + link-preview cards (Facebook/Messenger/WhatsApp/Viber/X): robots, sitemap, OG image, per-route meta, JSON-LD
 - `plan/features/BOOKING-UNIFIED.md` — BAR-01 booking data-model refactor (rooms denormalized into the booking doc) — deferred spec; tasks in `plan/project/ROADMAP.md §BAR` · BAR-02 (derive counters) + BAR-03 (FOL-05 sibling-flip helper) shipped 2026-08-08; see `plan/docs/DECISIONS-FEATURES.md #203` + `#204`
-- `plan/features/AUDIT-TRAIL.md` — Staff audit trail (ATR-01..10; ATR-01..05 + ATR-09 + ATR-10 shipped): who changed a room, who handled check-in, who created a walk-in — `auditLogs` action vocabulary, PII redaction list, inline attribution fields, the booking drawer's Activity history tab (breakfast / add-on / charge / milestone / room-change timeline), admin `/audit` page
+- `plan/features/AUDIT-TRAIL.md` — Staff audit trail (ATR-01..11; ATR-01..05 + ATR-09 + ATR-10 + ATR-11 shipped): who changed a room, who handled check-in, who created a walk-in — `auditLogs` action vocabulary, PII redaction list, inline attribution fields, the booking drawer's Activity history tab (breakfast / add-on / charge / milestone / room-change timeline), admin `/audit` page
 - `plan/features/AVAILABILITY-LOCKING.md` — Double-booking prevention, Firestore transactions
 - `plan/features/EMAIL-PDF-STORAGE.md` — Resend email flows, jsPDF receipts, Storage uploads
 - `plan/features/EMAIL-AUDIT-EXTENSIONS.md` — The 8 W4.4 email templates added by the 2026-06 audit
