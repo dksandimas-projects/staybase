@@ -2,7 +2,7 @@
 // booking drawer's HISTORY tab — the per-booking timeline of WHO changed
 // WHAT, and WHEN.
 //
-// WHY A SHARED MODULE: the timeline is assembled from FOUR sources that
+// WHY A SHARED MODULE: the timeline is assembled from FIVE sources that
 // each own their own row shape:
 //
 //   1. `bookings/{id}/breakfastAudit/{rowId}`  — the BR-01 breakfast
@@ -14,10 +14,15 @@
 //   4. The booking document's own milestone stamps — created / checked
 //      in / checked out / cancelled / payment verified / payment
 //      rejected / special requests updated.
+//   5. The booking document's `rescheduleHistory[]` — the ROOM CHANGE
+//      trail (a room re-assignment or a move / upgrade), added
+//      2026-11-21 after the desk reported that a room change did not
+//      appear in the drawer's history.
 //
-// Every one of those four is a DIFFERENT shape with a DIFFERENT
-// timestamp field (`occurredAt` / `addedAt` / `checkedInAt` / …) and a
-// DIFFERENT actor field (`actorUid` / `addedBy` / `checkedInBy` / …).
+// Every one of those five is a DIFFERENT shape with a DIFFERENT
+// timestamp field (`occurredAt` / `addedAt` / `checkedInAt` / `at` / …)
+// and a DIFFERENT actor field (`actorUid` / `addedBy` / `checkedInBy` /
+// `by` / …).
 // Normalising them in one place is the whole point: a second copy of
 // this mapping is how the three raw-UID surfaces drifted in the first
 // place (ATR-05, finding 9).
@@ -57,7 +62,8 @@ export type BookingHistoryEventKind =
   | "special-requests-updated"
   | "breakfast-change"
   | "add-on-change"
-  | "charge";
+  | "charge"
+  | "room-change";
 
 /**
  * ONE normalized event, whatever it came from.
@@ -91,7 +97,11 @@ export interface BookingHistoryEvent {
   reason: string | null;
   /** A free-text note (a charge's note). */
   note: string | null;
-  /** Money, for charge events. */
+  /**
+   * Money: a charge's amount, or the price delta a room move / extend
+   * produced. `null` when the change moved no money (a room override
+   * is always `deltaTotalPrice: 0`).
+   */
   amount: number | null;
   /** Quantity, for add-on events. */
   quantity: number | null;
@@ -134,7 +144,7 @@ function asNumber(value: unknown): number | null {
 /**
  * Normalize any timestamp-ish value to an ISO string.
  *
- * Handles the three shapes the four sources use: a Firestore
+ * Handles the three shapes the five sources use: a Firestore
  * `Timestamp` (an object with a `toDate()`), a JS `Date`, and an ISO
  * string (what the admin mapper's `parseDateTimeString` produces).
  * Returns `null` for anything unusable — an event with no usable time
@@ -172,7 +182,7 @@ function asActorRole(value: unknown): BookingHistoryActorRole | null {
   return null;
 }
 
-// ── The four sources ──────────────────────────────────────────────
+// ── The five sources ──────────────────────────────────────────────
 
 /**
  * A `breakfastAudit` row → one event.
@@ -456,6 +466,163 @@ export function bookingMilestoneEvents(booking: unknown): BookingHistoryEvent[] 
     if (!b.at) return -1;
     return b.at.localeCompare(a.at);
   });
+}
+
+/**
+ * `2026-11-20` — the calendar date of a date-ish value.
+ *
+ * The trail's date fields arrive in TWO shapes: a `yyyy-mm-dd` KEY
+ * (the room override path) and a full ISO timestamp (the reschedule
+ * path). Both reduce to the same calendar day here, so the History
+ * tab never shows a raw timestamp to the desk.
+ */
+function dateLabel(value: unknown): string {
+  const text = asText(value);
+  if (!text) return "";
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : "";
+}
+
+/**
+ * The actor of a `rescheduleHistory[]` entry.
+ *
+ * The server writes `req.staff?.uid || req.staff?.email || "staff"`.
+ * A UID resolves through the ONE shared staff resolver; an EMAIL is
+ * PII and is NOT a uid, so it is DROPPED (the desk sees the generic
+ * "Staff" label rather than a colleague's address); the reserved
+ * literals ("staff" / "guest" / "system") are not uids either.
+ */
+function rescheduleActorUid(value: unknown): string | null {
+  const text = asText(value);
+  if (!text) return null;
+  if (text.includes("@")) return null;
+  return staffUidFrom(text) || null;
+}
+
+/**
+ * A `rescheduleHistory[]` entry → one event.
+ *
+ * WHY THIS SOURCE EXISTS (2026-11-21): the desk reported "I did a
+ * room change for the booking, it was not tracked in the history in
+ * the booking drawer". The WRITE was always there — the server
+ * appends to `booking.rescheduleHistory[]` inside the same
+ * transaction that moves the room — but the drawer's History tab
+ * merged only FOUR sources, so a room change was invisible there.
+ *
+ * THIS TRAIL IS THE RIGHT SOURCE (not the `auditLogs` forensic row):
+ * it is server-written, it commits atomically with the move, and the
+ * FRONT DESK can read it — the audit log is ADMIN-ONLY
+ * (`firestore.rules`), so it could never have served the desk.
+ *
+ * THREE KINDS, because the server distinguishes them:
+ *   - `"room"`   — a room override: the SAME dates, a different room,
+ *                  and the money deliberately PRESERVED
+ *                  (`pricingBasis: "preserved"`, delta 0).
+ *   - `"move"`   — a different room AND re-dated stay; the money was
+ *                  re-derived.
+ *   - `"extend"` — the same room, a later check-out.
+ */
+export function rescheduleHistoryEvent(
+  entry: unknown,
+  fallbackId = ""
+): BookingHistoryEvent | null {
+  if (!entry || typeof entry !== "object") return null;
+  const data = entry as Record<string, unknown>;
+
+  const rawKind = asText(data.kind);
+  const kind = rawKind === "move" || rawKind === "extend" ? rawKind : "room";
+
+  const fromRoom = asText(data.fromRoomNumber);
+  const toRoom = asText(data.toRoomNumber);
+  const fromCheckIn = dateLabel(data.fromCheckIn);
+  const toCheckIn = dateLabel(data.toCheckIn);
+  const fromCheckOut = dateLabel(data.fromCheckOut);
+  const toCheckOut = dateLabel(data.toCheckOut);
+
+  const summary =
+    kind === "move"
+      ? "Moved to another room"
+      : kind === "extend"
+        ? "Extended stay"
+        : "Changed room";
+
+  let subject: string | null = null;
+  let note: string | null = null;
+
+  if (kind === "extend") {
+    subject =
+      fromCheckOut && toCheckOut && fromCheckOut !== toCheckOut
+        ? `Check-out ${fromCheckOut} → ${toCheckOut}`
+        : toCheckOut
+          ? `Check-out ${toCheckOut}`
+          : null;
+  } else {
+    subject =
+      fromRoom && toRoom
+        ? `Room ${fromRoom} → Room ${toRoom}`
+        : toRoom
+          ? `Room ${toRoom}`
+          : fromRoom
+            ? `Room ${fromRoom}`
+            : null;
+    // A "move" also RE-DATES the stay — that is half of what
+    // happened, so it is shown, not dropped.
+    const dateParts: string[] = [];
+    if (fromCheckIn && toCheckIn && fromCheckIn !== toCheckIn) {
+      dateParts.push(`Check-in ${fromCheckIn} → ${toCheckIn}`);
+    }
+    if (fromCheckOut && toCheckOut && fromCheckOut !== toCheckOut) {
+      dateParts.push(`Check-out ${fromCheckOut} → ${toCheckOut}`);
+    }
+    note = dateParts.length > 0 ? dateParts.join(" · ") : null;
+  }
+
+  const delta = asNumber(data.deltaTotalPrice);
+  const at = toIsoTimestamp(data.at);
+
+  return {
+    id: `reschedule:${kind}:${at ?? ""}:${fallbackId}`,
+    kind: "room-change",
+    at,
+    actorUid: rescheduleActorUid(data.by),
+    actorRole: null,
+    actorName: null,
+    summary,
+    subject,
+    serviceDate: null,
+    guestIndex: null,
+    reason: asText(data.reason) || null,
+    note,
+    // A room override is always `deltaTotalPrice: 0` — showing
+    // "₱0" would read as a money movement that did not happen.
+    amount: delta !== null && delta !== 0 ? delta : null,
+    quantity: null,
+    lateChange: false
+  };
+}
+
+/**
+ * The booking document's `rescheduleHistory[]` → events.
+ *
+ * The array is APPEND-ONLY on the server (every write spreads the
+ * existing entries and adds one), so the order in the document IS
+ * the order of the changes. The events are still returned
+ * newest-first, the same order `mergeBookingHistoryEvents` produces.
+ */
+export function rescheduleHistoryEvents(booking: unknown): BookingHistoryEvent[] {
+  if (!booking || typeof booking !== "object") return [];
+  const data = booking as Record<string, unknown>;
+  const entries = Array.isArray(data.rescheduleHistory) ? data.rescheduleHistory : [];
+
+  return entries
+    .map((entry, index) => rescheduleHistoryEvent(entry, String(index)))
+    .filter((event): event is BookingHistoryEvent => Boolean(event))
+    .sort((a, b) => {
+      if (!a.at && !b.at) return 0;
+      if (!a.at) return 1;
+      if (!b.at) return -1;
+      return b.at.localeCompare(a.at);
+    });
 }
 
 /**

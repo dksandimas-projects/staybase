@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.31.1";
+    VERSION2 = "2.31.2";
   }
 });
 
@@ -150173,19 +150173,19 @@ function buildBreakfastRateBreakdownLines(selections) {
   const sortedDates = Array.from(byDate.keys()).sort();
   return sortedDates.map((date) => {
     const { count, total } = byDate.get(date);
-    let dateLabel = date;
+    let dateLabel2 = date;
     try {
       const parsed = /* @__PURE__ */ new Date(`${date}T00:00:00Z`);
       if (!Number.isNaN(parsed.getTime())) {
         const month = parsed.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
         const day = parsed.getUTCDate();
-        dateLabel = `${month} ${day}`;
+        dateLabel2 = `${month} ${day}`;
       }
     } catch {
-      dateLabel = date;
+      dateLabel2 = date;
     }
     return {
-      label: `${BREAKFAST_RATE_LINE_PREFIX}${dateLabel}, ${count} meal${count === 1 ? "" : "s"})`,
+      label: `${BREAKFAST_RATE_LINE_PREFIX}${dateLabel2}, ${count} meal${count === 1 ? "" : "s"})`,
       amount: total
     };
   });
@@ -151847,6 +151847,78 @@ function bookingMilestoneEvents(booking) {
     null
   );
   return events.sort((a, b3) => {
+    if (!a.at && !b3.at) return 0;
+    if (!a.at) return 1;
+    if (!b3.at) return -1;
+    return b3.at.localeCompare(a.at);
+  });
+}
+function dateLabel(value) {
+  const text = asText(value);
+  if (!text) return "";
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : "";
+}
+function rescheduleActorUid(value) {
+  const text = asText(value);
+  if (!text) return null;
+  if (text.includes("@")) return null;
+  return staffUidFrom(text) || null;
+}
+function rescheduleHistoryEvent(entry, fallbackId = "") {
+  if (!entry || typeof entry !== "object") return null;
+  const data = entry;
+  const rawKind = asText(data.kind);
+  const kind = rawKind === "move" || rawKind === "extend" ? rawKind : "room";
+  const fromRoom = asText(data.fromRoomNumber);
+  const toRoom = asText(data.toRoomNumber);
+  const fromCheckIn = dateLabel(data.fromCheckIn);
+  const toCheckIn = dateLabel(data.toCheckIn);
+  const fromCheckOut = dateLabel(data.fromCheckOut);
+  const toCheckOut = dateLabel(data.toCheckOut);
+  const summary = kind === "move" ? "Moved to another room" : kind === "extend" ? "Extended stay" : "Changed room";
+  let subject = null;
+  let note = null;
+  if (kind === "extend") {
+    subject = fromCheckOut && toCheckOut && fromCheckOut !== toCheckOut ? `Check-out ${fromCheckOut} \u2192 ${toCheckOut}` : toCheckOut ? `Check-out ${toCheckOut}` : null;
+  } else {
+    subject = fromRoom && toRoom ? `Room ${fromRoom} \u2192 Room ${toRoom}` : toRoom ? `Room ${toRoom}` : fromRoom ? `Room ${fromRoom}` : null;
+    const dateParts = [];
+    if (fromCheckIn && toCheckIn && fromCheckIn !== toCheckIn) {
+      dateParts.push(`Check-in ${fromCheckIn} \u2192 ${toCheckIn}`);
+    }
+    if (fromCheckOut && toCheckOut && fromCheckOut !== toCheckOut) {
+      dateParts.push(`Check-out ${fromCheckOut} \u2192 ${toCheckOut}`);
+    }
+    note = dateParts.length > 0 ? dateParts.join(" \xB7 ") : null;
+  }
+  const delta = asNumber(data.deltaTotalPrice);
+  const at3 = toIsoTimestamp(data.at);
+  return {
+    id: `reschedule:${kind}:${at3 ?? ""}:${fallbackId}`,
+    kind: "room-change",
+    at: at3,
+    actorUid: rescheduleActorUid(data.by),
+    actorRole: null,
+    actorName: null,
+    summary,
+    subject,
+    serviceDate: null,
+    guestIndex: null,
+    reason: asText(data.reason) || null,
+    note,
+    // A room override is always `deltaTotalPrice: 0` — showing
+    // "₱0" would read as a money movement that did not happen.
+    amount: delta !== null && delta !== 0 ? delta : null,
+    quantity: null,
+    lateChange: false
+  };
+}
+function rescheduleHistoryEvents(booking) {
+  if (!booking || typeof booking !== "object") return [];
+  const data = booking;
+  const entries = Array.isArray(data.rescheduleHistory) ? data.rescheduleHistory : [];
+  return entries.map((entry, index) => rescheduleHistoryEvent(entry, String(index))).filter((event) => Boolean(event)).sort((a, b3) => {
     if (!a.at && !b3.at) return 0;
     if (!a.at) return 1;
     if (!b3.at) return -1;
@@ -153832,6 +153904,8 @@ __export(shared_exports, {
   redateOtherAddOnSelections: () => redateOtherAddOnSelections,
   requestsOtherAddOns: () => requestsOtherAddOns,
   requiredExtraBedsFor: () => requiredExtraBedsFor,
+  rescheduleHistoryEvent: () => rescheduleHistoryEvent,
+  rescheduleHistoryEvents: () => rescheduleHistoryEvents,
   resolveBedSetupOptions: () => resolveBedSetupOptions,
   resolveBookingPreferenceOptions: () => resolveBookingPreferenceOptions,
   resolveBookingPreferenceValues: () => resolveBookingPreferenceValues,

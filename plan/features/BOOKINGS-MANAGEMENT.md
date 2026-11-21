@@ -200,7 +200,14 @@ The New Booking modal creates a reservation covering one **or more** rooms — w
 - Each entry shows: who made the change, when, the price delta badge, and either:
   - `"extend"` entries: check-out change with `+N nights` pill and line-through on the old check-out.
   - `"move"` entries: room number change + date range.
+  - `"room"` entries (a room OVERRIDE — the same dates, a different room): labelled "Room changed", with the room number change. The "Moved / upgraded room" label would misdescribe it.
 - Reason is shown in italic below the change summary.
+- **The actor is a NAME, never a raw uid** (ATR-10, 2026-11-21). The panel resolves the entry's staff uid through the ONE shared resolver (`shared/utils/staffNames.ts`); an unknown or non-uid actor renders as the generic "Staff" label.
+- **The panel only renders when the field is hydrated.** The admin bookings mapper reads `rescheduleHistory` off the snapshot — without that hydration the array is always empty and the panel never appears, which is exactly how the room change stayed invisible in the drawer.
+
+**Activity history tab (`BookingHistoryTab.tsx`):**
+- One reverse-chronological timeline of who changed what on the booking, and when. It merges FIVE sources: the breakfast trail, the other-add-on trail, the incidental-charge ledger, the booking's own milestone stamps, and the booking's own `rescheduleHistory[]` — so a room change appears HERE too, as a `room-change` row (who, when, from → to room, the desk's reason, and the price delta a move produced).
+- The room-change source is the inline `rescheduleHistory[]` trail, NOT the `auditLogs` forensic row: the audit log is ADMIN-ONLY readable, so it could never have served the front desk.
 
 ### Multi-room extend
 
