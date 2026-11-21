@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.31.4";
+    VERSION2 = "2.31.5";
   }
 });
 
@@ -153519,6 +153519,13 @@ function normalizeIntercomChatEnabled(raw) {
 function normalizeIntercomCallsEnabled(raw) {
   return normalizeBooleanFlag(raw, INTERCOM_CALLS_ENABLED_DEFAULT);
 }
+function resolveInRoomChatTabSurface(chatEnabled, callsEnabled) {
+  if (chatEnabled) return "chat";
+  return callsEnabled ? "call" : "phone";
+}
+function everyInRoomFeatureIsOff(chatEnabled, callsEnabled, storeEnabled) {
+  return !chatEnabled && !callsEnabled && !storeEnabled;
+}
 var INTERCOM_CHAT_ENABLED_DEFAULT, INTERCOM_CALLS_ENABLED_DEFAULT;
 var init_intercomFeatures = __esm({
   "../shared/utils/intercomFeatures.ts"() {
@@ -153813,6 +153820,7 @@ __export(shared_exports, {
   evaluateBookingClosure: () => evaluateBookingClosure,
   evaluateCancelPreview: () => evaluateCancelPreview,
   evaluateCancellation: () => evaluateCancellation,
+  everyInRoomFeatureIsOff: () => everyInRoomFeatureIsOff,
   fadeIn: () => fadeIn,
   fadeUp: () => fadeUp,
   formatHotelAddress: () => formatHotelAddress,
@@ -153921,6 +153929,7 @@ __export(shared_exports, {
   resolveCurrentLevel: () => resolveCurrentLevel,
   resolveHotelContact: () => resolveHotelContact,
   resolveHotelTimes: () => resolveHotelTimes,
+  resolveInRoomChatTabSurface: () => resolveInRoomChatTabSurface,
   resolveKitchenGuestName: () => resolveKitchenGuestName,
   resolveMaxStayNights: () => resolveMaxStayNights,
   resolvePaymentMethodLabel: () => resolvePaymentMethodLabel,

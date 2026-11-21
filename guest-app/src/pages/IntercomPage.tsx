@@ -30,7 +30,7 @@ import { PrimaryButton } from "../components/PrimaryButton";
 // full-size view + download.
 import { PaymentQrCode } from "../components/PaymentQrCode";
 import { GhostButton } from "../components/GhostButton";
-import { getEffectiveStorePaymentMethods, resolveHotelContact, type EffectiveStorePaymentMethod, type HotelContact } from "@spark-inn/shared";
+import { getEffectiveStorePaymentMethods, resolveHotelContact, resolveInRoomChatTabSurface, everyInRoomFeatureIsOff as everyInRoomFeatureIsOffResolver, type EffectiveStorePaymentMethod, type HotelContact } from "@spark-inn/shared";
 import { fetchPublicHotelConfig } from "../hooks/usePublicHotelConfig";
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
@@ -143,21 +143,56 @@ interface ActiveOrder {
  * existing "this room is not checked in" screen so the two
  * unavailable states look like the same family.
  */
-function IntercomUnavailableCard({ phone, title, message }: {
+function IntercomUnavailableCard({ phone, title, message, icon, onCallDesk }: {
   phone: string;
   title: string;
   message: string;
+  icon?: React.ReactNode;
+  /**
+   * Per IFS-01 follow-up (2026-11-21, decision #335): when the hotel
+   * switched the CHAT off but the VOICE CALL is still on, the in-room
+   * call is the guest's next step — so it becomes the card's PRIMARY
+   * action (the one in the middle) and the phone number drops to a
+   * quiet secondary line. WITHOUT this prop the card is the phone-only
+   * fallback, which is what a hotel with BOTH switches off must show.
+   */
+  onCallDesk?: () => void;
 }) {
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-6 py-10 text-center">
       <div className="mx-auto h-12 w-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center">
-        <MessageSquare size={24} />
+        {icon || <MessageSquare size={24} />}
       </div>
       <h2 className="mt-4 font-heading text-xl lowercase text-gray-950">{title}</h2>
       <p className="mt-2 text-sm leading-relaxed text-gray-600 max-w-xs">{message}</p>
+      {/*
+       * Per IFS-01 follow-up (decision #335): the in-room call is offered
+       * whenever the hotel left it ON — the guest's next step is the
+       * call, not the phone.
+       */}
+      {onCallDesk && (
+        <button
+          type="button"
+          onClick={onCallDesk}
+          className="mt-5 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-bold text-white shadow-sm transition hover:bg-primary-dark active:scale-[0.98]"
+        >
+          <Phone size={16} />
+          Call Desk
+        </button>
+      )}
+      {/*
+       * The phone line ALWAYS renders — the guest is never left with a
+       * dead panel (FRONTEND.md §UX Philosophy: "Every error has a next
+       * step"). It is the PRIMARY action only when there is no in-room
+       * call to offer.
+       */}
       <a
         href={`tel:${phone}`}
-        className="mt-5 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-bold text-white"
+        className={
+          onCallDesk
+            ? "mt-3 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
+            : "mt-5 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-bold text-white"
+        }
       >
         <Phone size={16} />
         Call Front Desk
@@ -1366,7 +1401,30 @@ export function IntercomPage() {
   // the store are switched off, the in-room panel has nothing left to
   // offer — so the whole panel becomes the phone-only fallback card
   // instead of showing a set of tabs that lead nowhere.
-  const everyInRoomFeatureIsOff = !intercomChatEnabled && !isStoreEnabled;
+  //
+  // Per IFS-01 follow-up (2026-11-21, decision #335): the VOICE CALL
+  // counts as a live in-room channel. If the call is still ON, the
+  // panel must NOT collapse into the phone-only card — that card has no
+  // header, so it would take the "Call Desk" button with it and the
+  // guest would lose a channel the hotel deliberately left open. The
+  // whole-panel fallback is therefore for "every in-room feature is
+  // off", calls included. The rule itself lives in
+  // `shared/utils/intercomFeatures.ts` so the panel and any future
+  // surface can never disagree about it.
+  const everyInRoomFeatureIsOff = everyInRoomFeatureIsOffResolver(
+    intercomChatEnabled,
+    intercomCallsEnabled,
+    isStoreEnabled
+  );
+
+  // Per IFS-01 follow-up (2026-11-21, decision #335): what the CHAT TAB
+  // shows for the current pair of switches — the thread, the in-room
+  // call, or the phone-only fallback. The rule lives in
+  // `shared/utils/intercomFeatures.ts` (one definition, shared).
+  const inRoomChatTabSurface = resolveInRoomChatTabSurface(
+    intercomChatEnabled,
+    intercomCallsEnabled
+  );
 
   if (!isValidRoom || everyInRoomFeatureIsOff) {
     const isVacantRoom = roomAccessError === "vacant";
@@ -1379,7 +1437,7 @@ export function IntercomPage() {
         ? "Intercom not active yet"
         : "Invalid room QR code";
     const subcopy = everyInRoomFeatureIsOff
-      ? "In-room chat and the in-room store are switched off at the moment. Please call or visit the front desk so we can help you."
+      ? "In-room chat, voice calls and the in-room store are switched off at the moment. Please call or visit the front desk so we can help you."
       : isVacantRoom
         ? "This room intercom opens after check-in. Please call or visit the front desk so we can help you."
         : "This intercom link does not match an active room. Please call or visit the front desk so we can help you.";
@@ -1582,12 +1640,24 @@ export function IntercomPage() {
           {/* Active Chat Tab */}
           {activeTab === "chat" && (
             // Per IFS-01 (2026-11-20, decision #318): when the hotel
-            // switches the chat off, the Chat tab shows the phone-only
-            // fallback card instead of the thread + composer. The tab
-            // itself stays visible so the guest is not left wondering
-            // where the chat went — the card explains it and offers
-            // the one action that still works.
-            intercomChatEnabled ? (
+            // switches the chat off, the Chat tab shows a fallback card
+            // instead of the thread + composer. The tab itself stays
+            // visible so the guest is not left wondering where the chat
+            // went — the card explains it and offers the one action
+            // that still works.
+            //
+            // Per IFS-01 follow-up (2026-11-21, decision #335): WHICH
+            // action that is depends on the VOICE CALL switch:
+            //
+            //   call ON  → the in-room call IS the next step, so the
+            //               card's primary action is the "Call Desk"
+            //               button (the same handler as the header
+            //               button) and the phone number is the
+            //               quiet secondary line.
+            //   call OFF → the phone-only fallback: "Call Front Desk"
+            //               with the number. Both switches off means
+            //               there is no in-room channel left at all.
+            inRoomChatTabSurface === "chat" ? (
             <div className="flex-1 flex flex-col justify-between min-h-0">
               
               {/* Message scroll thread */}
@@ -1692,10 +1762,28 @@ export function IntercomPage() {
 
             </div>
             ) : (
+              // Per IFS-01 follow-up (2026-11-21, decision #335): the
+              // hotel switched the CHAT off. What the guest gets next
+              // depends on the VOICE CALL switch:
+              //
+              //   call ON  → the in-room call IS the next step, so the
+              //               card's primary action is the "Call Desk"
+              //               button (the same handler as the header
+              //               button) and the phone number is the
+              //               quiet secondary line.
+              //   call OFF → the phone-only fallback: "Call Front Desk"
+              //               with the number. Both switches off means
+              //               there is no in-room channel left at all.
               <IntercomUnavailableCard
                 phone={hotelContact.frontDeskPhone}
                 title="Chat is unavailable"
-                message="Chat support is switched off at the moment. Please call the front desk and we will be happy to help."
+                message={
+                  inRoomChatTabSurface === "call"
+                    ? "Chat support is switched off at the moment. Use Call Desk to reach the front desk by voice."
+                    : "Chat support is switched off at the moment. Please call the front desk and we will be happy to help."
+                }
+                icon={inRoomChatTabSurface === "call" ? <Phone size={24} /> : undefined}
+                onCallDesk={inRoomChatTabSurface === "call" ? handleStartCall : undefined}
               />
             )
           )}

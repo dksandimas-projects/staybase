@@ -73,21 +73,88 @@ describe("IFS-01 — the guest panel honours both switches", () => {
   });
 
   it("renders the phone-only fallback card when the chat is off", () => {
-    expect(guestSrc).toMatch(/intercomChatEnabled \? \(/);
+    expect(guestSrc).toMatch(/inRoomChatTabSurface === "chat" \? \(/);
     expect(guestSrc).toMatch(/IntercomUnavailableCard/);
   });
 
   it("the fallback card offers a tap-to-call link (never a dead end)", () => {
     const cardStart = guestSrc.indexOf("function IntercomUnavailableCard");
     expect(cardStart).toBeGreaterThan(-1);
-    const cardBody = guestSrc.slice(cardStart, cardStart + 2000);
+    const cardBody = guestSrc.slice(cardStart, cardStart + 3000);
     expect(cardBody).toMatch(/href=\{`tel:\$\{phone\}`\}/);
     expect(cardBody).toMatch(/Call Front Desk/);
   });
 
-  it("falls back to the whole-panel card when BOTH the chat and the store are off", () => {
-    expect(guestSrc).toMatch(/everyInRoomFeatureIsOff\s*=\s*!intercomChatEnabled && !isStoreEnabled/);
+  it("falls back to the whole-panel card only when EVERY in-room feature is off", () => {
+    // Per IFS-01 follow-up (decision #335, 2026-11-21): the whole-panel
+    // card has NO header, so it takes the "Call Desk" button with it.
+    // It must therefore only appear when the voice call is off too —
+    // otherwise the guest loses a channel the hotel left open.
+    //
+    // The RULE lives in `shared/utils/intercomFeatures.ts`; this pins
+    // that the panel is wired to the shared resolver (not to a second,
+    // hand-rolled copy of the same condition).
+    expect(guestSrc).toMatch(
+      /everyInRoomFeatureIsOff = everyInRoomFeatureIsOffResolver\(\s*\n?\s*intercomChatEnabled,\s*\n?\s*intercomCallsEnabled,\s*\n?\s*isStoreEnabled\s*\n?\s*\)/
+    );
     expect(guestSrc).toMatch(/if \(!isValidRoom \|\| everyInRoomFeatureIsOff\)/);
+  });
+});
+
+describe("IFS-01 follow-up — the guest panel honours the switch MATRIX (decision #335)", () => {
+  it("chat OFF + call ON → the in-room CALL is the card's primary action", () => {
+    // The guest's next step is the call, not the phone number. The
+    // card's primary button is the SAME handler as the header button.
+    expect(guestSrc).toMatch(
+      /onCallDesk=\{inRoomChatTabSurface === "call" \? handleStartCall : undefined\}/
+    );
+    // The card's message points at the call, not at the phone.
+    expect(guestSrc).toMatch(
+      /Use Call Desk to reach the front desk by voice/
+    );
+  });
+
+  it("the panel resolves the surface through the SHARED resolver", () => {
+    // One definition, shared: the panel and any future surface cannot
+    // drift apart on what the guest is offered.
+    expect(guestSrc).toMatch(
+      /resolveInRoomChatTabSurface\(\s*\n?\s*intercomChatEnabled,\s*\n?\s*intercomCallsEnabled\s*\n?\s*\)/
+    );
+  });
+
+  it("the in-app Call Desk button only renders when a call handler is passed", () => {
+    const cardStart = guestSrc.indexOf("function IntercomUnavailableCard");
+    expect(cardStart).toBeGreaterThan(-1);
+    const cardBody = guestSrc.slice(cardStart, cardStart + 3000);
+    expect(cardBody).toMatch(/\{onCallDesk && \(/);
+    expect(cardBody).toMatch(/onClick=\{onCallDesk\}/);
+    expect(cardBody).toMatch(/Call Desk/);
+  });
+
+  it("chat OFF + call OFF → the card is phone-only (no in-app call)", () => {
+    // Both switches off: there is no in-room channel left, so the phone
+    // number is the action. The phone link ALWAYS renders — the guest
+    // never lands on a dead panel.
+    expect(guestSrc).toMatch(
+      /onCallDesk=\{inRoomChatTabSurface === "call" \? handleStartCall : undefined\}/
+    );
+    const cardStart = guestSrc.indexOf("function IntercomUnavailableCard");
+    const cardBody = guestSrc.slice(cardStart, cardStart + 3000);
+    expect(cardBody).toMatch(/href=\{`tel:\$\{phone\}`\}/);
+    expect(cardBody).toMatch(/Call Front Desk/);
+  });
+
+  it("chat ON + call OFF → the header carries NO call button", () => {
+    // The "Call Desk" button is gated on the call switch alone, so a
+    // hotel with the chat on and the call off shows no call control at
+    // all — there is no dead control to tap.
+    expect(guestSrc).toMatch(/\{intercomCallsEnabled && \(\s*<button/);
+  });
+
+  it("the whole-panel copy names the voice call too", () => {
+    expect(guestSrc).toMatch(
+      /In-room chat, voice calls and the in-room store are switched off/
+    );
   });
 });
 
@@ -137,7 +204,7 @@ describe("IFS-01 — the Settings tab owns both switches", () => {
   });
 
   it("persists each switch the moment it is clicked — no Save step", () => {
-    // Per IFS-01 follow-up (decision #335, 2026-11-21): the switches are
+    // Per IFS-01 follow-up (decision #330 follow-up, 2026-11-21): the switches are
     // KILL-SWITCHES. The owner flipped one, saw it move, and the guest
     // panel kept offering "Call Desk" — because the write only happened
     // when "Save Intercom Settings" (at the bottom of the tab) was

@@ -3472,7 +3472,7 @@ export function SettingsPage() {
     chat: null,
     calls: null
   });
-  // Per IFS-01 follow-up (2026-11-21, decision #335): the two hotel-wide
+  // Per IFS-01 follow-up (2026-11-21, decision #330 follow-up): the two hotel-wide
   // in-room feature switches persist the moment they are CLICKED — there
   // is no Save step for them. The inline error surfaces when that write
   // fails and the switch is reverted, so the operator never sees a
@@ -4750,7 +4750,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
     }));
   };
 
-  // Per IFS-01 follow-up (2026-11-21, decision #335): persist ONE
+  // Per IFS-01 follow-up (2026-11-21, decision #330 follow-up): persist ONE
   // hotel-wide in-room feature switch, immediately.
   //
   // WHY THE WRITE MOVED OFF THE SAVE BUTTON

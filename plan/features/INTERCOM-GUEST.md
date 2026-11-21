@@ -133,7 +133,7 @@ server gate, the guest panel and the admin Settings tab.
 - **Desk:** the admin inbox ignores incoming call sessions while the voice call is
   off (no banner, no ringtone) and shows a **"Calls Off"** chip.
 - **Admin Settings tab:** each switch persists **the moment it is clicked** — there
-  is no Save step for them (IFS-01 follow-up, decision #335, 2026-11-21). They
+  is no Save step for them (IFS-01 follow-up to decision #330, 2026-11-21). They
   shipped as local state that only reached Firestore when "Save Intercom Settings"
   was pressed at the bottom of the tab, so an operator could flip the switch, see it
   move, and write nothing — which is exactly how the guest panel kept offering
@@ -155,11 +155,51 @@ desk's banner covers the real case (a guest on a stale screen), but it is not an
 airtight enforcement — that would need a Firestore-rules gate on a new public flag
 document. The chat, by contrast, IS enforced server-side.
 
+### The guest-side matrix (IFS-01 follow-up, decision #335, 2026-11-21)
+
+The two switches are **independent**, so the guest's next step is a function of the
+PAIR the hotel left on — not of the chat switch alone.
+
+| Chat | Voice call | What the guest gets |
+|---|---|---|
+| ON | ON | The chat thread, plus the **"Call Desk"** button in the panel header. |
+| ON | OFF | The chat thread. **No call control anywhere** — the button is gone entirely, not disabled. |
+| OFF | ON | The chat tab replaces the thread with a fallback card whose **primary action is the in-room "Call Desk" button** (the same handler as the header button — the one in the middle). The phone number stays as a quiet secondary line. |
+| OFF | OFF | The phone-only fallback card: **"Call Front Desk"** with the front-desk number. No in-room channel is left. |
+
+**The rule that matters:** with the chat off and the call ON, the guest must NOT be
+pushed to the phone. The hotel left the voice call open on purpose, so the in-room
+call IS the next step — degrading to a phone card would hide a channel the hotel
+deliberately left available.
+
+**The whole-panel card counts the call too.** When the chat AND the store are off,
+the panel used to collapse into the phone-only card — a card with **no header**, so
+it took the "Call Desk" button with it. The voice call is a live in-room channel, so
+the collapse now happens only when **every** in-room feature is off (chat + calls +
+store). With the call still ON, the panel keeps its header and offers the call.
+
+**One definition, shared.** The matrix lives in
+`shared/utils/intercomFeatures.ts` — `resolveInRoomChatTabSurface(chatEnabled,
+callsEnabled)` returns `"chat" | "call" | "phone"`, and `everyInRoomFeatureIsOff(chat,
+calls, store)` decides the collapse. The guest panel calls both, so the panel and any
+future surface cannot drift apart on what the guest is offered. The matrix itself is
+unit-tested in `shared/__tests__/ifs-01-in-room-feature-matrix.test.ts`; the wiring is
+pinned by source-text tripwires in
+`admin-app/src/__tests__/ifs-01-intercom-feature-switches.test.ts`.
+
+**The phone link always renders.** Whatever the switches say, the fallback card keeps
+a tap-to-call link — the guest never lands on a dead panel (FRONTEND.md §UX
+Philosophy: *"Every error has a next step"*). When the in-room call is available it
+is the PRIMARY action and the phone drops to a secondary line, so there is still only
+ONE obvious primary action on screen.
+
 ### Edge cases
 
-- [x] Chat off + store on → the Chat tab shows the fallback card; the shop tab works normally.
-- [x] Chat off + store off → the whole panel becomes the fallback card (no tabs).
-- [x] Calls off → no "Call Desk" button; the chat and the store are untouched.
+- [x] Chat off + call on → the chat tab's fallback card's primary action is the in-room "Call Desk" button; the phone number is secondary.
+- [x] Chat off + call off → the phone-only fallback card ("Call Front Desk" + the number).
+- [x] Chat off + store off + call on → the panel keeps its header and the "Call Desk" button (the whole-panel collapse waits for every feature to be off).
+- [x] Chat off + store off + call off → the whole panel becomes the phone-only card (no tabs).
+- [x] Chat on + call off → no "Call Desk" button anywhere; the chat and the store are untouched.
 - [x] A guest on a screen that was open before the switch flipped cannot start a call (the handler re-checks).
 - [x] The desk sees a "Calls Off" chip, so staff can explain the missing button to a guest.
 - [x] The switches apply on the guest's next page load / refresh (the public config is read on mount).
