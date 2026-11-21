@@ -175,6 +175,7 @@ Things agents must never do. Check this file before implementing any feature.
 ## General
 
 - **Never commit `.env` files** — all three are gitignored (`guest-app/.env`, `admin-app/.env`, `api/.env`).
+- **Adding a section to a feature MD can push it over the docs-audit 90% "near budget" line** — `npm run docs:audit` warns when a file passes 90% of its token ceiling, and the warning COUNT is part of the baseline (18 errors + 3 warnings; a 4th warning is a regression). A file already at ~88% crosses the line from a single new section. Read the file's token estimate in the audit output BEFORE and AFTER the edit, and pay for the new prose by compacting the section it sits next to — do not delete spec.
 - **Never add code snippets to MD files** — MDs are high-level specs only. Code lives in the codebase.
 - **`FIREBASE_PRIVATE_KEY` in `api/.env` contains literal `\n` characters** — use `.replace(/\\n/g, '\n')` when initializing the Firebase Admin SDK, or the key will be malformed.
 - **Brand name is always `spark inn`** — all lowercase. Never "Spark Inn" or "SPARK INN" in any UI copy.
