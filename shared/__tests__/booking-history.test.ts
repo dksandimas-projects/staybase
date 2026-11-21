@@ -578,3 +578,81 @@ describe("bookingHistory — rescheduleHistoryEvents (the room-change trail)", (
     expect(merged[1]?.kind).toBe("created");
   });
 });
+
+// Per ATR-11 (2026-11-21): the booking CONFIRMATION.
+//
+// The desk reported that the confirmation was missing from the
+// drawer's history. The server has always stamped `confirmedAt` +
+// `confirmedBy` on both confirm paths — nothing READ them: the
+// `Booking` type did not declare them, the admin mapper did not
+// hydrate them, and the timeline had no milestone for them.
+describe("bookingHistory — the confirmed milestone", () => {
+  const milestone = (events: BookingHistoryEvent[], kind: string) =>
+    events.find((event) => event.kind === kind);
+
+  it("renders the confirmation with the staff member's NAME", () => {
+    const events = bookingMilestoneEvents({
+      createdAt: "2026-11-19T08:14:00.000Z",
+      createdBy: "uid-juan",
+      confirmedAt: "2026-11-19T09:30:00.000Z",
+      confirmedBy: "uid-maria"
+    });
+
+    const event = milestone(events, "confirmed");
+    expect(event?.summary).toBe("Booking confirmed");
+    expect(event?.at).toBe("2026-11-19T09:30:00.000Z");
+    expect(event?.actorUid).toBe("uid-maria");
+    expect(
+      bookingHistoryActorLabel(event!, new Map([["uid-maria", "Maria Santos"]]))
+    ).toBe("Maria Santos");
+  });
+
+  it("DROPS the milestone when the booking was never confirmed", () => {
+    // A booking created already-confirmed (an online booking that paid
+    // at creation) carries no `confirmedAt`. A milestone dated at the
+    // creation time would be a lie about WHEN it happened.
+    const events = bookingMilestoneEvents({
+      createdAt: "2026-11-19T08:14:00.000Z",
+      createdBy: "guest"
+    });
+    expect(milestone(events, "confirmed")).toBeUndefined();
+  });
+
+  it("treats the legacy `\"staff\"` literal as no actor (never a raw uid)", () => {
+    const events = bookingMilestoneEvents({
+      confirmedAt: "2026-11-19T09:30:00.000Z",
+      confirmedBy: "staff"
+    });
+    const event = milestone(events, "confirmed");
+    expect(event?.actorUid).toBeNull();
+    expect(bookingHistoryActorLabel(event!, new Map())).toBe("Staff");
+  });
+
+  it("keeps BOTH milestones on a confirm-with-balance booking", () => {
+    // `handleConfirmBookingWithBalance` stamps `confirmedAt` AND
+    // `paymentConfirmedAt` — the desk should see both, because two
+    // things happened: the booking was confirmed, and a balance was
+    // approved.
+    const events = bookingMilestoneEvents({
+      confirmedAt: "2026-11-19T09:30:00.000Z",
+      confirmedBy: "uid-maria",
+      paymentConfirmedAt: "2026-11-19T09:30:00.000Z",
+      paymentConfirmedBy: "uid-maria"
+    });
+    expect(milestone(events, "confirmed")?.summary).toBe("Booking confirmed");
+    expect(milestone(events, "payment-confirmed")?.summary).toBe("Payment verified");
+  });
+
+  it("sits in the merged timeline at the confirmation time", () => {
+    const merged = mergeBookingHistoryEvents(
+      bookingMilestoneEvents({
+        createdAt: "2026-11-19T08:14:00.000Z",
+        createdBy: "uid-juan",
+        confirmedAt: "2026-11-19T09:30:00.000Z",
+        confirmedBy: "uid-maria"
+      })
+    );
+    expect(merged[0]?.kind).toBe("confirmed");
+    expect(merged[1]?.kind).toBe("created");
+  });
+});

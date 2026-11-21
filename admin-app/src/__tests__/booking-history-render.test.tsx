@@ -353,3 +353,45 @@ describe("booking history tab — the room change is tracked", () => {
     expect(html).not.toContain("uid-maria");
   });
 });
+
+// Per ATR-11 (2026-11-21): the desk reported that the booking
+// CONFIRMATION was missing from the drawer's history.
+//
+// The server always stamped `confirmedAt` + `confirmedBy`; nothing read
+// them. This is the ONE test that proves the reported bug is gone at
+// the RENDER level.
+describe("booking history tab — the confirmation is tracked", () => {
+  it("renders the confirmation with the staff NAME, never the raw uid", () => {
+    reset();
+    const booking = {
+      id: "BK-5",
+      discountVerified: false,
+      discountVerifiedBy: null,
+      createdAt: "2026-11-19T08:14:00.000Z",
+      createdBy: "uid-juan",
+      createdByName: "Juan Dela Cruz",
+      confirmedAt: "2026-11-19T09:30:00.000Z",
+      confirmedBy: "uid-maria"
+    } as never;
+
+    const html = render({ booking });
+    expect(html).toContain("Booking confirmed");
+    expect(html).toContain("Maria Santos");
+    // The raw uid must never reach the screen.
+    expect(html).not.toContain("uid-maria");
+  });
+
+  it("shows NO confirmation row for a booking that was never confirmed", () => {
+    reset();
+    const booking = {
+      id: "BK-6",
+      discountVerified: false,
+      discountVerifiedBy: null,
+      createdAt: "2026-11-19T08:14:00.000Z",
+      createdBy: "guest"
+    } as never;
+
+    const html = render({ booking });
+    expect(html).not.toContain("Booking confirmed");
+  });
+});

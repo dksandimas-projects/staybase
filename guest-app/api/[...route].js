@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.31.2";
+    VERSION2 = "2.31.3";
   }
 });
 
@@ -151801,6 +151801,14 @@ function bookingMilestoneEvents(booking) {
     createdBy === "guest" ? null : createdActorUid || null,
     createdBy === "guest" ? null : asText(data.createdByName) || null,
     createdBy === "guest" ? "guest" : null
+  );
+  const confirmedBy = asText(data.confirmedBy);
+  push(
+    "confirmed",
+    "Booking confirmed",
+    toIsoTimestamp(data.confirmedAt),
+    staffUidFrom(confirmedBy) || null,
+    asText(data.confirmedByName) || null
   );
   push(
     "checked-in",

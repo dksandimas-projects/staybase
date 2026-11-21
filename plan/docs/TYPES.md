@@ -671,7 +671,7 @@ The normalized VIEW model the admin booking drawer's **History tab** renders —
 ```
 BookingHistoryEvent {
   id: string                              // stable React key
-  kind: "created" | "checked-in" | "checked-out" | "cancelled"
+  kind: "created" | "confirmed" | "checked-in" | "checked-out" | "cancelled"
       | "payment-confirmed" | "payment-rejected" | "special-requests-updated"
       | "breakfast-change" | "add-on-change" | "charge" | "room-change"
   at: string | null                       // ISO timestamp; null sorts LAST, never first
@@ -696,6 +696,12 @@ BookingHistoryEvent {
 
 - **The actor is a staff uid, and it is never printed.** The server writes `req.staff?.uid || req.staff?.email || "staff"`. A uid resolves through the shared resolver; an EMAIL is PII and is DROPPED (the row falls back to the generic "Staff" label); the reserved literals (`"staff"` / `"guest"` / `"system"`) are not uids.
 - **`amount` is the price DELTA for a room change, and `null` when no money moved.** A room override preserves the money by construction (`pricingBasis: "preserved"`, `deltaTotalPrice: 0`), so it renders no badge — a "₱0" would read as a money movement that did not happen. A move's delta renders with its sign.
+
+**The confirmed milestone (ATR-11, 2026-11-21).** `bookingMilestoneEvents()` reads the booking document's own lifecycle stamps: `createdAt` → "created", **`confirmedAt` → "confirmed"**, `checkedInAt` → "checked-in", `checkedOutAt` → "checked-out", `cancelledAt` → "cancelled", `paymentConfirmedAt` → "payment-confirmed", `paymentRejectedAt` → "payment-rejected", `specialRequestsUpdatedAt` → "special-requests-updated". Three rules:
+
+- **A milestone with NO timestamp is DROPPED, never dated at the creation time.** A booking created already-confirmed (an online booking that paid at creation) carries no `confirmedAt`, so it shows a "created" row and no "confirmed" row.
+- **A confirm-WITH-BALANCE booking carries BOTH milestones.** `handleConfirmBookingWithBalance` stamps `confirmedAt` AND `paymentConfirmedAt` — two things happened (the booking was confirmed; a balance was approved) and the timeline says so.
+- **`confirmedBy` is a STAFF UID and resolves through the ONE shared resolver**, like every other actor on this timeline. A raw 28-character uid never reaches the screen.
 
 ---
 
