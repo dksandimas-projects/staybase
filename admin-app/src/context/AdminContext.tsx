@@ -535,6 +535,19 @@ export interface Booking {
   // Both are OPTIONAL — a booking verified before ATR-09 has neither.
   paymentConfirmedBy?: string | null;
   paymentConfirmedByName?: string | null;
+  // Per ATR-11 (2026-11-21): the booking CONFIRMATION stamp — when the
+  // desk confirmed the booking and who did it. The server has always
+  // written `confirmedAt` + `confirmedBy` (both confirm paths), but
+  // nothing read them: the `Booking` type did not declare them, the
+  // mapper did not hydrate them, and the drawer's timeline had no
+  // milestone for them — so the confirmation was INVISIBLE in the
+  // booking drawer's history (the desk reported exactly that).
+  //
+  // ISO string (the `parseDateTimeString` convention). `null` for a
+  // booking created already-confirmed (an online booking that paid at
+  // creation) — those carry the `created` milestone instead.
+  confirmedAt?: string | null;
+  confirmedBy?: string | null;
   rescheduleHistory?: any[];
   reminderSentAt: string | null;
   guestIdPhotoUrl: string | null;
@@ -2465,6 +2478,17 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
             // the UI cannot read (FOL-02 / MRB-15-10).
             paymentConfirmedBy: data.paymentConfirmedBy || null,
             paymentConfirmedByName: data.paymentConfirmedByName || null,
+            // Per ATR-11 (2026-11-21): the CONFIRMATION stamp. The
+            // server writes `confirmedAt` + `confirmedBy` on both
+            // confirm paths (`handleConfirmBooking` +
+            // `handleConfirmBookingWithBalance`); this mapper read
+            // NEITHER, so the drawer's timeline had no confirmation
+            // milestone and the desk's report — "the booking
+            // confirmation is not in the history" — was true. Same
+            // bug class as FOL-01 / FOL-02 / ATR-10: the server
+            // writes it, the type declares it, the mapper drops it.
+            confirmedAt: data.confirmedAt ? parseDateTimeString(data.confirmedAt) : null,
+            confirmedBy: data.confirmedBy || null,
             // Per Phase 12 — Dashboard Payment Rejection & Reference
             // Verification (2026-07-15): the reject-payment handler
             // stamps these three fields on the booking doc. The

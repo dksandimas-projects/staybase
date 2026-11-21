@@ -54,6 +54,7 @@ export type BookingHistoryActorRole = "guest" | "front-desk" | "admin" | "system
 /** The kind of change an event represents. */
 export type BookingHistoryEventKind =
   | "created"
+  | "confirmed"
   | "checked-in"
   | "checked-out"
   | "cancelled"
@@ -388,6 +389,30 @@ export function bookingMilestoneEvents(booking: unknown): BookingHistoryEvent[] 
     createdBy === "guest" ? null : createdActorUid || null,
     createdBy === "guest" ? null : asText(data.createdByName) || null,
     createdBy === "guest" ? "guest" : null
+  );
+
+  // The booking CONFIRMATION. Per ATR-11 (2026-11-21): the desk
+  // reported that the confirmation was missing from the timeline.
+  //
+  // The server has always stamped `confirmedAt` + `confirmedBy` —
+  // `handleConfirmBooking` (`status: "pending" | "payment-uploaded" →
+  // "confirmed"`) and `handleConfirmBookingWithBalance` (which ALSO
+  // stamps `paymentConfirmedAt`, so that booking carries BOTH
+  // milestones). Nothing read them: the `Booking` type did not
+  // declare them, the admin mapper did not hydrate them, and this
+  // milestone did not exist.
+  //
+  // A booking created ALREADY-confirmed (an online booking that paid
+  // at creation) carries no `confirmedAt` — for those, the `created`
+  // milestone is the first event on the timeline, and this push is
+  // DROPPED rather than dated at the creation time.
+  const confirmedBy = asText(data.confirmedBy);
+  push(
+    "confirmed",
+    "Booking confirmed",
+    toIsoTimestamp(data.confirmedAt),
+    staffUidFrom(confirmedBy) || null,
+    asText(data.confirmedByName) || null
   );
 
   push(

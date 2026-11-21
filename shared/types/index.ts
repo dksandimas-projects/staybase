@@ -860,6 +860,22 @@ export interface Booking {
   inFlowHoldId?: string | null;
   inFlowHoldMinutes?: number | null;
   rescheduleHistory?: any[];
+  // The booking CONFIRMATION stamp — WHEN the desk confirmed the
+  // booking and WHO did it.
+  //
+  // Written by `handleConfirmBooking` (`status: "pending" |
+  // "payment-uploaded" → "confirmed"`) and by
+  // `handleConfirmBookingWithBalance` (which ALSO stamps
+  // `paymentConfirmedAt`, so a confirm-with-balance booking carries
+  // BOTH milestones). The server writes a Firestore Timestamp; the
+  // admin app hydrates it as an ISO string.
+  //
+  // It is NOT stamped when a booking is created already-confirmed
+  // (an online booking that paid at creation) — for those, the
+  // `created` milestone is the first event on the timeline.
+  confirmedAt?: Date | null;
+  /** The staff UID who confirmed the booking. `"staff"` on a legacy write with no uid. */
+  confirmedBy?: string | null;
   // Per H2 (hardening batch 2026-06-26): 32-char hex
   // random token generated at booking-create time. The
   // email magic link carries `?ref={bookingRef}&token={

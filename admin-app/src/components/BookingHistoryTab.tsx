@@ -43,7 +43,8 @@ import {
   LogIn,
   LogOut,
   CreditCard,
-  BedDouble
+  BedDouble,
+  CheckCheck
 } from "lucide-react";
 import { useAdmin, type Booking, type IncidentalCharge } from "../context/AdminContext";
 import {
@@ -85,6 +86,8 @@ function EventIcon({ event }: { event: BookingHistoryEvent }) {
       return <CreditCard size={14} className={className} aria-hidden="true" />;
     case "room-change":
       return <BedDouble size={14} className={className} aria-hidden="true" />;
+    case "confirmed":
+      return <CheckCheck size={14} className={className} aria-hidden="true" />;
     default:
       return <History size={14} className={className} aria-hidden="true" />;
   }
