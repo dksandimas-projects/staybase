@@ -56,6 +56,7 @@ The store is accessible from the guest intercom page via QR scan. Guests browse 
 ## Data & Logic Checklist
 
 - [x] Room ID from URL param `:roomId` — same as intercom
+- [x] **Tab deep link** — the Spark Essentials QR encodes `/intercom/{roomId}?tab=shop`; the panel opens on the **Store** tab for that scan (the plain chat QR opens on Chat). The tab is read once on load and the URL stays in sync when the guest switches tabs (2026-11-21 — see `plan/features/QR-MANAGEMENT.md §QR tab deep link`)
 - [x] Active booking lookup: query `bookings` where `roomNumber` matches room and `status` is in `["confirmed", "checked-in"]` — link order to this booking if found
 - [x] Fetch `storeItems` where `isActive: true` — real-time via `onSnapshot`
 - [x] Cart state managed in React state (not persisted — clears on page refresh)
@@ -75,6 +76,7 @@ The store is accessible from the guest intercom page via QR scan. Guests browse 
 - [x] Item goes out of stock between page load and order submission — server-side stock check at order creation; return stock error
 - [x] All store items inactive/out of stock — show "The shop is currently unavailable" empty state
 - [x] Store disabled entirely (`settings/storeConfig.isEnabled: false`) — hide Shop tab, show "Coming soon" or nothing
+- [x] `?tab=shop` scan at a hotel with the store switched OFF — the panel falls back to Chat and drops the param from the URL, so the guest is never left on an empty store panel (2026-11-21)
 - [x] GCash screenshot upload fails — show error, do not submit order without it if GCash selected
 - [x] Cart empty on checkout attempt — disable Place Order button
 - [x] Order already cancelled — hide cancel button, show cancelled badge

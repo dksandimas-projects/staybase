@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo, useRef } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import {
   Send, Phone, ShoppingBag, MessageSquare, Plus, Minus, Trash2, X,
   ChevronRight, PhoneOff, Mic, MicOff, AlertCircle, Sparkles,
@@ -32,6 +32,7 @@ import { PaymentQrCode } from "../components/PaymentQrCode";
 import { GhostButton } from "../components/GhostButton";
 import { getEffectiveStorePaymentMethods, resolveHotelContact, resolveInRoomChatTabSurface, everyInRoomFeatureIsOff as everyInRoomFeatureIsOffResolver, type EffectiveStorePaymentMethod, type HotelContact } from "@spark-inn/shared";
 import { fetchPublicHotelConfig } from "../hooks/usePublicHotelConfig";
+import { resolveIntercomTab, withIntercomTab, type IntercomTab } from "../utils/intercomTab";
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const ACCEPTED_UPLOAD_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
@@ -209,6 +210,7 @@ function IntercomUnavailableCard({ phone, title, message, icon, onCallDesk }: {
 export function IntercomPage() {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Guest Identity States
@@ -226,7 +228,34 @@ export function IntercomPage() {
   const [verificationError, setVerificationError] = useState<string>("");
 
   // Navigation Tab State
-  const [activeTab, setActiveTab] = useState<"chat" | "shop">("chat");
+  //
+  // Per the QR deep link (2026-11-21): the Spark Essentials QR encodes
+  // `/intercom/{roomId}?tab=shop` (see `plan/features/QR-MANAGEMENT.md`),
+  // so a guest who scans a "scan to order" card must land on the STORE
+  // tab — the panel used to always open on Chat, which sent the guest
+  // to the wrong surface for that card. The chat QR encodes no param,
+  // so it still opens on Chat.
+  //
+  // The param is read ONCE (the initial state) and the URL is kept in
+  // sync when the guest switches tabs, so a refresh — or a shared link
+  // — preserves the surface the guest is actually on.
+  const [activeTab, setActiveTab] = useState<IntercomTab>(() =>
+    resolveIntercomTab(location.search)
+  );
+
+  const handleTabChange = useCallback((tab: IntercomTab) => {
+    setActiveTab(tab);
+    // `replace` keeps the tab switch out of the history stack — the
+    // guest's Back button still leaves the intercom, it does not walk
+    // backwards through their own tab clicks.
+    navigate(
+      {
+        pathname: location.pathname,
+        search: withIntercomTab(window.location.search, tab)
+      },
+      { replace: true }
+    );
+  }, [location.pathname, navigate]);
 
   // Chat States
   const INITIAL_MESSAGE_LIMIT = 50;
@@ -725,10 +754,14 @@ export function IntercomPage() {
   }, [messages]);
 
   useEffect(() => {
+    // Per the QR deep link (2026-11-21): a `?tab=shop` scan that lands
+    // on a hotel whose store is switched OFF must not leave the guest
+    // staring at an empty store panel — fall back to Chat and drop the
+    // param from the URL so a refresh does not re-request the store.
     if (!isStoreEnabled && activeTab === "shop") {
-      setActiveTab("chat");
+      handleTabChange("chat");
     }
-  }, [activeTab, isStoreEnabled]);
+  }, [activeTab, isStoreEnabled, handleTabChange]);
 
   useEffect(() => {
     if (!activeOrder || !roomNumber || activeOrder.status === "delivered" || activeOrder.status === "cancelled") return;
@@ -1603,7 +1636,7 @@ export function IntercomPage() {
           {/* Navigation Tabs */}
           <div className="flex gap-2 border-t border-white/10 pt-3 mt-1">
             <button
-              onClick={() => setActiveTab("chat")}
+              onClick={() => handleTabChange("chat")}
               className={`flex-1 min-h-[44px] rounded-lg text-center text-sm font-bold transition flex items-center justify-center gap-2 relative ${
                 activeTab === "chat" 
                   ? "bg-primary text-white shadow-sm"
@@ -1620,7 +1653,7 @@ export function IntercomPage() {
             </button>
             {isStoreEnabled && (
               <button
-                onClick={() => setActiveTab("shop")}
+                onClick={() => handleTabChange("shop")}
                 className={`flex-1 min-h-[44px] rounded-lg text-center text-sm font-bold transition flex items-center justify-center gap-2 ${
                   activeTab === "shop"
                     ? "bg-primary text-white shadow-sm"

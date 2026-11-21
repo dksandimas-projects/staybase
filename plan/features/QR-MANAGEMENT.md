@@ -38,6 +38,7 @@ The `/qr` dashboard page manages QR codes that link to the guest intercom for ea
 
 - [x] QR code URL format: `${resolveApiBaseUrl()}/intercom/{roomId}` (env-aware — see "QR URL env-awareness" below)
 - [x] QR code URL format for Spark Essentials: `${resolveApiBaseUrl()}/intercom/{roomId}?tab=shop`
+- [x] **The guest panel honors the encoded tab** — `/intercom/{roomId}?tab=shop` opens the intercom panel on the **Store** tab, the plain chat QR (no param) opens it on **Chat** (deep link, 2026-11-21 — see "QR tab deep link" below)
 - [x] `roomId` is the guest intercom route parameter; room numbers are accepted by the guest route and resolved against Firestore rooms
 - [x] Regenerate: updates optional `rooms/{roomId}.qrToken`; QR falls back to room doc ID when no token exists
 - [x] Guest route resolution: `/intercom/:roomId` accepts room doc ID, room number, or regenerated `qrToken`
@@ -70,6 +71,16 @@ The `/qr` dashboard page manages QR codes that link to the guest intercom for ea
 - [x] Print all QRs — 4 cards per A4 page, correct room data on each card
 - [x] spark inn logo appears on printed QR cards
 - [x] Download as PNG — file downloads with QR code
+- [x] Scan the Spark Essentials QR (`?tab=shop`) — the intercom panel opens on the **Store** tab, not Chat
+
+## QR tab deep link (2026-11-21)
+
+The store QR encodes `?tab=shop`, so the **guest** app must open the intercom panel on the Store tab. The panel used to always start on Chat, so every "scan to order" card dropped the guest on the wrong surface — the QR was right, the guest app ignored it.
+
+- The tab is resolved **once on load** from the `tab` query param (`guest-app/src/utils/intercomTab.ts` → `resolveIntercomTab`): `tab=shop` → Store, anything else (including an unknown value) → Chat. An unknown param never leaves the guest on a blank panel.
+- The URL is kept in sync when the guest switches tabs (`withIntercomTab`), so a refresh — or a shared link — preserves the surface the guest is on.
+- If the hotel has the store switched **off**, a `?tab=shop` scan falls back to Chat and the param is dropped from the URL, so a refresh does not re-request the store.
+- The chat QR is unchanged: no param, so it still opens on Chat.
 
 ## QR URL env-awareness (2026-07-24 fix)
 
