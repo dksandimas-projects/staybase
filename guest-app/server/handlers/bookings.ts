@@ -22,6 +22,16 @@ import { BookingValidationError } from "../lib/bookingValidationError";
 // the NAME from the same `guests` document the admin app's shared
 // `staffNameMap` reads.
 import { resolveStaffDisplayName } from "../lib/staffNames";
+// Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`): the
+// server-side forensic audit writer. Every authenticated staff
+// mutation records a row through it.
+import {
+  buildServerAuditEntry,
+  resolveServerAuditActor,
+  serverAuditActor,
+  stageServerAuditRow,
+  writeServerAuditRow
+} from "../lib/audit-writer";
 // Per BR-06 (Phase 13 — Breakfast Redesign, decision
 // #235, 2026-10-13): the unified refund-write helper.
 // `handleAddRefund` (CRL-01) routes the actual entry
@@ -6678,6 +6688,52 @@ export async function handleCreateWalkin(req: any, res: any) {
           // resolves to that room independently.
           lookupToken: lineIdx === 0 ? (newBooking as any).lookupToken : generateLookupToken()
         });
+
+        // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`): the
+        // forensic audit row for the walk-in. One row per created
+        // child booking — the walk-in creates N children (one per
+        // room line) in this transaction, and each is a real booking
+        // the trail must point at.
+        //
+        // The values recorded are stay facts + money only — never the
+        // guest's name, email, phone or the `guestDetails` object.
+        // (`leadGuestName` / `leadGuestEmail` / `leadGuestPhone` are
+        // NOT on the shared redaction list, so a whole-document
+        // snapshot would have leaked them. The rows are built from an
+        // explicit, minimal field list instead.)
+        const walkinAuditEntry = buildServerAuditEntry({
+          actor: serverAuditActor(req.staff, walkinStaffName),
+          action: "bookings.create-walkin",
+          targetId: perRoomBookingDocRef.id,
+          targetLabel: `${walkinBookingRefs[lineIdx]}`,
+          before: null,
+          after: {
+            status: newBooking.status,
+            roomId: assigned.roomId,
+            roomNumber: String(assigned.data.roomNumber || ""),
+            roomType: String(assigned.data.type || ""),
+            checkIn: checkInDate.toISOString(),
+            checkOut: checkOutDate.toISOString(),
+            numGuests: assigned.numAdults + assigned.numChildren,
+            totalPrice: lineFinancials.totalPrice,
+            source: "walk-in"
+          },
+          changedFields: [
+            "status",
+            "roomId",
+            "roomNumber",
+            "roomType",
+            "checkIn",
+            "checkOut",
+            "numGuests",
+            "totalPrice",
+            "source",
+            "createdAt",
+            "updatedAt"
+          ],
+          timestamp: now
+        });
+        if (walkinAuditEntry) stageServerAuditRow(transaction, walkinAuditEntry);
       }
       // Per PEX-03 (2026-08-01, per decision #147): same
       // in-transaction retirement as handleCreateBooking. The
@@ -6834,6 +6890,13 @@ export async function handleApplyBookingDiscount(req: any, res: any) {
     return res.status(400).json({ success: false, error: "Invalid government discount type." });
   }
 
+  // Per ATR-02: the audit row's actor (verified token + display name).
+  const auditActor = await resolveServerAuditActor(req.staff);
+  // Captured BEFORE the transaction so the row and the booking's
+  // `updatedAt` agree to the millisecond, and so a transaction
+  // retry does not move the clock.
+  const now = new Date();
+
   try {
     let result: Record<string, any> = {};
     await adminDb.runTransaction(async (transaction) => {
@@ -6956,9 +7019,41 @@ export async function handleApplyBookingDiscount(req: any, res: any) {
           otherAddOnTotal: Number(booking.otherAddOnTotal) || 0,
           previousOtherAddOnTotal: Number(booking.otherAddOnTotal) || 0
         }),
-        updatedAt: new Date()
+        updatedAt: now
       };
-      if (voucherRef) transaction.update(voucherRef, { usageCount: voucherUsageCount, updatedAt: new Date() });
+
+      // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`): the
+      // forensic audit row for the discount / voucher grant. Built
+      // after the reads (so `before` / `after` carry the REAL values)
+      // and staged in this transaction, so the row commits atomically
+      // with the price change. The values recorded here are money
+      // and grant facts only — no guest personal data.
+      const auditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.discount-verify",
+        targetId: bookingId,
+        targetLabel: `${booking.bookingRef || bookingId}`,
+        before: {
+          discountType: String(booking.discountType || ""),
+          discountPct: Number(booking.discountPct || 0),
+          discountVerified: Boolean(booking.discountVerified),
+          voucherCode: String(booking.voucherCode || ""),
+          voucherDiscount: Number(booking.voucherDiscount || 0),
+          totalPrice: Number(booking.totalPrice || 0)
+        },
+        after: {
+          discountType,
+          discountPct,
+          discountVerified: Boolean(discountType),
+          voucherCode,
+          voucherDiscount,
+          totalPrice
+        },
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
+
+      if (voucherRef) transaction.update(voucherRef, { usageCount: voucherUsageCount, updatedAt: now });
       transaction.update(bookingRef, updates);
       result = updates;
     });
@@ -7033,18 +7128,18 @@ export async function handleApplyReservationDiscount(req: any, res: any) {
     return res.status(400).json({ success: false, error: "Invalid government discount type." });
   }
 
-  // Staff-auth gate — same posture as the per-room handler.
-  // The router enforces this before invoking the handler; we
-  // trust `req.staff` here.
+  // Staff-auth gate — same posture as the per-room handler; the
+  // router enforces it before invoking the handler.
   const staffUid = String(req.staff?.uid || "staff");
 
-  // Pre-transaction: discover every child booking for the
-  // reservation. Firestore transactions don't support
-  // `.where().get()` queries, so the child IDs must be
-  // gathered outside the transaction. We re-read each child
-  // with `transaction.get` inside the transaction (FOL-03
-  // reads-before-writes) — the pre-transaction read is just
-  // for ID discovery.
+  // Per ATR-02: the audit row's actor (verified token + display name).
+  const auditActor = await resolveServerAuditActor(req.staff);
+  const now = new Date();
+
+  // Pre-transaction: discover every child booking. Firestore
+  // transactions don't support `.where().get()`, so the child IDs are
+  // gathered outside; each is re-read with `transaction.get` inside
+  // (FOL-03 reads-before-writes).
   let childRefs: FirebaseFirestore.DocumentReference[] = [];
   try {
     const childSnap = await adminDb.collection("bookings")
@@ -7214,9 +7309,41 @@ export async function handleApplyReservationDiscount(req: any, res: any) {
             otherAddOnTotal: Number(booking.otherAddOnTotal) || 0,
             previousOtherAddOnTotal: Number(booking.otherAddOnTotal) || 0
           }),
-          updatedAt: new Date()
+          updatedAt: now
         };
+
         transaction.update(child.ref, updates);
+
+        // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`):
+        // the forensic audit row for this child's discount /
+        // voucher grant. One row per child, staged in this
+        // transaction, so each row commits atomically with its
+        // own price change. Money and grant facts only — no
+        // guest personal data.
+        const childAuditEntry = buildServerAuditEntry({
+          actor: auditActor,
+          action: "bookings.discount-verify",
+          targetId: child.id,
+          targetLabel: `${booking.bookingRef || child.id}`,
+          before: {
+            discountType: String(booking.discountType || ""),
+            discountPct: Number(booking.discountPct || 0),
+            discountVerified: Boolean(booking.discountVerified),
+            voucherCode: String(booking.voucherCode || ""),
+            voucherDiscount: Number(booking.voucherDiscount || 0),
+            totalPrice: Number(booking.totalPrice || 0)
+          },
+          after: {
+            discountType,
+            discountPct,
+            discountVerified: Boolean(discountType),
+            voucherCode,
+            voucherDiscount,
+            totalPrice
+          },
+          timestamp: now
+        });
+        if (childAuditEntry) stageServerAuditRow(transaction, childAuditEntry);
       }
 
       // Single voucher write — the per-child increment
@@ -7226,7 +7353,7 @@ export async function handleApplyReservationDiscount(req: any, res: any) {
       let voucherUsageCount: number | undefined;
       if (voucherRef && voucherData) {
         voucherUsageCount = Number(voucherData.usageCount || 0) + eligible.length;
-        transaction.update(voucherRef, { usageCount: voucherUsageCount, updatedAt: new Date() });
+        transaction.update(voucherRef, { usageCount: voucherUsageCount, updatedAt: now });
       }
 
       result = {
@@ -7300,6 +7427,13 @@ export async function handleRemoveVoucher(req: any, res: any) {
   // Mirror of handleApplyBookingDiscount line ~4967:
   // staff-authenticated, router sets `req.staff`.
   const staffUid = String(req.staff?.uid || "staff");
+
+  // Per ATR-02: the audit row's actor (verified token + display name).
+  const auditActor = await resolveServerAuditActor(req.staff);
+  // Captured BEFORE the transaction so the row and the booking's
+  // `updatedAt` agree to the millisecond, and so a transaction
+  // retry does not move the clock.
+  const now = new Date();
 
   try {
     let result: Record<string, any> = {};
@@ -7393,7 +7527,7 @@ export async function handleRemoveVoucher(req: any, res: any) {
         voucherDiscount: 0,
         staffRemovedVoucherBy: staffUid,
         staffRemovedVoucherReason: reason,
-        staffRemovedVoucherAt: new Date(),
+        staffRemovedVoucherAt: now,
         totalPrice: restoredTotalPrice,
         ...(rateBreakdown ? { rateBreakdown } : {}),
         // Per the P1 revenue-reporting audit (2026-10-22): the
@@ -7412,8 +7546,45 @@ export async function handleRemoveVoucher(req: any, res: any) {
           otherAddOnTotal: Number(bookingData.otherAddOnTotal) || 0,
           previousOtherAddOnTotal: Number(bookingData.otherAddOnTotal) || 0
         }),
-        updatedAt: new Date()
+        updatedAt: now
       };
+
+      // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`): the
+      // forensic audit row for the voucher removal. Removing an
+      // applied entitlement is the same desk act as rejecting a
+      // government discount, so it shares the `discount-reject`
+      // action. The staff member's explanation is free text — it
+      // rides the row's `reason` channel, and the field is recorded
+      // BY NAME only.
+      const auditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.discount-reject",
+        targetId: bookingId,
+        targetLabel: `${bookingData.bookingRef || bookingId}`,
+        before: {
+          voucherCode: existingVoucherCode,
+          voucherDiscount: Number(bookingData.voucherDiscount || 0),
+          totalPrice: Number(bookingData.totalPrice || 0)
+        },
+        after: {
+          voucherCode: "",
+          voucherDiscount: 0,
+          totalPrice: restoredTotalPrice
+        },
+        changedFields: [
+          "voucherCode",
+          "voucherDiscount",
+          "staffRemovedVoucherBy",
+          "staffRemovedVoucherReason",
+          "staffRemovedVoucherAt",
+          "totalPrice",
+          "rateBreakdown",
+          "revenueAllocation"
+        ],
+        reason: typeof reason === "string" ? reason.slice(0, 500) : null,
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
 
       // Per the VOU-02 contract: decrement usageCount
       // by 1, clamped at 0. Mirror of the cancel-handler
@@ -7425,7 +7596,7 @@ export async function handleRemoveVoucher(req: any, res: any) {
         const voucherData = voucherDoc.data() || {};
         transaction.update(voucherRef, {
           usageCount: Math.max((Number(voucherData.usageCount) || 0) - 1, 0),
-          updatedAt: new Date()
+          updatedAt: now
         });
       }
       transaction.update(bookingRef, updates);
@@ -7444,6 +7615,12 @@ export async function handleRejectDiscount(req: any, res: any) {
   if (!bookingId) {
     return res.status(400).json({ success: false, error: "Booking ID is required." });
   }
+
+  // Per ATR-02: the audit row's actor (verified token + display name).
+  const auditActor = await resolveServerAuditActor(req.staff);
+  // Captured BEFORE the write so the row and the booking's
+  // `updatedAt` agree to the millisecond.
+  const now = new Date();
 
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
@@ -7539,10 +7716,47 @@ export async function handleRejectDiscount(req: any, res: any) {
         otherAddOnTotal: Number(bookingData.otherAddOnTotal) || 0,
         previousOtherAddOnTotal: Number(bookingData.otherAddOnTotal) || 0
       }),
-      updatedAt: new Date()
+      updatedAt: now
     };
 
+    // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`): the
+    // forensic audit row for the discount rejection. This handler has
+    // no transaction of its own, so the row is written with the
+    // awaited (non-transactional) writer AFTER the booking write
+    // succeeds — a failed row is logged and swallowed, never rolled
+    // back onto the desk's work. The rejection reason is free text:
+    // it rides the row's `reason` channel, and the field is recorded
+    // BY NAME only.
+    const auditEntry = buildServerAuditEntry({
+      actor: auditActor,
+      action: "bookings.discount-reject",
+      targetId: String(bookingId),
+      targetLabel: `${bookingData.bookingRef || bookingId}`,
+      before: {
+        discountPct: Number(bookingData.discountPct || 0),
+        discountRejected: Boolean(bookingData.discountRejected),
+        totalPrice: Number(bookingData.totalPrice || 0)
+      },
+      after: {
+        discountPct: 0,
+        discountRejected: true,
+        totalPrice: restoredTotalPrice
+      },
+      changedFields: [
+        "discountPct",
+        "discountRejected",
+        "discountRejectedBy",
+        "discountRejectionReason",
+        "totalPrice",
+        "rateBreakdown",
+        "revenueAllocation"
+      ],
+      reason: typeof reason === "string" ? String(reason).slice(0, 500) : null,
+      timestamp: now
+    });
+
     await bookingRef.update(updates);
+    await writeServerAuditRow(auditEntry);
 
     try {
       await sendBookingTrigger("discount-rejected", {
@@ -7602,6 +7816,9 @@ export async function handleSetLouReceived(req: any, res: any) {
   if (typeof louReceived !== "boolean") {
     return res.status(400).json({ success: false, error: "louReceived must be a boolean (true or false)." });
   }
+
+  // Per ATR-02: the audit row's actor (verified token + display name).
+  const auditActor = await resolveServerAuditActor(req.staff);
 
   try {
     let result: Record<string, any> = {};
@@ -7675,6 +7892,23 @@ export async function handleSetLouReceived(req: any, res: any) {
             }),
         updatedAt: now
       };
+
+      // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`): the
+      // forensic audit row for the LOU toggle. Staged in this
+      // transaction, so the row commits atomically with the flag
+      // flip.
+      const auditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.update",
+        targetId: String(bookingId).trim(),
+        targetLabel: `${booking.bookingRef || bookingId}`,
+        before: { louReceived: Boolean(booking.louReceived) },
+        after: { louReceived },
+        changedFields: ["louReceived", "louReceivedAt", "louReceivedBy", "updatedAt"],
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
+
       transaction.update(bookingRef, updates);
       result = updates;
     });
@@ -7737,6 +7971,9 @@ export async function handleSetSpecialRequests(req: any, res: any) {
     });
   }
 
+  // Per ATR-02: the audit row's actor (verified token + display name).
+  const auditActor = await resolveServerAuditActor(req.staff);
+
   try {
     let result: Record<string, any> = {};
     await adminDb.runTransaction(async (transaction) => {
@@ -7759,6 +7996,32 @@ export async function handleSetSpecialRequests(req: any, res: any) {
         specialRequestsUpdatedBy: staffUid,
         updatedAt: now
       };
+
+      // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`): the
+      // forensic audit row for the special-requests edit.
+      //
+      // `specialRequests` is FREE TEXT the desk types from a phone
+      // call — it can quote the guest, so it is recorded BY NAME
+      // ONLY: the field appears in `changedFields`, and neither
+      // `before` nor `after` carries its value. The row therefore
+      // answers "who changed the guest's requests, and when" without
+      // copying the guest's words into a second collection.
+      const auditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.update",
+        targetId: bookingId.trim(),
+        targetLabel: `${bookingSnap.data()?.bookingRef || bookingId}`,
+        before: null,
+        after: null,
+        changedFields: [
+          "specialRequests",
+          "specialRequestsUpdatedAt",
+          "specialRequestsUpdatedBy"
+        ],
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
+
       transaction.update(bookingRef, updates);
       result = updates;
     });
@@ -7789,6 +8052,9 @@ export async function handleRejectPayment(req: any, res: any) {
   // (BF-15). `req.staff.uid` is guaranteed by the
   // dispatcher's `authenticateStaff` guard.
   const paymentRejectedBy = req.staff?.uid || "staff";
+
+  // Per ATR-02: the audit row's actor (verified token + display name).
+  const auditActor = await resolveServerAuditActor(req.staff);
 
   let bookingData: any = null;
   // Per FOL-05 (2026-08-07, per decision #201): the
@@ -7946,6 +8212,46 @@ export async function handleRejectPayment(req: any, res: any) {
           updatedAt
         );
       siblingRejectedCount = helperSiblingRejectedCount;
+
+      // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`): the
+      // forensic audit rows for the rejection. One row per booking
+      // that actually flips back to `pending` — the target plus
+      // every sibling the reservation-scope rule flipped — so each
+      // row commits atomically with its own status change.
+      //
+      // The rejection reason is the desk's free text (it goes to the
+      // guest by email), so it rides the row's `reason` channel and
+      // the field is recorded BY NAME only.
+      const rejectionAuditRows: Array<{ id: string; fromStatus: string }> = [];
+      if (isTargetInPaymentUploaded) {
+        rejectionAuditRows.push({ id: bookingId, fromStatus: data.status });
+      }
+      for (const sibling of siblingChildBookings) {
+        if (sibling.id === bookingId) continue;
+        if (sibling.status !== "payment-uploaded") continue;
+        rejectionAuditRows.push({ id: sibling.id, fromStatus: sibling.status });
+      }
+      for (const row of rejectionAuditRows) {
+        const auditEntry = buildServerAuditEntry({
+          actor: auditActor,
+          action: "bookings.payment-reject",
+          targetId: row.id,
+          targetLabel: row.id === bookingId ? `${data.bookingRef || bookingId}` : row.id,
+          before: { status: row.fromStatus },
+          after: { status: "pending" },
+          changedFields: [
+            "status",
+            "paymentRejectionReason",
+            "paymentRejectedAt",
+            "paymentRejectedBy",
+            "holdExpiresAt",
+            "updatedAt"
+          ],
+          reason: safeReason,
+          timestamp: updatedAt
+        });
+        if (auditEntry) stageServerAuditRow(transaction, auditEntry);
+      }
 
       // ---- WRITES — all writes after every `get()`, per FOL-03 ----
 
@@ -8234,6 +8540,17 @@ export async function handleCancelBooking(req: any, res: any) {
   const cancelledBy = isStaffCancellation
     ? String(req.staff.uid)
     : "guest";
+
+  // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`): the
+  // forensic audit row's actor name. Resolved ONCE, before the
+  // transaction — a Firestore transaction rejects a read after a
+  // write, and this is a read. The guest path records no audit row
+  // (it is not a staff mutation); the guest's cancellation is already
+  // visible through the booking's `cancelledBy` / `cancelledAt`
+  // milestone stamps.
+  const cancelledByName = isStaffCancellation
+    ? await resolveStaffDisplayName(req.staff?.uid)
+    : "";
 
   // Per OCT-H8 (2026-10-20, decision #288): today's date in the
   // hotel timezone, captured ONCE at the entry point so every
@@ -8681,6 +8998,28 @@ export async function handleCancelBooking(req: any, res: any) {
         // `rewardsPoints == sum(pointsHistory.points)`.
         for (const child of children) {
           if (!cancellableIds.has(child.id)) continue;
+
+          // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`):
+          // one forensic audit row per cancelled child, staged in
+          // this transaction so each row commits atomically with its
+          // own status change. The cancellation reason is the staff
+          // member's free text — it rides the row's `reason` channel
+          // (the deliberate channel for operational prose), never as
+          // a changed VALUE.
+          if (isStaffCancellation) {
+            const childAudit = buildServerAuditEntry({
+              actor: serverAuditActor(req.staff, cancelledByName),
+              action: "bookings.cancel",
+              targetId: child.id,
+              targetLabel: `${child.data.bookingRef || child.id}`,
+              before: { status: child.data.status },
+              after: { status: "cancelled" },
+              reason: validReason,
+              timestamp: now
+            });
+            if (childAudit) stageServerAuditRow(transaction, childAudit);
+          }
+
           transaction.update(child.ref, {
             status: "cancelled",
             cancellationReason: validReason,
@@ -9099,6 +9438,26 @@ export async function handleCancelBooking(req: any, res: any) {
       bookingUpdate.otherAddOnSelections = perChildRedated.otherAddOnSelections;
       bookingUpdate.otherAddOnTotal = perChildRedated.otherAddOnTotal;
       bookingUpdate.hasAnyOtherAddOns = perChildRedated.hasAnyOtherAddOns;
+
+      // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`):
+      // the forensic audit row for the single-booking staff
+      // cancellation. Staged in this transaction, so the row commits
+      // atomically with the status flip. The guest path records no
+      // row (it is not a staff mutation) — the booking's
+      // `cancelledBy` / `cancelledAt` stamps already carry it.
+      if (isStaffCancellation) {
+        const auditEntry = buildServerAuditEntry({
+          actor: serverAuditActor(req.staff, cancelledByName),
+          action: "bookings.cancel",
+          targetId: bookingDocumentRef.id,
+          targetLabel: `${freshBooking.bookingRef || bookingDocumentRef.id}`,
+          before: { status: freshBooking.status },
+          after: { status: "cancelled" },
+          reason: validReason,
+          timestamp: now
+        });
+        if (auditEntry) stageServerAuditRow(transaction, auditEntry);
+      }
 
       transaction.update(bookingDocumentRef, bookingUpdate);
 
@@ -9838,6 +10197,10 @@ export async function handleAddPayment(req: any, res: any) {
   // the staff-new-payment dedup inside a Firestore transaction,
   // then defers the email sends to a single follow-up read.
   const staffUid = req.staff?.uid || "staff";
+
+  // Per ATR-02: the audit row's actor (verified token + display name).
+  const auditActor = await resolveServerAuditActor(req.staff);
+
   const paymentRecord: Record<string, any> = {
     type: "payment",
     amount: numericAmount,
@@ -10190,6 +10553,81 @@ export async function handleAddPayment(req: any, res: any) {
         ? { ...paymentRecord, reservationId: bookingReservationId, bookingId: bookingId }
         : paymentRecord;
       transaction.create(newPaymentRef, recordWithReservation);
+
+      // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`): the
+      // forensic audit row for the payment.
+      //
+      // The payment record itself lives in a payments SUBCOLLECTION,
+      // which is not an auditable target collection — so the row
+      // targets the BOOKING and carries the money facts (amount +
+      // method) the trail needs.
+      //
+      // The payment's `note` is the desk's free text and its
+      // `transactionReference` is an opaque external string that may
+      // embed an account number: both are recorded BY NAME only.
+      const paymentAuditChangedFields = [
+        "paidAmount",
+        "totalPaid",
+        "paymentAmount",
+        "paymentMethod",
+        "note",
+        "transactionReference"
+      ];
+      if (bookingUpdates.status) {
+        paymentAuditChangedFields.push(
+          "status",
+          "paymentConfirmedAt",
+          "handledBy",
+          "updatedAt"
+        );
+      }
+      const paymentAuditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.payment-add",
+        targetId: bookingId,
+        targetLabel: `${bookingData.bookingRef || bookingId}`,
+        before: {
+          status: bookingData.status,
+          paidAmount: Number((bookingData as any).paidAmount || 0),
+          totalPaid: existingPaid,
+          paymentAmount: 0,
+          paymentMethod: ""
+        },
+        after: {
+          status: bookingUpdates.status || bookingData.status,
+          paidAmount: Number(bookingUpdates.paidAmount || 0),
+          totalPaid,
+          paymentAmount: numericAmount,
+          paymentMethod: method
+        },
+        changedFields: paymentAuditChangedFields,
+        timestamp: now
+      });
+      if (paymentAuditEntry) stageServerAuditRow(transaction, paymentAuditEntry);
+
+      // Per ATR-02: the sibling rooms whose payment coverage was
+      // completed by this same payment. Each flipped sibling is a
+      // real booking whose status changed, so it gets its own row —
+      // the sibling's payment became VERIFIED (covered), which is
+      // what actually happened to it.
+      for (const sibling of siblingChildBookings) {
+        if (sibling.id === bookingId) continue;
+        const coversChild = sibling.totalPrice > 0 && totalPaid >= sibling.totalPrice;
+        const isFlippableStatus =
+          sibling.status === "pending" || sibling.status === "payment-uploaded";
+        if (!isFlippableStatus || !coversChild) continue;
+        const siblingAuditEntry = buildServerAuditEntry({
+          actor: auditActor,
+          action: "bookings.payment-verify",
+          targetId: sibling.id,
+          targetLabel: sibling.id,
+          before: { status: sibling.status },
+          after: { status: "payment-confirmed" },
+          changedFields: ["status", "paymentConfirmedAt", "handledBy", "updatedAt"],
+          timestamp: now
+        });
+        if (siblingAuditEntry) stageServerAuditRow(transaction, siblingAuditEntry);
+      }
     });
   } catch (error: any) {
     if (error.message === "Booking not found") {
@@ -10432,6 +10870,13 @@ export async function handleAddRefund(req: any, res: any) {
     ? transactionReference.trim().slice(0, 200) || null
     : null;
 
+  // Per ATR-02: the audit row's actor (verified token + display name).
+  const auditActor = await resolveServerAuditActor(req.staff);
+  // Captured BEFORE the transaction so the row and the refund write
+  // agree to the millisecond, and so a transaction retry does not
+  // move the clock.
+  const now = new Date();
+
   try {
     let refundRecord: Record<string, any> = {};
     let netCollected = 0;
@@ -10645,6 +11090,51 @@ export async function handleAddRefund(req: any, res: any) {
       // on the input — see `markRefundPaid` in
       // `server/lib/refunds.ts`.
       refundRecord = helperResult.refundEntry;
+
+      // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`):
+      // the forensic audit row for the refund.
+      //
+      // The refund record itself lives in a refunds SUBCOLLECTION,
+      // which is not an auditable target collection — so the row
+      // targets the BOOKING and carries the money facts (amount +
+      // method) the trail needs.
+      //
+      // The refund's `reason` is the desk's free text and its
+      // `transactionReference` is an opaque external string that may
+      // embed an account number: the reason rides the row's
+      // deliberate `reason` channel and both fields are recorded BY
+      // NAME only.
+      const refundAuditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.refund",
+        targetId: bookingId,
+        targetLabel: `${bookingData.bookingRef || bookingId}`,
+        before: {
+          paidAmount: Number((bookingData as any).paidAmount || 0),
+          netCollected,
+          refundAmount: 0,
+          refundMethod: ""
+        },
+        after: {
+          paidAmount: Number(helperResult.newBookingPaidAmount || 0),
+          netCollected: netCollected - numericAmount,
+          refundAmount: numericAmount,
+          refundMethod: safeMethod
+        },
+        changedFields: [
+          "paidAmount",
+          "netCollected",
+          "refundAmount",
+          "refundMethod",
+          "reason",
+          "note",
+          "transactionReference",
+          "lastRefundClearedAt"
+        ],
+        reason: safeReason,
+        timestamp: now
+      });
+      if (refundAuditEntry) stageServerAuditRow(transaction, refundAuditEntry);
     });
     // Per CRL-08 (2026-08-03, per decision #174):
     // post-commit side effects. The refund-state
@@ -10799,19 +11289,19 @@ export async function handleRecordCancellationException(req: any, res: any) {
   // the staff UID is the source of truth (no
   // client-supplied UID).
   const adminUid = req.staff.uid || "admin";
+
+  // Per ATR-02: the audit row's actor (verified token + display name).
+  const auditActor = await resolveServerAuditActor(req.staff);
+
   try {
     let liabilityFieldPath: "cancellationLiability" = "cancellationLiability";
     let snapshotAfter: any = null;
     let idempotentReplay = false;
     await adminDb.runTransaction(async (transaction) => {
-      // Pick the right document. The reservation
-      // path is the source of truth for
-      // reservation-scope cancels; the booking
-      // path is the source of truth for per-child
-      // + legacy cancels. The endpoint never
-      // "promotes" a per-child liability to the
-      // header — it writes to wherever the
-      // cancellation stamped the snapshot.
+      // Pick the right document. The reservation path owns
+      // reservation-scope cancels; the booking path owns per-child
+      // + legacy cancels. The endpoint never "promotes" a per-child
+      // liability to the header.
       const targetRef = safeReservationId
         ? adminDb.collection("reservations").doc(safeReservationId)
         : adminDb.collection("bookings").doc(safeBookingId);
@@ -10836,6 +11326,8 @@ export async function handleRecordCancellationException(req: any, res: any) {
         throw new Error("Approved amount cannot exceed the policy refund.");
       }
       const approvedRounded = Math.round(numericApproved * 100) / 100;
+      // Per ATR-02: one clock for the exception stamp, the audit row
+      // and the target's `updatedAt`.
       const now = new Date();
       // Idempotency check: a re-submit with the
       // same `approvedAmount` + `reason` replays
@@ -10869,6 +11361,68 @@ export async function handleRecordCancellationException(req: any, res: any) {
         approvedAmount: approvedRounded,
         exception: newException
       };
+
+      // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`): the
+      // forensic audit row for the cancellation exception.
+      //
+      // The closed `AUDIT_TARGET_COLLECTIONS` set has no
+      // `reservations` entry, so a reservation-scope exception cannot
+      // point at the reservation header. It follows the SAME
+      // precedent as the reservation-scope cancel (one row per
+      // cancelled child): the row is written against each booking of
+      // the reservation, so every booking in it carries the trail.
+      //
+      // The exception's `reason` is the admin's free text — it rides
+      // the row's `reason` channel, and the field is recorded BY NAME
+      // only.
+      const exceptionAuditTargets: Array<{ id: string; label: string }> = [];
+      if (safeBookingId) {
+        exceptionAuditTargets.push({
+          id: safeBookingId,
+          label: `${targetData.bookingRef || safeBookingId}`
+        });
+      } else {
+        // Per FOL-03: the children read completes BEFORE any write.
+        const childSnap = await transaction.get(
+          adminDb.collection("bookings").where("reservationId", "==", safeReservationId)
+        );
+        for (const childDoc of childSnap.docs) {
+          const childData = childDoc.data() || {};
+          exceptionAuditTargets.push({
+            id: childDoc.id,
+            label: `${childData.bookingRef || childDoc.id}`
+          });
+        }
+      }
+      for (const auditTarget of exceptionAuditTargets) {
+        const auditEntry = buildServerAuditEntry({
+          actor: auditActor,
+          action: "bookings.update",
+          targetId: auditTarget.id,
+          targetLabel: auditTarget.label,
+          before: {
+            approvedAmount: Number(liability.approvedAmount || 0),
+            policyRefund
+          },
+          after: {
+            approvedAmount: approvedRounded,
+            policyRefund
+          },
+          changedFields: [
+            "cancellationLiability.approvedAmount",
+            "cancellationLiability.exception",
+            "cancellationLiability.exception.approvedAmount",
+            "cancellationLiability.exception.reason",
+            "cancellationLiability.exception.approvedBy",
+            "cancellationLiability.exception.approvedAt",
+            "updatedAt"
+          ],
+          reason: safeReason,
+          timestamp: now
+        });
+        if (auditEntry) stageServerAuditRow(transaction, auditEntry);
+      }
+
       transaction.update(targetRef, {
         [liabilityFieldPath]: newLiability,
         updatedAt: now
@@ -10986,6 +11540,12 @@ export async function handleMarkPaymentConfirmed(req: any, res: any) {
     return res.status(400).json({ success: false, error: "Booking ID is required." });
   }
 
+  // Per ATR-02: the audit row's actor (verified token + display name).
+  const auditActor = await resolveServerAuditActor(req.staff);
+  // Captured BEFORE the transaction so the row and the booking's
+  // `updatedAt` agree to the millisecond.
+  const now = new Date();
+
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
     const handledBy = req.staff?.uid || "staff";
@@ -11006,11 +11566,29 @@ export async function handleMarkPaymentConfirmed(req: any, res: any) {
         throw new Error(`INVALID_STATUS:${data.status}`);
       }
 
+      // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`):
+      // the forensic audit row for the manual payment confirmation.
+      // Built after the read (so `before` / `after` carry the REAL
+      // status) and staged in this transaction, so the row commits
+      // atomically with the status flip. The already-confirmed
+      // branch returns early, so no row is written for a no-op.
+      const auditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.payment-verify",
+        targetId: bookingId,
+        targetLabel: `${data.bookingRef || bookingId}`,
+        before: { status: data.status },
+        after: { status: "payment-confirmed" },
+        changedFields: ["status", "handledBy", "paymentConfirmedAt", "updatedAt"],
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
+
       transaction.update(bookingRef, {
         status: "payment-confirmed",
         handledBy,
-        paymentConfirmedAt: new Date(),
-        updatedAt: new Date()
+        paymentConfirmedAt: now,
+        updatedAt: now
       });
     });
 
@@ -11067,6 +11645,9 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
   const paymentNote = safeNote || "Verified payment proof";
 
   const staffUid = req.staff?.uid || "staff";
+
+  // Per ATR-02: the audit row's actor (verified token + display name).
+  const auditActor = await resolveServerAuditActor(req.staff);
 
   // Per RPT-05 (QA pass 2026-10-21): the booking doc, declared at
   // the HANDLER scope rather than inside the try block. A `catch`
@@ -11389,6 +11970,78 @@ export async function handleVerifyAndRecordPayment(req: any, res: any) {
       }
       bookingData = { ...data, ...bookingUpdates };
 
+      // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`): the
+      // forensic audit row for the verified payment.
+      //
+      // The payment record itself lives in a payments SUBCOLLECTION,
+      // which is not an auditable target collection — so the row
+      // targets the BOOKING and carries the money facts (amount +
+      // method) the trail needs. The payment's `note` is the desk's
+      // free text and its `transactionReference` is an opaque
+      // external string that may embed an account number: both are
+      // recorded BY NAME only.
+      const paymentAuditChangedFields = [
+        "paidAmount",
+        "totalCollected",
+        "paymentAmount",
+        "paymentMethod",
+        "note",
+        "transactionReference"
+      ];
+      if (bookingUpdates.status) {
+        paymentAuditChangedFields.push(
+          "status",
+          "paymentConfirmedAt",
+          "handledBy",
+          "updatedAt"
+        );
+      }
+      const paymentAuditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.payment-verify",
+        targetId: bookingId,
+        targetLabel: `${data.bookingRef || bookingId}`,
+        before: {
+          status: data.status,
+          paidAmount: Number((data as any).paidAmount || 0),
+          totalCollected: existingPaid,
+          paymentAmount: 0,
+          paymentMethod: ""
+        },
+        after: {
+          status: bookingUpdates.status || data.status,
+          paidAmount: Number(bookingUpdates.paidAmount || 0),
+          totalCollected,
+          paymentAmount: numericAmount,
+          paymentMethod: method
+        },
+        changedFields: paymentAuditChangedFields,
+        timestamp: now
+      });
+      if (paymentAuditEntry) stageServerAuditRow(transaction, paymentAuditEntry);
+
+      // Per ATR-02: the sibling rooms whose payment coverage was
+      // completed by this same verification. Each flipped sibling is
+      // a real booking whose status changed, so it gets its own row.
+      for (const sibling of siblingChildBookings) {
+        if (sibling.id === bookingId) continue;
+        const coversChild = sibling.totalPrice > 0 && totalCollected >= sibling.totalPrice;
+        const isFlippableStatus =
+          sibling.status === "pending" || sibling.status === "payment-uploaded";
+        if (!isFlippableStatus || !coversChild) continue;
+        const siblingAuditEntry = buildServerAuditEntry({
+          actor: auditActor,
+          action: "bookings.payment-verify",
+          targetId: sibling.id,
+          targetLabel: sibling.id,
+          before: { status: sibling.status },
+          after: { status: "payment-confirmed" },
+          changedFields: ["status", "paymentConfirmedAt", "handledBy", "updatedAt"],
+          timestamp: now
+        });
+        if (siblingAuditEntry) stageServerAuditRow(transaction, siblingAuditEntry);
+      }
+
       // 3. Per BAR-03 (2026-08-08, per decision #204):
       // the per-sibling `transaction.update` calls + the
       // reservation header heartbeat are queued by the
@@ -11532,6 +12185,9 @@ export async function handleConfirmBooking(req: any, res: any) {
     // booking update and the reservation mirror.
     const now = new Date();
 
+    // Per ATR-02: the audit row's actor (verified token + display name).
+    const auditActor = await resolveServerAuditActor(req.staff);
+
     // Per S4 (soft batch 2026-06-26): wrap the
     // read + status check + write in a transaction so two
     // staff confirming the same booking in parallel
@@ -11569,6 +12225,22 @@ export async function handleConfirmBooking(req: any, res: any) {
       // so the legacy-skip guard below is a clean
       // `length === 0` check.
       const bookingReservationId = String((data as any).reservationId || "").trim();
+
+      // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`):
+      // the forensic audit row for the confirmation. Built
+      // after the reads (so `before` / `after` carry the real
+      // values) and staged in this transaction, so the row
+      // commits atomically with the status change.
+      const auditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.confirm",
+        targetId: bookingId,
+        targetLabel: `${data.bookingRef || bookingId}`,
+        before: { status: data.status },
+        after: { status: "confirmed" },
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
 
       transaction.update(bookingRef, {
         status: "confirmed",
@@ -11731,6 +12403,9 @@ export async function handleConfirmBookingWithBalance(req: any, res: any) {
   const confirmedBy = req.staff?.uid || "staff";
   const staffRole = req.staff?.role || "front-desk";
 
+  // Per ATR-02: the audit row's actor (verified token + display name).
+  const auditActor = await resolveServerAuditActor(req.staff);
+
   // Pre-read hotelConfig outside the transaction so the 403
   // message can include the configured threshold. The
   // transaction re-reads it for the authoritative gate.
@@ -11868,6 +12543,23 @@ export async function handleConfirmBookingWithBalance(req: any, res: any) {
           updatedAt: now
         });
       }
+
+      // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`):
+      // the forensic audit row for the confirm-with-balance. The
+      // balance reason is the staff member's own free text, so it
+      // is recorded as the row's `reason` (the deliberate channel
+      // for operational prose) rather than as a changed VALUE.
+      const auditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.confirm",
+        targetId: bookingId,
+        targetLabel: `${data.bookingRef || bookingId}`,
+        before: { status: data.status },
+        after: { status: "confirmed", confirmedWithBalance: computedBalance },
+        reason: safeReason,
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
 
       transaction.update(bookingRef, {
         status: "confirmed",
@@ -12081,6 +12773,23 @@ export async function handleCheckinBooking(req: any, res: any) {
 
       // ALL WRITES BELOW — no `transaction.get()` calls
       // from this point forward. Per FOL-03.
+
+      // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`):
+      // the forensic audit row for the check-in. It is BUILT here
+      // (after the reads, so `before` / `after` carry the REAL
+      // values) and STAGED in this transaction, so the row commits
+      // atomically with the status change. The helper never throws —
+      // a malformed row is logged and the check-in still completes.
+      const auditEntry = buildServerAuditEntry({
+        actor: serverAuditActor(req.staff, checkedInByName),
+        action: "bookings.checkin",
+        targetId: bookingId,
+        targetLabel: `${bookingData.bookingRef || bookingId}`,
+        before: { status: bookingData.status },
+        after: { status: "checked-in" },
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
 
       transaction.update(bookingRef, {
         status: "checked-in",
@@ -12446,6 +13155,27 @@ export async function handleCheckoutBooking(req: any, res: any) {
 
       // ALL WRITES BELOW — no `transaction.get()` calls
       // from this point forward. Per FOL-03.
+
+      // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`):
+      // the forensic audit row for the check-out. Built after the
+      // reads (so `before` / `after` carry the real values) and
+      // staged in this transaction, so the row commits atomically
+      // with the status change. `unpaidCheckoutReason` is recorded
+      // by NAME only — it is the staff member's free text.
+      const auditEntry = buildServerAuditEntry({
+        actor: serverAuditActor(req.staff, checkedOutByName),
+        action: "bookings.checkout",
+        targetId: bookingId,
+        targetLabel: `${freshBookingData.bookingRef || bookingId}`,
+        before: { status: freshBookingData.status },
+        after: { status: "checked-out" },
+        changedFields: checkedOutWithBalance > 0
+          ? ["status", "checkedOutAt", "checkedOutWithBalance", "unpaidCheckoutReason"]
+          : undefined,
+        reason: safeUnpaidReason,
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
 
       transaction.update(bookingRef, bookingUpdate);
 
@@ -13316,6 +14046,12 @@ export async function handleResolveEarlyCheckin(req: any, res: any) {
     return res.status(400).json({ success: false, error: "Choose an early check-in time before granting it." });
   }
 
+  // Per ATR-02: the audit row's actor (verified token + display name).
+  const auditActor = await resolveServerAuditActor(req.staff);
+  // Captured BEFORE the transaction so the row and the booking's
+  // `updatedAt` agree to the millisecond.
+  const now = new Date();
+
   try {
     const bookingRef = adminDb.collection("bookings").doc(bookingId);
     const resolvedBy = req.staff?.name || req.staff?.email || "Staff Member";
@@ -13371,9 +14107,38 @@ export async function handleResolveEarlyCheckin(req: any, res: any) {
           confirmedTime
         };
         bookingData = { id: bookingDoc.id, ...data, earlyCheckIn: grantedEarlyCheckIn };
+
+        // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`): the
+        // forensic audit row for the granted early check-in. The
+        // `staffNote` is the desk's free text — it rides the row's
+        // `reason` channel and the field is recorded BY NAME only.
+        const grantAuditEntry = buildServerAuditEntry({
+          actor: auditActor,
+          action: "bookings.update",
+          targetId: bookingId,
+          targetLabel: `${data.bookingRef || bookingId}`,
+          before: { earlyCheckInStatus: "", earlyCheckInConfirmedTime: "" },
+          after: {
+            earlyCheckInStatus: "approved",
+            earlyCheckInConfirmedTime: String(confirmedTime || "")
+          },
+          changedFields: [
+            "earlyCheckIn",
+            "earlyCheckIn.status",
+            "earlyCheckIn.confirmedTime",
+            "earlyCheckIn.staffNote",
+            "earlyCheckIn.resolvedAt",
+            "earlyCheckIn.resolvedBy",
+            "updatedAt"
+          ],
+          reason: typeof staffNote === "string" ? staffNote.slice(0, 500) : null,
+          timestamp: now
+        });
+        if (grantAuditEntry) stageServerAuditRow(transaction, grantAuditEntry);
+
         transaction.update(bookingRef, {
           earlyCheckIn: grantedEarlyCheckIn,
-          updatedAt: new Date()
+          updatedAt: now
         });
         didWrite = true;
         return;
@@ -13397,9 +14162,42 @@ export async function handleResolveEarlyCheckin(req: any, res: any) {
 
       bookingData = { id: bookingDoc.id, ...data, earlyCheckIn: updatedEarlyCheckIn };
 
+      // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`): the
+      // forensic audit row for the resolved early check-in. The
+      // `staffNote` is the desk's free text — it rides the row's
+      // `reason` channel and the field is recorded BY NAME only.
+      const resolveAuditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.update",
+        targetId: bookingId,
+        targetLabel: `${data.bookingRef || bookingId}`,
+        before: {
+          earlyCheckInStatus: String(data.earlyCheckIn.status || ""),
+          earlyCheckInConfirmedTime: String(data.earlyCheckIn.confirmedTime || "")
+        },
+        after: {
+          earlyCheckInStatus: status,
+          earlyCheckInConfirmedTime: String(
+            status === "approved" ? (confirmedTime || data.earlyCheckIn.requestedTime) || "" : ""
+          )
+        },
+        changedFields: [
+          "earlyCheckIn",
+          "earlyCheckIn.status",
+          "earlyCheckIn.confirmedTime",
+          "earlyCheckIn.staffNote",
+          "earlyCheckIn.resolvedAt",
+          "earlyCheckIn.resolvedBy",
+          "updatedAt"
+        ],
+        reason: typeof staffNote === "string" ? staffNote.slice(0, 500) : null,
+        timestamp: now
+      });
+      if (resolveAuditEntry) stageServerAuditRow(transaction, resolveAuditEntry);
+
       transaction.update(bookingRef, {
         earlyCheckIn: updatedEarlyCheckIn,
-        updatedAt: new Date()
+        updatedAt: now
       });
       didWrite = true;
     });
@@ -13499,6 +14297,11 @@ export async function handleRescheduleBooking(req: any, res: any) {
 
   const { todayStr: todayKey, manilaDate: currentManilaDate } = getManilaDateInfo();
   const currentManilaMinutes = currentManilaDate.getHours() * 60 + currentManilaDate.getMinutes();
+
+  // Per ATR-02: the audit row's actor (verified token + display name).
+  // Resolved before the transaction — the name lookup is a READ, and a
+  // Firestore transaction rejects a read after a write (FOL-03).
+  const auditActor = await resolveServerAuditActor(req.staff);
 
   try {
     let updatedBooking: any = null;
@@ -14307,6 +15110,26 @@ export async function handleRescheduleBooking(req: any, res: any) {
         }
       }
 
+      // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`):
+      // the forensic audit row for the reschedule. The old and new
+      // stay dates are the whole point of the row — the staff member
+      // moved the guest's dates and the trail must show which dates.
+      // The staff member's reason rides the row's `reason` channel.
+      const auditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.reschedule",
+        targetId: String(bookingId),
+        targetLabel: `${booking.bookingRef || bookingId}`,
+        before: {
+          checkIn: toDateOrNull(booking.checkIn)?.toISOString() || null,
+          checkOut: toDateOrNull(booking.checkOut)?.toISOString() || null
+        },
+        after: { checkIn: checkIn, checkOut: checkOut },
+        reason: typeof reason === "string" ? reason.slice(0, 500) : null,
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
+
       transaction.update(bookingRef, updatedBooking);
       // Per MRB-02.x (2026-08-02, per decision #164):
       // update the reservation header in the SAME
@@ -14652,6 +15475,12 @@ export async function handleAssignBookingRoom(req: any, res: any) {
   const { todayStr: todayKey, manilaDate: currentManilaDate } = getManilaDateInfo();
   const currentManilaMinutes = currentManilaDate.getHours() * 60 + currentManilaDate.getMinutes();
 
+  // Per ATR-02: the audit row's actor (verified token + display name).
+  const auditActor = await resolveServerAuditActor(req.staff);
+  // Captured BEFORE the transaction so the row and the booking's
+  // `updatedAt` agree to the millisecond.
+  const now = new Date();
+
   try {
     const assigned = await adminDb.runTransaction(async (transaction) => {
       const bookingRef = adminDb.collection("bookings").doc(String(bookingId));
@@ -14736,7 +15565,10 @@ export async function handleAssignBookingRoom(req: any, res: any) {
       // a loop is a wasted round trip.
       const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
       const hotelConfig = hotelConfigDoc.data() || {};
-      const now = new Date();
+      // Per ATR-02: the handler-scoped `now` (captured before the
+      // transaction) is used here so the conflict check, the audit row
+      // and the booking's `updatedAt` all agree — and so a
+      // transaction retry does not move the clock.
       let sawConflict = false;
       let sawLingering = false;
       for (const doc of overlapSnapshot.docs) {
@@ -14778,7 +15610,7 @@ export async function handleAssignBookingRoom(req: any, res: any) {
       // a room override from a move (`"move"`) and an extend
       // (`"extend"`). `pricingBasis: "preserved"` records that
       // the money was deliberately NOT re-derived.
-      const nowIso = new Date().toISOString();
+      const nowIso = now.toISOString();
       const assignmentEntry = {
         fromRoomId: currentRoomId,
         fromRoomNumber: String(booking.roomNumber || ""),
@@ -14810,8 +15642,41 @@ export async function handleAssignBookingRoom(req: any, res: any) {
           ...(Array.isArray(booking.rescheduleHistory) ? booking.rescheduleHistory : []),
           assignmentEntry
         ],
-        updatedAt: new Date()
+        updatedAt: now
       });
+
+      // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`): the
+      // forensic audit row for the room re-assignment. Built after
+      // the reads (so `before` / `after` carry the REAL room) and
+      // staged in this transaction, so the row commits atomically
+      // with the move. The desk's reason is free text: it rides the
+      // row's `reason` channel, never a changed VALUE.
+      const auditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.room-reassign",
+        targetId: String(bookingId),
+        targetLabel: `${booking.bookingRef || bookingId}`,
+        before: {
+          roomId: currentRoomId,
+          roomNumber: String(booking.roomNumber || ""),
+          roomType: currentRoomType
+        },
+        after: {
+          roomId: String(roomId),
+          roomNumber: String(room.roomNumber || ""),
+          roomType: targetRoomType
+        },
+        changedFields: [
+          "roomId",
+          "roomNumber",
+          "roomType",
+          "rescheduleHistory",
+          "updatedAt"
+        ],
+        reason: typeof reason === "string" ? reason.slice(0, 500) : null,
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
 
       // An in-house guest physically moves: the old room is
       // released and the new room is marked occupied, in the
@@ -14985,6 +15850,12 @@ export async function handleAddRoomToReservation(req: any, res: any) {
     let newBookingRef: string | null = null;
     let updatedHeader: any = null;
     let fullBookingForEmail: any = null;
+
+    // Per ATR-02: the audit row's actor (verified token + display name).
+    const auditActor = await resolveServerAuditActor(req.staff);
+    // Captured BEFORE the transaction so the row and the new child's
+    // `createdAt` agree to the millisecond.
+    const now = new Date();
 
     await adminDb.runTransaction(async (transaction) => {
       // 1. Read the reservation header. The header
@@ -15545,6 +16416,51 @@ export async function handleAddRoomToReservation(req: any, res: any) {
         updatedAt: new Date()
       };
       const newBookingRefDoc = adminDb.collection("bookings").doc(bookingId);
+
+      // Per ATR-02 (2026-11-21, `plan/features/AUDIT-TRAIL.md`): the
+      // forensic audit row for the added room. The staff added a ROOM
+      // to an existing reservation, which creates a new child
+      // booking — so the row targets the NEW booking and records the
+      // stay facts (no guest personal data).
+      //
+      // The action is `bookings.update`: the closed vocabulary has no
+      // plain "bookings.create", and `bookings.create-walkin` is
+      // specifically the walk-in surface.
+      const auditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.update",
+        targetId: bookingId,
+        targetLabel: `${newBookingRefValue}`,
+        before: null,
+        after: {
+          status: "confirmed",
+          roomId: String(roomId),
+          roomNumber: String(targetRoom.roomNumber || ""),
+          roomType: targetRoomType,
+          checkIn: headerCheckIn.toISOString(),
+          checkOut: headerCheckOut.toISOString(),
+          numGuests: numAdults + numChildren,
+          totalPrice: finalTotalPrice,
+          reservationId
+        },
+        changedFields: [
+          "status",
+          "roomId",
+          "roomNumber",
+          "roomType",
+          "checkIn",
+          "checkOut",
+          "numGuests",
+          "totalPrice",
+          "reservationId",
+          "reservationPosition",
+          "createdAt",
+          "updatedAt"
+        ],
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
+
       transaction.set(newBookingRefDoc, newBookingDoc);
       newBookingId = bookingId;
       newBookingRef = newBookingRefValue;

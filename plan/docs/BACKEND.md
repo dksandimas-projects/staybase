@@ -162,10 +162,11 @@ match /auditLogs/{auditId} {
 
 The create rule validates: `action` is in the closed set, `targetCollection` is in the closed set, `actor == request.auth.uid`, `timestamp == request.time`, `source` is `"server"`/`"client"`, `changedFields` is a list, and no field outside the table above may be written. Like `addOns`, this collection shipped without a rule block (decision #279), so every audit row was rejected and the `addons.*` actions were permanently lost.
 
-**PII redaction (ATR-01).** A field on the redaction list is recorded in `changedFields` BY NAME ONLY and is NEVER copied into `before` / `after` — a naive snapshot would copy guest personal data into a second collection with a different retention posture. The list lives in `shared/schemas/audit.ts` (`AUDIT_REDACTED_FIELDS`) and `buildAuditEntry()` is the only sanctioned way to build a row.
+**PII redaction (ATR-01).** A field on the redaction list is recorded in `changedFields` BY NAME ONLY and is NEVER copied into `before` / `after` — a naive snapshot would copy guest personal data into a second collection with a different retention posture. The list lives in `shared/schemas/audit.ts` (`AUDIT_REDACTED_FIELDS`) and `buildAuditEntry()` is the only sanctioned way to build a row. **ATR-02** added the booking documents' own guest-identity names (`leadGuestName` / `leadGuestEmail` / `leadGuestPhone` / `leadGuestDetails` / `guestDetails`) — the list named `guestName` / `guestEmail`, which the documents do NOT use.
+
+**Server writers (ATR-02).** Every authenticated staff booking mutation records a row through `guest-app/server/lib/audit-writer.ts`, inside the handler's existing transaction (so it commits atomically with the mutation). The Admin SDK bypasses the rules, so `actor == request.auth.uid` / `timestamp == request.time` bind CLIENT rows only — a server row's actor comes from the verified token.
 
 **Composite indexes** (ATR-07): `(actor, timestamp desc)`, `(targetCollection, targetId, timestamp desc)`, `(action, timestamp desc)` in `firebase/firestore.indexes.json`.
-
 **Rules + indexes + writers ship in ONE commit.** A collection without its rules block loses every write silently — the writer swallows the failure by design, so there is no error anywhere.
 
 ---

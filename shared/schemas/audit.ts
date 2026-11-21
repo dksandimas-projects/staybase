@@ -151,6 +151,24 @@ export const AuditActorRoleSchema = z.enum(AUDIT_ACTOR_ROLES);
  * deliberate, writer-supplied channel — and NOT in a mechanical
  * before/after snapshot. The list governs snapshots; `reason` is a
  * separate, explicit path.
+ *
+ * THE `leadGuest*` FAMILY (added by ATR-02, 2026-11-21)
+ * ------------------------------------------------------
+ * The booking documents carry the guest's identity under
+ * `leadGuestName` / `leadGuestEmail` / `leadGuestPhone` (plus a
+ * nested `leadGuestDetails` object) — NOT under `guestName` /
+ * `guestEmail` / `guestPhone`. The spec's redaction list names the
+ * latter, so the list as shipped did not cover the field names the
+ * actual documents use.
+ *
+ * That gap only became exploitable when ATR-02 landed the first
+ * writer that copies booking fields into an audit row: a whole-document
+ * before/after snapshot would have copied the guest's name, email and
+ * phone straight into `auditLogs` — a SECOND copy of the guest's
+ * personal data, under a different retention, in a collection the
+ * admin can read. The list now covers the real field names, so
+ * `buildAuditEntry` drops them whether the caller names them
+ * `guestName` or `leadGuestName`.
  */
 export const AUDIT_REDACTED_FIELDS = [
   "guestName",
@@ -161,9 +179,17 @@ export const AUDIT_REDACTED_FIELDS = [
   "paymentProofUrl",
   "paymentProofPath",
   "discountIdPhotoUrl",
+  "discountIdPhotoPath",
   "lookupToken",
   "qrToken",
   "remarks",
+  // The booking documents' actual guest-identity field names (the
+  // `leadGuest*` family) + the nested per-guest object.
+  "leadGuestName",
+  "leadGuestEmail",
+  "leadGuestPhone",
+  "leadGuestDetails",
+  "guestDetails",
 ] as const;
 
 export type AuditRedactedField = (typeof AUDIT_REDACTED_FIELDS)[number];

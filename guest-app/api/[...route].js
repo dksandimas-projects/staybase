@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.30.0";
+    VERSION2 = "2.31.0";
   }
 });
 
@@ -149436,9 +149436,17 @@ var init_audit = __esm({
       "paymentProofUrl",
       "paymentProofPath",
       "discountIdPhotoUrl",
+      "discountIdPhotoPath",
       "lookupToken",
       "qrToken",
-      "remarks"
+      "remarks",
+      // The booking documents' actual guest-identity field names (the
+      // `leadGuest*` family) + the nested per-guest object.
+      "leadGuestName",
+      "leadGuestEmail",
+      "leadGuestPhone",
+      "leadGuestDetails",
+      "guestDetails"
     ];
     MEMBERS_REDACTED_FIELDS = [
       "memberEmail",
@@ -231885,6 +231893,60 @@ async function resolveStaffDisplayName(uid) {
   }
 }
 
+// server/lib/audit-writer.ts
+init_firestore();
+init_shared();
+init_firebase_admin();
+function buildServerAuditEntry(write) {
+  try {
+    return buildAuditEntry({
+      action: write.action,
+      targetCollection: write.targetCollection || "bookings",
+      targetId: write.targetId,
+      targetLabel: write.targetLabel ?? void 0,
+      changedFields: write.changedFields,
+      before: write.before ?? null,
+      after: write.after ?? null,
+      actor: write.actor.uid,
+      actorName: write.actor.name,
+      actorRole: write.actor.role,
+      source: "server",
+      reason: write.reason ?? null,
+      timestamp: write.timestamp instanceof Timestamp ? write.timestamp : Timestamp.fromDate(write.timestamp)
+    });
+  } catch (error) {
+    console.error(
+      `[audit] could not build a "${write.action}" audit row for ${write.targetId}:`,
+      error?.message || error
+    );
+    return null;
+  }
+}
+function stageServerAuditRow(transaction, entry) {
+  transaction.set(adminDb.collection("auditLogs").doc(), entry);
+}
+async function writeServerAuditRow(entry) {
+  if (!entry) return;
+  try {
+    await adminDb.collection("auditLogs").add(entry);
+  } catch (error) {
+    console.error(
+      `[audit] could not write the "${entry.action}" audit row:`,
+      error?.message || error
+    );
+  }
+}
+function serverAuditActor(staff, displayName) {
+  return {
+    uid: staff?.uid || "staff",
+    name: displayName || staff?.email || "",
+    role: staff?.role === "admin" ? "admin" : "front-desk"
+  };
+}
+async function resolveServerAuditActor(staff) {
+  return serverAuditActor(staff, await resolveStaffDisplayName(staff?.uid));
+}
+
 // server/lib/refunds.ts
 init_firestore();
 function trimOrNull(input, maxLen) {
@@ -236483,6 +236545,39 @@ async function handleCreateWalkin(req, res) {
           // resolves to that room independently.
           lookupToken: lineIdx === 0 ? newBooking.lookupToken : generateLookupToken()
         });
+        const walkinAuditEntry = buildServerAuditEntry({
+          actor: serverAuditActor(req.staff, walkinStaffName),
+          action: "bookings.create-walkin",
+          targetId: perRoomBookingDocRef.id,
+          targetLabel: `${walkinBookingRefs[lineIdx]}`,
+          before: null,
+          after: {
+            status: newBooking.status,
+            roomId: assigned.roomId,
+            roomNumber: String(assigned.data.roomNumber || ""),
+            roomType: String(assigned.data.type || ""),
+            checkIn: checkInDate.toISOString(),
+            checkOut: checkOutDate.toISOString(),
+            numGuests: assigned.numAdults + assigned.numChildren,
+            totalPrice: lineFinancials.totalPrice,
+            source: "walk-in"
+          },
+          changedFields: [
+            "status",
+            "roomId",
+            "roomNumber",
+            "roomType",
+            "checkIn",
+            "checkOut",
+            "numGuests",
+            "totalPrice",
+            "source",
+            "createdAt",
+            "updatedAt"
+          ],
+          timestamp: now
+        });
+        if (walkinAuditEntry) stageServerAuditRow(transaction, walkinAuditEntry);
       }
       for (const retirement of expiredHoldRetirements) {
         transaction.update(retirement.ref, {
@@ -236595,6 +236690,8 @@ async function handleApplyBookingDiscount(req, res) {
   if (requestedDiscountType && requestedDiscountType !== "senior" && requestedDiscountType !== "pwd") {
     return res.status(400).json({ success: false, error: "Invalid government discount type." });
   }
+  const auditActor = await resolveServerAuditActor(req.staff);
+  const now = /* @__PURE__ */ new Date();
   try {
     let result = {};
     await adminDb.runTransaction(async (transaction) => {
@@ -236694,9 +236791,33 @@ async function handleApplyBookingDiscount(req, res) {
           otherAddOnTotal: Number(booking.otherAddOnTotal) || 0,
           previousOtherAddOnTotal: Number(booking.otherAddOnTotal) || 0
         }),
-        updatedAt: /* @__PURE__ */ new Date()
+        updatedAt: now
       };
-      if (voucherRef) transaction.update(voucherRef, { usageCount: voucherUsageCount, updatedAt: /* @__PURE__ */ new Date() });
+      const auditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.discount-verify",
+        targetId: bookingId,
+        targetLabel: `${booking.bookingRef || bookingId}`,
+        before: {
+          discountType: String(booking.discountType || ""),
+          discountPct: Number(booking.discountPct || 0),
+          discountVerified: Boolean(booking.discountVerified),
+          voucherCode: String(booking.voucherCode || ""),
+          voucherDiscount: Number(booking.voucherDiscount || 0),
+          totalPrice: Number(booking.totalPrice || 0)
+        },
+        after: {
+          discountType,
+          discountPct,
+          discountVerified: Boolean(discountType),
+          voucherCode,
+          voucherDiscount,
+          totalPrice
+        },
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
+      if (voucherRef) transaction.update(voucherRef, { usageCount: voucherUsageCount, updatedAt: now });
       transaction.update(bookingRef2, updates);
       result = updates;
     });
@@ -236721,6 +236842,8 @@ async function handleApplyReservationDiscount(req, res) {
     return res.status(400).json({ success: false, error: "Invalid government discount type." });
   }
   const staffUid2 = String(req.staff?.uid || "staff");
+  const auditActor = await resolveServerAuditActor(req.staff);
+  const now = /* @__PURE__ */ new Date();
   let childRefs = [];
   try {
     const childSnap = await adminDb.collection("bookings").where("reservationId", "==", reservationId).get();
@@ -236852,14 +236975,38 @@ async function handleApplyReservationDiscount(req, res) {
             otherAddOnTotal: Number(booking.otherAddOnTotal) || 0,
             previousOtherAddOnTotal: Number(booking.otherAddOnTotal) || 0
           }),
-          updatedAt: /* @__PURE__ */ new Date()
+          updatedAt: now
         };
         transaction.update(child.ref, updates);
+        const childAuditEntry = buildServerAuditEntry({
+          actor: auditActor,
+          action: "bookings.discount-verify",
+          targetId: child.id,
+          targetLabel: `${booking.bookingRef || child.id}`,
+          before: {
+            discountType: String(booking.discountType || ""),
+            discountPct: Number(booking.discountPct || 0),
+            discountVerified: Boolean(booking.discountVerified),
+            voucherCode: String(booking.voucherCode || ""),
+            voucherDiscount: Number(booking.voucherDiscount || 0),
+            totalPrice: Number(booking.totalPrice || 0)
+          },
+          after: {
+            discountType,
+            discountPct,
+            discountVerified: Boolean(discountType),
+            voucherCode,
+            voucherDiscount,
+            totalPrice
+          },
+          timestamp: now
+        });
+        if (childAuditEntry) stageServerAuditRow(transaction, childAuditEntry);
       }
       let voucherUsageCount;
       if (voucherRef && voucherData) {
         voucherUsageCount = Number(voucherData.usageCount || 0) + eligible.length;
-        transaction.update(voucherRef, { usageCount: voucherUsageCount, updatedAt: /* @__PURE__ */ new Date() });
+        transaction.update(voucherRef, { usageCount: voucherUsageCount, updatedAt: now });
       }
       result = {
         appliedTo: eligible.map((c2) => c2.id).sort(),
@@ -236889,6 +237036,8 @@ async function handleRemoveVoucher(req, res) {
     return res.status(400).json({ success: false, error: "Invalid booking id." });
   }
   const staffUid2 = String(req.staff?.uid || "staff");
+  const auditActor = await resolveServerAuditActor(req.staff);
+  const now = /* @__PURE__ */ new Date();
   try {
     let result = {};
     await adminDb.runTransaction(async (transaction) => {
@@ -236952,7 +237101,7 @@ async function handleRemoveVoucher(req, res) {
         voucherDiscount: 0,
         staffRemovedVoucherBy: staffUid2,
         staffRemovedVoucherReason: reason,
-        staffRemovedVoucherAt: /* @__PURE__ */ new Date(),
+        staffRemovedVoucherAt: now,
         totalPrice: restoredTotalPrice,
         ...rateBreakdown ? { rateBreakdown } : {},
         // Per the P1 revenue-reporting audit (2026-10-22): the
@@ -236971,13 +237120,42 @@ async function handleRemoveVoucher(req, res) {
           otherAddOnTotal: Number(bookingData.otherAddOnTotal) || 0,
           previousOtherAddOnTotal: Number(bookingData.otherAddOnTotal) || 0
         }),
-        updatedAt: /* @__PURE__ */ new Date()
+        updatedAt: now
       };
+      const auditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.discount-reject",
+        targetId: bookingId,
+        targetLabel: `${bookingData.bookingRef || bookingId}`,
+        before: {
+          voucherCode: existingVoucherCode,
+          voucherDiscount: Number(bookingData.voucherDiscount || 0),
+          totalPrice: Number(bookingData.totalPrice || 0)
+        },
+        after: {
+          voucherCode: "",
+          voucherDiscount: 0,
+          totalPrice: restoredTotalPrice
+        },
+        changedFields: [
+          "voucherCode",
+          "voucherDiscount",
+          "staffRemovedVoucherBy",
+          "staffRemovedVoucherReason",
+          "staffRemovedVoucherAt",
+          "totalPrice",
+          "rateBreakdown",
+          "revenueAllocation"
+        ],
+        reason: typeof reason === "string" ? reason.slice(0, 500) : null,
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
       if (voucherDoc.exists) {
         const voucherData = voucherDoc.data() || {};
         transaction.update(voucherRef, {
           usageCount: Math.max((Number(voucherData.usageCount) || 0) - 1, 0),
-          updatedAt: /* @__PURE__ */ new Date()
+          updatedAt: now
         });
       }
       transaction.update(bookingRef2, updates);
@@ -236995,6 +237173,8 @@ async function handleRejectDiscount(req, res) {
   if (!bookingId) {
     return res.status(400).json({ success: false, error: "Booking ID is required." });
   }
+  const auditActor = await resolveServerAuditActor(req.staff);
+  const now = /* @__PURE__ */ new Date();
   try {
     const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
     const bookingDoc = await bookingRef2.get();
@@ -237058,9 +237238,37 @@ async function handleRejectDiscount(req, res) {
         otherAddOnTotal: Number(bookingData.otherAddOnTotal) || 0,
         previousOtherAddOnTotal: Number(bookingData.otherAddOnTotal) || 0
       }),
-      updatedAt: /* @__PURE__ */ new Date()
+      updatedAt: now
     };
+    const auditEntry = buildServerAuditEntry({
+      actor: auditActor,
+      action: "bookings.discount-reject",
+      targetId: String(bookingId),
+      targetLabel: `${bookingData.bookingRef || bookingId}`,
+      before: {
+        discountPct: Number(bookingData.discountPct || 0),
+        discountRejected: Boolean(bookingData.discountRejected),
+        totalPrice: Number(bookingData.totalPrice || 0)
+      },
+      after: {
+        discountPct: 0,
+        discountRejected: true,
+        totalPrice: restoredTotalPrice
+      },
+      changedFields: [
+        "discountPct",
+        "discountRejected",
+        "discountRejectedBy",
+        "discountRejectionReason",
+        "totalPrice",
+        "rateBreakdown",
+        "revenueAllocation"
+      ],
+      reason: typeof reason === "string" ? String(reason).slice(0, 500) : null,
+      timestamp: now
+    });
     await bookingRef2.update(updates);
+    await writeServerAuditRow(auditEntry);
     try {
       await sendBookingTrigger("discount-rejected", {
         ...bookingData,
@@ -237084,6 +237292,7 @@ async function handleSetLouReceived(req, res) {
   if (typeof louReceived !== "boolean") {
     return res.status(400).json({ success: false, error: "louReceived must be a boolean (true or false)." });
   }
+  const auditActor = await resolveServerAuditActor(req.staff);
   try {
     let result = {};
     await adminDb.runTransaction(async (transaction) => {
@@ -237112,6 +237321,17 @@ async function handleSetLouReceived(req, res) {
         },
         updatedAt: now
       };
+      const auditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.update",
+        targetId: String(bookingId).trim(),
+        targetLabel: `${booking.bookingRef || bookingId}`,
+        before: { louReceived: Boolean(booking.louReceived) },
+        after: { louReceived },
+        changedFields: ["louReceived", "louReceivedAt", "louReceivedBy", "updatedAt"],
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
       transaction.update(bookingRef2, updates);
       result = updates;
     });
@@ -237139,6 +237359,7 @@ async function handleSetSpecialRequests(req, res) {
       error: `Special requests must be ${MAX_SPECIAL_REQUESTS_LENGTH} characters or fewer.`
     });
   }
+  const auditActor = await resolveServerAuditActor(req.staff);
   try {
     let result = {};
     await adminDb.runTransaction(async (transaction) => {
@@ -237155,6 +237376,21 @@ async function handleSetSpecialRequests(req, res) {
         specialRequestsUpdatedBy: staffUid2,
         updatedAt: now
       };
+      const auditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.update",
+        targetId: bookingId.trim(),
+        targetLabel: `${bookingSnap.data()?.bookingRef || bookingId}`,
+        before: null,
+        after: null,
+        changedFields: [
+          "specialRequests",
+          "specialRequestsUpdatedAt",
+          "specialRequestsUpdatedBy"
+        ],
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
       transaction.update(bookingRef2, updates);
       result = updates;
     });
@@ -237177,6 +237413,7 @@ async function handleRejectPayment(req, res) {
     return res.status(400).json({ success: false, error: "A rejection reason is required so the guest can fix the issue." });
   }
   const paymentRejectedBy = req.staff?.uid || "staff";
+  const auditActor = await resolveServerAuditActor(req.staff);
   let bookingData = null;
   let siblingRejectedCount = 0;
   let transitioned = false;
@@ -237248,6 +237485,36 @@ async function handleRejectPayment(req, res) {
         updatedAt
       );
       siblingRejectedCount = helperSiblingRejectedCount;
+      const rejectionAuditRows = [];
+      if (isTargetInPaymentUploaded) {
+        rejectionAuditRows.push({ id: bookingId, fromStatus: data.status });
+      }
+      for (const sibling of siblingChildBookings) {
+        if (sibling.id === bookingId) continue;
+        if (sibling.status !== "payment-uploaded") continue;
+        rejectionAuditRows.push({ id: sibling.id, fromStatus: sibling.status });
+      }
+      for (const row2 of rejectionAuditRows) {
+        const auditEntry = buildServerAuditEntry({
+          actor: auditActor,
+          action: "bookings.payment-reject",
+          targetId: row2.id,
+          targetLabel: row2.id === bookingId ? `${data.bookingRef || bookingId}` : row2.id,
+          before: { status: row2.fromStatus },
+          after: { status: "pending" },
+          changedFields: [
+            "status",
+            "paymentRejectionReason",
+            "paymentRejectedAt",
+            "paymentRejectedBy",
+            "holdExpiresAt",
+            "updatedAt"
+          ],
+          reason: safeReason,
+          timestamp: updatedAt
+        });
+        if (auditEntry) stageServerAuditRow(transaction, auditEntry);
+      }
       if (isTargetInPaymentUploaded) {
         transaction.update(bookingRef2, {
           status: "pending",
@@ -237417,6 +237684,7 @@ async function handleCancelBooking(req, res) {
   const isStaffCancellation = Boolean(req.staff?.uid);
   const cancellationSource = isStaffCancellation ? "staff" : "guest";
   const cancelledBy = isStaffCancellation ? String(req.staff.uid) : "guest";
+  const cancelledByName = isStaffCancellation ? await resolveStaffDisplayName(req.staff?.uid) : "";
   const { todayStr: todayKey } = getManilaDateInfo();
   if (isStaffCancellation && !validReason.trim()) {
     return res.status(400).json({
@@ -237605,6 +237873,19 @@ async function handleCancelBooking(req, res) {
         }
         for (const child of children) {
           if (!cancellableIds.has(child.id)) continue;
+          if (isStaffCancellation) {
+            const childAudit = buildServerAuditEntry({
+              actor: serverAuditActor(req.staff, cancelledByName),
+              action: "bookings.cancel",
+              targetId: child.id,
+              targetLabel: `${child.data.bookingRef || child.id}`,
+              before: { status: child.data.status },
+              after: { status: "cancelled" },
+              reason: validReason,
+              timestamp: now
+            });
+            if (childAudit) stageServerAuditRow(transaction, childAudit);
+          }
           transaction.update(child.ref, {
             status: "cancelled",
             cancellationReason: validReason,
@@ -237857,6 +238138,19 @@ async function handleCancelBooking(req, res) {
         bookingUpdate.otherAddOnSelections = perChildRedated.otherAddOnSelections;
         bookingUpdate.otherAddOnTotal = perChildRedated.otherAddOnTotal;
         bookingUpdate.hasAnyOtherAddOns = perChildRedated.hasAnyOtherAddOns;
+        if (isStaffCancellation) {
+          const auditEntry = buildServerAuditEntry({
+            actor: serverAuditActor(req.staff, cancelledByName),
+            action: "bookings.cancel",
+            targetId: bookingDocumentRef.id,
+            targetLabel: `${freshBooking.bookingRef || bookingDocumentRef.id}`,
+            before: { status: freshBooking.status },
+            after: { status: "cancelled" },
+            reason: validReason,
+            timestamp: now
+          });
+          if (auditEntry) stageServerAuditRow(transaction, auditEntry);
+        }
         transaction.update(bookingDocumentRef, bookingUpdate);
         const bookingReservationId = String(freshBooking.reservationId || "").trim();
         if (bookingReservationId.length > 0) {
@@ -238143,6 +238437,7 @@ async function handleAddPayment(req, res) {
   const safeNote = typeof note === "string" ? note.trim().slice(0, 500) : "";
   const safeTransactionReference = typeof transactionReference === "string" ? transactionReference.trim().slice(0, 200) || null : null;
   const staffUid2 = req.staff?.uid || "staff";
+  const auditActor = await resolveServerAuditActor(req.staff);
   const paymentRecord = {
     type: "payment",
     amount: numericAmount,
@@ -238318,6 +238613,62 @@ async function handleAddPayment(req, res) {
       const newPaymentRef = paymentsRef.doc(paymentId);
       const recordWithReservation = bookingReservationId.length > 0 ? { ...paymentRecord, reservationId: bookingReservationId, bookingId } : paymentRecord;
       transaction.create(newPaymentRef, recordWithReservation);
+      const paymentAuditChangedFields = [
+        "paidAmount",
+        "totalPaid",
+        "paymentAmount",
+        "paymentMethod",
+        "note",
+        "transactionReference"
+      ];
+      if (bookingUpdates.status) {
+        paymentAuditChangedFields.push(
+          "status",
+          "paymentConfirmedAt",
+          "handledBy",
+          "updatedAt"
+        );
+      }
+      const paymentAuditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.payment-add",
+        targetId: bookingId,
+        targetLabel: `${bookingData.bookingRef || bookingId}`,
+        before: {
+          status: bookingData.status,
+          paidAmount: Number(bookingData.paidAmount || 0),
+          totalPaid: existingPaid,
+          paymentAmount: 0,
+          paymentMethod: ""
+        },
+        after: {
+          status: bookingUpdates.status || bookingData.status,
+          paidAmount: Number(bookingUpdates.paidAmount || 0),
+          totalPaid,
+          paymentAmount: numericAmount,
+          paymentMethod: method
+        },
+        changedFields: paymentAuditChangedFields,
+        timestamp: now
+      });
+      if (paymentAuditEntry) stageServerAuditRow(transaction, paymentAuditEntry);
+      for (const sibling of siblingChildBookings) {
+        if (sibling.id === bookingId) continue;
+        const coversChild = sibling.totalPrice > 0 && totalPaid >= sibling.totalPrice;
+        const isFlippableStatus = sibling.status === "pending" || sibling.status === "payment-uploaded";
+        if (!isFlippableStatus || !coversChild) continue;
+        const siblingAuditEntry = buildServerAuditEntry({
+          actor: auditActor,
+          action: "bookings.payment-verify",
+          targetId: sibling.id,
+          targetLabel: sibling.id,
+          before: { status: sibling.status },
+          after: { status: "payment-confirmed" },
+          changedFields: ["status", "paymentConfirmedAt", "handledBy", "updatedAt"],
+          timestamp: now
+        });
+        if (siblingAuditEntry) stageServerAuditRow(transaction, siblingAuditEntry);
+      }
     });
   } catch (error) {
     if (error.message === "Booking not found") {
@@ -238460,6 +238811,8 @@ async function handleAddRefund(req, res) {
     return res.status(400).json({ success: false, error: "Refund method and reason are required." });
   }
   const safeTransactionReference = typeof transactionReference === "string" ? transactionReference.trim().slice(0, 200) || null : null;
+  const auditActor = await resolveServerAuditActor(req.staff);
+  const now = /* @__PURE__ */ new Date();
   try {
     let refundRecord = {};
     let netCollected = 0;
@@ -238543,6 +238896,37 @@ async function handleAddRefund(req, res) {
         throw new Error(`Refund exceeds the net collected amount of ${netCollected}.`);
       }
       refundRecord = helperResult.refundEntry;
+      const refundAuditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.refund",
+        targetId: bookingId,
+        targetLabel: `${bookingData.bookingRef || bookingId}`,
+        before: {
+          paidAmount: Number(bookingData.paidAmount || 0),
+          netCollected,
+          refundAmount: 0,
+          refundMethod: ""
+        },
+        after: {
+          paidAmount: Number(helperResult.newBookingPaidAmount || 0),
+          netCollected: netCollected - numericAmount,
+          refundAmount: numericAmount,
+          refundMethod: safeMethod
+        },
+        changedFields: [
+          "paidAmount",
+          "netCollected",
+          "refundAmount",
+          "refundMethod",
+          "reason",
+          "note",
+          "transactionReference",
+          "lastRefundClearedAt"
+        ],
+        reason: safeReason,
+        timestamp: now
+      });
+      if (refundAuditEntry) stageServerAuditRow(transaction, refundAuditEntry);
     });
     if (!idempotentReplay && priorStateRef && newStateRef && priorStateRef !== newStateRef && priorLiabilityRef) {
       try {
@@ -238606,6 +238990,7 @@ async function handleRecordCancellationException(req, res) {
     return res.status(400).json({ success: false, error: "A reason is required for a cancellation exception." });
   }
   const adminUid = req.staff.uid || "admin";
+  const auditActor = await resolveServerAuditActor(req.staff);
   try {
     let liabilityFieldPath = "cancellationLiability";
     let snapshotAfter = null;
@@ -238644,6 +239029,52 @@ async function handleRecordCancellationException(req, res) {
         approvedAmount: approvedRounded,
         exception: newException
       };
+      const exceptionAuditTargets = [];
+      if (safeBookingId) {
+        exceptionAuditTargets.push({
+          id: safeBookingId,
+          label: `${targetData.bookingRef || safeBookingId}`
+        });
+      } else {
+        const childSnap = await transaction.get(
+          adminDb.collection("bookings").where("reservationId", "==", safeReservationId)
+        );
+        for (const childDoc of childSnap.docs) {
+          const childData = childDoc.data() || {};
+          exceptionAuditTargets.push({
+            id: childDoc.id,
+            label: `${childData.bookingRef || childDoc.id}`
+          });
+        }
+      }
+      for (const auditTarget of exceptionAuditTargets) {
+        const auditEntry = buildServerAuditEntry({
+          actor: auditActor,
+          action: "bookings.update",
+          targetId: auditTarget.id,
+          targetLabel: auditTarget.label,
+          before: {
+            approvedAmount: Number(liability.approvedAmount || 0),
+            policyRefund
+          },
+          after: {
+            approvedAmount: approvedRounded,
+            policyRefund
+          },
+          changedFields: [
+            "cancellationLiability.approvedAmount",
+            "cancellationLiability.exception",
+            "cancellationLiability.exception.approvedAmount",
+            "cancellationLiability.exception.reason",
+            "cancellationLiability.exception.approvedBy",
+            "cancellationLiability.exception.approvedAt",
+            "updatedAt"
+          ],
+          reason: safeReason,
+          timestamp: now
+        });
+        if (auditEntry) stageServerAuditRow(transaction, auditEntry);
+      }
       transaction.update(targetRef, {
         [liabilityFieldPath]: newLiability,
         updatedAt: now
@@ -238716,6 +239147,8 @@ async function handleMarkPaymentConfirmed(req, res) {
   if (!bookingId || typeof bookingId !== "string" || bookingId.length > 64) {
     return res.status(400).json({ success: false, error: "Booking ID is required." });
   }
+  const auditActor = await resolveServerAuditActor(req.staff);
+  const now = /* @__PURE__ */ new Date();
   try {
     const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
     const handledBy = req.staff?.uid || "staff";
@@ -238733,11 +239166,22 @@ async function handleMarkPaymentConfirmed(req, res) {
       if (data.status !== "payment-uploaded") {
         throw new Error(`INVALID_STATUS:${data.status}`);
       }
+      const auditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.payment-verify",
+        targetId: bookingId,
+        targetLabel: `${data.bookingRef || bookingId}`,
+        before: { status: data.status },
+        after: { status: "payment-confirmed" },
+        changedFields: ["status", "handledBy", "paymentConfirmedAt", "updatedAt"],
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
       transaction.update(bookingRef2, {
         status: "payment-confirmed",
         handledBy,
-        paymentConfirmedAt: /* @__PURE__ */ new Date(),
-        updatedAt: /* @__PURE__ */ new Date()
+        paymentConfirmedAt: now,
+        updatedAt: now
       });
     });
     if (alreadyConfirmed) {
@@ -238785,6 +239229,7 @@ async function handleVerifyAndRecordPayment(req, res) {
   const safeNote = typeof note === "string" ? note.trim().slice(0, 500) : "";
   const paymentNote = safeNote || "Verified payment proof";
   const staffUid2 = req.staff?.uid || "staff";
+  const auditActor = await resolveServerAuditActor(req.staff);
   let bookingData = null;
   try {
     const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
@@ -238919,6 +239364,62 @@ async function handleVerifyAndRecordPayment(req, res) {
         transaction.update(bookingRef2, bookingUpdates);
       }
       bookingData = { ...data, ...bookingUpdates };
+      const paymentAuditChangedFields = [
+        "paidAmount",
+        "totalCollected",
+        "paymentAmount",
+        "paymentMethod",
+        "note",
+        "transactionReference"
+      ];
+      if (bookingUpdates.status) {
+        paymentAuditChangedFields.push(
+          "status",
+          "paymentConfirmedAt",
+          "handledBy",
+          "updatedAt"
+        );
+      }
+      const paymentAuditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.payment-verify",
+        targetId: bookingId,
+        targetLabel: `${data.bookingRef || bookingId}`,
+        before: {
+          status: data.status,
+          paidAmount: Number(data.paidAmount || 0),
+          totalCollected: existingPaid,
+          paymentAmount: 0,
+          paymentMethod: ""
+        },
+        after: {
+          status: bookingUpdates.status || data.status,
+          paidAmount: Number(bookingUpdates.paidAmount || 0),
+          totalCollected,
+          paymentAmount: numericAmount,
+          paymentMethod: method
+        },
+        changedFields: paymentAuditChangedFields,
+        timestamp: now
+      });
+      if (paymentAuditEntry) stageServerAuditRow(transaction, paymentAuditEntry);
+      for (const sibling of siblingChildBookings) {
+        if (sibling.id === bookingId) continue;
+        const coversChild = sibling.totalPrice > 0 && totalCollected >= sibling.totalPrice;
+        const isFlippableStatus = sibling.status === "pending" || sibling.status === "payment-uploaded";
+        if (!isFlippableStatus || !coversChild) continue;
+        const siblingAuditEntry = buildServerAuditEntry({
+          actor: auditActor,
+          action: "bookings.payment-verify",
+          targetId: sibling.id,
+          targetLabel: sibling.id,
+          before: { status: sibling.status },
+          after: { status: "payment-confirmed" },
+          changedFields: ["status", "paymentConfirmedAt", "handledBy", "updatedAt"],
+          timestamp: now
+        });
+        if (siblingAuditEntry) stageServerAuditRow(transaction, siblingAuditEntry);
+      }
     });
     if (idempotentReplay) {
       return res.status(200).json({
@@ -239019,6 +239520,7 @@ async function handleConfirmBooking(req, res) {
     let bookingData = null;
     let alreadyConfirmed = false;
     const now = /* @__PURE__ */ new Date();
+    const auditActor = await resolveServerAuditActor(req.staff);
     await adminDb.runTransaction(async (transaction) => {
       const bookingDoc = await transaction.get(bookingRef2);
       if (!bookingDoc.exists) {
@@ -239035,6 +239537,16 @@ async function handleConfirmBooking(req, res) {
         throw new Error(`INVALID_STATUS:${data.status}`);
       }
       const bookingReservationId = String(data.reservationId || "").trim();
+      const auditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.confirm",
+        targetId: bookingId,
+        targetLabel: `${data.bookingRef || bookingId}`,
+        before: { status: data.status },
+        after: { status: "confirmed" },
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
       transaction.update(bookingRef2, {
         status: "confirmed",
         confirmedAt: now,
@@ -239100,6 +239612,7 @@ async function handleConfirmBookingWithBalance(req, res) {
   }
   const confirmedBy = req.staff?.uid || "staff";
   const staffRole = req.staff?.role || "front-desk";
+  const auditActor = await resolveServerAuditActor(req.staff);
   const hotelConfigDoc = await adminDb.collection("settings").doc("hotelConfig").get();
   const hotelConfig = hotelConfigDoc.exists ? hotelConfigDoc.data() : {};
   const unpaidCheckoutThreshold = Number(hotelConfig.unpaidCheckoutApprovalThreshold) || 5e3;
@@ -239143,6 +239656,17 @@ async function handleConfirmBookingWithBalance(req, res) {
           updatedAt: now
         });
       }
+      const auditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.confirm",
+        targetId: bookingId,
+        targetLabel: `${data.bookingRef || bookingId}`,
+        before: { status: data.status },
+        after: { status: "confirmed", confirmedWithBalance: computedBalance },
+        reason: safeReason,
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
       transaction.update(bookingRef2, {
         status: "confirmed",
         // Stamps the original balance at confirm time —
@@ -239271,6 +239795,16 @@ async function handleCheckinBooking(req, res) {
           (d) => d.id === bookingId ? "checked-in" : String(d.data()?.status || "")
         );
       }
+      const auditEntry = buildServerAuditEntry({
+        actor: serverAuditActor(req.staff, checkedInByName),
+        action: "bookings.checkin",
+        targetId: bookingId,
+        targetLabel: `${bookingData.bookingRef || bookingId}`,
+        before: { status: bookingData.status },
+        after: { status: "checked-in" },
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
       transaction.update(bookingRef2, {
         status: "checked-in",
         checkedInAt: now,
@@ -239450,6 +239984,18 @@ async function handleCheckoutBooking(req, res) {
           (d) => d.id === bookingId ? "checked-out" : String(d.data()?.status || "")
         );
       }
+      const auditEntry = buildServerAuditEntry({
+        actor: serverAuditActor(req.staff, checkedOutByName),
+        action: "bookings.checkout",
+        targetId: bookingId,
+        targetLabel: `${freshBookingData.bookingRef || bookingId}`,
+        before: { status: freshBookingData.status },
+        after: { status: "checked-out" },
+        changedFields: checkedOutWithBalance > 0 ? ["status", "checkedOutAt", "checkedOutWithBalance", "unpaidCheckoutReason"] : void 0,
+        reason: safeUnpaidReason,
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
       transaction.update(bookingRef2, bookingUpdate);
       if (bookingData.roomId) {
         const roomRef = adminDb.collection("rooms").doc(String(bookingData.roomId));
@@ -239913,6 +240459,8 @@ async function handleResolveEarlyCheckin(req, res) {
   if (grantIfMissing && !confirmedTime) {
     return res.status(400).json({ success: false, error: "Choose an early check-in time before granting it." });
   }
+  const auditActor = await resolveServerAuditActor(req.staff);
+  const now = /* @__PURE__ */ new Date();
   try {
     const bookingRef2 = adminDb.collection("bookings").doc(bookingId);
     const resolvedBy = req.staff?.name || req.staff?.email || "Staff Member";
@@ -239960,9 +240508,32 @@ async function handleResolveEarlyCheckin(req, res) {
           confirmedTime
         };
         bookingData = { id: bookingDoc.id, ...data, earlyCheckIn: grantedEarlyCheckIn };
+        const grantAuditEntry = buildServerAuditEntry({
+          actor: auditActor,
+          action: "bookings.update",
+          targetId: bookingId,
+          targetLabel: `${data.bookingRef || bookingId}`,
+          before: { earlyCheckInStatus: "", earlyCheckInConfirmedTime: "" },
+          after: {
+            earlyCheckInStatus: "approved",
+            earlyCheckInConfirmedTime: String(confirmedTime || "")
+          },
+          changedFields: [
+            "earlyCheckIn",
+            "earlyCheckIn.status",
+            "earlyCheckIn.confirmedTime",
+            "earlyCheckIn.staffNote",
+            "earlyCheckIn.resolvedAt",
+            "earlyCheckIn.resolvedBy",
+            "updatedAt"
+          ],
+          reason: typeof staffNote === "string" ? staffNote.slice(0, 500) : null,
+          timestamp: now
+        });
+        if (grantAuditEntry) stageServerAuditRow(transaction, grantAuditEntry);
         transaction.update(bookingRef2, {
           earlyCheckIn: grantedEarlyCheckIn,
-          updatedAt: /* @__PURE__ */ new Date()
+          updatedAt: now
         });
         didWrite = true;
         return;
@@ -239982,9 +240553,37 @@ async function handleResolveEarlyCheckin(req, res) {
         confirmedTime: status === "approved" ? confirmedTime || data.earlyCheckIn.requestedTime : null
       };
       bookingData = { id: bookingDoc.id, ...data, earlyCheckIn: updatedEarlyCheckIn };
+      const resolveAuditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.update",
+        targetId: bookingId,
+        targetLabel: `${data.bookingRef || bookingId}`,
+        before: {
+          earlyCheckInStatus: String(data.earlyCheckIn.status || ""),
+          earlyCheckInConfirmedTime: String(data.earlyCheckIn.confirmedTime || "")
+        },
+        after: {
+          earlyCheckInStatus: status,
+          earlyCheckInConfirmedTime: String(
+            status === "approved" ? confirmedTime || data.earlyCheckIn.requestedTime || "" : ""
+          )
+        },
+        changedFields: [
+          "earlyCheckIn",
+          "earlyCheckIn.status",
+          "earlyCheckIn.confirmedTime",
+          "earlyCheckIn.staffNote",
+          "earlyCheckIn.resolvedAt",
+          "earlyCheckIn.resolvedBy",
+          "updatedAt"
+        ],
+        reason: typeof staffNote === "string" ? staffNote.slice(0, 500) : null,
+        timestamp: now
+      });
+      if (resolveAuditEntry) stageServerAuditRow(transaction, resolveAuditEntry);
       transaction.update(bookingRef2, {
         earlyCheckIn: updatedEarlyCheckIn,
-        updatedAt: /* @__PURE__ */ new Date()
+        updatedAt: now
       });
       didWrite = true;
     });
@@ -240053,6 +240652,7 @@ async function handleRescheduleBooking(req, res) {
   }
   const { todayStr: todayKey, manilaDate: currentManilaDate } = getManilaDateInfo();
   const currentManilaMinutes = currentManilaDate.getHours() * 60 + currentManilaDate.getMinutes();
+  const auditActor = await resolveServerAuditActor(req.staff);
   try {
     let updatedBooking = null;
     let fullBookingForEmail = null;
@@ -240561,6 +241161,20 @@ async function handleRescheduleBooking(req, res) {
           });
         }
       }
+      const auditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.reschedule",
+        targetId: String(bookingId),
+        targetLabel: `${booking.bookingRef || bookingId}`,
+        before: {
+          checkIn: toDateOrNull(booking.checkIn)?.toISOString() || null,
+          checkOut: toDateOrNull(booking.checkOut)?.toISOString() || null
+        },
+        after: { checkIn, checkOut },
+        reason: typeof reason === "string" ? reason.slice(0, 500) : null,
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
       transaction.update(bookingRef2, updatedBooking);
       if (reservationDocRef && existingReservationData) {
         const rescheduleActualDateRange = computeReservationActualDateRange(
@@ -240755,6 +241369,8 @@ async function handleAssignBookingRoom(req, res) {
   const { bookingId, roomId, reason } = parsedAssign.data;
   const { todayStr: todayKey, manilaDate: currentManilaDate } = getManilaDateInfo();
   const currentManilaMinutes = currentManilaDate.getHours() * 60 + currentManilaDate.getMinutes();
+  const auditActor = await resolveServerAuditActor(req.staff);
+  const now = /* @__PURE__ */ new Date();
   try {
     const assigned = await adminDb.runTransaction(async (transaction) => {
       const bookingRef2 = adminDb.collection("bookings").doc(String(bookingId));
@@ -240805,7 +241421,6 @@ async function handleAssignBookingRoom(req, res) {
       const overlapSnapshot = await transaction.get(overlapQuery);
       const hotelConfigDoc = await transaction.get(adminDb.collection("settings").doc("hotelConfig"));
       const hotelConfig = hotelConfigDoc.data() || {};
-      const now = /* @__PURE__ */ new Date();
       let sawConflict = false;
       let sawLingering = false;
       for (const doc of overlapSnapshot.docs) {
@@ -240837,7 +241452,7 @@ async function handleAssignBookingRoom(req, res) {
         checkOutDate
       );
       if (hasBlockConflict) throw new Error("Target room is blocked for that date range.");
-      const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+      const nowIso = now.toISOString();
       const assignmentEntry = {
         fromRoomId: currentRoomId,
         fromRoomNumber: String(booking.roomNumber || ""),
@@ -240862,8 +241477,34 @@ async function handleAssignBookingRoom(req, res) {
           ...Array.isArray(booking.rescheduleHistory) ? booking.rescheduleHistory : [],
           assignmentEntry
         ],
-        updatedAt: /* @__PURE__ */ new Date()
+        updatedAt: now
       });
+      const auditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.room-reassign",
+        targetId: String(bookingId),
+        targetLabel: `${booking.bookingRef || bookingId}`,
+        before: {
+          roomId: currentRoomId,
+          roomNumber: String(booking.roomNumber || ""),
+          roomType: currentRoomType
+        },
+        after: {
+          roomId: String(roomId),
+          roomNumber: String(room.roomNumber || ""),
+          roomType: targetRoomType
+        },
+        changedFields: [
+          "roomId",
+          "roomNumber",
+          "roomType",
+          "rescheduleHistory",
+          "updatedAt"
+        ],
+        reason: typeof reason === "string" ? reason.slice(0, 500) : null,
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
       if (booking.status === "checked-in" && currentRoomId) {
         const oldRoomRef = adminDb.collection("rooms").doc(currentRoomId);
         transaction.update(oldRoomRef, { status: "available" });
@@ -240976,6 +241617,8 @@ async function handleAddRoomToReservation(req, res) {
     let newBookingRef = null;
     let updatedHeader = null;
     let fullBookingForEmail = null;
+    const auditActor = await resolveServerAuditActor(req.staff);
+    const now = /* @__PURE__ */ new Date();
     await adminDb.runTransaction(async (transaction) => {
       const reservationRef = adminDb.collection("reservations").doc(reservationId);
       const reservationSnap = await transaction.get(reservationRef);
@@ -241341,6 +241984,40 @@ async function handleAddRoomToReservation(req, res) {
         updatedAt: /* @__PURE__ */ new Date()
       };
       const newBookingRefDoc = adminDb.collection("bookings").doc(bookingId);
+      const auditEntry = buildServerAuditEntry({
+        actor: auditActor,
+        action: "bookings.update",
+        targetId: bookingId,
+        targetLabel: `${newBookingRefValue}`,
+        before: null,
+        after: {
+          status: "confirmed",
+          roomId: String(roomId),
+          roomNumber: String(targetRoom.roomNumber || ""),
+          roomType: targetRoomType,
+          checkIn: headerCheckIn.toISOString(),
+          checkOut: headerCheckOut.toISOString(),
+          numGuests: numAdults + numChildren,
+          totalPrice: finalTotalPrice,
+          reservationId
+        },
+        changedFields: [
+          "status",
+          "roomId",
+          "roomNumber",
+          "roomType",
+          "checkIn",
+          "checkOut",
+          "numGuests",
+          "totalPrice",
+          "reservationId",
+          "reservationPosition",
+          "createdAt",
+          "updatedAt"
+        ],
+        timestamp: now
+      });
+      if (auditEntry) stageServerAuditRow(transaction, auditEntry);
       transaction.set(newBookingRefDoc, newBookingDoc);
       newBookingId = bookingId;
       newBookingRef = newBookingRefValue;
