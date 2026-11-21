@@ -302,6 +302,21 @@ Spec: `plan/features/INTERCOM-GUEST.md`
 
 **Expected:** "This QR code is not valid. Please contact the front desk."
 
+### IC-06 — The in-room feature switch MATRIX (decision #335)
+**Actor:** Guest checked into an occupied room (any QA test-run booking).
+**Setup:** Admin toggles the two switches in **Settings → Intercom**. Each toggle now persists **on click** (no Save step) — but the guest's panel reads a public projection cached for **60 seconds**, so **wait ~75 s after each flip** before reloading the guest page.
+
+| Chat | Voice call | Expected on the guest's panel |
+|---|---|---|
+| ON | ON | The chat thread, plus a **"Call Desk"** button in the panel header. |
+| ON | OFF | The chat thread and **no call control anywhere** — the header button is gone, not disabled. |
+| OFF | ON | The chat tab shows the **"Chat is unavailable"** card whose **primary action is the in-room "Call Desk"** button ("Use Call Desk to reach the front desk by voice"); the front-desk number is the quiet secondary line. The header still carries its "Call Desk" button. |
+| OFF | OFF | The **phone-only** card: "Chat is unavailable" + **"Call Front Desk"** with the front-desk number. No in-room call control. |
+
+**Also check:** chat OFF + store OFF + call ON → the panel keeps its header and the "Call Desk" button (the whole-panel phone card only appears once EVERY in-room feature is off).
+
+**Note:** the first load after a guest deploy can serve the PREVIOUS bundle from the PWA service worker — hard-refresh before judging the panel (see `plan/project/DEPLOY.md`).
+
 ---
 
 ## 8. Spark Essentials (In-Room Store)
