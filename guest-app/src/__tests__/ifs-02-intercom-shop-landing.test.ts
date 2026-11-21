@@ -1,19 +1,22 @@
-// Per IFS-01 follow-up (2026-11-21, decision #336): the in-room panel
-// LANDS on the shop when the hotel switched the chat off but left the
-// store on, and the shop tab carries the "Call Front Desk" phone link
-// while the voice call is off.
+// Per IFS-01 follow-up (2026-11-21, decisions #336 + #337): the in-room
+// panel LANDS on the shop when the hotel switched the chat off but left
+// the store on — and the shop carries NO phone link.
 //
-// The rules themselves are unit-tested (`intercom-landing-tab.test.ts`).
-// These are SOURCE-TEXT pins, because what regressed before was the
-// WIRING: the resolver existed but the panel never called it, and the
-// phone link was offered while the in-room call was still on (breaking
-// the mutual exclusivity of decision #335).
+// The landing rule is unit-tested (`intercom-landing-tab.test.ts`). These
+// are SOURCE-TEXT pins, because what regressed before was the WIRING:
+// the resolver existed but the panel never called it, and the shop grew
+// a "Call Front Desk" link that the owner then removed again.
+//
+// The phone lives in ONE place: the chat card (`IntercomUnavailableCard`)
+// — the surface that explains WHY the chat is gone. The shop is a
+// catalogue; a phone number in the middle of it is noise, not a next
+// step, and the Chat tab is one tap away.
 
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-describe("IntercomPage — the shop landing and the shop phone link", () => {
+describe("IntercomPage — the shop landing, and the phone that stays off the shop", () => {
   const page = readFileSync(
     resolve(__dirname, "../pages/IntercomPage.tsx"),
     "utf8"
@@ -47,21 +50,17 @@ describe("IntercomPage — the shop landing and the shop phone link", () => {
     expect(page).toMatch(/if \(source === "guest"\) \{\s*guestChoseTabRef\.current = true;/);
   });
 
-  it("puts exactly ONE phone link in the shop tab — behind the call-off guard", () => {
+  it("keeps EVERY phone link OFF the shop tab (decision #337)", () => {
     expect(shopTabStart).toBeGreaterThan(-1);
     expect(shopTabEnd).toBeGreaterThan(shopTabStart);
-    // The intercom call and the phone are mutually exclusive (decision
-    // #335): the phone link exists in the shop tab ONLY while the voice
-    // call is off.
-    expect(shopTab).toMatch(
-      /\{!intercomCallsEnabled && \(\s*<a\s+href=\{`tel:\$\{hotelContact\.frontDeskPhone\}`\}/
-    );
-    expect(shopTab.match(/tel:/g)?.length ?? 0).toBe(1);
+    // The shop carries no `tel:` link at all — not behind a guard, not
+    // anywhere. The front-desk phone lives on the chat card.
+    expect(shopTab.match(/tel:/g) ?? []).toHaveLength(0);
+    expect(shopTab).not.toMatch(/Call Front Desk/);
   });
 
-  it("keeps the shop phone link out of the way while the call is on", () => {
-    // The header's "Call Desk" button is the channel while the call is
-    // on — the shop link must never be offered next to it.
-    expect(page).toMatch(/\{intercomCallsEnabled && \(\s*<button/);
+  it("keeps the phone on the chat card — the guest still has a next step", () => {
+    expect(page).toMatch(/href=\{`tel:\$\{phone\}`\}/);
+    expect(page).toMatch(/Call Front Desk/);
   });
 });

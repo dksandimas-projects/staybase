@@ -197,7 +197,7 @@ is on — EXCEPT in the call-ERROR banner in the panel header (no mic permission
 answer). There the intercom call is on but it FAILED, so the direct line is the
 guest's recovery; without it the guest would be stuck.
 
-### Where the panel lands, and the shop's phone line (decision #336, 2026-11-21)
+### Where the panel lands (decision #336, 2026-11-21)
 
 The chat QR landed the guest on the **"chat is unavailable"** card whenever the hotel
 had switched the chat off. With the STORE left on, that card was a dead end — the one
@@ -217,10 +217,10 @@ tab. The Chat tab stays one tap away.
 config arrives, NOT a standing redirect; a guest who taps "Chat Support" by hand stays
 on Chat.
 
-**The shop carries the phone line while the call is off** — with the voice call off the
-phone is the guest's only way to reach the desk from the shop, so the shop tab shows a
-**"Call Front Desk"** link with the front-desk number, **only while the voice call is
-off** (mutual exclusivity above is unchanged).
+**The shop carries NO phone link** (decision #337). The front-desk phone lives in ONE
+place: the chat card — the surface that explains WHY the chat is gone. The shop is a
+catalogue; a phone number in the middle of it is noise, not a next step, and the Chat
+tab is one tap away.
 
 **One definition.** The landing rule is a pure resolver,
 `resolveIntercomLandingTab(requestedTab, chatEnabled, storeEnabled)` in
@@ -235,7 +235,7 @@ unit-tested; the wiring is pinned by source-text tripwires.
 - [x] Chat off + store off + call off → the whole panel becomes the phone-only card (no tabs).
 - [x] Chat on + call off → no "Call Desk" button anywhere; the chat and the store are untouched.
 - [x] Chat off + store on → the panel lands on the Shop tab, not on the "chat is unavailable" card; the guest may tap "Chat Support" and STAY there.
-- [x] Chat off + store on + call off → the shop tab shows the "Call Front Desk" phone link; with the call on it shows NO phone link (the header's "Call Desk" is the channel).
+- [x] Chat off + store on → the shop tab carries NO phone link; the desk is reached from the Chat tab's card.
 - [x] The store QR (`?tab=shop`) still lands on the shop even when the chat is off.
 - [x] A guest on a screen that was open before the switch flipped cannot start a call (the handler re-checks).
 - [x] The desk sees a "Calls Off" chip, so staff can explain the missing button to a guest.
@@ -249,7 +249,7 @@ unit-tested; the wiring is pinned by source-text tripwires.
 - [x] With the voice call off, a Spark Essentials order still reaches the desk (the store badge message is not gated)
 - [x] With both the chat and the store off, the panel is the fallback card
 - [x] With the chat off and the store on, the panel opens on the Shop tab (not on the "chat is unavailable" card)
-- [x] With the chat off, the store on and the voice call off, the shop tab shows the "Call Front Desk" phone link
+- [x] With the chat off and the store on, the shop tab carries NO phone link — the desk is reached from the Chat tab's card
 
 ### References
 

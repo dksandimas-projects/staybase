@@ -1980,31 +1980,10 @@ export function IntercomPage() {
               </div>
 
               {/*
-               * Per IFS-01 follow-up (2026-11-21, decision #336): with the
-               * VOICE CALL switched off, the phone is the guest's only way
-               * to reach the front desk from the shop surface — and the
-               * shop IS a working surface, so it must carry the same next
-               * step the chat card carries. It is the one place the
-               * guest can still get a human while the in-room chat and
-               * the in-room call are both dark.
-               *
-               * The two call affordances stay MUTUALLY EXCLUSIVE
-               * (decision #335): while the intercom call is ON the
-               * header's "Call Desk" button is the channel, and this
-               * phone link is NOT rendered.
+               * Decision #337 (owner-specified 2026-11-21): the shop tab
+               * carries NO phone link. The front-desk phone lives on the
+               * chat card — one place, one next step.
                */}
-              {!intercomCallsEnabled && (
-                <a
-                  href={`tel:${hotelContact.frontDeskPhone}`}
-                  className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-primary/30 bg-white px-4 text-xs font-bold text-primary-dark shadow-sm transition hover:bg-primary-light/40 active:scale-[0.98]"
-                >
-                  <Phone size={14} />
-                  Call Front Desk
-                  {hotelContact.frontDeskPhone && (
-                    <span className="font-normal text-gray-500">{hotelContact.frontDeskPhone}</span>
-                  )}
-                </a>
-              )}
 
               {/* GSD-01: Catalog Discovery — search + category chips
                   + result count + clear-all. Hidden while the live
@@ -2117,7 +2096,7 @@ export function IntercomPage() {
                     <p className="mt-1 text-xs text-gray-500">
                       {intercomChatEnabled
                         ? "Please send a chat message for anything you need."
-                        : "Chat support is switched off at the moment — please call the front desk and we will be happy to help."}
+                        : "Chat support is switched off at the moment — tap Chat Support to reach the front desk."}
                     </p>
                   </div>
                 )}

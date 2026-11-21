@@ -320,7 +320,9 @@ Spec: `plan/features/INTERCOM-GUEST.md`
 1. Open the room QR **without** a `tab` param (the chat QR).
 2. Then open `/intercom/{roomId}?tab=shop` (the store QR).
 
-**Expected:** the chat QR now opens on the **Shop** tab, NOT on the "chat is unavailable" card. The store QR still opens on the Shop tab. The Chat tab is one tap away either way, and the guest may tap it and STAY there — the landing never fights a guest who chooses by hand. With the voice call ON, the shop shows **no phone number** (the header's "Call Desk" is the channel); with the voice call OFF, the shop shows the **"Call Front Desk"** link with the front-desk number.
+**Expected:** the chat QR now opens on the **Shop** tab, NOT on the "chat is unavailable" card. The store QR still opens on the Shop tab. The Chat tab is one tap away either way, and the guest may tap it and STAY there — the landing never fights a guest who chooses by hand.
+
+**The shop carries NO phone (decision #337):** on the Shop tab there is **no "Call Front Desk" link and no phone number** — with the voice call ON *or* OFF. The front-desk number lives on the Chat tab's card only; tap "Chat Support" to reach it.
 
 **Note:** the first load after a guest deploy can serve the PREVIOUS bundle from the PWA service worker — hard-refresh before judging the panel (see `plan/project/DEPLOY.md`).
 
