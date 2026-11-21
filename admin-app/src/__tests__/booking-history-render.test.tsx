@@ -214,3 +214,56 @@ describe("booking history tab — renders", () => {
     expect(html).not.toContain("uid-maria");
   });
 });
+
+// Per ATR-09 (2026-11-21): the desk reported "I am only seeing Staff" —
+// the Activity history tab rendered the generic fallback because the
+// "Payment verified" milestone carried NO actor and the legacy
+// "Booking created" milestone carried no `createdBy` stamp.
+//
+// This is the ONE test that proves the REPORTED BUG is gone: it renders
+// the two milestones of a real booking document and asserts a NAME.
+describe("booking history tab — the milestones name their actor", () => {
+  it("renders the payment verifier's NAME, not \"Staff\"", () => {
+    reset();
+    const booking = {
+      id: "BK-1",
+      discountVerified: false,
+      discountVerifiedBy: null,
+      createdAt: "2026-11-19T08:14:00.000Z",
+      createdBy: "uid-juan",
+      createdByName: "Juan Dela Cruz",
+      paymentConfirmedAt: "2026-11-19T08:14:00.000Z",
+      paymentConfirmedBy: "uid-maria",
+      paymentConfirmedByName: "Maria Santos",
+      handledBy: "uid-maria"
+    } as never;
+
+    const html = render({ booking });
+    expect(html).toContain("Payment verified");
+    expect(html).toContain("Maria Santos");
+    expect(html).toContain("Booking created");
+    expect(html).toContain("Juan Dela Cruz");
+    // The generic fallback is what the desk reported seeing.
+    expect(html).not.toContain(">Staff<");
+    // The raw uid must never reach the screen.
+    expect(html).not.toContain("uid-maria");
+    expect(html).not.toContain("uid-juan");
+  });
+
+  it("names the actor of a LEGACY booking (no `createdBy` stamp) through `handledBy`", () => {
+    reset();
+    const booking = {
+      id: "BK-2",
+      discountVerified: false,
+      discountVerifiedBy: null,
+      createdAt: "2026-11-19T08:14:00.000Z",
+      paymentConfirmedAt: "2026-11-19T08:14:00.000Z",
+      handledBy: "uid-juan"
+    } as never;
+
+    const html = render({ booking });
+    expect(html).toContain("Juan Dela Cruz");
+    expect(html).not.toContain(">Staff<");
+    expect(html).not.toContain("uid-juan");
+  });
+});

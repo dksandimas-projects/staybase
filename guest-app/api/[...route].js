@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.31.0";
+    VERSION2 = "2.31.1";
   }
 });
 
@@ -151627,6 +151627,11 @@ function asText(value) {
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   return "";
 }
+function staffUidFrom(value) {
+  if (!value) return "";
+  if (value === "guest" || value === "system" || value === "staff") return "";
+  return value;
+}
 function asNumber(value) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim() !== "") {
@@ -151788,26 +151793,27 @@ function bookingMilestoneEvents(booking) {
     });
   };
   const createdBy = asText(data.createdBy);
+  const createdActorUid = staffUidFrom(createdBy) || staffUidFrom(asText(data.handledBy));
   push(
     "created",
     "Booking created",
     toIsoTimestamp(data.createdAt),
-    createdBy || null,
-    asText(data.createdByName) || null,
+    createdBy === "guest" ? null : createdActorUid || null,
+    createdBy === "guest" ? null : asText(data.createdByName) || null,
     createdBy === "guest" ? "guest" : null
   );
   push(
     "checked-in",
     "Checked in",
     toIsoTimestamp(data.checkedInAt),
-    asText(data.checkedInBy) || null,
+    staffUidFrom(asText(data.checkedInBy)) || null,
     asText(data.checkedInByName) || null
   );
   push(
     "checked-out",
     "Checked out",
     toIsoTimestamp(data.checkedOutAt),
-    asText(data.checkedOutBy) || null,
+    staffUidFrom(asText(data.checkedOutBy)) || null,
     asText(data.checkedOutByName) || null
   );
   const cancelledBy = asText(data.cancelledBy);
@@ -151815,7 +151821,7 @@ function bookingMilestoneEvents(booking) {
     "cancelled",
     "Booking cancelled",
     toIsoTimestamp(data.cancelledAt),
-    cancelledBy || null,
+    staffUidFrom(cancelledBy) || null,
     null,
     cancelledBy === "guest" ? "guest" : cancelledBy === "system" ? "system" : null
   );
@@ -151823,21 +151829,21 @@ function bookingMilestoneEvents(booking) {
     "payment-confirmed",
     "Payment verified",
     toIsoTimestamp(data.paymentConfirmedAt),
-    null,
-    null
+    staffUidFrom(asText(data.paymentConfirmedBy)) || staffUidFrom(asText(data.handledBy)) || null,
+    asText(data.paymentConfirmedByName) || null
   );
   push(
     "payment-rejected",
     "Payment rejected",
     toIsoTimestamp(data.paymentRejectedAt),
-    asText(data.paymentRejectedBy) || null,
+    staffUidFrom(asText(data.paymentRejectedBy)) || null,
     null
   );
   push(
     "special-requests-updated",
     "Updated special requests",
     toIsoTimestamp(data.specialRequestsUpdatedAt),
-    asText(data.specialRequestsUpdatedBy) || null,
+    staffUidFrom(asText(data.specialRequestsUpdatedBy)) || null,
     null
   );
   return events.sort((a, b3) => {
@@ -238535,7 +238541,22 @@ async function handleAddPayment(req, res) {
                 status: "payment-confirmed",
                 paymentConfirmedAt: now,
                 handledBy: staffUid2,
-                updatedAt: now
+                updatedAt: now,
+                // Per ATR-09 (2026-11-21): the verifier's stamp.
+                // Written in the SAME write as `paymentConfirmedAt`
+                // — and never overwritten, because
+                // `paymentConfirmedAt` is only ever written on the
+                // transition. `handledBy` cannot answer this: it is
+                // overwritten by every later staff action, so the
+                // desk's history tab could not say WHO verified the
+                // money.
+                //
+                // It sits AFTER `updatedAt` on purpose: the FOL-05
+                // guard pins the literal adjacency of the payload's
+                // first four fields. A source-text guard is a
+                // contract — move your field, do not loosen it.
+                paymentConfirmedBy: staffUid2,
+                paymentConfirmedByName: auditActor.name || null
               },
               newStatus: "payment-confirmed"
             };
@@ -238574,6 +238595,13 @@ async function handleAddPayment(req, res) {
           status: "payment-confirmed",
           handledBy: staffUid2,
           paymentConfirmedAt: now,
+          // Per ATR-09 (2026-11-21): the verifier's stamp, written in
+          // the SAME write as `paymentConfirmedAt` and never
+          // overwritten. `handledBy` cannot answer this — it is
+          // overwritten by every later staff action, so the desk's
+          // history tab could not say WHO verified the money.
+          paymentConfirmedBy: staffUid2,
+          paymentConfirmedByName: auditActor.name || null,
           updatedAt
         });
         transitionedToPaymentConfirmed = true;
@@ -239181,6 +239209,12 @@ async function handleMarkPaymentConfirmed(req, res) {
         status: "payment-confirmed",
         handledBy,
         paymentConfirmedAt: now,
+        // Per ATR-09 (2026-11-21): the verifier's stamp, written in
+        // the SAME write as `paymentConfirmedAt` and never
+        // overwritten — `handledBy` is overwritten by every later
+        // staff action, so it cannot answer "who verified this?".
+        paymentConfirmedBy: handledBy,
+        paymentConfirmedByName: auditActor.name || null,
         updatedAt: now
       });
     });
@@ -239311,7 +239345,22 @@ async function handleVerifyAndRecordPayment(req, res) {
                 status: "payment-confirmed",
                 paymentConfirmedAt: now,
                 handledBy: staffUid2,
-                updatedAt: now
+                updatedAt: now,
+                // Per ATR-09 (2026-11-21): the verifier's stamp.
+                // Written in the SAME write as `paymentConfirmedAt`
+                // — and never overwritten, because
+                // `paymentConfirmedAt` is only ever written on the
+                // transition. `handledBy` cannot answer this: it is
+                // overwritten by every later staff action, so the
+                // desk's history tab could not say WHO verified the
+                // money.
+                //
+                // It sits AFTER `updatedAt` on purpose: the FOL-05
+                // guard pins the literal adjacency of the payload's
+                // first four fields. A source-text guard is a
+                // contract — move your field, do not loosen it.
+                paymentConfirmedBy: staffUid2,
+                paymentConfirmedByName: auditActor.name || null
               },
               newStatus: "payment-confirmed"
             };
@@ -239359,6 +239408,8 @@ async function handleVerifyAndRecordPayment(req, res) {
         bookingUpdates.status = targetPostStatus;
         bookingUpdates.handledBy = staffUid2;
         bookingUpdates.paymentConfirmedAt = now;
+        bookingUpdates.paymentConfirmedBy = staffUid2;
+        bookingUpdates.paymentConfirmedByName = auditActor.name || null;
       }
       if (Object.keys(bookingUpdates).length > 0) {
         transaction.update(bookingRef2, bookingUpdates);
@@ -239682,6 +239733,14 @@ async function handleConfirmBookingWithBalance(req, res) {
         // receipt paths light up uniformly.
         confirmedAt: now,
         paymentConfirmedAt: now,
+        // Per ATR-09 (2026-11-21): the verifier's stamp, written in
+        // the SAME write as `paymentConfirmedAt` and never
+        // overwritten — `handledBy` is overwritten by every later
+        // staff action, so it cannot answer "who verified this?".
+        // On this path the confirmer IS the verifier: they confirmed
+        // the booking with a balance outstanding.
+        paymentConfirmedBy: confirmedBy,
+        paymentConfirmedByName: auditActor.name || null,
         handledBy: confirmedBy,
         updatedAt: now
       });

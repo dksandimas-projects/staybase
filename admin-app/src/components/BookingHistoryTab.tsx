@@ -15,12 +15,20 @@
 // a raw 28-character uid tells a desk user nothing (GOTCHAS §Security
 // & PII).
 //
-// WHAT IT IS NOT: the ATR-02 forensic trail. The booking MUTATIONS
-// (confirm / cancel / reschedule / payment verify / discount verify)
-// do not write event rows yet, so this tab is a history of the
-// operational changes, not a complete audit of every field write. The
-// tab says so in its own copy rather than implying a completeness it
-// does not have.
+// WHAT IT IS NOT: the ATR-02 forensic trail. ATR-02 now writes a
+// server-side audit row for every staff mutation — but the full audit
+// log stays ADMIN-ONLY (CVQ-ATR-02, the owner's standing decision):
+// the front desk reads the inline attribution only, which is what this
+// tab shows. The tab says so in its own copy rather than implying a
+// completeness it does not have.
+//
+// PER ATR-09 (2026-11-21): every milestone names its actor. The desk
+// reported "I am only seeing Staff" — the "Payment verified" milestone
+// carried no actor at all, and a legacy booking carried no creator
+// stamp. The actor resolution lives in the SHARED module
+// (`shared/utils/bookingHistory.ts`): `paymentConfirmedBy` for the
+// verifier, `createdBy` for the creator, `handledBy` as the documented
+// fallback for a record written before those stamps existed.
 
 import { useMemo } from "react";
 import { History, Receipt, Utensils, Sparkles, LogIn, LogOut, CreditCard } from "lucide-react";

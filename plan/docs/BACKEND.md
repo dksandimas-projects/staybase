@@ -252,18 +252,18 @@ MRB-06 public creates may contain an explicit room selection per requested stay.
 | `source` / `notes` / `handledBy` | string | Booking source & staff notes. **`handledBy` = the LAST staff member to touch this booking** (documented, not renamed). The rules pin it to the caller's own uid. |
 | `createdBy` / `createdByName` | string \| null | **ATR-04.** Stamped ONCE at create and NEVER overwritten: `"guest"` (+ `"Guest"`) for a public online booking, the staff uid (+ display name) for a walk-in. Answers "kinsay nag walkin book?". |
 | `checkedInAt` / `checkedInBy` / `checkedInByName` | timestamp / string \| null | **ATR-04.** `checkedInAt` + `checkedInBy` have been written by the server since the FOL-03 pass (they were in no type and no MD until ATR-04); `checkedInByName` is the display-name companion. |
-| `checkedOutBy` / `checkedOutByName` | string \| null | **ATR-04.** `checkedOutBy` has been written by the server since the FOL-03 pass; `checkedOutByName` is the display-name companion. |
+| `checkedOutAt` / `checkedOutBy` / `checkedOutByName` / `checkedOutWithBalance` | timestamp / string / number | **ATR-04.** `checkedOutBy` has been written by the server since the FOL-03 pass; `checkedOutByName` is the display-name companion. `checkedOutWithBalance` is the checkout balance snapshot. |
+| `paymentConfirmedAt` / `paymentConfirmedBy` / `paymentConfirmedByName` | timestamp / string \| null | **ATR-09.** `paymentConfirmedAt` is the durable "payment verified" signal (FOL-01). `paymentConfirmedBy` + `paymentConfirmedByName` are the VERIFIER's stamp, written in the same write and never overwritten — `handledBy` is last-touch, so it cannot answer "who verified?". |
 | `memberId` / `memberDiscountPct` / `pointsRedeemed` / `pointsAwarded` | string / number | Spark Rewards loyalty fields |
-| `checkedOutAt` / `checkedOutBy` / `checkedOutWithBalance` | timestamp / string / number | Checkout audit & balance snapshot |
 | `confirmedWithBalance` / `confirmedWithBalanceReason` | number / string \| null | Partial payment confirmation audit (CWB) |
 | `guestRegistration` / `guestIdPhotoUrl` | object / string \| null | Physical check-in registration data & ID photo |
 | `breakfastSelections` | map | `bookings/{bookingId}.breakfastSelections` map: `yyyy-mm-dd-guest-n` → selected silog item name |
 | `breakfastServed` / `hasBreakfast` / `breakfastRate` | map / bool / number | Breakfast add-on & daily silog selection maps |
-| `earlyCheckIn` | object \| null | Optional early-arrival workflow record. `source` is `guest-request` or `staff-granted` (absent legacy value means guest request); includes status, requested/confirmed time, guest/staff notes, and created/resolved audit fields. Admin grant writes are server-authorized and transactional. |
+| `earlyCheckIn` | object \| null | Optional early-arrival workflow record. `source` is `guest-request` or `staff-granted` (absent legacy value means guest request); includes status, requested/confirmed time, guest/staff notes, and created/resolved audit fields. |
 | `cancellationReason` / `cancelledAt` / `cancelledBy` / `cancellationSource` | string / timestamp \| null | Permanent cancellation record |
 | `cancellationLiability` | object \| null | **CRL-07 (decision #173):** the durable refund-liability snapshot stamped by per-child + legacy null-`reservationId` cancels. `{ policyResult: { refundPct, policyRefund, netCollected, retainedAmount, cutoffHours, source, snapshottedAt }, approvedAmount, exception: { approvedAmount, reason, approvedBy, approvedAt } \| null }`. `policyResult` is immutable post-cancel; `approvedAmount` is reduced only via `POST /api/bookings/cancellation-exception`. Absent = "no liability work to do". See `computeCancellationLiabilityState`. |
-| `revenueAllocation` | object \| null | **MRB-11 (decision #177):** the per-stream revenue allocation snapshotted at create time (recomputed on reschedule). `{ roomNet, breakfastNet, addOnNet, deductionNet, totalNet }` with `roomNet + breakfastNet + addOnNet − deductionNet === totalNet` (asserted at the write boundary). Absence = "pre-MRB-11 booking"; `getBookingRevenueStreams` falls back to the legacy heuristic. |
-| `otherAddOnSelections` / `otherAddOnTotal` / `hasAnyOtherAddOns` | map / number / bool | **BR-12 (decision #247; OCT-M4 #297):** the per-date × per-add-on selection map, its denormalised total, and the O(1) "has any" flag. The total sits ON TOP of `booking.totalPrice` for the BALANCE (see §The folio balance model below). Stored at 2dp (OCT-L3 #301). |
+| `revenueAllocation` | object \| null | **MRB-11 (decision #177):** the per-stream revenue allocation snapshotted at create time (recomputed on reschedule). `{ roomNet, breakfastNet, addOnNet, deductionNet, totalNet }` with `roomNet + breakfastNet + addOnNet − deductionNet === totalNet` (asserted at the write boundary). |
+| `otherAddOnSelections` / `otherAddOnTotal` / `hasAnyOtherAddOns` | map / number / bool | **BR-12 (decision #247; OCT-M4 #297):** the per-date × per-add-on selection map, its denormalised total, and the O(1) "has any" flag. The total sits ON TOP of `booking.totalPrice` for the BALANCE (see §The folio balance model below). |
 | `createdAt` / `updatedAt` | timestamp | Audit timestamps |
 
 #### The folio balance model (OCT-FOL-01, 2026-10-20, decision #298)
@@ -361,7 +361,7 @@ Live WebRTC signalling for the intercom voice call, addressed by the same per-st
 ### `settings/{settingId}`
 
 Single-document collections holding dynamic configuration:
-- `settings/hotelConfig`: `brandName`, `colors`, `logos`, `roomTypes[]` (Maximum 10 photos per type), `paymentMethods[]`, `bookingSources[]`, `discountScope`, `paymentHoldWindowHours`, `inFlowHoldMinutes` (per IFH-01.2, 5..30 min default 15), `unpaidCheckoutApprovalThreshold`, `address`, `frontDeskPhone`, `supportEmail`, `dpoEmail`, `facebookUrl`, `instagramUrl`, `checkInTime`, `checkOutTime`, `otherAddOnsEnabled` (per OCT-M1 #295 — **only an explicit `false` disables it**), `intercomChatEnabled` + `intercomCallsEnabled` (per IFS-01 #318 — the hotel-wide in-room feature switches; **only an explicit `false` disables one**; read by the guest-app server gate, projected to the guest panel, and mirrored into the admin desk)
+- `settings/hotelConfig`: `brandName`, `colors`, `logos`, `roomTypes[]` (Maximum 10 photos per type), `paymentMethods[]`, `bookingSources[]`, `discountScope`, `paymentHoldWindowHours`, `inFlowHoldMinutes` (per IFH-01.2, 5..30 min default 15), `unpaidCheckoutApprovalThreshold`, `address`, `frontDeskPhone`, `supportEmail`, `dpoEmail`, `facebookUrl`, `instagramUrl`, `checkInTime`, `checkOutTime`, `otherAddOnsEnabled` (per OCT-M1 #295 — **only an explicit `false` disables it**), `intercomChatEnabled` + `intercomCallsEnabled` (per IFS-01 #318 — the hotel-wide in-room feature switches; **only an explicit `false` disables one**)
   - HC-01/HC-02 (#328/#329): the contact details AND the check-in/check-out times have ONE source of truth (this doc; `hotel.config.ts` = fallback); legacy `contactEmail`/`contactPhone` never read; the house rules may quote them via `{{checkInTime}}`/`{{checkOutTime}}`.
 - `settings/websiteContent`: Editable homepage, about, corporate, and legal page copy.
 - `settings/breakfastConfig`: Silog menu items & daily prep settings.
@@ -385,7 +385,7 @@ Single-document collections holding dynamic configuration:
 | `convertedBookingId` / `convertedBookingRef` | string | Back-link to the resulting booking once the inquiry is converted |
 | `createdAt` / `updatedAt` | timestamp | Audit |
 
-Public submissions land here via `POST /api/corporate/inquiry` (rate-limited + Turnstile-gated + honeypot). The conversion path (`POST /api/corporate/convert-inquiry`, staff-only) creates a `bookings/{id}` doc and links the two in a single transaction — see `plan/features/CORPORATE-BOOKING.md §Multi-Room Block` and `plan/features/CORPORATE-INQUIRIES.md`.
+Public submissions land here via `POST /api/corporate/inquiry` (rate-limited + Turnstile-gated + honeypot). The conversion path (`POST /api/corporate/convert-inquiry`, staff-only) creates a `bookings/{id}` doc and links the two in one transaction.
 
 ---
 
@@ -458,7 +458,7 @@ The doc ID is the code string by convention, and the validate + create handlers 
 | `audioRoutingUpdatedAt` | timestamp | Audit timestamp for the last `audioRouting` write |
 | `createdAt` / `updatedAt` | timestamp | Audit |
 
-> Lifecycle: `create` / `delete` are admin-only; `update` is admin OR the owner writing only to the self-write allowlist (`fullName` / `displayName` / `phone` / `photoUrl` / `address` / `dateOfBirth` / `emergencyContact` / `preferences` / `audioRouting` / `audioRoutingUpdatedAt` / `updatedAt`). **A write that changes `audioRouting` must also change `audioRoutingUpdatedAt`** — enforced by the `audioRoutingStamped()` rule function (`hasOnly()` is a subset check and cannot express the pairing; decision #307). See `firebase/firestore.rules §guests`.
+> Lifecycle: `create` / `delete` are admin-only; `update` is admin OR the owner writing only to the self-write allowlist (`fullName` / `displayName` / `phone` / `photoUrl` / `address` / `dateOfBirth` / `emergencyContact` / `preferences` / `audioRouting` / `audioRoutingUpdatedAt` / `updatedAt`). **A write that changes `audioRouting` must also change `audioRoutingUpdatedAt`** — enforced by the `audioRoutingStamped()` rule function (`hasOnly()` cannot express the pairing; decision #307). See `firebase/firestore.rules §guests`.
 
 ---
 
@@ -504,7 +504,7 @@ Subcollection: `members/{memberId}/pointsHistory/{historyId}` — append-only le
 ---
 
 ## Reservation Aggregate Counter Ownership (MRB-15)
-> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-03, **REAL BUG FIX**). Pre-MRB-15-03, check-in + checkout updated the booking's own `status` but NEVER recomputed the header's `checkedInRoomCount` / `checkedOutRoomCount` in the same `runTransaction` — the counters were silently stuck at `0` forever for N>1, and the aggregate `paymentStatus` was a hardcoded array literal correct only for N=1.
+> Decision: `plan/docs/DECISIONS-FEATURES.md #181` (MRB-15-03, **REAL BUG FIX**). Pre-MRB-15-03, check-in + checkout updated the booking's own `status` but NEVER recomputed the header's `checkedInRoomCount` / `checkedOutRoomCount` — the counters were silently stuck at `0` for N>1, and the aggregate `paymentStatus` was a hardcoded array literal correct only for N=1.
 
 ### Counter ownership contract (which handler may write which counter)
 
