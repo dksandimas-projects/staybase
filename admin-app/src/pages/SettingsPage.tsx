@@ -3472,6 +3472,12 @@ export function SettingsPage() {
     chat: null,
     calls: null
   });
+  // Per IFS-01 follow-up (2026-11-21, decision #335): the two hotel-wide
+  // in-room feature switches persist the moment they are CLICKED — there
+  // is no Save step for them. The inline error surfaces when that write
+  // fails and the switch is reverted, so the operator never sees a
+  // switch that disagrees with what is stored.
+  const [intercomFeatureSwitchesError, setIntercomFeatureSwitchesError] = useState("");
 
   // Per IFS-01: re-sync the two switches from the live
   // `settings/hotelConfig` snapshot. Only a GENUINE change in the
@@ -4744,16 +4750,59 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
     }));
   };
 
+  // Per IFS-01 follow-up (2026-11-21, decision #335): persist ONE
+  // hotel-wide in-room feature switch, immediately.
+  //
+  // WHY THE WRITE MOVED OFF THE SAVE BUTTON
+  // ----------------------------------------
+  // The two switches shipped (2026-11-20, decision #318) as plain local
+  // state that only reached Firestore when the operator pressed
+  // "Save Intercom Settings" — a button that sits at the BOTTOM of the
+  // tab, below the quick-request list and the notification sound. The
+  // switches look exactly like the "Other Add-Ons" master switch two
+  // tabs away, which persists the instant it is clicked.
+  //
+  // The owner switched the voice call off, saw the switch move, and the
+  // guest panel kept offering "Call Desk" — because nothing was written.
+  // A kill-switch that looks live but is not is worse than no switch:
+  // the desk believes the calls are off (or on) and the guest sees the
+  // truth. So these two now write on click, with the same
+  // revert-on-failure contract the add-ons switch uses, and they say so
+  // in their own copy.
+  //
+  // `updateSettings` merges one field into `settings/hotelConfig` and
+  // busts the public-site content cache, so the guest panel picks the
+  // new value up on its next load.
+  const handleIntercomFeatureSwitchToggle = async (
+    switchName: "chat" | "calls",
+    next: boolean
+  ) => {
+    setIntercomFeatureSwitchesError("");
+    const previous = switchName === "chat" ? intercomChatEnabled : intercomCallsEnabled;
+    const field = switchName === "chat" ? "intercomChatEnabled" : "intercomCallsEnabled";
+
+    // Optimistic: the switch moves now, the write follows.
+    if (switchName === "chat") setIntercomChatEnabled(next);
+    else setIntercomCallsEnabled(next);
+
+    const saved = await updateSettings("hotelConfig", { [field]: next });
+    if (saved) return;
+
+    // The write failed — put the switch back where it was so the UI
+    // never shows a value that is not stored.
+    if (switchName === "chat") setIntercomChatEnabled(previous);
+    else setIntercomCallsEnabled(previous);
+    setIntercomFeatureSwitchesError(
+      switchName === "chat"
+        ? "Failed to save the guest-chat switch. The previous setting is still in effect."
+        : "Failed to save the voice-calls switch. The previous setting is still in effect."
+    );
+  };
+
   const handleSaveIntercom = async () => {
     await runSettingsSave("intercom", "Intercom settings saved", () => updateSettings("hotelConfig", {
       intercomQuickRequests,
-      notificationSoundUrl,
-      // Per IFS-01 (2026-11-20, decision #318): the two hotel-wide
-      // in-room feature switches ride along with the rest of the
-      // Intercom settings, so one Save turns the chat / the voice call
-      // off for the whole hotel.
-      intercomChatEnabled,
-      intercomCallsEnabled
+      notificationSoundUrl
     }));
   };
 
@@ -9380,6 +9429,14 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                  */}
                 <div className="space-y-4">
                   <h4 className="text-[10px] text-gray-400 font-bold uppercase tracking-wider border-b border-gray-100 pb-1.5">In-Room Service Switches</h4>
+                  <p className="text-[10px] leading-relaxed text-gray-500">
+                    These switches apply to the whole hotel the moment you flip them — there is no Save step. A guest who already has the in-room panel open sees the change on their next page load.
+                  </p>
+                  {intercomFeatureSwitchesError && (
+                    <p role="alert" className="text-[10px] font-semibold text-red-600">
+                      {intercomFeatureSwitchesError}
+                    </p>
+                  )}
                   <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm space-y-4">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div>
@@ -9390,7 +9447,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                       </div>
                       <button
                         type="button"
-                        onClick={() => setIntercomChatEnabled(!intercomChatEnabled)}
+                        onClick={() => void handleIntercomFeatureSwitchToggle("chat", !intercomChatEnabled)}
                         aria-pressed={intercomChatEnabled}
                         aria-label={intercomChatEnabled ? "Disable guest chat" : "Enable guest chat"}
                         className={`h-6 w-11 shrink-0 rounded-full p-0.5 transition ${intercomChatEnabled ? "bg-primary" : "bg-gray-200"}`}
@@ -9408,7 +9465,7 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                       </div>
                       <button
                         type="button"
-                        onClick={() => setIntercomCallsEnabled(!intercomCallsEnabled)}
+                        onClick={() => void handleIntercomFeatureSwitchToggle("calls", !intercomCallsEnabled)}
                         aria-pressed={intercomCallsEnabled}
                         aria-label={intercomCallsEnabled ? "Disable voice calls" : "Enable voice calls"}
                         className={`h-6 w-11 shrink-0 rounded-full p-0.5 transition ${intercomCallsEnabled ? "bg-primary" : "bg-gray-200"}`}

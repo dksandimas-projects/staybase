@@ -132,6 +132,15 @@ server gate, the guest panel and the admin Settings tab.
   They apply on the guest's next page load.
 - **Desk:** the admin inbox ignores incoming call sessions while the voice call is
   off (no banner, no ringtone) and shows a **"Calls Off"** chip.
+- **Admin Settings tab:** each switch persists **the moment it is clicked** — there
+  is no Save step for them (IFS-01 follow-up, decision #335, 2026-11-21). They
+  shipped as local state that only reached Firestore when "Save Intercom Settings"
+  was pressed at the bottom of the tab, so an operator could flip the switch, see it
+  move, and write nothing — which is exactly how the guest panel kept offering
+  "Call Desk" while the switch read OFF on screen. Each switch now writes its own
+  field on click and **reverts + shows an inline error if the write fails**, so the
+  switch on screen always matches what is stored. See `plan/features/SETTINGS.md
+  §7. Intercom & Audio`.
 
 **The STORE message carve-out.** The order badge that follows a Spark Essentials
 order travels through the same `/api/intercom/send-message` endpoint. It is **not**

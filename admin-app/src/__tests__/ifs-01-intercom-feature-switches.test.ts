@@ -128,16 +128,44 @@ describe("IFS-01 — the desk stops ringing while the voice call is off", () => 
 
 describe("IFS-01 — the Settings tab owns both switches", () => {
   it("renders a toggle for each switch", () => {
-    expect(settingsSrc).toMatch(/onClick=\{\(\) => setIntercomChatEnabled\(!intercomChatEnabled\)\}/);
-    expect(settingsSrc).toMatch(/onClick=\{\(\) => setIntercomCallsEnabled\(!intercomCallsEnabled\)\}/);
+    expect(settingsSrc).toMatch(
+      /onClick=\{\(\) => void handleIntercomFeatureSwitchToggle\("chat", !intercomChatEnabled\)\}/
+    );
+    expect(settingsSrc).toMatch(
+      /onClick=\{\(\) => void handleIntercomFeatureSwitchToggle\("calls", !intercomCallsEnabled\)\}/
+    );
   });
 
-  it("saves both switches with the rest of the Intercom settings", () => {
+  it("persists each switch the moment it is clicked — no Save step", () => {
+    // Per IFS-01 follow-up (decision #335, 2026-11-21): the switches are
+    // KILL-SWITCHES. The owner flipped one, saw it move, and the guest
+    // panel kept offering "Call Desk" — because the write only happened
+    // when "Save Intercom Settings" (at the bottom of the tab) was
+    // pressed. A switch that looks live but is not stored is worse than
+    // no switch, so the write moved into the click handler.
+    expect(settingsSrc).toMatch(/const handleIntercomFeatureSwitchToggle = async \(/);
+    expect(settingsSrc).toMatch(/updateSettings\("hotelConfig", \{ \[field\]: next \}\)/);
+    // The Save button must NOT carry the switches any more — one write
+    // path per switch, so the two can never disagree.
     const fnStart = settingsSrc.indexOf("const handleSaveIntercom");
     expect(fnStart).toBeGreaterThan(-1);
     const fnBody = settingsSrc.slice(fnStart, fnStart + 800);
-    expect(fnBody).toMatch(/intercomChatEnabled/);
-    expect(fnBody).toMatch(/intercomCallsEnabled/);
+    expect(fnBody).not.toMatch(/intercomChatEnabled/);
+    expect(fnBody).not.toMatch(/intercomCallsEnabled/);
+  });
+
+  it("reverts the switch when the write fails, so the UI never lies", () => {
+    const fnStart = settingsSrc.indexOf("const handleIntercomFeatureSwitchToggle");
+    expect(fnStart).toBeGreaterThan(-1);
+    const fnBody = settingsSrc.slice(fnStart, fnStart + 1800);
+    expect(fnBody).toMatch(/if \(saved\) return;/);
+    expect(fnBody).toMatch(/setIntercomChatEnabled\(previous\)/);
+    expect(fnBody).toMatch(/setIntercomCallsEnabled\(previous\)/);
+    expect(fnBody).toMatch(/setIntercomFeatureSwitchesError\(/);
+  });
+
+  it("says the switches apply immediately, so no Save is expected", () => {
+    expect(settingsSrc).toMatch(/apply to the whole hotel the moment you flip them/);
   });
 
   it("hydrates the switches from the settings document with the shared normalisers", () => {
