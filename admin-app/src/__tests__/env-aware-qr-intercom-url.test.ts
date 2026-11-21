@@ -47,6 +47,16 @@ describe("QR intercom URL — env-aware (2026-07-24 fix)", () => {
     expect(preview?.[0]).not.toMatch(/https:\/\/\{config\.domain\}/);
   });
 
+  it("the Spark Essentials QR target appends the ?tab=shop deep link", () => {
+    // Per the QR deep link (2026-11-21): the store QR must encode
+    // `?tab=shop` so the guest panel opens on the store tab. The
+    // guest side of this contract is pinned in
+    // `guest-app/src/__tests__/intercom-shop-deeplink.test.ts`.
+    const fn = qrPage.match(/function getIntercomUrl[\s\S]*?\n\}/);
+    expect(fn, "expected to find the getIntercomUrl function").not.toBeNull();
+    expect(fn?.[0]).toMatch(/\?tab=shop/);
+  });
+
   it("resolveApiBaseUrl still returns https://stg.<domain> for stg-admin.<domain> (regression guard)", () => {
     // The existing api-base-url.test.ts covers this, but we re-pin the
     // core staging rule here so a future refactor of that helper can't
