@@ -23,9 +23,8 @@ export interface CheckInRegistration {
   // attestation that the guest's physical ID was sighted and verified
   // at the desk:
   //   - `idSightStatus` — "sighted" once the staff confirms it.
-  //   - `idSightNote`   — WHY no photo is attached. Required ONLY when
-  //     no photo is on file (a missing photo with no explanation is
-  //     not an acceptable check-in).
+  //   - `idSightNote`   — an OPTIONAL note the desk may record (e.g.
+  //     "guest declined"). Never a check-in requirement (decision #339).
   //   - `idSightBy`     — the acting staff member's name (a NAME, never
   //     a raw uid — per GOTCHAS "never render a raw staff uid").
   //   - `idSightAt`     — ISO timestamp of the attestation.
@@ -55,7 +54,7 @@ export interface IdVerificationState {
   sighted: boolean;
   /** A photo copy of the ID is on file (optional evidence). */
   hasPhoto: boolean;
-  /** Why no photo is attached (required only when `hasPhoto` is false). */
+  /** An optional note recorded with the attestation. */
   note: string;
   /** The acting staff member's name, as recorded at attestation time. */
   sightedBy: string;
@@ -94,9 +93,9 @@ export function getIdVerificationState(input: {
     note,
     sightedBy: (reg.idSightBy || "").trim(),
     sightedAt: (reg.idSightAt || "").trim(),
-    // The photo is optional; the reason is required only when no
-    // photo is on file.
-    complete: sighted && (hasPhoto || note.length > 0)
+    // The attestation alone is the evidence: BOTH the photo and the
+    // note are optional (decision #339).
+    complete: sighted
   };
 }
 
@@ -110,16 +109,14 @@ export function getCheckInReadiness(input: CheckInReadinessInput): CheckInReadin
 
   // Per Decision #338 (2026-11-22): the guest ID PHOTO is no longer a
   // check-in blocker. The mandatory ID evidence is the staff
-  // attestation that the physical ID was sighted; when no photo is
-  // attached, the attestation must carry a reason.
+  // attestation that the physical ID was sighted. Per Decision #339
+  // the desk's note is OPTIONAL too — the attestation alone is enough.
   const idVerification = getIdVerificationState({
     registration,
     hasPhoto: hasValue(input.guestIdPhotoUrl)
   });
   if (!idVerification.sighted) {
     missingItems.push("Guest ID sighted at the desk");
-  } else if (!idVerification.hasPhoto && !idVerification.note) {
-    missingItems.push("Reason for no ID photo attached");
   }
 
   for (const field of REQUIRED_REGISTRATION_FIELDS) {

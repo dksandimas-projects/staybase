@@ -24,7 +24,7 @@ Spark Inn collects and processes guest Personal Identifiable Information (PII) i
 | Nationality | Guest registration form (check-in) | Legal obligation (Hotel Code + RA 11862) |
 | Valid ID type + ID number | Guest registration form (check-in) | Legal obligation (Hotel Code + RA 11862) |
 | Guest ID photo (scan/photo of physical ID) | OPTIONAL — uploaded by front desk at check-in, embedded in the registration PDF when present | Supporting evidence (RA 11862); the mandatory registry minimum is nationality + ID type + ID number |
-| Desk ID-sighting attestation | Recorded by the front desk at check-in — who sighted the physical ID, when, and why no photo was attached | Desk accountability record for the guest registry (RA 11862) |
+| Desk ID-sighting attestation | Recorded by the front desk at check-in — who sighted the physical ID and when (an optional note may record why no photo was attached) | Desk accountability record for the guest registry (RA 11862) |
 | OSCA Card / PWD ID photo | Uploaded by guest at booking Step 3 when Senior/PWD discount selected — staff verifies before confirming discount | Legal basis for discount claim (RA 9994 / RA 10754) |
 | Date of birth, gender, home address | Guest registration form (check-in) | Legal obligation (Hotel Code) |
 

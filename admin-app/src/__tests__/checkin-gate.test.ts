@@ -32,9 +32,9 @@ describe("BookingsPage check-in gate", () => {
     for (const label of [
       // Per Decision #338 (2026-11-22): the guest ID PHOTO is optional.
       // The mandatory ID evidence is the desk's attestation that the
-      // physical ID was sighted, plus a reason when no photo is on file.
+      // physical ID was sighted. Per Decision #339 the desk's note is
+      // optional too — the attestation alone is enough.
       "Guest ID sighted at the desk",
-      "Reason for no ID photo attached",
       "Nationality",
       "Residential address",
       "Date of birth",
@@ -56,7 +56,17 @@ describe("BookingsPage check-in gate", () => {
     expect(sharedSrc).not.toContain('missingItems.push("Guest ID photo")');
   });
 
+  // Per Decision #339 (2026-11-22): the desk's note is optional, so
+  // the gate never asks for a reason either.
+  it("never asks for a reason for the missing ID photo", () => {
+    const panelSrc = read("admin-app/src/components/GuestIdVerificationPanel.tsx");
+    expect(sharedSrc).not.toContain("Reason for no ID photo attached");
+    expect(panelSrc).not.toContain("Reason for no ID photo");
+    expect(panelSrc).toContain("Note (optional)");
+  });
+
   it("mounts the guest ID verification panel in the booking drawer", () => {
+    const panelSrc = read("admin-app/src/components/GuestIdVerificationPanel.tsx");
     expect(pageSrc).toMatch(/<GuestIdVerificationPanel/);
     expect(pageSrc).toMatch(/hasPhoto=\{Boolean\(selectedBooking\.guestIdPhotoUrl\)\}/);
     expect(pageSrc).toMatch(/onSave=\{handleIdSightSave\}/);

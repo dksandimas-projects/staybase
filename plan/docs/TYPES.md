@@ -430,11 +430,11 @@ Booking {
     signatureStatus: "pending" | "signed"
     // Per Decision #338 (2026-11-22): the guest ID photo is OPTIONAL.
     // The mandatory ID evidence is the desk's attestation that the
-    // physical ID was sighted at the desk. `idSightNote` is required
-    // ONLY when no photo is attached; `idSightBy` is the acting staff
-    // member's NAME (never a raw uid).
+    // physical ID was sighted at the desk. Per Decision #339 the note
+    // is OPTIONAL too; `idSightBy` is the acting staff member's NAME
+    // (never a raw uid).
     idSightStatus?: string            // "sighted" once the desk attests
-    idSightNote?: string              // why no ID photo is attached
+    idSightNote?: string              // optional note for the next shift
     idSightBy?: string                // acting staff display name
     idSightAt?: string                // ISO timestamp of the attestation
   }

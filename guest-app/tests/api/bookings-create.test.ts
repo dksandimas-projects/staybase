@@ -1591,11 +1591,10 @@ describe("/api/bookings/create", () => {
     });
 
     // Per Decision #338 (2026-11-22): the guest ID PHOTO is optional.
-    // What the check-in gate now requires is the desk's attestation
-    // that the physical ID was sighted. When NO photo is attached, the
-    // attestation must carry a reason — a missing photo with no
-    // explanation is not an acceptable check-in.
-    test("POST /api/bookings/checkin: blocks a missing ID photo with no recorded reason", async () => {
+    // What the check-in gate requires is the desk's attestation that
+    // the physical ID was sighted. Per Decision #339 the desk's note
+    // is optional too — the attestation alone is the evidence.
+    test("POST /api/bookings/checkin: succeeds with no ID photo and no reason when the ID was sighted", async () => {
       mockBookings.push({
         id: "booking_checkin_no_id",
         roomId: "room_101",
@@ -1608,12 +1607,11 @@ describe("/api/bookings/create", () => {
       const res = mockResponse();
       await handler(req, res);
 
-      expect(res.status).toHaveBeenCalledWith(400);
-      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-        success: false,
-        error: expect.stringContaining("Reason for no ID photo attached")
-      }));
-      expect(updateCalls.find((c) => c.path === "bookings/booking_checkin_no_id")).toBeUndefined();
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(updateCalls).toContainEqual({
+        path: "bookings/booking_checkin_no_id",
+        data: expect.objectContaining({ status: "checked-in" })
+      });
     });
 
     test("POST /api/bookings/checkin: blocks when the desk never attested the physical ID", async () => {

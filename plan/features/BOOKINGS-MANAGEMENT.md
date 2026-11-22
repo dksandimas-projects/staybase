@@ -271,10 +271,10 @@ Both shipped on the same branch — the scope note below is retained because the
 ### Guest ID Verification (photo + desk attestation)
 > Decision: `plan/docs/DECISIONS-FEATURES.md #338` (2026-11-22).
 - **The guest ID photo is OPTIONAL.** The check-in gate requires the desk's attestation that the guest's physical ID was sighted at the desk (`guestRegistration.idSightStatus`), not a photo upload. The photo stays available as the strongest supporting evidence, one tap away, and never blocks.
-- **A reason is required when no photo is attached** (`guestRegistration.idSightNote`) — e.g. the guest declined, or the ID has no camera-ready copy. The reason is optional when a photo is on file.
+- **The desk's note is OPTIONAL** (`guestRegistration.idSightNote`) — e.g. the guest declined, or the ID has no camera-ready copy. It is context for the next shift, never a condition of the check-in (per decision #339).
 - **The attestation carries the desk's name and time** (`idSightBy` / `idSightAt`). The server-stamped `checkedInBy` / `checkedInByName` / `checkedInAt` remain the trusted record of who checked the guest in and when.
 - **The legal registry minimum is unchanged** — nationality, ID type, ID number, the remaining registry fields, and the signed physical registration form stay required (RA 11862). The guest-side Senior/PWD discount ID upload is untouched.
-- **The readiness card names the items in plain language** — "Guest ID sighted at the desk" and "Reason for no ID photo attached".
+- **The readiness card names the items in plain language** — "Guest ID sighted at the desk" is the only ID item it ever asks for.
 - **The registration PDF reflects the evidence** — "ID sighted - no photo on file" instead of an empty "Attach ID here" box.
 
 ### Guest ID Upload & HEIC Conversion

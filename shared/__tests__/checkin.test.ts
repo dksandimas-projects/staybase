@@ -54,15 +54,18 @@ describe("getCheckInReadiness", () => {
     expect(readiness.missingItems).toEqual([]);
   });
 
-  test("requires a reason when the ID was sighted but no photo is attached", () => {
+  // Per Decision #339 (2026-11-22): the desk's note is OPTIONAL. The
+  // attestation alone is the evidence — a missing photo with no reason
+  // is no longer a blocked check-in.
+  test("is ready with no ID photo AND no reason when the ID was sighted", () => {
     const readiness = getCheckInReadiness({
       status: "confirmed",
       guestIdPhotoUrl: "",
       guestRegistration: completeRegistration
     });
 
-    expect(readiness.ready).toBe(false);
-    expect(readiness.missingItems).toEqual(["Reason for no ID photo attached"]);
+    expect(readiness.ready).toBe(true);
+    expect(readiness.missingItems).toEqual([]);
   });
 
   test("requires the desk attestation even when a photo is attached", () => {
@@ -200,13 +203,15 @@ describe("getIdVerificationState", () => {
     expect(state.complete).toBe(true);
   });
 
-  test("sighted with no photo and no reason is incomplete", () => {
+  test("sighted with no photo and no reason is still complete", () => {
+    // Per Decision #339 (2026-11-22): the note is optional.
     const state = getIdVerificationState({
       registration: { idSightStatus: "sighted" },
       hasPhoto: false
     });
 
-    expect(state.complete).toBe(false);
+    expect(state.sighted).toBe(true);
+    expect(state.complete).toBe(true);
   });
 
   test("a photo alone is not an attestation", () => {

@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { CheckCircle2, Eye, Pencil, ShieldCheck } from "lucide-react";
 import { getIdVerificationState } from "@spark-inn/shared";
-import { cn } from "../utils/cn";
 import { Booking } from "../context/AdminContext";
 
 export interface IdSightPayload {
@@ -28,9 +27,10 @@ interface GuestIdVerificationPanelProps {
  * evidence, so the panel keeps it one tap away, but a missing photo
  * no longer blocks the check-in: the staff records WHY instead.
  *
- * The reason is required ONLY when no photo is attached. That keeps the
- * desk's happy path (attach the photo) exactly as fast as before while
- * making the no-photo path self-documenting for the audit trail.
+ * The desk's note is OPTIONAL (decision #339) — the attestation alone
+ * is the evidence. The panel keeps the note as a free-text field for
+ * context the next shift may want ("guest declined"), but nothing
+ * blocks the save and nothing blocks the check-in.
  */
 export function GuestIdVerificationPanel({
   registration,
@@ -43,22 +43,14 @@ export function GuestIdVerificationPanel({
   const [sighted, setSighted] = useState(stored.sighted);
   const [note, setNote] = useState(stored.note);
   const [editing, setEditing] = useState(!stored.complete);
-  const [error, setError] = useState("");
-
-  const reasonRequired = sighted && !hasPhoto && !note.trim();
 
   const handleSave = () => {
-    if (reasonRequired) {
-      setError("Add a short reason for the missing ID photo before saving.");
-      return;
-    }
     onSave({
       idSightStatus: sighted ? "sighted" : "",
       idSightNote: sighted ? note.trim() : "",
       idSightBy: sighted ? staffName : "",
       idSightAt: sighted ? new Date().toISOString() : ""
     });
-    setError("");
     setEditing(false);
   };
 
@@ -104,13 +96,8 @@ export function GuestIdVerificationPanel({
           <p className="text-[11px] font-bold text-gray-950">Confirm the guest&apos;s physical ID</p>
           <p className="mt-0.5 text-[10px] leading-relaxed text-gray-600">
             The ID photo is optional. Tick the box to record that you sighted and verified the
-            guest&apos;s physical ID.{" "}
-            {!hasPhoto && (
-              <>
-                A photo is not on file, so a short reason is required — e.g. the guest declined, or
-                the ID has no camera-ready copy.
-              </>
-            )}
+            guest&apos;s physical ID. Add a note if it helps the next shift — e.g. the guest
+            declined, or the ID has no camera-ready copy.
           </p>
         </div>
       </div>
@@ -120,10 +107,7 @@ export function GuestIdVerificationPanel({
           type="checkbox"
           data-testid="guest-id-sight-checkbox"
           checked={sighted}
-          onChange={(event) => {
-            setSighted(event.target.checked);
-            if (event.target.checked) setError("");
-          }}
+          onChange={(event) => setSighted(event.target.checked)}
           className="h-4 w-4 accent-primary"
         />
         <Eye size={14} className="shrink-0 text-gray-400" aria-hidden="true" />
@@ -131,40 +115,23 @@ export function GuestIdVerificationPanel({
       </label>
 
       <label className="mt-2 flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
-        {hasPhoto ? "Note (optional)" : "Reason for no ID photo (required)"}
+        Note (optional)
         <textarea
           data-testid="guest-id-sight-note"
           value={note}
-          onChange={(event) => {
-            setNote(event.target.value);
-            if (error) setError("");
-          }}
+          onChange={(event) => setNote(event.target.value)}
           rows={2}
           maxLength={240}
-          placeholder={hasPhoto
-            ? "e.g. photo taken from the back cover"
-            : "e.g. guest declined to be photographed"}
-          className={cn(
-            "rounded-lg border px-3 py-2 text-[11px] text-gray-800",
-            reasonRequired || error ? "border-amber-400 bg-amber-50" : "border-gray-200 bg-white"
-          )}
+          placeholder="e.g. guest declined to be photographed"
+          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-[11px] text-gray-800"
         />
       </label>
-
-      {error ? (
-        <p role="alert" className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[10px] font-bold text-amber-800">
-          {error}
-        </p>
-      ) : null}
 
       <div className="mt-3 flex justify-end gap-2">
         {stored.complete ? (
           <button
             type="button"
-            onClick={() => {
-              setEditing(false);
-              setError("");
-            }}
+            onClick={() => setEditing(false)}
             className="inline-flex min-h-[44px] items-center rounded-lg border border-gray-200 px-3 text-[10px] font-bold text-gray-700 hover:bg-gray-50"
           >
             Cancel

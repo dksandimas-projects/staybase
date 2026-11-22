@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.31.8";
+    VERSION2 = "2.32.0";
   }
 });
 
@@ -150540,9 +150540,9 @@ function getIdVerificationState(input) {
     note,
     sightedBy: (reg.idSightBy || "").trim(),
     sightedAt: (reg.idSightAt || "").trim(),
-    // The photo is optional; the reason is required only when no
-    // photo is on file.
-    complete: sighted && (hasPhoto || note.length > 0)
+    // The attestation alone is the evidence: BOTH the photo and the
+    // note are optional (decision #339).
+    complete: sighted
   };
 }
 function getCheckInReadiness(input) {
@@ -150557,8 +150557,6 @@ function getCheckInReadiness(input) {
   });
   if (!idVerification.sighted) {
     missingItems.push("Guest ID sighted at the desk");
-  } else if (!idVerification.hasPhoto && !idVerification.note) {
-    missingItems.push("Reason for no ID photo attached");
   }
   for (const field of REQUIRED_REGISTRATION_FIELDS) {
     if (!hasValue(registration[field.key])) {
