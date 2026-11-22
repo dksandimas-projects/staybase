@@ -80,7 +80,7 @@ describe("Phase 12 — booking drawer information architecture", () => {
       // sourced from the latest onsitePayments[] entry.
       "Reference\n",
       "Check-in Registration",
-      "Guest ID Attachment",
+      "Guest ID Verification",
       "Move / Upgrade Room Workstation",
       "Charge breakdown",
       "Breakfast Selections",
@@ -150,7 +150,7 @@ describe("Phase 12 — booking drawer information architecture", () => {
     expect(pageSrc).toMatch(/primaryAction=\{renderBookingPrimaryAction\(\)\}/);
     expect(pageSrc).toMatch(/Confirm pay-at-hotel booking/);
     expect(pageSrc).toMatch(/Verify & Record Payment/);
-    expect(pageSrc).toMatch(/Verify guest ID & check in/);
+    expect(pageSrc).toMatch(/Check in guest/);
     expect(pageSrc).toMatch(/Review folio & check out|Check out — /);
     expect(pageSrc).toMatch(/View \/ print receipt/);
   });

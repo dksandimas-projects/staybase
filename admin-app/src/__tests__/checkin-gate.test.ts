@@ -27,10 +27,14 @@ describe("BookingsPage check-in gate", () => {
     expect(handlerSrc).toMatch(/readiness\.missingItems\.join/);
   });
 
-  it("requires guest ID, registration fields, signed status, and eligible status", () => {
+  it("requires the desk ID attestation, registration fields, signed status, and eligible status", () => {
     expect(sharedSrc).toMatch(/CHECK_IN_ELIGIBLE_STATUSES = \["confirmed", "payment-confirmed"\]/);
     for (const label of [
-      "Guest ID photo",
+      // Per Decision #338 (2026-11-22): the guest ID PHOTO is optional.
+      // The mandatory ID evidence is the desk's attestation that the
+      // physical ID was sighted, plus a reason when no photo is on file.
+      "Guest ID sighted at the desk",
+      "Reason for no ID photo attached",
       "Nationality",
       "Residential address",
       "Date of birth",
@@ -42,6 +46,32 @@ describe("BookingsPage check-in gate", () => {
     ]) {
       expect(sharedSrc).toContain(label);
     }
+  });
+
+  // Per Decision #338 (2026-11-22): the guest ID photo no longer
+  // blocks the check-in. The photo is still uploaded (it is the
+  // strongest evidence) but the desk attestation is what the gate
+  // reads.
+  it("no longer treats a missing guest ID photo as a check-in blocker", () => {
+    expect(sharedSrc).not.toContain('missingItems.push("Guest ID photo")');
+  });
+
+  it("mounts the guest ID verification panel in the booking drawer", () => {
+    expect(pageSrc).toMatch(/<GuestIdVerificationPanel/);
+    expect(pageSrc).toMatch(/hasPhoto=\{Boolean\(selectedBooking\.guestIdPhotoUrl\)\}/);
+    expect(pageSrc).toMatch(/onSave=\{handleIdSightSave\}/);
+  });
+
+  it("writes the attestation into guestRegistration and keeps it across a registry-form save", () => {
+    const panelSrc = read("admin-app/src/components/GuestIdVerificationPanel.tsx");
+    expect(panelSrc).toMatch(/idSightStatus/);
+    expect(panelSrc).toMatch(/idSightNote/);
+    expect(panelSrc).toMatch(/idSightBy/);
+    expect(panelSrc).toMatch(/idSightAt/);
+    // The registration form rewrites `guestRegistration` wholesale —
+    // the attestation has to be carried across explicitly or saving
+    // the registry form would silently wipe the desk's record.
+    expect(pageSrc).toMatch(/existingSight\.idSightStatus/);
   });
 
   it("hides the readiness card once the booking has been checked in", () => {

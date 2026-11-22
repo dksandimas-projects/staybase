@@ -731,7 +731,10 @@ export function BookingCheckInReadiness({ ready, missingItems }: BookingCheckInR
         {ready ? (
           <div className="flex items-center gap-2 rounded-lg bg-white/80 px-3 py-2 text-[11px] font-semibold text-status-green-text">
             <Check size={14} aria-hidden="true" />
-            Guest ID, registration, and signature saved
+            {/* Per Decision #338 (2026-11-22): the guest ID PHOTO is
+                optional — the item that must be satisfied is the
+                desk's attestation that the physical ID was sighted. */}
+            Guest ID verified, registration, and signature saved
           </div>
         ) : missingItems.map((item) => (
           <div key={item} className="flex items-center gap-2 rounded-lg bg-white/80 px-3 py-2 text-[11px] font-semibold text-amber-800">

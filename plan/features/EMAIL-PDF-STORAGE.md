@@ -256,7 +256,7 @@ Used at check-in by front desk. Generated from booking data.
 - Number of guests, room number, check-in date/time
 - House rules agreement text
 - Signature line
-- **Guest ID photo** — if `booking.guestIdPhotoUrl` exists, embed as a scaled image below the signature line with label "Government-Issued ID" (RA 11862 compliance); if not yet uploaded, render a blank bordered box labeled "Attach ID here"
+- **Guest ID photo** — if `booking.guestIdPhotoUrl` exists, embed as a scaled image below the signature line with label "Government-Issued ID" (RA 11862 compliance); if no photo is on file, render a blank bordered box whose label reflects the desk's ID attestation — "ID sighted - no photo on file" when the physical ID was sighted, otherwise "No ID photo on file" (the photo is optional per decision #338)
 - **Breakfast section (shown only if `booking.hasBreakfast: true`):**
   - One row per guest, one column per night of stay
   - Each cell has a blank line or checkbox list of silog options for the guest to fill in
@@ -267,7 +267,7 @@ Used at check-in by front desk. Generated from booking data.
 - [x] Wireframe data capture exists in admin booking drawer for guest registry fields, ID photo preview, and breakfast choices
 - [x] PDF pre-filled from booking data where available (name, room, dates, guest registration fields)
 - [x] Guest ID photo fetched from `booking.guestIdPhotoUrl` and embedded as base64 image in PDF — fetch before PDF generation, convert to base64, detect MIME type, pass to `jsPDF.addImage()`
-- [x] If `guestIdPhotoUrl` is null/empty — render blank "Attach ID here" placeholder box instead
+- [x] If `guestIdPhotoUrl` is null/empty — render the blank placeholder box instead; its label reflects the desk's ID attestation ("ID sighted - no photo on file" / "No ID photo on file") per decision #338
 - [x] ID image constrained to max width of half the page, aspect ratio preserved — never overflow page margins
 - [x] Breakfast section rendered dynamically based on `hasBreakfast` and number of nights × guests
 - [x] Silog items listed as checkboxes or options per cell — guest circles/checks their choice

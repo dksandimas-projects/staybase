@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Booking } from "../context/AdminContext";
 import { ClipboardCheck, Save, FileText } from "lucide-react";
+import { getIdVerificationState } from "@spark-inn/shared";
 
 interface BookingRegistrationFormProps {
   registration: Booking["guestRegistration"];
@@ -9,6 +10,12 @@ interface BookingRegistrationFormProps {
   onSetShowEdit: (v: boolean) => void;
   onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
   onPrintPdf: () => void;
+  /**
+   * Whether a photo copy of the guest's ID is on file. Per Decision
+   * #338 (2026-11-22) the photo is OPTIONAL — this only shapes the
+   * read-only summary line, never the form's required fields.
+   */
+  hasPhoto?: boolean;
 }
 
 export function BookingRegistrationForm({
@@ -18,10 +25,28 @@ export function BookingRegistrationForm({
   onSetShowEdit,
   onSubmit,
   onPrintPdf,
+  hasPhoto = false
 }: BookingRegistrationFormProps) {
   if (status !== "confirmed" && status !== "checked-in" && status !== "checked-out") return null;
 
   const isReadOnly = status === "checked-out";
+
+  // Per Decision #338 (2026-11-22): the guest ID photo is optional.
+  // The desk's attestation ("the physical ID was sighted") is the ID
+  // evidence the check-in gate reads.
+  const idVerification = getIdVerificationState({ registration: reg, hasPhoto });
+  const idVerificationLabel = idVerification.sighted
+    ? [
+        `Sighted at the desk${idVerification.sightedBy ? ` by ${idVerification.sightedBy}` : ""}`,
+        idVerification.hasPhoto
+          ? "photo on file"
+          : idVerification.note
+            ? `no photo — ${idVerification.note}`
+            : "no photo on file"
+      ].join(" · ")
+    : idVerification.hasPhoto
+      ? "Photo on file — not yet sighted at the desk"
+      : "Not yet sighted at the desk";
 
   const isComplete =
     reg?.signatureStatus === "signed" &&
@@ -94,6 +119,13 @@ export function BookingRegistrationForm({
             <div className="col-span-2">
               <span className="text-gray-400">Address:</span>{" "}
               <span className="font-medium text-gray-800">{reg?.address}</span>
+            </div>
+            {/* Per Decision #338 (2026-11-22): the ID verification line
+                is read-only here — it is recorded in the Guest ID
+                Verification panel, not in the registration form. */}
+            <div className="col-span-2">
+              <span className="text-gray-400">ID verification:</span>{" "}
+              <span className="font-medium text-gray-800">{idVerificationLabel}</span>
             </div>
             {reg?.vehiclePlate && (
               <div className="col-span-2">

@@ -591,6 +591,16 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     await idPhotoInput.setInputFiles(PROOF_FILE);
     await page.waitForTimeout(3500);
 
+    // Per Decision #338 (2026-11-22): the guest ID PHOTO is optional —
+    // the check-in gate requires the desk's attestation that the
+    // physical ID was sighted. The photo is already on file here, so
+    // no reason is required.
+    const sightCheckbox = drawer.locator('[data-testid="guest-id-sight-checkbox"]').first();
+    await expect(sightCheckbox, "the ID sighting attestation must be offered").toBeAttached({ timeout: 15_000 });
+    await sightCheckbox.check({ force: true });
+    await drawer.locator('[data-testid="guest-id-sight-save"]').first().click();
+    await page.waitForTimeout(2500);
+
     // Check in.
     const checkinRes = await page.request.post(`${API_BASE}/api/bookings/checkin`, {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${staffToken}` },

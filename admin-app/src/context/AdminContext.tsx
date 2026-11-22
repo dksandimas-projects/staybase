@@ -619,20 +619,34 @@ export interface Booking {
   createdAt: string;
   onsitePayments?: OnsitePayment[];
   guestRegistration?: {
-    nationality: string;
-    address: string;
-    dateOfBirth: string;
-    gender: string;
+    // Every field is optional on purpose: a booking can carry NO
+    // registration at all, and the ID-verification attestation (below)
+    // is written on its own — the desk can record "the physical ID was
+    // sighted" before the full registry form is filled in.
+    nationality?: string;
+    address?: string;
+    dateOfBirth?: string;
+    gender?: string;
     // Per Decision #121 (2026-07-23): purpose of stay defaults to
     // "Leisure" at the front-desk form. Free-text `otherPurpose`
     // captures the actual reason when the staff picks "Other".
     purposeOfStay?: string;
     otherPurpose?: string;
-    idType: string;
-    idNumber: string;
-    emergencyContact: string;
-    vehiclePlate: string;
-    signatureStatus: "pending" | "signed";
+    idType?: string;
+    idNumber?: string;
+    emergencyContact?: string;
+    vehiclePlate?: string;
+    signatureStatus?: "pending" | "signed";
+    // Per Decision #338 (2026-11-22): the guest ID photo is OPTIONAL
+    // at check-in. The mandatory ID evidence is the staff attestation
+    // that the physical ID was sighted at the desk. `idSightNote` is
+    // required ONLY when no photo is attached; `idSightBy` is the
+    // acting staff member's NAME (never a raw uid) and `idSightAt`
+    // the ISO timestamp of the attestation.
+    idSightStatus?: string;
+    idSightNote?: string;
+    idSightBy?: string;
+    idSightAt?: string;
   };
   isTestData?: boolean;
   testRunId?: string | null;

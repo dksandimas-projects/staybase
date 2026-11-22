@@ -18,6 +18,25 @@ export interface CheckInRegistration {
   idNumber?: string | null;
   emergencyContact?: string | null;
   signatureStatus?: string | null;
+  // Per Decision #338 (2026-11-22): the guest ID PHOTO is OPTIONAL at
+  // physical check-in. The mandatory ID evidence is the staff
+  // attestation that the guest's physical ID was sighted and verified
+  // at the desk:
+  //   - `idSightStatus` — "sighted" once the staff confirms it.
+  //   - `idSightNote`   — WHY no photo is attached. Required ONLY when
+  //     no photo is on file (a missing photo with no explanation is
+  //     not an acceptable check-in).
+  //   - `idSightBy`     — the acting staff member's name (a NAME, never
+  //     a raw uid — per GOTCHAS "never render a raw staff uid").
+  //   - `idSightAt`     — ISO timestamp of the attestation.
+  //
+  // The legal registry minimum is unchanged: nationality, ID type and
+  // ID number stay REQUIRED (RA 11862 / DOT guest registry). Only the
+  // photo COPY of the ID became optional.
+  idSightStatus?: string | null;
+  idSightNote?: string | null;
+  idSightBy?: string | null;
+  idSightAt?: string | null;
 }
 
 export interface CheckInReadinessInput {
@@ -29,6 +48,21 @@ export interface CheckInReadinessInput {
 export interface CheckInReadiness {
   ready: boolean;
   missingItems: string[];
+}
+
+export interface IdVerificationState {
+  /** The staff attested that the guest's physical ID was sighted. */
+  sighted: boolean;
+  /** A photo copy of the ID is on file (optional evidence). */
+  hasPhoto: boolean;
+  /** Why no photo is attached (required only when `hasPhoto` is false). */
+  note: string;
+  /** The acting staff member's name, as recorded at attestation time. */
+  sightedBy: string;
+  /** ISO timestamp of the attestation. */
+  sightedAt: string;
+  /** True when the attestation is complete enough for a check-in. */
+  complete: boolean;
 }
 
 const REQUIRED_REGISTRATION_FIELDS: Array<{ key: keyof CheckInRegistration; label: string }> = [
@@ -46,16 +80,48 @@ function hasValue(value: string | null | undefined) {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+export function getIdVerificationState(input: {
+  registration?: CheckInRegistration | null;
+  hasPhoto?: boolean;
+}): IdVerificationState {
+  const reg = input.registration || {};
+  const sighted = (reg.idSightStatus || "").trim().toLowerCase() === "sighted";
+  const hasPhoto = input.hasPhoto === true;
+  const note = (reg.idSightNote || "").trim();
+  return {
+    sighted,
+    hasPhoto,
+    note,
+    sightedBy: (reg.idSightBy || "").trim(),
+    sightedAt: (reg.idSightAt || "").trim(),
+    // The photo is optional; the reason is required only when no
+    // photo is on file.
+    complete: sighted && (hasPhoto || note.length > 0)
+  };
+}
+
 export function getCheckInReadiness(input: CheckInReadinessInput): CheckInReadiness {
   const missingItems: string[] = [];
   if (!CHECK_IN_ELIGIBLE_STATUSES.includes(input.status as any)) {
     missingItems.push("Booking status must be confirmed or payment-confirmed");
   }
-  if (!hasValue(input.guestIdPhotoUrl)) {
-    missingItems.push("Guest ID photo");
-  }
 
   const registration = input.guestRegistration || {};
+
+  // Per Decision #338 (2026-11-22): the guest ID PHOTO is no longer a
+  // check-in blocker. The mandatory ID evidence is the staff
+  // attestation that the physical ID was sighted; when no photo is
+  // attached, the attestation must carry a reason.
+  const idVerification = getIdVerificationState({
+    registration,
+    hasPhoto: hasValue(input.guestIdPhotoUrl)
+  });
+  if (!idVerification.sighted) {
+    missingItems.push("Guest ID sighted at the desk");
+  } else if (!idVerification.hasPhoto && !idVerification.note) {
+    missingItems.push("Reason for no ID photo attached");
+  }
+
   for (const field of REQUIRED_REGISTRATION_FIELDS) {
     if (!hasValue(registration[field.key])) {
       missingItems.push(field.label);

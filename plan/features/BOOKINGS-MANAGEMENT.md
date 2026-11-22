@@ -39,7 +39,7 @@ The drawer is a status-aware workspace (`BookingDrawerWorkspace.tsx`):
 - **Sticky Header:** Booking context (guest, room, stay, status, source), lifecycle indicator, Total/Paid/Balance summary, and actionable alerts.
 - **Task-Based Sections:**
   - **Overview:** Time-sensitive early check-in decision/grant first, followed by staff-captured special requests. Guest, room, dates, duration, occupancy, breakfast inclusion, payment method, reference, and the compact financial summary live once in the global header above the tabs.
-  - **Check-in:** Readiness checklist, registration, signature, guest ID photo, discount verification, breakfast selections.
+  - **Check-in:** Readiness checklist, registration, signature, guest ID verification (optional photo + desk attestation), discount verification, breakfast selections.
   - **Folio:** The sole detailed home for money ledgers, discounts, payment proof review, receipts, incidental & store charges. A pending proof has one labelled View action plus the verification action.
   - **Breakfast:** The per-date × per-guest meal grid, the served toggles, and the refund-liability panel.
   - **Other Add-Ons:** The per-day × per-add-on selection grid with the served-stamp badge.
@@ -261,12 +261,21 @@ Both shipped on the same branch — the scope note below is retained because the
 - **Confirm with Balance:** Staff can confirm a `payment-uploaded` booking with an intentional partial balance via `/api/bookings/confirm-with-balance`.
 
 ### Lifecycle Transition Confirmation Modals (CLS)
-- **CLS-01 (2026-08-09):** the three lifecycle transition buttons in the drawer's primary action footer (`Confirm booking` / `Verify guest ID & check in` / `Review folio & check out`) all open a `ConfirmStatusModal` shell instead of firing `handleStatusTransition` directly. The shell wraps the existing `<Modal>` (focus trap, ESC, backdrop, framer animations, mobile bottom-sheet for free) and accepts `confirmTone` (`primary` / `warning` / `danger`) so the CTA inside the modal matches the button the desk just clicked. Each call site composes the transition-specific context (children: room, stay, payment, breakfast flag, folio summary, etc.) and a confirm handler.
+- **CLS-01 (2026-08-09):** the three lifecycle transition buttons in the drawer's primary action footer (`Confirm booking` / `Check in guest` / `Review folio & check out`) all open a `ConfirmStatusModal` shell instead of firing `handleStatusTransition` directly. The shell wraps the existing `<Modal>` (focus trap, ESC, backdrop, framer animations, mobile bottom-sheet for free) and accepts `confirmTone` (`primary` / `warning` / `danger`) so the CTA inside the modal matches the button the desk just clicked. Each call site composes the transition-specific context (children: room, stay, payment, breakfast flag, folio summary, etc.) and a confirm handler.
 - **Unified check-out modal (CLS-01):** the pre-CLS-01 split-path (`modal-only-when-balance-due` + naked `handleStatusTransition` for zero-balance) is gone. The new shell always opens, and the children body decides:
   - **balance = 0** → green "Folio fully paid" callout, no reason form, primary CTA "Complete check-out"
   - **balance > 0 + not blocked** → amber balance callout + the UCO-02/03 reason form (shortcut chips + textarea, capped at 500 chars) + warning-tone CTA "Check out with ₱X due"
   - **server returned "Front Desk cannot complete"** → red blocked callout + custom footer (Close button only — no confirm pair)
 - **Pre-CLS-01 path (deprecated):** `showUnpaidCheckoutForm` state, the legacy `<Modal title="Unpaid checkout — reason required">` body, the inline `setUnpaidCheckoutSubmitting` flag, the post-click `getBookingFolio(selectedBooking)` branch. Renamed to `showConfirmCheckOut` + `confirmCheckOutPending` and lifted into the shared shell.
+
+### Guest ID Verification (photo + desk attestation)
+> Decision: `plan/docs/DECISIONS-FEATURES.md #338` (2026-11-22).
+- **The guest ID photo is OPTIONAL.** The check-in gate requires the desk's attestation that the guest's physical ID was sighted at the desk (`guestRegistration.idSightStatus`), not a photo upload. The photo stays available as the strongest supporting evidence, one tap away, and never blocks.
+- **A reason is required when no photo is attached** (`guestRegistration.idSightNote`) — e.g. the guest declined, or the ID has no camera-ready copy. The reason is optional when a photo is on file.
+- **The attestation carries the desk's name and time** (`idSightBy` / `idSightAt`). The server-stamped `checkedInBy` / `checkedInByName` / `checkedInAt` remain the trusted record of who checked the guest in and when.
+- **The legal registry minimum is unchanged** — nationality, ID type, ID number, the remaining registry fields, and the signed physical registration form stay required (RA 11862). The guest-side Senior/PWD discount ID upload is untouched.
+- **The readiness card names the items in plain language** — "Guest ID sighted at the desk" and "Reason for no ID photo attached".
+- **The registration PDF reflects the evidence** — "ID sighted - no photo on file" instead of an empty "Attach ID here" box.
 
 ### Guest ID Upload & HEIC Conversion
 - Accepts JPEG, PNG, WebP, HEIC, HEIF.

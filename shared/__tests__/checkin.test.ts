@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { getCheckInReadiness } from "../utils/checkin";
+import { getCheckInReadiness, getIdVerificationState } from "../utils/checkin";
 
 const completeRegistration = {
   nationality: "Filipino",
@@ -13,11 +13,15 @@ const completeRegistration = {
   idType: "Passport",
   idNumber: "P1234567",
   emergencyContact: "Juan Dela Cruz / 09171234567",
-  signatureStatus: "signed"
+  signatureStatus: "signed",
+  // Per Decision #338 (2026-11-22): the guest ID PHOTO is optional.
+  // The desk's attestation that the physical ID was sighted is the
+  // mandatory ID evidence.
+  idSightStatus: "sighted"
 };
 
 describe("getCheckInReadiness", () => {
-  test("is ready for confirmed bookings with guest ID and complete registration", () => {
+  test("is ready for confirmed bookings with a sighted ID, a photo, and complete registration", () => {
     expect(getCheckInReadiness({
       status: "confirmed",
       guestIdPhotoUrl: "https://storage.example/guest-id.jpg",
@@ -33,12 +37,58 @@ describe("getCheckInReadiness", () => {
     }).ready).toBe(true);
   });
 
-  test("reports missing guest ID, required registration fields, signature, and status", () => {
+  // Per Decision #338 (2026-11-22): the ID photo is OPTIONAL. A desk
+  // that sighted the physical ID but did not photograph it must still
+  // be able to check the guest in — with a recorded reason.
+  test("is ready with NO ID photo when the ID was sighted and a reason is recorded", () => {
+    const readiness = getCheckInReadiness({
+      status: "confirmed",
+      guestIdPhotoUrl: "",
+      guestRegistration: {
+        ...completeRegistration,
+        idSightNote: "Guest declined to be photographed"
+      }
+    });
+
+    expect(readiness.ready).toBe(true);
+    expect(readiness.missingItems).toEqual([]);
+  });
+
+  test("requires a reason when the ID was sighted but no photo is attached", () => {
+    const readiness = getCheckInReadiness({
+      status: "confirmed",
+      guestIdPhotoUrl: "",
+      guestRegistration: completeRegistration
+    });
+
+    expect(readiness.ready).toBe(false);
+    expect(readiness.missingItems).toEqual(["Reason for no ID photo attached"]);
+  });
+
+  test("requires the desk attestation even when a photo is attached", () => {
+    // The photo is evidence of the ID, not proof that the desk
+    // verified it against the guest. The attestation is the mandatory
+    // item.
+    const readiness = getCheckInReadiness({
+      status: "confirmed",
+      guestIdPhotoUrl: "https://storage.example/guest-id.jpg",
+      guestRegistration: {
+        ...completeRegistration,
+        idSightStatus: ""
+      }
+    });
+
+    expect(readiness.ready).toBe(false);
+    expect(readiness.missingItems).toContain("Guest ID sighted at the desk");
+  });
+
+  test("reports the missing attestation, required registration fields, signature, and status", () => {
     const readiness = getCheckInReadiness({
       status: "pending",
       guestIdPhotoUrl: "",
       guestRegistration: {
         ...completeRegistration,
+        idSightStatus: "",
         idNumber: "",
         signatureStatus: "pending"
       }
@@ -47,7 +97,7 @@ describe("getCheckInReadiness", () => {
     expect(readiness.ready).toBe(false);
     expect(readiness.missingItems).toEqual([
       "Booking status must be confirmed or payment-confirmed",
-      "Guest ID photo",
+      "Guest ID sighted at the desk",
       "ID number",
       "Guest signature marked signed"
     ]);
@@ -116,5 +166,65 @@ describe("getCheckInReadiness", () => {
 
     expect(readiness.ready).toBe(false);
     expect(readiness.missingItems).toContain("Purpose of stay (Other — reason required)");
+  });
+});
+
+describe("getIdVerificationState", () => {
+  test("reports sighted + photo on file as complete", () => {
+    expect(getIdVerificationState({
+      registration: {
+        idSightStatus: "sighted",
+        idSightBy: "Front Desk",
+        idSightAt: "2026-11-22T09:00:00.000Z"
+      },
+      hasPhoto: true
+    })).toEqual({
+      sighted: true,
+      hasPhoto: true,
+      note: "",
+      sightedBy: "Front Desk",
+      sightedAt: "2026-11-22T09:00:00.000Z",
+      complete: true
+    });
+  });
+
+  test("sighted with a reason and no photo is complete", () => {
+    const state = getIdVerificationState({
+      registration: { idSightStatus: "sighted", idSightNote: "Foreign ID, no camera" },
+      hasPhoto: false
+    });
+
+    expect(state.sighted).toBe(true);
+    expect(state.hasPhoto).toBe(false);
+    expect(state.note).toBe("Foreign ID, no camera");
+    expect(state.complete).toBe(true);
+  });
+
+  test("sighted with no photo and no reason is incomplete", () => {
+    const state = getIdVerificationState({
+      registration: { idSightStatus: "sighted" },
+      hasPhoto: false
+    });
+
+    expect(state.complete).toBe(false);
+  });
+
+  test("a photo alone is not an attestation", () => {
+    const state = getIdVerificationState({
+      registration: {},
+      hasPhoto: true
+    });
+
+    expect(state.sighted).toBe(false);
+    expect(state.complete).toBe(false);
+  });
+
+  test("the status is case-insensitive and whitespace-tolerant", () => {
+    const state = getIdVerificationState({
+      registration: { idSightStatus: "  Sighted " },
+      hasPhoto: true
+    });
+
+    expect(state.sighted).toBe(true);
   });
 });

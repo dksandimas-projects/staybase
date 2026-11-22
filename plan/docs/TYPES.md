@@ -417,7 +417,7 @@ Booking {
   earlyCheckoutOriginalCheckOut?: Timestamp | null
   hasBreakfast: boolean
   breakfastRate: number
-  guestIdPhotoUrl: string | null      // guest ID photo uploaded by front desk at check-in
+  guestIdPhotoUrl: string | null      // OPTIONAL guest ID photo uploaded by front desk at check-in (decision #338)
   guestRegistration?: {
     nationality: string
     address: string
@@ -428,6 +428,15 @@ Booking {
     emergencyContact: string
     vehiclePlate: string
     signatureStatus: "pending" | "signed"
+    // Per Decision #338 (2026-11-22): the guest ID photo is OPTIONAL.
+    // The mandatory ID evidence is the desk's attestation that the
+    // physical ID was sighted at the desk. `idSightNote` is required
+    // ONLY when no photo is attached; `idSightBy` is the acting staff
+    // member's NAME (never a raw uid).
+    idSightStatus?: string            // "sighted" once the desk attests
+    idSightNote?: string              // why no ID photo is attached
+    idSightBy?: string                // acting staff display name
+    idSightAt?: string                // ISO timestamp of the attestation
   }
   breakfastSelections?: Record<string, string> // key format: yyyy-mm-dd-guest-n → silog item name
   // Per BSP-01 (fix/breakfast-served-persistence, 2026-07-25): per-date/per-guest

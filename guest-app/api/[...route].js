@@ -150529,15 +150529,37 @@ var init_calendar = __esm({
 function hasValue(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
+function getIdVerificationState(input) {
+  const reg = input.registration || {};
+  const sighted = (reg.idSightStatus || "").trim().toLowerCase() === "sighted";
+  const hasPhoto = input.hasPhoto === true;
+  const note = (reg.idSightNote || "").trim();
+  return {
+    sighted,
+    hasPhoto,
+    note,
+    sightedBy: (reg.idSightBy || "").trim(),
+    sightedAt: (reg.idSightAt || "").trim(),
+    // The photo is optional; the reason is required only when no
+    // photo is on file.
+    complete: sighted && (hasPhoto || note.length > 0)
+  };
+}
 function getCheckInReadiness(input) {
   const missingItems = [];
   if (!CHECK_IN_ELIGIBLE_STATUSES.includes(input.status)) {
     missingItems.push("Booking status must be confirmed or payment-confirmed");
   }
-  if (!hasValue(input.guestIdPhotoUrl)) {
-    missingItems.push("Guest ID photo");
-  }
   const registration = input.guestRegistration || {};
+  const idVerification = getIdVerificationState({
+    registration,
+    hasPhoto: hasValue(input.guestIdPhotoUrl)
+  });
+  if (!idVerification.sighted) {
+    missingItems.push("Guest ID sighted at the desk");
+  } else if (!idVerification.hasPhoto && !idVerification.note) {
+    missingItems.push("Reason for no ID photo attached");
+  }
   for (const field of REQUIRED_REGISTRATION_FIELDS) {
     if (!hasValue(registration[field.key])) {
       missingItems.push(field.label);
@@ -153840,6 +153862,7 @@ __export(shared_exports, {
   getEffectiveStorePaymentMethods: () => getEffectiveStorePaymentMethods,
   getEffectiveVatRate: () => getEffectiveVatRate,
   getEnabledAddOnsByHotel: () => getEnabledAddOnsByHotel,
+  getIdVerificationState: () => getIdVerificationState,
   getLatestPaymentReference: () => getLatestPaymentReference,
   getLegacyCancellationPolicy: () => getLegacyCancellationPolicy,
   getLockedManualNightlyRate: () => getLockedManualNightlyRate,

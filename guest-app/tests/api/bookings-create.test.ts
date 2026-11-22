@@ -361,7 +361,12 @@ const completeGuestRegistration = {
   idType: "Passport",
   idNumber: "P1234567",
   emergencyContact: "Juan Dela Cruz / 09171234567",
-  signatureStatus: "signed"
+  signatureStatus: "signed",
+  // Per Decision #338 (2026-11-22): the guest ID PHOTO is optional at
+  // check-in. The mandatory ID evidence is the desk's attestation that
+  // the physical ID was sighted. `idSightNote` (why no photo was
+  // attached) is required ONLY when no photo is on file.
+  idSightStatus: "sighted"
 };
 
 describe("/api/bookings/create", () => {
@@ -1585,7 +1590,12 @@ describe("/api/bookings/create", () => {
       expect(loggedPayment.recordedBy).toBe("mock_staff_uid");
     });
 
-    test("POST /api/bookings/checkin: blocks missing guest ID photo", async () => {
+    // Per Decision #338 (2026-11-22): the guest ID PHOTO is optional.
+    // What the check-in gate now requires is the desk's attestation
+    // that the physical ID was sighted. When NO photo is attached, the
+    // attestation must carry a reason — a missing photo with no
+    // explanation is not an acceptable check-in.
+    test("POST /api/bookings/checkin: blocks a missing ID photo with no recorded reason", async () => {
       mockBookings.push({
         id: "booking_checkin_no_id",
         roomId: "room_101",
@@ -1601,9 +1611,56 @@ describe("/api/bookings/create", () => {
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
         success: false,
-        error: expect.stringContaining("Guest ID photo")
+        error: expect.stringContaining("Reason for no ID photo attached")
       }));
       expect(updateCalls.find((c) => c.path === "bookings/booking_checkin_no_id")).toBeUndefined();
+    });
+
+    test("POST /api/bookings/checkin: blocks when the desk never attested the physical ID", async () => {
+      mockBookings.push({
+        id: "booking_checkin_not_sighted",
+        roomId: "room_101",
+        status: "confirmed",
+        guestIdPhotoUrl: "https://storage.example/guest-id.jpg",
+        guestRegistration: {
+          ...completeGuestRegistration,
+          idSightStatus: ""
+        }
+      });
+
+      const req = mockRequest({ bookingId: "booking_checkin_not_sighted" }, "POST", "/api/bookings/checkin", { authorization: "Bearer mock_token" });
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: false,
+        error: expect.stringContaining("Guest ID sighted at the desk")
+      }));
+      expect(updateCalls.find((c) => c.path === "bookings/booking_checkin_not_sighted")).toBeUndefined();
+    });
+
+    test("POST /api/bookings/checkin: succeeds with NO ID photo when the ID was sighted and a reason was recorded", async () => {
+      mockBookings.push({
+        id: "booking_checkin_sighted_no_photo",
+        roomId: "room_101",
+        status: "confirmed",
+        guestIdPhotoUrl: null,
+        guestRegistration: {
+          ...completeGuestRegistration,
+          idSightNote: "Guest declined to be photographed"
+        }
+      });
+
+      const req = mockRequest({ bookingId: "booking_checkin_sighted_no_photo" }, "POST", "/api/bookings/checkin", { authorization: "Bearer mock_token" });
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(updateCalls).toContainEqual({
+        path: "bookings/booking_checkin_sighted_no_photo",
+        data: expect.objectContaining({ status: "checked-in" })
+      });
     });
 
     test("POST /api/bookings/checkin: blocks incomplete guest registration", async () => {
