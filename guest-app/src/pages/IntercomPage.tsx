@@ -30,6 +30,9 @@ import { PrimaryButton } from "../components/PrimaryButton";
 // full-size view + download.
 import { PaymentQrCode } from "../components/PaymentQrCode";
 import { GhostButton } from "../components/GhostButton";
+// Per decision #342 (2026-11-23): the Spark Essentials item photo —
+// the grid crop is the thumbnail, tapping it opens the full photo.
+import { StoreItemImage } from "../components/StoreItemImage";
 import { getEffectiveStorePaymentMethods, resolveHotelContact, resolveInRoomChatTabSurface, everyInRoomFeatureIsOff as everyInRoomFeatureIsOffResolver, type EffectiveStorePaymentMethod, type HotelContact } from "@spark-inn/shared";
 import { fetchPublicHotelConfig } from "../hooks/usePublicHotelConfig";
 import { resolveIntercomTab, withIntercomTab, resolveIntercomLandingTab, type IntercomTab } from "../utils/intercomTab";
@@ -2131,20 +2134,19 @@ export function IntercomPage() {
                       className="rounded-card bg-white p-5 shadow-sm ring-1 ring-gray-200 flex flex-col justify-between gap-3 transition hover:shadow-md"
                     >
                       <div className="space-y-2">
-                        {/* Image placeholder simulation */}
+                        {/* Item photo — the crop is the thumbnail, the tap
+                            opens the full photo (decision #342). */}
                         <div className="h-28 w-full rounded-lg overflow-hidden bg-gray-100 border border-gray-100 relative">
                           {item.imageUrl ? (
-                            <img
-                              src={item.imageUrl}
-                              alt={item.name}
-                              className="h-full w-full object-cover"
-                            />
+                            <StoreItemImage name={item.name} imageUrl={item.imageUrl} />
                           ) : (
                             <div className="flex h-full w-full items-center justify-center bg-primary-light text-primary">
                               <ShoppingBag size={24} />
                             </div>
                           )}
-                          <div className="absolute top-2 left-2">
+                          {/* The badge floats OVER the photo — it must not
+                              swallow the tap that opens the full view. */}
+                          <div className="pointer-events-none absolute top-2 left-2">
                             {isOutOfStock ? (
                               <span className="inline-flex items-center rounded bg-red-50 px-1.5 py-0.5 text-[9px] font-bold text-red-700 ring-1 ring-inset ring-red-600/10">
                                 Out of Stock

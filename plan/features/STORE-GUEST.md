@@ -30,6 +30,7 @@ The store is accessible from the guest intercom page via QR scan. Guests browse 
 - [x] The panel LANDS on the Shop tab when the hotel switched the in-room chat off but left the store on (decision #336) — the chat QR must not open on the "chat is unavailable" card. The landing is one-shot and never overrides a tab the guest tapped by hand. See `plan/features/INTERCOM-GUEST.md §Where the panel lands`.
 - [x] The shop tab carries **NO phone link** (decision #337) — the front-desk phone lives in ONE place, the chat card. A phone number in the middle of a catalogue is noise, not a next step, and the Chat tab is one tap away.
 - [x] Item grid — name, photo (optional), short description, price, stock badge (Available / Out of Stock)
+- [x] **The item photo opens FULL SIZE on tap** (decision #342, 2026-11-23) — the grid crop is the *thumbnail* only; tapping the photo opens the full-resolution image in the guest app's `Modal`. The guest keeps their place: the basket, the filters and the tab are untouched behind the lightbox, so looking closer never costs them their order. The photo is a real `<button>` with an accessible name, the expand chip is **always visible** (the in-room panel is a phone — a hover-only affordance is invisible on touch), and the stock badge floats OVER the photo without swallowing the tap
 - [x] Items with `stock: null` (unlimited) show no stock count — just "Available"
 - [x] Items with `stock: 0` show "Out of Stock" and are not orderable
 - [x] Cart — add/remove items, quantity selector per item, running total
@@ -80,6 +81,8 @@ The store is accessible from the guest intercom page via QR scan. Guests browse 
 - [x] Store disabled entirely (`settings/storeConfig.isEnabled: false`) — hide Shop tab, show "Coming soon" or nothing
 - [x] `?tab=shop` scan at a hotel with the store switched OFF — the panel falls back to Chat and drops the param from the URL, so the guest is never left on an empty store panel (2026-11-21)
 - [x] GCash screenshot upload fails — show error, do not submit order without it if GCash selected
+- [x] Item has **no** photo — the placeholder tile is NOT a button; there is no dead affordance on a photo-less item (decision #342)
+- [x] The guest opens the full photo and then closes it — the basket, the search text, the category chip and the active tab are all exactly as they were
 - [x] Cart empty on checkout attempt — disable Place Order button
 - [x] Order already cancelled — hide cancel button, show cancelled badge
 
@@ -95,6 +98,7 @@ The store is accessible from the guest intercom page via QR scan. Guests browse 
 - [x] Add to Bill flow: order linked to correct booking in admin
 - [x] Cancel order works when status is "placed"
 - [x] Cancel button hidden after order is confirmed
+- [x] Tapping an item photo opens the full photo; Escape or a backdrop tap closes it and the basket survives (decision #342)
 
 ## References
 
