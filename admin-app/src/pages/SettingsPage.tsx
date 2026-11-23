@@ -4895,9 +4895,12 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
       setStaffFormMessage({ type: "error", text: result.error || "Failed to create staff account." });
       return;
     }
+    const createdEmail = newStaffEmail.trim();
     setStaffFormMessage({
       type: "success",
-      text: `Staff account created for ${newStaffEmail.trim()}. They can sign in now.`
+      text: result.converted
+        ? `${createdEmail} already had a guest account — it was converted to ${newStaffRole === "admin" ? "Admin" : "Front Desk"}. The password you set is now the account password for both the guest and staff sign-in.`
+        : `Staff account created for ${createdEmail}. They can sign in now.`
     });
     setNewStaffName("");
     setNewStaffEmail("");
@@ -10462,6 +10465,12 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
                       <Plus size={14} className="text-primary" />
                       Create Staff Account
                     </h4>
+
+                    <p className="text-[10px] font-medium text-gray-500">
+                      If the email already has a guest account (a guest who signed up while booking), it is converted
+                      to a staff account instead of failing — and the password below becomes that account&apos;s
+                      password for both the guest and the staff sign-in.
+                    </p>
 
                     <form
                       onSubmit={handleCreateStaffSubmit}

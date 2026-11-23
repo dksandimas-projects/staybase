@@ -1260,7 +1260,7 @@ export interface AdminContextType {
 
   // Staff Accounts
   staff: StaffMember[];
-  createStaff: (input: { fullName: string; email: string; password: string; phone?: string; nationality?: string; role: StaffRole }) => Promise<{ success: boolean; error?: string }>;
+  createStaff: (input: { fullName: string; email: string; password: string; phone?: string; nationality?: string; role: StaffRole }) => Promise<{ success: boolean; error?: string; converted?: boolean }>;
   disableStaff: (uid: string) => Promise<{ success: boolean; error?: string }>;
   updateStaff: (input: { uid: string; fullName: string; email: string; phone?: string; nationality?: string; role: StaffRole; password?: string }) => Promise<{ success: boolean; error?: string }>;
 
@@ -9263,7 +9263,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
     phone?: string;
     nationality?: string;
     role: StaffRole;
-  }): Promise<{ success: boolean; error?: string }> => {
+  }): Promise<{ success: boolean; error?: string; converted?: boolean }> => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
       const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/admin/create-staff`, {
@@ -9285,7 +9285,9 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
       if (!res.ok || !data.success) {
         return { success: false, error: data.error || "Failed to create staff account." };
       }
-      return { success: true };
+      // `converted` = the email already owned a guest account and it was
+      // promoted to staff instead of creating a second account (AUTH-01).
+      return { success: true, converted: data.data?.converted === true };
     } catch (err: any) {
       console.error("Error creating staff account:", err);
       return { success: false, error: err?.message || "Failed to create staff account." };

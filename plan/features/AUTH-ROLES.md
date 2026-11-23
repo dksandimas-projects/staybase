@@ -34,6 +34,8 @@ Firebase Email/Password authentication for all staff. No public registration —
 - [x] Redirect unauthenticated users from any protected route to `/login`
 - [x] Redirect authenticated users away from `/login` to `/`
 - [x] Role-restricted pages (Rates, Settings) show "Access denied" for Front Desk users — do not hide nav links, show restricted state instead
+- [x] Create Staff Account form states the guest-conversion rule before the admin submits — "if the email already has a guest account it is converted, and the password below becomes that account's password for both the guest and the staff sign-in"
+- [x] Converted-account success message names the conversion and the password change (never the generic "Staff account created … They can sign in now.")
 
 ## Data & Logic Checklist
 
@@ -63,6 +65,26 @@ Firebase Email/Password authentication for all staff. No public registration —
 - [x] Role claim missing — treat as front-desk (least privilege fallback)
 - [x] Network offline on login — show "Unable to connect. Check your internet connection."
 
+## Guest account → staff account (AUTH-01, 2026-11-23)
+
+A guest who signs up **during booking** already owns a Firebase Auth account. "Create Staff Account" used to call `adminAuth.createUser`, which fails with `auth/email-already-exists` — the admin saw *"A staff account with this email already exists."* even though **no staff account existed**. There is no second Auth account for one email, so the admin was stuck.
+
+The create path now **converts** the existing account instead of creating a second one.
+
+| Rule | Behaviour |
+|---|---|
+| Same uid | The guest's uid is kept, so their booking history, member record and rewards points stay attached to the same identity |
+| Role claim | `setCustomUserClaims(uid, { ...existingClaims, role })` — the claim is **merged**, never replaced, so a claim the guest account already carried is not silently dropped |
+| Staff profile | `guests/{uid}` is written with `merge: true` — a pre-existing profile (a legacy member mirror, a phone number the guest already gave) is never wiped |
+| Blank fields | An empty admin-supplied `phone` / `nationality` does NOT overwrite the value already on the profile |
+| Password | The admin-supplied password becomes the account password. The guest sign-in is the **same** account, so that password is the guest password too — the admin UI says so before the admin submits |
+| Already staff | If the claims already carry a staff role, the create path refuses (409) and points at the edit path. It never resets an existing staff member's credentials |
+| No demotion | If the Firestore profile already marks the account as staff with a **different** role, the create path refuses (409). Roles change in the edit path, never in the create path |
+| Rollback | If the profile write fails, the display name, the enabled flag and the role claim are rolled back so the guest account keeps working. The **password cannot be rolled back** — Firebase never exposes it — so the admin retries the conversion |
+| Never deleted | A failed conversion NEVER deletes the auth user (the S4 rollback that deletes an orphaned auth user applies to the *create* path only) |
+
+The same conversion is available from the command line for the case where the account has to be fixed before this ships: `node scripts/promote-user-to-staff.mjs <email> <front-desk|admin> [--apply]` (dry run by default; reads `guest-app/.env.spark-inn-prod`).
+
 ## Manual QA
 
 - [x] Front desk account can log in and access dashboard
@@ -75,6 +97,8 @@ Firebase Email/Password authentication for all staff. No public registration —
 - [x] Unauthenticated access to `/bookings` redirects to `/login`
 - [x] After login, redirect goes to dashboard (not login page again)
 - [x] Logging out clears auth state and redirects to `/login`
+- [x] Creating a staff account with an email that already has a guest account converts it — the guest signs in with the same email and the new password, and their bookings still resolve
+- [x] Creating a staff account with an email that is already a staff account is refused with a message that points at the edit path
 
 ## References
 

@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.32.0";
+    VERSION2 = "2.32.2";
   }
 });
 
@@ -244636,6 +244636,14 @@ var updateStaffSchema = external_exports.object({
 function getStaff3(req) {
   return req.staff || {};
 }
+var STAFF_ROLES = ["front-desk", "admin"];
+var STAFF_ROLE_LABELS = {
+  "front-desk": "Front Desk",
+  admin: "Admin"
+};
+function isStaffRole(value) {
+  return typeof value === "string" && STAFF_ROLES.includes(value);
+}
 async function hasAnotherActiveAdmin(uidToDisable) {
   const adminSnapshot = await adminDb.collection("guests").where("role", "==", "admin").get();
   return adminSnapshot.docs.some((doc) => {
@@ -244643,6 +244651,66 @@ async function hasAnotherActiveAdmin(uidToDisable) {
     const data = doc.data();
     return data.isActive !== false;
   });
+}
+async function promoteExistingAuthUserToStaff(params) {
+  const { existingUser, fullName, email, phone, nationality, role, password, createdBy } = params;
+  const uid = existingUser.uid;
+  const existingClaims = existingUser.customClaims || {};
+  const existingRole = existingClaims.role;
+  if (isStaffRole(existingRole)) {
+    return {
+      ok: false,
+      status: 409,
+      error: `This email already belongs to the existing ${STAFF_ROLE_LABELS[existingRole]} staff account. Edit that account instead of creating a new one.`
+    };
+  }
+  const staffRef = adminDb.collection("guests").doc(uid);
+  const staffDoc = await staffRef.get();
+  const existingProfile = (staffDoc.exists ? staffDoc.data() : null) || {};
+  if (isStaffRole(existingProfile.role) && existingProfile.role !== role) {
+    return {
+      ok: false,
+      status: 409,
+      error: `This email already belongs to the existing ${STAFF_ROLE_LABELS[existingProfile.role]} staff account. Edit that account to change their role.`
+    };
+  }
+  const now = /* @__PURE__ */ new Date();
+  const nextClaims = { ...existingClaims, role };
+  const profilePatch = {
+    fullName,
+    email: email.toLowerCase(),
+    // An empty admin-supplied field must not wipe what is already on the
+    // profile — the guest may already have given us a phone number.
+    phone: phone || existingProfile.phone || "",
+    nationality: nationality || existingProfile.nationality || "",
+    role,
+    isActive: true,
+    createdBy: existingProfile.createdBy || createdBy,
+    createdAt: existingProfile.createdAt || now,
+    updatedAt: now
+  };
+  try {
+    await adminAuth.updateUser(uid, {
+      displayName: fullName,
+      password,
+      disabled: false
+    });
+    await adminAuth.setCustomUserClaims(uid, nextClaims);
+    await staffRef.set(profilePatch, { merge: true });
+  } catch (syncErr) {
+    console.error("Staff promotion sync failed, rolling back auth details:", syncErr);
+    try {
+      await adminAuth.updateUser(uid, {
+        displayName: existingUser.displayName || null,
+        disabled: existingUser.disabled === true
+      });
+      await adminAuth.setCustomUserClaims(uid, existingClaims);
+    } catch (rollbackErr) {
+      console.error("Failed to roll back auth details during staff promotion failure:", rollbackErr);
+    }
+    throw syncErr;
+  }
+  return { ok: true, uid };
 }
 async function handleCreateStaff(req, res) {
   if (req.method !== "POST") {
@@ -244662,17 +244730,46 @@ async function handleCreateStaff(req, res) {
   const { fullName, email, password, phone, nationality, role } = parsed.data;
   try {
     const now = /* @__PURE__ */ new Date();
-    const user = await adminAuth.createUser({
-      email: email.toLowerCase(),
-      password,
-      displayName: fullName,
-      disabled: false
-    });
+    const normalizedEmail = email.toLowerCase();
+    let user;
+    try {
+      user = await adminAuth.createUser({
+        email: normalizedEmail,
+        password,
+        displayName: fullName,
+        disabled: false
+      });
+    } catch (createError) {
+      if (createError?.code !== "auth/email-already-exists") throw createError;
+      const existingUser = await adminAuth.getUserByEmail(normalizedEmail);
+      const promotion = await promoteExistingAuthUserToStaff({
+        existingUser,
+        fullName,
+        email: normalizedEmail,
+        phone,
+        nationality,
+        role,
+        password,
+        createdBy: staff.uid || ""
+      });
+      if (!promotion.ok) {
+        return res.status(promotion.status).json({ success: false, error: promotion.error });
+      }
+      return res.status(200).json({
+        success: true,
+        data: {
+          uid: promotion.uid,
+          email: normalizedEmail,
+          role,
+          converted: true
+        }
+      });
+    }
     try {
       await adminAuth.setCustomUserClaims(user.uid, { role });
       await adminDb.collection("guests").doc(user.uid).set({
         fullName,
-        email: email.toLowerCase(),
+        email: normalizedEmail,
         phone,
         nationality,
         role,
@@ -244694,7 +244791,7 @@ async function handleCreateStaff(req, res) {
       success: true,
       data: {
         uid: user.uid,
-        email: email.toLowerCase(),
+        email: normalizedEmail,
         role
       }
     });
@@ -244702,7 +244799,7 @@ async function handleCreateStaff(req, res) {
     if (error?.code === "auth/email-already-exists") {
       return res.status(409).json({
         success: false,
-        error: "A staff account with this email already exists."
+        error: "A staff account with this email already exists. Edit that account instead of creating a new one."
       });
     }
     console.error("Staff account creation failed:", error);

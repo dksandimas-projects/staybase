@@ -30,6 +30,18 @@ function getStaff(req: any) {
   return (req as any).staff || {};
 }
 
+const STAFF_ROLES = ["front-desk", "admin"] as const;
+type StaffRole = (typeof STAFF_ROLES)[number];
+
+const STAFF_ROLE_LABELS: Record<StaffRole, string> = {
+  "front-desk": "Front Desk",
+  admin: "Admin"
+};
+
+function isStaffRole(value: unknown): value is StaffRole {
+  return typeof value === "string" && (STAFF_ROLES as readonly string[]).includes(value);
+}
+
 async function hasAnotherActiveAdmin(uidToDisable: string) {
   const adminSnapshot = await adminDb
     .collection("guests")
@@ -41,6 +53,118 @@ async function hasAnotherActiveAdmin(uidToDisable: string) {
     const data = doc.data();
     return data.isActive !== false;
   });
+}
+
+/**
+ * Convert an EXISTING (guest) Firebase Auth account into a staff account.
+ *
+ * Per AUTH-01 (2026-11-23): a guest who signs up during booking already
+ * owns a Firebase Auth account, so `createUser` fails with
+ * `auth/email-already-exists` and the admin is stuck on "A staff account
+ * with this email already exists" even though NO staff account exists.
+ * The conversion keeps the SAME uid, so the guest's booking history,
+ * member record and rewards points stay attached to the same identity.
+ *
+ * The conversion:
+ *   - mints the `role` custom claim, MERGED with any claim the account
+ *     already carries (`setCustomUserClaims` REPLACES the whole map, so
+ *     a bare `{ role }` would silently drop a guest's other claims),
+ *   - writes the staff profile into `guests/{uid}` with `merge: true`,
+ *     so a pre-existing profile (a legacy member mirror, a phone number
+ *     the guest already gave us) is never wiped,
+ *   - applies the admin-supplied password, so the credential the admin
+ *     hands over is the one that works. The guest sign-in uses the SAME
+ *     account, so that password becomes the guest password too — the
+ *     admin UI says so before the admin submits.
+ */
+async function promoteExistingAuthUserToStaff(params: {
+  existingUser: any;
+  fullName: string;
+  email: string;
+  phone: string;
+  nationality: string;
+  role: StaffRole;
+  password: string;
+  createdBy: string;
+}): Promise<
+  | { ok: true; uid: string }
+  | { ok: false; status: number; error: string }
+> {
+  const { existingUser, fullName, email, phone, nationality, role, password, createdBy } = params;
+  const uid = existingUser.uid;
+  const existingClaims = existingUser.customClaims || {};
+  const existingRole = existingClaims.role;
+
+  // Guard 1 — the claims already carry a staff role. This is a staff
+  // account, not a guest account: refuse rather than silently resetting
+  // somebody's admin credentials.
+  if (isStaffRole(existingRole)) {
+    return {
+      ok: false,
+      status: 409,
+      error: `This email already belongs to the existing ${STAFF_ROLE_LABELS[existingRole]} staff account. Edit that account instead of creating a new one.`
+    };
+  }
+
+  // Guard 2 — the Firestore profile already marks them as staff. If the
+  // requested role differs, refuse: the create path must never silently
+  // demote an admin. The edit path is the way to change a role.
+  const staffRef = adminDb.collection("guests").doc(uid);
+  const staffDoc = await staffRef.get();
+  const existingProfile = (staffDoc.exists ? staffDoc.data() : null) || {};
+
+  if (isStaffRole(existingProfile.role) && existingProfile.role !== role) {
+    return {
+      ok: false,
+      status: 409,
+      error: `This email already belongs to the existing ${STAFF_ROLE_LABELS[existingProfile.role]} staff account. Edit that account to change their role.`
+    };
+  }
+
+  const now = new Date();
+  const nextClaims = { ...existingClaims, role };
+  const profilePatch = {
+    fullName,
+    email: email.toLowerCase(),
+    // An empty admin-supplied field must not wipe what is already on the
+    // profile — the guest may already have given us a phone number.
+    phone: phone || existingProfile.phone || "",
+    nationality: nationality || existingProfile.nationality || "",
+    role,
+    isActive: true,
+    createdBy: existingProfile.createdBy || createdBy,
+    createdAt: existingProfile.createdAt || now,
+    updatedAt: now
+  };
+
+  try {
+    await adminAuth.updateUser(uid, {
+      displayName: fullName,
+      password,
+      disabled: false
+    });
+    await adminAuth.setCustomUserClaims(uid, nextClaims);
+    await staffRef.set(profilePatch, { merge: true });
+  } catch (syncErr) {
+    // Best-effort rollback. The PASSWORD cannot be restored — Firebase
+    // never exposes it — so the admin has to retry the conversion to put
+    // the credential they handed over back in place. The display name,
+    // the enabled flag and the role claim CAN be restored, so the guest
+    // account keeps working as a guest account.
+    console.error("Staff promotion sync failed, rolling back auth details:", syncErr);
+    try {
+      await adminAuth.updateUser(uid, {
+        displayName: existingUser.displayName || null,
+        disabled: existingUser.disabled === true
+      });
+      await adminAuth.setCustomUserClaims(uid, existingClaims);
+    } catch (rollbackErr) {
+      console.error("Failed to roll back auth details during staff promotion failure:", rollbackErr);
+    }
+    throw syncErr;
+  }
+
+  return { ok: true, uid };
 }
 
 export async function handleCreateStaff(req: any, res: any) {
@@ -65,18 +189,54 @@ export async function handleCreateStaff(req: any, res: any) {
 
   try {
     const now = new Date();
-    const user = await adminAuth.createUser({
-      email: email.toLowerCase(),
-      password,
-      displayName: fullName,
-      disabled: false
-    });
+    const normalizedEmail = email.toLowerCase();
+
+    let user: { uid: string };
+    try {
+      user = await adminAuth.createUser({
+        email: normalizedEmail,
+        password,
+        displayName: fullName,
+        disabled: false
+      });
+    } catch (createError: any) {
+      if (createError?.code !== "auth/email-already-exists") throw createError;
+
+      // The email already owns a Firebase Auth account — most often a
+      // guest who signed up during booking. Convert that account into a
+      // staff account instead of creating a second one (AUTH-01).
+      const existingUser = await adminAuth.getUserByEmail(normalizedEmail);
+      const promotion = await promoteExistingAuthUserToStaff({
+        existingUser,
+        fullName,
+        email: normalizedEmail,
+        phone,
+        nationality,
+        role,
+        password,
+        createdBy: staff.uid || ""
+      });
+
+      if (!promotion.ok) {
+        return res.status(promotion.status).json({ success: false, error: promotion.error });
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          uid: promotion.uid,
+          email: normalizedEmail,
+          role,
+          converted: true
+        }
+      });
+    }
 
     try {
       await adminAuth.setCustomUserClaims(user.uid, { role });
       await adminDb.collection("guests").doc(user.uid).set({
         fullName,
-        email: email.toLowerCase(),
+        email: normalizedEmail,
         phone,
         nationality,
         role,
@@ -109,7 +269,7 @@ export async function handleCreateStaff(req: any, res: any) {
       success: true,
       data: {
         uid: user.uid,
-        email: email.toLowerCase(),
+        email: normalizedEmail,
         role
       }
     });
@@ -117,7 +277,7 @@ export async function handleCreateStaff(req: any, res: any) {
     if (error?.code === "auth/email-already-exists") {
       return res.status(409).json({
         success: false,
-        error: "A staff account with this email already exists."
+        error: "A staff account with this email already exists. Edit that account instead of creating a new one."
       });
     }
 
