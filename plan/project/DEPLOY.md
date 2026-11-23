@@ -210,6 +210,15 @@ curl -s https://admin.sparkinnbohol.com/ | grep -o 'assets/index-[A-Za-z0-9_-]*\
   `guest-app/server/`, `shared/`, or `hotel.config.ts`
   (`npm run build:api -w guest-app` + a `chore(bundle):` commit) — the
   `fix:`/`feat:` hook bumps `shared/VERSION.ts`, which the bundle embeds.
+- **Rebuild the bundle BEFORE committing, never after.** The pre-commit gate
+  (`check:api-bundle`) rebuilds the bundle from the staged sources and compares
+  it byte-for-byte with the staged `guest-app/api/[...route].js` — so the bundle
+  you stage must already match the tree. The `fix:`/`feat:` hook then bumps
+  `shared/VERSION.ts` and the post-commit hook amends the commit, which means
+  **the committed bundle embeds the version from BEFORE that commit's own bump**
+  (every past commit does this). Rebuilding after the commit would desync the
+  bundle from the version the commit records, and the next commit's pre-commit
+  gate would then fail on a bundle that "was already rebuilt".
 
 ---
 
