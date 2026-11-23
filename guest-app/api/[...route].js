@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.32.2";
+    VERSION2 = "2.32.3";
   }
 });
 
@@ -244656,24 +244656,35 @@ async function promoteExistingAuthUserToStaff(params) {
   const { existingUser, fullName, email, phone, nationality, role, password, createdBy } = params;
   const uid = existingUser.uid;
   const existingClaims = existingUser.customClaims || {};
-  const existingRole = existingClaims.role;
-  if (isStaffRole(existingRole)) {
-    return {
-      ok: false,
-      status: 409,
-      error: `This email already belongs to the existing ${STAFF_ROLE_LABELS[existingRole]} staff account. Edit that account instead of creating a new one.`
-    };
-  }
+  const claimsRole = existingClaims.role;
   const staffRef = adminDb.collection("guests").doc(uid);
   const staffDoc = await staffRef.get();
   const existingProfile = (staffDoc.exists ? staffDoc.data() : null) || {};
-  if (isStaffRole(existingProfile.role) && existingProfile.role !== role) {
+  const profileRole = existingProfile.role;
+  const claimsIsStaff = isStaffRole(claimsRole);
+  const profileIsStaff = isStaffRole(profileRole);
+  if (profileIsStaff && profileRole !== role) {
     return {
       ok: false,
       status: 409,
-      error: `This email already belongs to the existing ${STAFF_ROLE_LABELS[existingProfile.role]} staff account. Edit that account to change their role.`
+      error: `This email already belongs to the existing ${STAFF_ROLE_LABELS[profileRole]} staff account. Edit that account to change their role.`
     };
   }
+  if (claimsIsStaff && claimsRole !== role) {
+    return {
+      ok: false,
+      status: 409,
+      error: `This email already belongs to the existing ${STAFF_ROLE_LABELS[claimsRole]} staff account. Edit that account to change their role.`
+    };
+  }
+  if (profileIsStaff && claimsIsStaff) {
+    return {
+      ok: false,
+      status: 409,
+      error: `This email already belongs to the existing ${STAFF_ROLE_LABELS[profileRole]} staff account. Edit that account instead of creating a new one.`
+    };
+  }
+  const mode = profileIsStaff || claimsIsStaff ? "repaired" : "converted";
   const now = /* @__PURE__ */ new Date();
   const nextClaims = { ...existingClaims, role };
   const profilePatch = {
@@ -244710,7 +244721,7 @@ async function promoteExistingAuthUserToStaff(params) {
     }
     throw syncErr;
   }
-  return { ok: true, uid };
+  return { ok: true, uid, mode };
 }
 async function handleCreateStaff(req, res) {
   if (req.method !== "POST") {
@@ -244761,7 +244772,12 @@ async function handleCreateStaff(req, res) {
           uid: promotion.uid,
           email: normalizedEmail,
           role,
-          converted: true
+          converted: true,
+          // "repaired" = the account was already half-promoted (the claim
+          // or the profile was written by an earlier attempt that failed
+          // partway) and this call completed it. "converted" = the account
+          // was a plain guest account and this call converted it.
+          mode: promotion.mode
         }
       });
     }

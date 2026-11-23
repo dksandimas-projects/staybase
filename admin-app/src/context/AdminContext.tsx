@@ -1260,7 +1260,7 @@ export interface AdminContextType {
 
   // Staff Accounts
   staff: StaffMember[];
-  createStaff: (input: { fullName: string; email: string; password: string; phone?: string; nationality?: string; role: StaffRole }) => Promise<{ success: boolean; error?: string; converted?: boolean }>;
+  createStaff: (input: { fullName: string; email: string; password: string; phone?: string; nationality?: string; role: StaffRole }) => Promise<{ success: boolean; error?: string; converted?: boolean; mode?: "converted" | "repaired" }>;
   disableStaff: (uid: string) => Promise<{ success: boolean; error?: string }>;
   updateStaff: (input: { uid: string; fullName: string; email: string; phone?: string; nationality?: string; role: StaffRole; password?: string }) => Promise<{ success: boolean; error?: string }>;
 
@@ -9263,7 +9263,7 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
     phone?: string;
     nationality?: string;
     role: StaffRole;
-  }): Promise<{ success: boolean; error?: string; converted?: boolean }> => {
+  }): Promise<{ success: boolean; error?: string; converted?: boolean; mode?: "converted" | "repaired" }> => {
     try {
       const token = await auth.currentUser?.getIdToken(true);
       const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/admin/create-staff`, {
@@ -9287,7 +9287,13 @@ adminPreviousCallRoomIdRef.current = nextCall?.roomId ?? null;
       }
       // `converted` = the email already owned a guest account and it was
       // promoted to staff instead of creating a second account (AUTH-01).
-      return { success: true, converted: data.data?.converted === true };
+      // `mode` = "converted" (plain guest → staff) or "repaired" (an
+      // earlier attempt failed partway and this call completed it).
+      return {
+        success: true,
+        converted: data.data?.converted === true,
+        mode: data.data?.mode === "repaired" ? "repaired" : "converted"
+      };
     } catch (err: any) {
       console.error("Error creating staff account:", err);
       return { success: false, error: err?.message || "Failed to create staff account." };

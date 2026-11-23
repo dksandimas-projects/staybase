@@ -18,6 +18,12 @@
 //
 // DRY RUN BY DEFAULT — nothing is written without `--apply`.
 //
+// It is SAFE TO RE-RUN. The script shares the server handler's decision
+// table: an account that is already fully staff is refused, but a
+// HALF-PROMOTED one (the claim or the profile was written by an earlier
+// attempt that failed partway) is COMPLETED rather than dead-ended — and
+// a repair does not rotate the password unless you pass one.
+//
 // Reads: guest-app/.env.spark-inn-prod  (prod service account)
 
 import { readFileSync } from "node:fs";
@@ -134,24 +140,52 @@ async function run() {
   console.log(`staff profile:   ${profile ? JSON.stringify(profile) : "(none)"}`);
 
   const existingRole = (existing.customClaims || {}).role;
-  if (existingRole === "admin" || existingRole === "front-desk") {
-    console.error(`\n❌ This email is already a ${existingRole} staff account. Nothing to do.\n`);
-    process.exit(1);
-  }
+  const claimsIsStaff = existingRole === "admin" || existingRole === "front-desk";
+  const profileRole = profile?.role;
+  const profileIsStaff = profileRole === "admin" || profileRole === "front-desk";
 
-  if (profile && (profile.role === "admin" || profile.role === "front-desk")) {
+  // The same decision table as the server handler
+  // (`promoteExistingAuthUserToStaff`): never demote, refuse a staff
+  // account that is already complete, and COMPLETE a half-promoted one
+  // instead of dead-ending.
+  if (profileIsStaff && profileRole !== role) {
     console.error(
-      `\n❌ The staff profile already marks this account as ${profile.role}. Edit it in the admin app instead.\n`
+      `\n❌ This email already belongs to the existing ${profileRole} staff account. Edit it to change the role.\n`
     );
     process.exit(1);
   }
+  if (claimsIsStaff && existingRole !== role) {
+    console.error(
+      `\n❌ This email already belongs to the existing ${existingRole} staff account. Edit it to change the role.\n`
+    );
+    process.exit(1);
+  }
+  if (profileIsStaff && claimsIsStaff) {
+    console.error(`\n❌ This email is already a ${profileRole} staff account. Nothing to do.\n`);
+    process.exit(1);
+  }
+
+  const mode = profileIsStaff || claimsIsStaff ? "repaired" : "converted";
+  // A repair must NOT silently rotate a credential nobody asked to change —
+  // the account was already staff, so the existing password is kept unless
+  // the operator passes one explicitly.
+  const keepExistingPassword = mode === "repaired" && !flags.password;
 
   const fullName = (flags["full-name"] || existing.displayName || "").trim();
-  const password = flags.password || generatePassword();
+  const password = flags.password || (keepExistingPassword ? null : generatePassword());
 
   console.log("\n---");
+  console.log(`mode:      ${mode}`);
   console.log(`full name: ${fullName || "(unchanged)"}`);
-  console.log(`password:  ${flags.password ? "(the one you passed)" : "(generated temporary password)"}`);
+  console.log(
+    `password:  ${
+      flags.password
+        ? "(the one you passed)"
+        : keepExistingPassword
+          ? "(kept — the account was already staff)"
+          : "(generated temporary password)"
+    }`
+  );
   console.log(`would set the role claim to: ${role}`);
   console.log(`would write the staff profile: guests/${existing.uid}`);
 
@@ -163,11 +197,13 @@ async function run() {
   const now = new Date();
   const nextClaims = { ...(existing.customClaims || {}), role };
 
-  await auth.updateUser(existing.uid, {
+  const authUpdates = {
     displayName: fullName || existing.displayName || undefined,
-    password,
     disabled: false
-  });
+  };
+  if (password) authUpdates.password = password;
+
+  await auth.updateUser(existing.uid, authUpdates);
   await auth.setCustomUserClaims(existing.uid, nextClaims);
   await staffRef.set(
     {
@@ -185,13 +221,18 @@ async function run() {
   );
 
   console.log("\n✔ Promoted.");
+  console.log(`  mode: ${mode}`);
   console.log(`  role claim: ${JSON.stringify(nextClaims)}`);
   console.log(`  staff profile: guests/${existing.uid}`);
-  console.log(`\n🔑 Temporary password: ${password}`);
-  console.log(
-    "   This is the password for BOTH the staff sign-in and the guest sign-in"
-  );
-  console.log("   (same Firebase Auth account). Share it securely.\n");
+  if (password) {
+    console.log(`\n🔑 Temporary password: ${password}`);
+    console.log(
+      "   This is the password for BOTH the staff sign-in and the guest sign-in"
+    );
+    console.log("   (same Firebase Auth account). Share it securely.\n");
+  } else {
+    console.log("\n   The existing password was kept — share it as-is.\n");
+  }
 }
 
 run().catch((error) => {

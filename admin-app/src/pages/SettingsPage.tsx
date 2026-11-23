@@ -4896,10 +4896,13 @@ const handleSaveBreakfast = async (e: React.FormEvent) => {
       return;
     }
     const createdEmail = newStaffEmail.trim();
+    const roleLabel = newStaffRole === "admin" ? "Admin" : "Front Desk";
     setStaffFormMessage({
       type: "success",
       text: result.converted
-        ? `${createdEmail} already had a guest account — it was converted to ${newStaffRole === "admin" ? "Admin" : "Front Desk"}. The password you set is now the account password for both the guest and staff sign-in.`
+        ? result.mode === "repaired"
+          ? `${createdEmail} was already half set up as staff — this completed it. The password you set is now the account password for both the guest and staff sign-in.`
+          : `${createdEmail} already had a guest account — it was converted to ${roleLabel}. The password you set is now the account password for both the guest and staff sign-in.`
         : `Staff account created for ${createdEmail}. They can sign in now.`
     });
     setNewStaffName("");

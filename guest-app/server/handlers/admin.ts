@@ -87,39 +87,60 @@ async function promoteExistingAuthUserToStaff(params: {
   password: string;
   createdBy: string;
 }): Promise<
-  | { ok: true; uid: string }
+  | { ok: true; uid: string; mode: "converted" | "repaired" }
   | { ok: false; status: number; error: string }
 > {
   const { existingUser, fullName, email, phone, nationality, role, password, createdBy } = params;
   const uid = existingUser.uid;
   const existingClaims = existingUser.customClaims || {};
-  const existingRole = existingClaims.role;
+  const claimsRole = existingClaims.role;
 
-  // Guard 1 — the claims already carry a staff role. This is a staff
-  // account, not a guest account: refuse rather than silently resetting
-  // somebody's admin credentials.
-  if (isStaffRole(existingRole)) {
-    return {
-      ok: false,
-      status: 409,
-      error: `This email already belongs to the existing ${STAFF_ROLE_LABELS[existingRole]} staff account. Edit that account instead of creating a new one.`
-    };
-  }
-
-  // Guard 2 — the Firestore profile already marks them as staff. If the
-  // requested role differs, refuse: the create path must never silently
-  // demote an admin. The edit path is the way to change a role.
   const staffRef = adminDb.collection("guests").doc(uid);
   const staffDoc = await staffRef.get();
   const existingProfile = (staffDoc.exists ? staffDoc.data() : null) || {};
+  const profileRole = existingProfile.role;
 
-  if (isStaffRole(existingProfile.role) && existingProfile.role !== role) {
+  const claimsIsStaff = isStaffRole(claimsRole);
+  const profileIsStaff = isStaffRole(profileRole);
+
+  // Guard 1 — the Firestore profile already marks them as staff under a
+  // DIFFERENT role. The create path must never silently demote an admin.
+  // The edit path is the way to change a role.
+  if (profileIsStaff && profileRole !== role) {
     return {
       ok: false,
       status: 409,
-      error: `This email already belongs to the existing ${STAFF_ROLE_LABELS[existingProfile.role]} staff account. Edit that account to change their role.`
+      error: `This email already belongs to the existing ${STAFF_ROLE_LABELS[profileRole]} staff account. Edit that account to change their role.`
     };
   }
+
+  // Guard 2 — the sign-in claim already carries a staff role under a
+  // DIFFERENT role. Same rule as guard 1, for the other source of truth.
+  if (claimsIsStaff && claimsRole !== role) {
+    return {
+      ok: false,
+      status: 409,
+      error: `This email already belongs to the existing ${STAFF_ROLE_LABELS[claimsRole]} staff account. Edit that account to change their role.`
+    };
+  }
+
+  // Guard 3 — the account is ALREADY a staff member, all the way through
+  // (claim + profile). Refuse rather than silently resetting somebody's
+  // admin credentials; the edit path is the way to change a staff member.
+  if (profileIsStaff && claimsIsStaff) {
+    return {
+      ok: false,
+      status: 409,
+      error: `This email already belongs to the existing ${STAFF_ROLE_LABELS[profileRole]} staff account. Edit that account instead of creating a new one.`
+    };
+  }
+
+  // Past this point the account is either a plain guest account, or a
+  // HALF-PROMOTED one — the claim was written but the profile was not (or
+  // the other way round) because a write failed partway through. A
+  // half-promoted account is COMPLETED here rather than refused, so
+  // "run it again" is always the recovery.
+  const mode = profileIsStaff || claimsIsStaff ? "repaired" : "converted";
 
   const now = new Date();
   const nextClaims = { ...existingClaims, role };
@@ -164,7 +185,7 @@ async function promoteExistingAuthUserToStaff(params: {
     throw syncErr;
   }
 
-  return { ok: true, uid };
+  return { ok: true, uid, mode };
 }
 
 export async function handleCreateStaff(req: any, res: any) {
@@ -227,7 +248,12 @@ export async function handleCreateStaff(req: any, res: any) {
           uid: promotion.uid,
           email: normalizedEmail,
           role,
-          converted: true
+          converted: true,
+          // "repaired" = the account was already half-promoted (the claim
+          // or the profile was written by an earlier attempt that failed
+          // partway) and this call completed it. "converted" = the account
+          // was a plain guest account and this call converted it.
+          mode: promotion.mode
         }
       });
     }

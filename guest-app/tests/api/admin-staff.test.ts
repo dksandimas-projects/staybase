@@ -186,7 +186,8 @@ describe("/api/admin staff handlers", () => {
           uid: "guest_1",
           email: "feliasnovabelle@gmail.com",
           role: "front-desk",
-          converted: true
+          converted: true,
+          mode: "converted"
         }
       });
     });
@@ -247,7 +248,14 @@ describe("/api/admin staff handlers", () => {
     });
 
     test("refuses to convert an account that is already a staff member", async () => {
+      // Fully staff: the sign-in claim AND the profile agree.
       mockGetUserByEmail.mockResolvedValue({ ...guestUser, customClaims: { role: "front-desk" } });
+      mockGuestDocs.set("guest_1", {
+        fullName: "Felia Novabelle",
+        email: "feliasnovabelle@gmail.com",
+        role: "front-desk",
+        isActive: true
+      });
 
       const res = mockResponse();
       await handleCreateStaff({ method: "POST", staff: adminStaff, body: guestBody } as any, res);
@@ -272,6 +280,72 @@ describe("/api/admin staff handlers", () => {
         disabled: false
       });
       expect(mockSetCustomUserClaims).toHaveBeenLastCalledWith("guest_1", {});
+    });
+
+    // A promotion that failed partway leaves the account HALF-PROMOTED:
+    // the claim was written but the profile was not (or the other way
+    // round). "Run it again" must COMPLETE it, not refuse it — a refusal
+    // here would leave the operator stuck with an account that is half
+    // staff and invisible in the staff list.
+    test("completes a half-promoted account — the claim is set but the profile is missing", async () => {
+      mockGetUserByEmail.mockResolvedValue({ ...guestUser, customClaims: { role: "front-desk" } });
+
+      const res = mockResponse();
+      await handleCreateStaff({ method: "POST", staff: adminStaff, body: guestBody } as any, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: true,
+        data: expect.objectContaining({ uid: "guest_1", mode: "repaired" })
+      }));
+      expect(mockGuestSet).toHaveBeenCalledWith(expect.objectContaining({
+        role: "front-desk",
+        isActive: true
+      }), { merge: true });
+    });
+
+    test("completes a half-promoted account — the profile is set but the claim is missing", async () => {
+      mockGuestDocs.set("guest_1", {
+        fullName: "Felia Novabelle",
+        email: "feliasnovabelle@gmail.com",
+        role: "front-desk",
+        isActive: true
+      });
+
+      const res = mockResponse();
+      await handleCreateStaff({ method: "POST", staff: adminStaff, body: guestBody } as any, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: true,
+        data: expect.objectContaining({ mode: "repaired" })
+      }));
+      expect(mockSetCustomUserClaims).toHaveBeenCalledWith("guest_1", { role: "front-desk" });
+    });
+
+    test("refuses to demote a half-promoted admin", async () => {
+      mockGetUserByEmail.mockResolvedValue({ ...guestUser, customClaims: { role: "admin" } });
+
+      const res = mockResponse();
+      await handleCreateStaff({ method: "POST", staff: adminStaff, body: guestBody } as any, res);
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: false,
+        error: "This email already belongs to the existing Admin staff account. Edit that account to change their role."
+      }));
+      expect(mockUpdateUser).not.toHaveBeenCalled();
+      expect(mockSetCustomUserClaims).not.toHaveBeenCalled();
+    });
+
+    test("a plain guest account reports the converted mode", async () => {
+      const res = mockResponse();
+      await handleCreateStaff({ method: "POST", staff: adminStaff, body: guestBody } as any, res);
+
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: true,
+        data: expect.objectContaining({ mode: "converted" })
+      }));
     });
   });
 

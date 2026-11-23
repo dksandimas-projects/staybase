@@ -78,12 +78,24 @@ The create path now **converts** the existing account instead of creating a seco
 | Staff profile | `guests/{uid}` is written with `merge: true` — a pre-existing profile (a legacy member mirror, a phone number the guest already gave) is never wiped |
 | Blank fields | An empty admin-supplied `phone` / `nationality` does NOT overwrite the value already on the profile |
 | Password | The admin-supplied password becomes the account password. The guest sign-in is the **same** account, so that password is the guest password too — the admin UI says so before the admin submits |
-| Already staff | If the claims already carry a staff role, the create path refuses (409) and points at the edit path. It never resets an existing staff member's credentials |
-| No demotion | If the Firestore profile already marks the account as staff with a **different** role, the create path refuses (409). Roles change in the edit path, never in the create path |
-| Rollback | If the profile write fails, the display name, the enabled flag and the role claim are rolled back so the guest account keeps working. The **password cannot be rolled back** — Firebase never exposes it — so the admin retries the conversion |
+| Already staff | If the account is **already fully staff** (the sign-in claim AND the profile agree), the create path refuses (409) and points at the edit path. It never resets an existing staff member's credentials |
+| No demotion | If EITHER the claim or the profile marks the account as staff with a **different** role, the create path refuses (409). Roles change in the edit path, never in the create path |
+| Half-promoted | If ONE of the two sources says staff (the claim was written but the profile was not, or the other way round) — a promotion that failed partway — the create path **COMPLETES** it (`mode: "repaired"`) instead of refusing. **"Run it again" is always the recovery**, and a repair never rotates the password on its own |
+| Rollback | If the profile write fails, the display name, the enabled flag and the role claim are rolled back so the guest account keeps working. The **password cannot be rolled back** — Firebase never exposes it — so the admin retries the conversion **with the same password** |
 | Never deleted | A failed conversion NEVER deletes the auth user (the S4 rollback that deletes an orphaned auth user applies to the *create* path only) |
 
-The same conversion is available from the command line for the case where the account has to be fixed before this ships: `node scripts/promote-user-to-staff.mjs <email> <front-desk|admin> [--apply]` (dry run by default; reads `guest-app/.env.spark-inn-prod`).
+The decision table, shared by the server handler and the CLI script:
+
+| Claim says staff | Profile says staff | Requested role | Outcome |
+|---|---|---|---|
+| no | no | any | **Converted** — the guest account becomes staff |
+| no | yes, different | any | **Refused** — never demote; use the edit path |
+| yes, different | no | any | **Refused** — never demote; use the edit path |
+| yes, same | yes, same | same | **Refused** — already fully staff; use the edit path |
+| yes, same | no | same | **Repaired** — the profile write is completed |
+| no | yes, same | same | **Repaired** — the role claim is completed |
+
+The same conversion is available from the command line for the case where the account has to be fixed before this ships: `node scripts/promote-user-to-staff.mjs <email> <front-desk|admin> [--apply]` (dry run by default; reads `guest-app/.env.spark-inn-prod`). It is **safe to re-run**: it shares the decision table above, so it completes a half-promoted account instead of dead-ending, and a repair keeps the existing password unless `--password` is passed.
 
 ## Manual QA
 
