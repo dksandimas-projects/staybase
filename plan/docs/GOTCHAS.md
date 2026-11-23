@@ -68,6 +68,10 @@ Things agents must never do. Check this file before implementing any feature.
 - **No `forwardRef` needed** — in React 19, pass `ref` as a regular prop directly to components.
 - **No `useEffect` for derived state** — compute it inline or with `useMemo` instead.
 
+## URL State (React Router)
+
+- **ONE `setSearchParams` call per handler — never a chain of per-parameter writes** (FSO-13, 2026-11-23). `useSearchParams` builds its next query string from the `searchParams` captured in the CURRENT render, and `setSearchParams` REPLACES the whole query string. So N calls inside ONE handler each rebuild from the SAME stale snapshot and the LAST call wins — every earlier write is silently undone. The admin Bookings page's "Clear all" called one setter per filter, so it cleared exactly ONE of them and left the rest of the list filtered (verified in a browser: the URL came back completely unchanged). The functional form (`setSearchParams(prev => …)`) does NOT help — React Router's own implementation feeds it the same render-captured snapshot. **The rule:** build ONE payload for the whole change and write it once; when the payload is a list of keys to clear, build it from ONE list (`admin-app/src/utils/listFilterParams.ts` → `clearFilterParams`) so a new filter cannot be added without also becoming clearable. The same applies to any "reset" button that touches more than one parameter.
+
 ---
 
 ## jsPDF (Receipts & PDFs)
