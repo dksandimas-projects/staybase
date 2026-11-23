@@ -582,23 +582,24 @@ test.describe("Tier-3 scenario writes (approved 2026-10-26)", () => {
     await drawer.locator('input[name="emergencyContact"]').first().fill("QA contact 09170000000");
     const signature = drawer.locator('input[name="signatureStatus"]').first();
     await signature.check({ force: true });
-    await drawer.getByRole("button", { name: /save registration/i }).click();
-    await page.waitForTimeout(2500);
 
-    // The guest ID attachment.
+    // Per Decision #338 (2026-11-22): the guest ID PHOTO is optional —
+    // the check-in gate requires the desk's attestation that the
+    // physical ID was sighted.
+    const sightCheckbox = drawer.locator('[data-testid="guest-id-sight-checkbox"]').first();
+    await expect(sightCheckbox, "the ID sighting attestation must be offered").toBeAttached({ timeout: 15_000 });
+    await sightCheckbox.check({ force: true });
+
+    // The guest ID attachment — the upload is immediate, it has no save
+    // button of its own.
     const idPhotoInput = drawer.locator('input[type="file"][accept*="image"]').first();
     await expect(idPhotoInput, "the guest ID upload must be offered").toBeAttached({ timeout: 15_000 });
     await idPhotoInput.setInputFiles(PROOF_FILE);
     await page.waitForTimeout(3500);
 
-    // Per Decision #338 (2026-11-22): the guest ID PHOTO is optional —
-    // the check-in gate requires the desk's attestation that the
-    // physical ID was sighted. The photo is already on file here, so
-    // no reason is required.
-    const sightCheckbox = drawer.locator('[data-testid="guest-id-sight-checkbox"]').first();
-    await expect(sightCheckbox, "the ID sighting attestation must be offered").toBeAttached({ timeout: 15_000 });
-    await sightCheckbox.check({ force: true });
-    await drawer.locator('[data-testid="guest-id-sight-save"]').first().click();
+    // Per Decision #340 (2026-11-23): the registry fields AND the ID
+    // attestation are written by ONE save.
+    await drawer.getByRole("button", { name: /save registration/i }).click();
     await page.waitForTimeout(2500);
 
     // Check in.

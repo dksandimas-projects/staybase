@@ -59,29 +59,40 @@ describe("BookingsPage check-in gate", () => {
   // Per Decision #339 (2026-11-22): the desk's note is optional, so
   // the gate never asks for a reason either.
   it("never asks for a reason for the missing ID photo", () => {
-    const panelSrc = read("admin-app/src/components/GuestIdVerificationPanel.tsx");
+    const formSrc = read("admin-app/src/components/BookingRegistrationForm.tsx");
     expect(sharedSrc).not.toContain("Reason for no ID photo attached");
-    expect(panelSrc).not.toContain("Reason for no ID photo");
-    expect(panelSrc).toContain("Note (optional)");
+    expect(formSrc).not.toContain("Reason for no ID photo");
+    expect(formSrc).toContain("Note (optional)");
   });
 
-  it("mounts the guest ID verification panel in the booking drawer", () => {
-    const panelSrc = read("admin-app/src/components/GuestIdVerificationPanel.tsx");
-    expect(pageSrc).toMatch(/<GuestIdVerificationPanel/);
-    expect(pageSrc).toMatch(/hasPhoto=\{Boolean\(selectedBooking\.guestIdPhotoUrl\)\}/);
-    expect(pageSrc).toMatch(/onSave=\{handleIdSightSave\}/);
+  // Per Decision #340 (2026-11-23): the guest registry and the desk's
+  // ID attestation are ONE form with ONE save button.
+  it("records the attestation in the registration form, not a second form", () => {
+    const formSrc = read("admin-app/src/components/BookingRegistrationForm.tsx");
+    expect(formSrc).toMatch(/name="idSightStatus"/);
+    expect(formSrc).toMatch(/name="idSightNote"/);
+    expect(formSrc).toMatch(/I sighted and verified the guest/);
+    // The photo strip rides inside the same card.
+    expect(formSrc).toMatch(/photoSlot/);
+    expect(pageSrc).toMatch(/photoSlot=\{guestIdPhotoSlot\}/);
   });
 
-  it("writes the attestation into guestRegistration and keeps it across a registry-form save", () => {
-    const panelSrc = read("admin-app/src/components/GuestIdVerificationPanel.tsx");
-    expect(panelSrc).toMatch(/idSightStatus/);
-    expect(panelSrc).toMatch(/idSightNote/);
-    expect(panelSrc).toMatch(/idSightBy/);
-    expect(panelSrc).toMatch(/idSightAt/);
-    // The registration form rewrites `guestRegistration` wholesale —
-    // the attestation has to be carried across explicitly or saving
-    // the registry form would silently wipe the desk's record.
-    expect(pageSrc).toMatch(/existingSight\.idSightStatus/);
+  it("writes the attestation into guestRegistration from the ONE save handler", () => {
+    expect(pageSrc).toMatch(/formData\.get\("idSightStatus"\)/);
+    expect(pageSrc).toMatch(/formData\.get\("idSightNote"\)/);
+    expect(pageSrc).toMatch(/idSightBy:/);
+    expect(pageSrc).toMatch(/idSightAt:/);
+  });
+
+  it("has exactly ONE save button in the check-in section", () => {
+    const formSrc = read("admin-app/src/components/BookingRegistrationForm.tsx");
+    // One submit button on the form...
+    const submits = formSrc.match(/type="submit"/g) || [];
+    expect(submits.length).toBe(1);
+    expect(formSrc).toMatch(/Save Registration/);
+    // ...and the retired second save button is gone for good.
+    expect(pageSrc).not.toMatch(/handleIdSightSave/);
+    expect(pageSrc).not.toMatch(/Save ID verification/);
   });
 
   it("hides the readiness card once the booking has been checked in", () => {

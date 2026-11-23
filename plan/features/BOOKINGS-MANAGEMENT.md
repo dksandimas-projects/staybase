@@ -39,7 +39,7 @@ The drawer is a status-aware workspace (`BookingDrawerWorkspace.tsx`):
 - **Sticky Header:** Booking context (guest, room, stay, status, source), lifecycle indicator, Total/Paid/Balance summary, and actionable alerts.
 - **Task-Based Sections:**
   - **Overview:** Time-sensitive early check-in decision/grant first, followed by staff-captured special requests. Guest, room, dates, duration, occupancy, breakfast inclusion, payment method, reference, and the compact financial summary live once in the global header above the tabs.
-  - **Check-in:** Readiness checklist, registration, signature, guest ID verification (optional photo + desk attestation), discount verification, breakfast selections.
+  - **Check-in:** Readiness checklist, then ONE registration form — the guest registry, the signature and the desk's ID attestation, with the optional ID photo strip on top — and ONE save button; discount verification, breakfast selections.
   - **Folio:** The sole detailed home for money ledgers, discounts, payment proof review, receipts, incidental & store charges. A pending proof has one labelled View action plus the verification action.
   - **Breakfast:** The per-date × per-guest meal grid, the served toggles, and the refund-liability panel.
   - **Other Add-Ons:** The per-day × per-add-on selection grid with the served-stamp badge.
@@ -269,12 +269,14 @@ Both shipped on the same branch — the scope note below is retained because the
 - **Pre-CLS-01 path (deprecated):** `showUnpaidCheckoutForm` state, the legacy `<Modal title="Unpaid checkout — reason required">` body, the inline `setUnpaidCheckoutSubmitting` flag, the post-click `getBookingFolio(selectedBooking)` branch. Renamed to `showConfirmCheckOut` + `confirmCheckOutPending` and lifted into the shared shell.
 
 ### Guest ID Verification (photo + desk attestation)
-> Decision: `plan/docs/DECISIONS-FEATURES.md #338` (2026-11-22).
+> Decisions: `plan/docs/DECISIONS-FEATURES.md #338` (2026-11-22) · `#339` (2026-11-22) · `#340` (2026-11-23).
+> **ONE form, ONE save button** — the ID photo strip, the guest registry, the signature and the ID attestation all live in the SAME check-in registration form.
 - **The guest ID photo is OPTIONAL.** The check-in gate requires the desk's attestation that the guest's physical ID was sighted at the desk (`guestRegistration.idSightStatus`), not a photo upload. The photo stays available as the strongest supporting evidence, one tap away, and never blocks.
 - **The desk's note is OPTIONAL** (`guestRegistration.idSightNote`) — e.g. the guest declined, or the ID has no camera-ready copy. It is context for the next shift, never a condition of the check-in (per decision #339).
 - **The attestation carries the desk's name and time** (`idSightBy` / `idSightAt`). The server-stamped `checkedInBy` / `checkedInByName` / `checkedInAt` remain the trusted record of who checked the guest in and when.
 - **The legal registry minimum is unchanged** — nationality, ID type, ID number, the remaining registry fields, and the signed physical registration form stay required (RA 11862). The guest-side Senior/PWD discount ID upload is untouched.
 - **The readiness card names the items in plain language** — "Guest ID sighted at the desk" is the only ID item it ever asks for.
+- **ONE form, ONE save button (#340).** The photo strip renders inside the registration card (the upload is immediate — it never had a save button), the attestation checkbox + optional note are fields of the registration form, and its single Save writes the registry AND the attestation in one Firestore write. The separate "Guest ID Verification" card and its second Save button are gone.
 - **The registration PDF reflects the evidence** — "ID sighted - no photo on file" instead of an empty "Attach ID here" box.
 
 ### Guest ID Upload & HEIC Conversion

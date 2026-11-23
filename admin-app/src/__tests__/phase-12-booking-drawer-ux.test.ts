@@ -79,8 +79,10 @@ describe("Phase 12 — booking drawer information architecture", () => {
       // retired; the header now shows a read-only "Reference" cell
       // sourced from the latest onsitePayments[] entry.
       "Reference\n",
+      // Per Decision #340 (2026-11-23): the guest ID photo strip and
+      // the desk's ID attestation moved INTO the registration form —
+      // one form, one save button, so there is no separate ID block.
       "Check-in Registration",
-      "Guest ID Verification",
       "Move / Upgrade Room Workstation",
       "Charge breakdown",
       "Breakfast Selections",

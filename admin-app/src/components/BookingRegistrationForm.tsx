@@ -16,6 +16,13 @@ interface BookingRegistrationFormProps {
    * read-only summary line, never the form's required fields.
    */
   hasPhoto?: boolean;
+  /**
+   * The guest ID photo strip (preview + upload). Per Decision #340
+   * (2026-11-23) it renders INSIDE this card so the whole check-in
+   * capture is ONE form with ONE save button. The upload itself is
+   * immediate — it never needed a save button of its own.
+   */
+  photoSlot?: React.ReactNode;
 }
 
 export function BookingRegistrationForm({
@@ -25,7 +32,8 @@ export function BookingRegistrationForm({
   onSetShowEdit,
   onSubmit,
   onPrintPdf,
-  hasPhoto = false
+  hasPhoto = false,
+  photoSlot
 }: BookingRegistrationFormProps) {
   if (status !== "confirmed" && status !== "checked-in" && status !== "checked-out") return null;
 
@@ -50,6 +58,11 @@ export function BookingRegistrationForm({
 
   const isComplete =
     reg?.signatureStatus === "signed" &&
+    // Per Decision #340 (2026-11-23): the ID attestation is part of
+    // THIS form now — so the form only collapses into its read-only
+    // summary once the desk has attested the physical ID too. The
+    // desk therefore always has one place to finish the check-in.
+    reg?.idSightStatus === "sighted" &&
     reg?.nationality &&
     reg?.dateOfBirth &&
     reg?.gender &&
@@ -82,6 +95,7 @@ export function BookingRegistrationForm({
 
       {(isComplete || isReadOnly) && !showEdit ? (
         <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2">
+          {photoSlot ? <div className="mb-3 border-b border-gray-100 pb-3">{photoSlot}</div> : null}
           <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
             <div>
               <span className="text-gray-400">Nationality:</span>{" "}
@@ -120,9 +134,9 @@ export function BookingRegistrationForm({
               <span className="text-gray-400">Address:</span>{" "}
               <span className="font-medium text-gray-800">{reg?.address}</span>
             </div>
-            {/* Per Decision #338 (2026-11-22): the ID verification line
-                is read-only here — it is recorded in the Guest ID
-                Verification panel, not in the registration form. */}
+            {/* Per Decision #338 (2026-11-22) + #340 (2026-11-23):
+                the ID verification line is read-only here — it is
+                recorded by the SAME form, one save button below. */}
             <div className="col-span-2">
               <span className="text-gray-400">ID verification:</span>{" "}
               <span className="font-medium text-gray-800">{idVerificationLabel}</span>
@@ -163,6 +177,7 @@ export function BookingRegistrationForm({
           }}
           className="rounded-lg border border-gray-200 bg-white p-5 space-y-4"
         >
+          {photoSlot ? <div className="border-b border-gray-100 pb-4">{photoSlot}</div> : null}
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
               Nationality
@@ -287,6 +302,34 @@ export function BookingRegistrationForm({
               className="h-4 w-4 accent-primary"
             />
             Guest signed physical registration form
+          </label>
+          {/* Per Decision #338 (2026-11-22) + #340 (2026-11-23): the
+              ID attestation lives in THIS form, so ONE save writes the
+              registry fields AND the "physical ID sighted" record. The
+              photo is optional; the attestation is what the check-in
+              gate reads. */}
+          <label className="flex min-h-[38px] items-center gap-2 rounded border border-gray-200 px-2 text-[10px] font-bold text-gray-700">
+            <input
+              type="checkbox"
+              name="idSightStatus"
+              value="sighted"
+              data-testid="guest-id-sight-checkbox"
+              defaultChecked={reg?.idSightStatus === "sighted"}
+              className="h-4 w-4 accent-primary"
+            />
+            I sighted and verified the guest&apos;s physical ID
+          </label>
+          <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
+            Note (optional)
+            <textarea
+              name="idSightNote"
+              data-testid="guest-id-sight-note"
+              rows={2}
+              maxLength={240}
+              defaultValue={reg?.idSightNote ?? ""}
+              placeholder="e.g. guest declined to be photographed"
+              className="rounded border border-gray-200 p-2 text-xs text-gray-800"
+            />
           </label>
           <div className="flex flex-col gap-2 border-t border-gray-100 pt-3 sm:flex-row sm:justify-end">
             <button

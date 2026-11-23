@@ -127,11 +127,6 @@ import {
   type BookingDrawerSection
 } from "../components/BookingDrawerWorkspace";
 import { BookingRegistrationForm } from "../components/BookingRegistrationForm";
-// Per Decision #338 (2026-11-22): the guest ID photo is OPTIONAL at
-// check-in. This panel records the staff attestation that the
-// guest's physical ID was sighted at the desk (plus the reason when
-// no photo is attached).
-import { GuestIdVerificationPanel, type IdSightPayload } from "../components/GuestIdVerificationPanel";
 import { BookingEmailActions } from "../components/BookingEmailActions";
 import { IncidentalChargeList } from "../components/IncidentalChargeList";
 // Per ATR-08 follow-up (2026-11-21): the booking drawer's HISTORY
@@ -4408,37 +4403,48 @@ export function BookingsPage() {
     }
   };
 
-  // Per Decision #338 (2026-11-22): the staff attestation that the
-  // guest's physical ID was sighted and verified at the desk.
-  //
-  // It is written INTO `guestRegistration` — the same object the
-  // registration form writes — so the shared `getCheckInReadiness`
-  // gate sees it and the SERVER-side check-in handler enforces it
-  // with no extra endpoint and no extra Firestore rule (the staff
-  // update allowlist already covers `guestRegistration`).
-  //
-  // The photo stays the strongest evidence, but it is no longer
-  // required. When no photo is attached the attestation carries a
-  // short reason, which is what makes the no-photo path auditable.
-  const handleIdSightSave = (payload: IdSightPayload) => {
-    if (!selectedBooking) return;
-    const existing = selectedBooking.guestRegistration || {};
-    persistSelectedBooking({
-      guestRegistration: {
-        ...existing,
-        idSightStatus: payload.idSightStatus,
-        idSightNote: payload.idSightNote,
-        idSightBy: payload.idSightBy,
-        idSightAt: payload.idSightAt
-      }
-    });
-    toast.success(
-      "ID verification saved",
-      payload.idSightStatus === "sighted"
-        ? "The guest's physical ID is recorded as sighted at the desk."
-        : "The ID attestation was cleared."
-    );
-  };
+  // Per Decision #340 (2026-11-23): the guest ID photo strip renders
+  // INSIDE the check-in registration card, so the whole check-in
+  // capture is ONE form with ONE save button. The upload is immediate
+  // — it never had a save button of its own.
+  const guestIdPhotoSlot =
+    selectedBooking && ["confirmed", "checked-in"].includes(selectedBooking.status) ? (
+      <div className="space-y-3">
+        <div className="grid gap-4 sm:grid-cols-[140px_1fr]">
+          <button
+            type="button"
+            disabled={!selectedBooking.guestIdPhotoUrl}
+            onClick={() => selectedBooking.guestIdPhotoUrl && setImagePreview({ title: `Guest ID for ${selectedBooking.bookingRef}`, url: selectedBooking.guestIdPhotoUrl })}
+            className="flex h-32 w-full items-center justify-center overflow-hidden rounded-card bg-gray-100 disabled:cursor-default"
+          >
+            {selectedBooking.guestIdPhotoUrl ? (
+              <img src={selectedBooking.guestIdPhotoUrl} alt="Guest ID preview" className="h-full w-full object-cover" />
+            ) : (
+              <ImageIcon size={22} className="text-gray-400" />
+            )}
+          </button>
+          <label className="flex cursor-pointer flex-col items-center justify-center rounded-card border border-dashed border-gray-250 bg-gray-50 px-4 py-4 text-center transition hover:border-primary hover:bg-primary-light/30">
+            <span className="text-xs font-bold text-gray-800">Attach Guest ID Photo (optional)</span>
+            <span className="mt-1 text-[10px] leading-relaxed text-gray-500">
+              JPG, PNG, or WebP. HEIC from iPhone cameras is auto-converted to JPEG before upload.
+              Not required — the attestation in this form is what the check-in gate checks.
+            </span>
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+              className="sr-only"
+              onChange={(event) => {
+                void handleGuestIdUpload(event.currentTarget.files?.[0]);
+                event.currentTarget.value = "";
+              }}
+            />
+          </label>
+        </div>
+        {guestIdUploadStatus ? (
+          <p className="rounded bg-gray-50 px-3 py-2 text-[10px] font-semibold text-gray-600">{guestIdUploadStatus}</p>
+        ) : null}
+      </div>
+    ) : undefined;
 
   const handleRegistrationSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -4456,22 +4462,27 @@ export function BookingsPage() {
     // document clean (no null/undefined fields) and matches how
     // `corporate` is conditionally included in the public
     // bookings-create payload.
-    // Per Decision #338 (2026-11-22): the registration form rewrites
-    // `guestRegistration` wholesale, so the ID-verification attestation
-    // has to be carried across explicitly — otherwise saving the
-    // registry form would silently wipe the desk's "ID sighted" record
-    // and re-block the check-in.
-    const existingSight = selectedBooking?.guestRegistration || {};
+    // Per Decision #338 (2026-11-22) + #340 (2026-11-23): the ID
+    // attestation ("the physical ID was sighted at the desk") is part
+    // of THIS form — ONE save writes the guest registry AND the
+    // attestation. The attestation lives in `guestRegistration`, so
+    // the shared `getCheckInReadiness` gate sees it and the SERVER-side
+    // check-in handler enforces it with no extra endpoint and no extra
+    // Firestore rule (the staff update allowlist already covers
+    // `guestRegistration`).
+    //
+    // The photo is optional and the desk's note is optional; the
+    // ATTESTATION is the one mandatory ID item.
+    const idSightStatus = formData.get("idSightStatus") === "sighted" ? "sighted" : "";
+    const idSightNote = String(formData.get("idSightNote") || "").trim();
+    // Keep the ORIGINAL attribution when the desk re-saves a booking
+    // it already attested — the stamp answers "when did the desk
+    // first sight this ID?", not "when was this form last touched?".
+    const priorSight = selectedBooking?.guestRegistration || {};
+    const keepPriorStamp =
+      idSightStatus === "sighted" && priorSight.idSightStatus === "sighted" && !!priorSight.idSightAt;
     persistSelectedBooking({
       guestRegistration: {
-        ...(existingSight.idSightStatus
-          ? {
-              idSightStatus: existingSight.idSightStatus,
-              idSightNote: existingSight.idSightNote,
-              idSightBy: existingSight.idSightBy,
-              idSightAt: existingSight.idSightAt
-            }
-          : {}),
         nationality: String(formData.get("nationality") || "").trim(),
         address: String(formData.get("address") || "").trim(),
         dateOfBirth: String(formData.get("dateOfBirth") || ""),
@@ -4482,7 +4493,21 @@ export function BookingsPage() {
         idNumber: String(formData.get("idNumber") || "").trim(),
         emergencyContact: String(formData.get("emergencyContact") || "").trim(),
         vehiclePlate: String(formData.get("vehiclePlate") || "").trim(),
-        signatureStatus: formData.get("signatureStatus") === "signed" ? "signed" : "pending"
+        signatureStatus: formData.get("signatureStatus") === "signed" ? "signed" : "pending",
+        idSightStatus,
+        idSightNote: idSightStatus === "sighted" ? idSightNote : "",
+        idSightBy:
+          idSightStatus === "sighted"
+            ? keepPriorStamp
+              ? priorSight.idSightBy || ""
+              : currentUser?.displayName || currentUser?.email || "Front Desk"
+            : "",
+        idSightAt:
+          idSightStatus === "sighted"
+            ? keepPriorStamp
+              ? priorSight.idSightAt || ""
+              : new Date().toISOString()
+            : ""
       }
     });
   };
@@ -6125,6 +6150,12 @@ export function BookingsPage() {
                 missingItems={selectedBookingCheckInReadiness.missingItems}
               />
             )}
+            {/* Per Decision #340 (2026-11-23): the guest ID photo
+                strip, the guest registry and the desk's ID
+                attestation are ONE form with ONE save button. The
+                upload itself is immediate — it never had a save button
+                of its own; the attestation is written by the form's
+                single Save. */}
             <BookingRegistrationForm
               registration={selectedBooking.guestRegistration}
               status={selectedBooking.status}
@@ -6133,64 +6164,8 @@ export function BookingsPage() {
               onSubmit={handleRegistrationSubmit}
               onPrintPdf={printRegistrationPDF}
               hasPhoto={Boolean(selectedBooking.guestIdPhotoUrl)}
+              photoSlot={guestIdPhotoSlot}
             />
-
-            {/* Guest ID verification — the photo is OPTIONAL (Decision
-                #338); the desk attestation below is what the check-in
-                gate requires. The upload stays one tap away because a
-                photo is still the strongest evidence. */}
-            {(selectedBooking.status === "confirmed" || selectedBooking.status === "checked-in") && (
-              <div className="space-y-3">
-                <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-gray-400">
-                  <ImageIcon size={14} className="text-primary" />
-                  Guest ID Verification
-                </h3>
-                <div className="rounded-card border border-gray-200 bg-white p-5">
-                  <div className="grid gap-4 sm:grid-cols-[140px_1fr]">
-                    <button
-                      type="button"
-                      disabled={!selectedBooking.guestIdPhotoUrl}
-                      onClick={() => selectedBooking.guestIdPhotoUrl && setImagePreview({ title: `Guest ID for ${selectedBooking.bookingRef}`, url: selectedBooking.guestIdPhotoUrl })}
-                      className="flex h-32 w-full items-center justify-center overflow-hidden rounded-card bg-gray-100 disabled:cursor-default"
-                    >
-                      {selectedBooking.guestIdPhotoUrl ? (
-                        <img src={selectedBooking.guestIdPhotoUrl} alt="Guest ID preview" className="h-full w-full object-cover" />
-                      ) : (
-                        <ImageIcon size={22} className="text-gray-400" />
-                      )}
-                    </button>
-                    <label className="flex cursor-pointer flex-col items-center justify-center rounded-card border border-dashed border-gray-250 bg-gray-50 px-4 py-4 text-center transition hover:border-primary hover:bg-primary-light/30">
-                      <span className="text-xs font-bold text-gray-800">Attach Guest ID Photo (optional)</span>
-                      <span className="mt-1 text-[10px] leading-relaxed text-gray-500">
-                        JPG, PNG, or WebP. HEIC from iPhone cameras is auto-converted to JPEG before upload.
-                        Not required — the attestation below is what the check-in gate checks.
-                      </span>
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-                        className="sr-only"
-                        onChange={(event) => {
-                          void handleGuestIdUpload(event.currentTarget.files?.[0]);
-                          event.currentTarget.value = "";
-                        }}
-                      />
-                    </label>
-                  </div>
-                  {guestIdUploadStatus ? (
-                    <p className="mt-3 rounded bg-gray-50 px-3 py-2 text-[10px] font-semibold text-gray-600">{guestIdUploadStatus}</p>
-                  ) : null}
-                  <div className="mt-4">
-                    <GuestIdVerificationPanel
-                      key={selectedBooking.id}
-                      registration={selectedBooking.guestRegistration}
-                      hasPhoto={Boolean(selectedBooking.guestIdPhotoUrl)}
-                      staffName={currentUser?.displayName || currentUser?.email || "Front Desk"}
-                      onSave={handleIdSightSave}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
             </BookingDrawerSectionPanel>
 
             {/*
