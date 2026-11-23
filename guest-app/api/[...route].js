@@ -144094,7 +144094,7 @@ var VERSION2;
 var init_VERSION = __esm({
   "../shared/VERSION.ts"() {
     "use strict";
-    VERSION2 = "2.32.3";
+    VERSION2 = "2.33.1";
   }
 });
 

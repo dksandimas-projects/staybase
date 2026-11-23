@@ -226,6 +226,8 @@ The badge is already small enough to fit in tight card layouts. No mobile change
 
 The current "search input + status dropdown" toolbar on Bookings, Store Orders, Members, Vouchers, Reports, Corporate Inquiries, Rates is two side-by-side inputs. On mobile this becomes a single row: search input on top, status dropdown in a **Filter sheet** (full-screen bottom sheet) opened by a "Filter" button with a count badge when active.
 
+**Shipped on Bookings (FSO-13, 2026-11-23):** the Bookings page's status dropdown is **desktop/tablet only** (`hidden sm:block` in the toolbar) and the SAME control is rendered inside the **Filters panel**, which is the mobile filter surface on that page. Both write the same URL parameter (`bs` for bookings, `ss` for store orders), so the two can never disagree. The filter panel's "Clear all" resets every filter the panel owns in ONE URL write — see `BOOKINGS-MANAGEMENT.md §Table Filtering & Search`.
+
 The Reports top tab list (`role="tablist"`) already has 3 tabs in a `grid-cols-3` — labels should be checked for truncation at 375px. If any label truncates, switch to a horizontally scrollable tab bar.
 
 ### Settings tabs (P1)

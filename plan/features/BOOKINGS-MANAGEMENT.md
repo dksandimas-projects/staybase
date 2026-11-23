@@ -229,6 +229,19 @@ Both shipped on the same branch — the scope note below is retained because the
 - **Quick Views:** Needs attention, Arrivals today, Departures today, In house, Upcoming, Balance due, Cancelled, All bookings.
 - **Search Coverage:** Guest name, booking ref, room number, email, phone, transaction references (`transactionReference`).
 
+### Lifecycle Status Filter (FSO-13, 2026-11-23)
+
+- **The status filter has a CONTROL.** The `bs` parameter and its predicate shipped with the FSO contract, but no control ever wrote it — the desk could deep-link `?bs=checked-in` and nothing else could produce that URL. The **desktop/tablet toolbar** now carries a status dropdown beside the search box (`All statuses` + the lifecycle buckets), and the **advanced filter panel** carries the same control so the mobile desk can reach it (per `ADMIN-MOBILE.md §Filter / search bar`, where the status dropdown belongs to the filter sheet, not the toolbar). Both controls write the SAME parameter, so they cannot disagree.
+- **The booking options are derived from the shared `BOOKING_STATUSES` constant** (`@spark-inn/shared`), so a status added to the data model appears in the dropdown without a second edit. The labels match the Status column's wording: Pending · Payment uploaded · Payment confirmed · Confirmed · Checked in · Checked out · Cancelled. The store tab's dropdown carries the order lifecycle (Placed · Confirmed · Out for delivery · Delivered · Cancelled) and writes `ss`.
+- **A status and a quick view are mutually exclusive:** picking a status replaces the quick view. Putting the dropdown back to `All statuses` is a NO-OP that does **not** silently drop the quick view the desk was working with.
+- **The filter is room-scoped.** It matches `booking.status` on the room rows, exactly like the other list filters — a multi-room reservation only groups the rooms that are in view, so the count never lies about what the list shows.
+
+### Filter Reset — ONE URL Write (FSO-13, 2026-11-23)
+
+- **A filter reset is ONE `writeParams` call.** `writeParams` builds the next query string from the `searchParams` captured in the current render, and `setSearchParams` REPLACES the whole query string — so N calls inside one handler each rebuild from the SAME stale snapshot and the LAST call wins. The toolbar's "Clear all" used to call one setter per filter, so it cleared exactly ONE of them (the last in the chain) and left the rest of the list filtered; the date chip's remove button cleared `bdt` and restored `bdf`; both advanced panels' "Clear all" buttons had the same shape.
+- **The key lists are the contract.** `admin-app/src/utils/listFilterParams.ts` owns the parameter lists (`BOOKING_FILTER_PARAM_KEYS`, `BOOKING_ADVANCED_FILTER_PARAM_KEYS`, `STORE_FILTER_PARAM_KEYS`, `STORE_ADVANCED_FILTER_PARAM_KEYS`) and `clearFilterParams()` turns a list into one null-valued payload. Every parameter the page reads as a FILTER is in one of them — the test asserts it, so a new filter cannot be added without also becoming clearable.
+- **Navigation is not a filter.** The main tab (`tab`), the legacy `filter` parameter, and the deep-link parameters (`bookingId`, `reservationId`, `reservationRef`, `orderId`, `orderRef`, `staffHoldId`, `roomIds`, `checkIn`, `checkOut`, `newBooking`, `holdExpiresAt`) are never cleared by "Clear all" — they are where the page IS, not what it is filtered by.
+
 ---
 
 ## Key Workflows & Rules

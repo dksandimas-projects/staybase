@@ -10,6 +10,10 @@ import {
   calculateSeasonalAwareRoomTotal,
   compressImageFile,
   CHECK_IN_ELIGIBLE_STATUSES,
+  // Per FSO-13 (2026-11-23): the shared lifecycle constant that backs
+  // the bookings status filter, so the dropdown can never fall behind
+  // the data model.
+  BOOKING_STATUSES,
   getCheckInReadiness,
   getIdVerificationState,
   getLatestPaymentReference,
@@ -75,6 +79,16 @@ import {
 import { DataTable, DataTableColumn } from "../components/DataTable";
 import { Drawer } from "../components/Drawer";
 import { Modal } from "../components/Modal";
+// Per FSO-13 (2026-11-23): the ONE list of filter URL parameters — the
+// "Clear all" buttons reset every key in one `writeParams` call, and
+// the test asserts that every parameter the page reads is clearable.
+import {
+  BOOKING_ADVANCED_FILTER_PARAM_KEYS,
+  BOOKING_FILTER_PARAM_KEYS,
+  STORE_ADVANCED_FILTER_PARAM_KEYS,
+  STORE_FILTER_PARAM_KEYS,
+  clearFilterParams,
+} from "../utils/listFilterParams";
 // Per BR-09 (2026-10-14): the admin walk-in modal +
 // calendar-create modal now render the same 5-step
 // stepper as the public booking flow. The shared
@@ -679,6 +693,40 @@ function AdminPriceBreakdown({ breakdown, total, originalTotalPrice, discountTyp
   );
 }
 
+// Per FSO-13 (2026-11-23): the LIFECYCLE status filter.
+//
+// The `bs` URL parameter and its predicate shipped with the FSO
+// contract (`plan/features/BOOKINGS-MANAGEMENT.md §Table Filtering
+// & Search`), but NO control ever wrote it — the desk could deep-link
+// `?bs=checked-in` and nothing else. The labels below match the
+// Status column's wording so the dropdown and the table read the
+// same. The list is derived from the shared `BOOKING_STATUSES`
+// constant, so a status added there can never be missing here.
+const BOOKING_STATUS_FILTER_LABELS: Record<string, string> = {
+  pending: "Pending",
+  "payment-uploaded": "Payment uploaded",
+  "payment-confirmed": "Payment confirmed",
+  confirmed: "Confirmed",
+  "checked-in": "Checked in",
+  "checked-out": "Checked out",
+  cancelled: "Cancelled",
+};
+
+const BOOKING_STATUS_FILTER_OPTIONS = BOOKING_STATUSES.map((status) => ({
+  value: status,
+  label: BOOKING_STATUS_FILTER_LABELS[status] || status,
+}));
+
+// The store-order lifecycle (per `AdminContext`'s store-order type):
+// placed → confirmed → out-for-delivery → delivered, plus cancelled.
+const STORE_ORDER_STATUS_FILTER_OPTIONS = [
+  { value: "placed", label: "Placed" },
+  { value: "confirmed", label: "Confirmed" },
+  { value: "out-for-delivery", label: "Out for delivery" },
+  { value: "delivered", label: "Delivered" },
+  { value: "cancelled", label: "Cancelled" },
+];
+
 export function BookingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { 
@@ -884,7 +932,12 @@ export function BookingsPage() {
   const bookingSearch = readParam("bq", "");
   const setBookingSearch = (v: string) => writeParams({ bq: v || null });
   const bookingStatusFilter = readParam("bs", "all");
-  const setBookingStatusFilter = (v: string) => writeParams({ bs: v === "all" ? null : v, bqv: null });
+  // Per FSO-13 (2026-11-23): picking a lifecycle status REPLACES the
+  // quick view (the two are mutually exclusive), but putting the
+  // dropdown back to "All statuses" is a no-op that must NOT silently
+  // drop the quick view the desk was actually working with.
+  const setBookingStatusFilter = (v: string) =>
+    writeParams(v === "all" ? { bs: null } : { bs: v, bqv: null });
 
   // FSO-10: Store quick views + filter state (synced to URL)
   type StoreQuickView = "all" | "needs-action" | "placed" | "preparing" | "out-for-delivery" | "delivered-today" | "add-to-bill" | "payment-pending" | "cancelled";
@@ -893,7 +946,8 @@ export function BookingsPage() {
   const storeSearch = readParam("sq", "");
   const setStoreSearch = (v: string) => writeParams({ sq: v || null });
   const storeStatusFilter = readParam("ss", "all");
-  const setStoreStatusFilter = (v: string) => writeParams({ ss: v === "all" ? null : v, sqv: null });
+  const setStoreStatusFilter = (v: string) =>
+    writeParams(v === "all" ? { ss: null } : { ss: v, sqv: null });
 
   // FSO-08: Booking advanced filter state (synced to URL)
   const bDateBasis = readParam("bdb", "stay") as "stay" | "arrival" | "departure" | "created";
@@ -934,6 +988,35 @@ export function BookingsPage() {
   const sPayProof = readParam("spp", "");
   const setSPayProof = (v: string) => writeParams({ spp: v || null });
   const [showStoreFilters, setShowStoreFilters] = useState(false);
+
+  // Per FSO-13 (2026-11-23): a filter RESET must go through ONE
+  // `writeParams` call.
+  //
+  // `writeParams` builds its next query string from the `searchParams`
+  // captured in the CURRENT render, and `setSearchParams` REPLACES the
+  // whole query string. So N calls inside ONE handler each start from
+  // the SAME stale snapshot — the last `setSearchParams` wins and every
+  // earlier clear is silently undone. That is why the toolbar's
+  // "Clear all" left every filter in place except the single key it
+  // happened to touch last, and why removing the date chip cleared
+  // only one of the two dates. One call, every key.
+  //
+  // The key lists live in `admin-app/src/utils/listFilterParams.ts` so
+  // the page and the test agree on what "every filter" means.
+  const clearBookingFilters = () =>
+    writeParams(clearFilterParams(BOOKING_FILTER_PARAM_KEYS));
+
+  // The advanced panel's own "Clear all" — every control the panel
+  // owns (the status filter lives in the panel too, so mobile can
+  // reach it), without touching the quick view or the search box.
+  const clearBookingAdvancedFilters = () =>
+    writeParams(clearFilterParams(BOOKING_ADVANCED_FILTER_PARAM_KEYS));
+
+  const clearStoreFilters = () =>
+    writeParams(clearFilterParams(STORE_FILTER_PARAM_KEYS));
+
+  const clearStoreAdvancedFilters = () =>
+    writeParams(clearFilterParams(STORE_ADVANCED_FILTER_PARAM_KEYS));
 
   // Booking Drawer States
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
@@ -5490,7 +5573,11 @@ export function BookingsPage() {
       activeChips.push({ id: "search", label: `Search: "${bookingSearch}"`, onRemove: () => setBookingSearch("") });
     }
     if (bookingStatusFilter !== "all") {
-      activeChips.push({ id: "status", label: `Status: ${bookingStatusFilter}`, onRemove: () => setBookingStatusFilter("all") });
+      // Per FSO-13 (2026-11-23): the chip reads the SAME label the
+      // dropdown shows ("Checked in"), not the raw URL value.
+      const statusLabel =
+        BOOKING_STATUS_FILTER_LABELS[bookingStatusFilter] || bookingStatusFilter;
+      activeChips.push({ id: "status", label: `Status: ${statusLabel}`, onRemove: () => setBookingStatusFilter("all") });
     }
     if (bPayState) activeChips.push({ id: "bPayState", label: `Payment: ${bPayState}`, onRemove: () => setBPayState("") });
     if (bPaymentMethod) activeChips.push({ id: "bPaymentMethod", label: `Method: ${bPaymentMethod}`, onRemove: () => setBPaymentMethod("") });
@@ -5503,7 +5590,7 @@ export function BookingsPage() {
     }
     if (bCorp) activeChips.push({ id: "bCorp", label: bCorp === "yes" ? "Corporate" : "Non-corporate", onRemove: () => setBCorp("") });
     if (bDiscount) activeChips.push({ id: "bDiscount", label: bDiscount === "yes" ? "With discount" : "No discount", onRemove: () => setBDiscount("") });
-    if (bDateFrom || bDateTo) activeChips.push({ id: "bDate", label: `Dates: ${bDateFrom || "any"} – ${bDateTo || "any"}`, onRemove: () => { setBDateFrom(""); setBDateTo(""); } });
+    if (bDateFrom || bDateTo) activeChips.push({ id: "bDate", label: `Dates: ${bDateFrom || "any"} – ${bDateTo || "any"}`, onRemove: () => writeParams({ bdf: null, bdt: null }) });
   } else {
     if (storeQuickView !== "all") {
       const def = storeQuickViews.find((q) => q.id === storeQuickView);
@@ -5513,19 +5600,22 @@ export function BookingsPage() {
       activeChips.push({ id: "search", label: `Search: "${storeSearch}"`, onRemove: () => setStoreSearch("") });
     }
     if (storeStatusFilter !== "all") {
-      activeChips.push({ id: "status", label: `Status: ${storeStatusFilter}`, onRemove: () => setStoreStatusFilter("all") });
+      const storeStatusLabel =
+        STORE_ORDER_STATUS_FILTER_OPTIONS.find((o) => o.value === storeStatusFilter)?.label ||
+        storeStatusFilter;
+      activeChips.push({ id: "status", label: `Status: ${storeStatusLabel}`, onRemove: () => setStoreStatusFilter("all") });
     }
     if (sRoom) activeChips.push({ id: "sRoom", label: `Room: ${sRoom}`, onRemove: () => setSRoom("") });
     if (sPaymentMethod) activeChips.push({ id: "sPaymentMethod", label: `Method: ${sPaymentMethod}`, onRemove: () => setSPaymentMethod("") });
     if (sBilling) activeChips.push({ id: "sBilling", label: sBilling === "direct" ? "Direct pay" : "Add to bill", onRemove: () => setSBilling("") });
     if (sBilled) activeChips.push({ id: "sBilled", label: sBilled === "billed" ? "Billed" : "Unbilled", onRemove: () => setSBilled("") });
     if (sPayProof) activeChips.push({ id: "sPayProof", label: `Proof: ${sPayProof}`, onRemove: () => setSPayProof("") });
-    if (sDateFrom || sDateTo) activeChips.push({ id: "sDate", label: `Dates: ${sDateFrom || "any"} – ${sDateTo || "any"}`, onRemove: () => { setSDateFrom(""); setSDateTo(""); } });
+    if (sDateFrom || sDateTo) activeChips.push({ id: "sDate", label: `Dates: ${sDateFrom || "any"} – ${sDateTo || "any"}`, onRemove: () => writeParams({ sdf: null, sdt: null }) });
   }
 
   const advancedCount = activeMainTab === "bookings"
-    ? [bPayState, bPaymentMethod, bRoom, bRoomType, bSource, bCorp, bDiscount, bDateFrom || bDateTo ? "dates" : ""].filter(Boolean).length
-    : [sRoom, sPaymentMethod, sBilling, sBilled, sPayProof, sDateFrom || sDateTo ? "dates" : ""].filter(Boolean).length;
+    ? [bookingStatusFilter !== "all" ? bookingStatusFilter : "", bPayState, bPaymentMethod, bRoom, bRoomType, bSource, bCorp, bDiscount, bDateFrom || bDateTo ? "dates" : ""].filter(Boolean).length
+    : [storeStatusFilter !== "all" ? storeStatusFilter : "", sRoom, sPaymentMethod, sBilling, sBilled, sPayProof, sDateFrom || sDateTo ? "dates" : ""].filter(Boolean).length;
 
   const currentQVs = activeMainTab === "bookings" ? bookingQuickViews : storeQuickViews;
   const setQV = activeMainTab === "bookings" ? setBookingQuickView : setStoreQuickView;
@@ -5649,7 +5739,7 @@ export function BookingsPage() {
           />
           <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="hidden text-xs text-gray-500 sm:inline">
             {resultCount === totalCount
               ? `${totalCount} records`
@@ -5660,6 +5750,39 @@ export function BookingsPage() {
               {advancedCount} active filters
             </span>
           )}
+          {/* Per FSO-13 (2026-11-23): the LIFECYCLE status filter.
+              Per `ADMIN-MOBILE.md §Filter / search bar` the desktop
+              toolbar is "search input + status dropdown"; on mobile
+              the same control lives inside the Filters panel (it is
+              rendered there too), so the dropdown is desktop/tablet
+              only. Both controls write the SAME `bs` / `ss` URL
+              parameter, so they can never disagree. */}
+          <label className="hidden sm:block">
+            <span className="sr-only">
+              {activeMainTab === "bookings" ? "Booking status" : "Order status"}
+            </span>
+            <select
+              value={activeMainTab === "bookings" ? bookingStatusFilter : storeStatusFilter}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (activeMainTab === "bookings") setBookingStatusFilter(v);
+                else setStoreStatusFilter(v);
+              }}
+              className="min-h-[44px] rounded-lg border border-gray-250 bg-white px-2 text-xs font-semibold text-gray-700 outline-none transition hover:bg-gray-50 focus:border-primary"
+            >
+              <option value="all">
+                {activeMainTab === "bookings" ? "All statuses" : "All statuses"}
+              </option>
+              {(activeMainTab === "bookings"
+                ? BOOKING_STATUS_FILTER_OPTIONS
+                : STORE_ORDER_STATUS_FILTER_OPTIONS
+              ).map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             type="button"
             onClick={() => { if (activeMainTab === "bookings") setShowBookingFilters(true); else setShowStoreFilters(true); }}
@@ -5670,14 +5793,13 @@ export function BookingsPage() {
           </button>
           <button
             type="button"
+            // Per FSO-13 (2026-11-23): ONE `writeParams` call per tab.
+            // N calls inside one handler each rebuilt the query string
+            // from the SAME stale snapshot, so the last one won and
+            // every other filter stayed exactly where it was.
             onClick={() => {
-              if (activeMainTab === "bookings") {
-                setBookingQuickView("all"); setBookingSearch(""); setBookingStatusFilter("all");
-                setBPayState(""); setBPaymentMethod(""); setBRoom(""); setBRoomType(""); setBSource(""); setBCorp(""); setBDiscount(""); setBDateFrom(""); setBDateTo("");
-              } else {
-                setStoreQuickView("all"); setStoreSearch(""); setStoreStatusFilter("all");
-                setSRoom(""); setSPaymentMethod(""); setSBilling(""); setSBilled(""); setSPayProof(""); setSDateFrom(""); setSDateTo("");
-              }
+              if (activeMainTab === "bookings") clearBookingFilters();
+              else clearStoreFilters();
             }}
             disabled={activeChips.length === 0}
             className="min-h-[36px] rounded-lg border border-gray-250 bg-white px-3 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-40"
@@ -5712,6 +5834,19 @@ export function BookingsPage() {
               <button type="button" onClick={() => setShowBookingFilters(false)} className="min-h-[36px] rounded-lg border border-gray-250 px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50">Close</button>
             </div>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {/* Per FSO-13 (2026-11-23): the lifecycle status filter is
+                  in the panel too, so the desk can reach it on mobile
+                  (where the toolbar dropdown is hidden). Same `bs`
+                  parameter as the toolbar dropdown. */}
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Booking status
+                <select value={bookingStatusFilter} onChange={(e) => setBookingStatusFilter(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="all">All statuses</option>
+                  {BOOKING_STATUS_FILTER_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </label>
               <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
                 Date basis
                 <select value={bDateBasis} onChange={(e) => setBDateBasis(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
@@ -5787,7 +5922,7 @@ export function BookingsPage() {
               </label>
             </div>
             <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-100 pt-3">
-              <button type="button" onClick={() => { setBPayState(""); setBPaymentMethod(""); setBRoom(""); setBRoomType(""); setBSource(""); setBCorp(""); setBDiscount(""); setBDateFrom(""); setBDateTo(""); }} className="min-h-[36px] rounded-lg border border-gray-250 bg-white px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50">Clear all</button>
+              <button type="button" onClick={clearBookingAdvancedFilters} className="min-h-[36px] rounded-lg border border-gray-250 bg-white px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50">Clear all</button>
               <button type="button" onClick={() => setShowBookingFilters(false)} className="min-h-[36px] rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark">Apply filters</button>
             </div>
           </div>
@@ -5803,6 +5938,17 @@ export function BookingsPage() {
               <button type="button" onClick={() => setShowStoreFilters(false)} className="min-h-[36px] rounded-lg border border-gray-250 px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50">Close</button>
             </div>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {/* Per FSO-13 (2026-11-23): the order-status filter, same
+                  `ss` parameter as the toolbar dropdown. */}
+              <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
+                Order status
+                <select value={storeStatusFilter} onChange={(e) => setStoreStatusFilter(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs">
+                  <option value="all">All statuses</option>
+                  {STORE_ORDER_STATUS_FILTER_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </label>
               <label className="flex flex-col gap-1 text-[10px] font-semibold text-gray-600">
                 From
                 <input type="date" value={sDateFrom} onChange={(e) => setSDateFrom(e.target.value)} className="min-h-[36px] rounded-lg border border-gray-200 px-2 text-xs" />
@@ -5851,7 +5997,7 @@ export function BookingsPage() {
               </label>
             </div>
             <div className="mt-4 flex items-center justify-end gap-2 border-t border-gray-100 pt-3">
-              <button type="button" onClick={() => { setSDateFrom(""); setSDateTo(""); setSRoom(""); setSPaymentMethod(""); setSBilling(""); setSBilled(""); setSPayProof(""); }} className="min-h-[36px] rounded-lg border border-gray-250 bg-white px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50">Clear all</button>
+              <button type="button" onClick={clearStoreAdvancedFilters} className="min-h-[36px] rounded-lg border border-gray-250 bg-white px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50">Clear all</button>
               <button type="button" onClick={() => setShowStoreFilters(false)} className="min-h-[36px] rounded-lg bg-primary px-4 text-xs font-bold text-white hover:bg-primary-dark">Apply filters</button>
             </div>
           </div>
