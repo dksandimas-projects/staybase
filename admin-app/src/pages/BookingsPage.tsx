@@ -155,6 +155,7 @@ import { useToast } from "../components/Toast";
 import { useTwoClickConfirm } from "../utils/useTwoClickConfirm";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
+import { installPdfTextSanitizer } from "../utils/pdfText";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
 import {
   Calendar,
@@ -425,6 +426,11 @@ const LEGACY_ONSITE_PAYMENT_METHOD_LABELS = LEGACY_ONSITE_PAYMENT_METHOD_OPTIONS
 
 async function registerBrandPdfFonts(pdf: jsPDF) {
   pdf.setFont("helvetica", "normal");
+  // Helvetica is a WinAnsi standard font, so the peso sign has no glyph in
+  // it — drawn raw it came out as "± 2 , 3 9 0". Sanitizing here, before a
+  // single string is drawn, covers both builders and the shared header /
+  // footer helpers they pass `pdf` to. See `utils/pdfText.ts`.
+  installPdfTextSanitizer(pdf);
   await Promise.resolve();
 }
 
