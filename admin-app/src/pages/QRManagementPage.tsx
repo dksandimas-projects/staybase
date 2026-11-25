@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { QRCodeCanvas, QRCodeSVG } from "qrcode.react";
+import { QRCodeSVG } from "qrcode.react";
 import { AlertTriangle, Check, Download, Printer, QrCode, RefreshCcw, X } from "lucide-react";
 import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
 import config from "@config";
@@ -9,6 +8,7 @@ import { useAdmin, Room } from "../context/AdminContext";
 import { useToast } from "../components/Toast";
 import { db } from "../firebase/config";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
+import { renderQrPngDataUrl } from "../utils/renderQrPngDataUrl";
 
 const qrSize = 136;
 
@@ -43,36 +43,6 @@ function getQrMarkup(value: string, size = qrSize) {
       bgColor="white"
     />
   );
-}
-
-async function renderQrPngDataUrl(value: string, size = 512) {
-  const host = document.createElement("div");
-  host.style.position = "fixed";
-  host.style.left = "-9999px";
-  host.style.top = "0";
-  host.setAttribute("aria-hidden", "true");
-  document.body.appendChild(host);
-
-  const root = createRoot(host);
-  try {
-    root.render(
-      <QRCodeCanvas
-        value={value}
-        size={size}
-        level="M"
-        marginSize={2}
-        fgColor={config.colors.sidebar}
-        bgColor="white"
-      />
-    );
-    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-    const canvas = host.querySelector("canvas");
-    if (!canvas) throw new Error("QR canvas did not render.");
-    return canvas.toDataURL("image/png");
-  } finally {
-    root.unmount();
-    host.remove();
-  }
 }
 
 function getPrintableCard(room: Room, compact = false, destination: "chat" | "shop" = "chat") {

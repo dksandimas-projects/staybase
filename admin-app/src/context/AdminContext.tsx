@@ -587,6 +587,10 @@ export interface Booking {
   cancelledAt?: string | null;
   cancelledBy?: string | null;
   cancellationSource?: "guest" | "staff" | "system" | null;
+  // The policy in force when the guest booked. The listener has always
+  // mapped this field; the type never declared it, so the booking
+  // receipt could not quote the policy without a cast.
+  cancellationPolicySnapshot?: import("@spark-inn/shared").CancellationPolicySnapshot | null;
   // Per CRL-07 (2026-08-03, per decision #173):
   // the durable refund-liability snapshot. Mirrors
   // `shared/types.Booking.cancellationLiability`.

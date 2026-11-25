@@ -168,7 +168,16 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
       const funcBody = bookingsPageSrc.slice(funcStart, funcEnd);
       expect(funcBody).toMatch(/Amount to collect/);
       expect(funcBody).toMatch(/amountDueForSummary/);
-      expect(funcBody).toMatch(/\$\{isReservationReceipt \? "Reservation" : "Booking"\} \$\{receiptReference\} • Generated/);
+      // The banner's sub-line used to repeat the reference and the
+      // generated timestamp — both already in the header above it and
+      // the footer below it. It now says what the banner's number means.
+      expect(funcBody).not.toMatch(/\$\{isReservationReceipt \? "Reservation" : "Booking"\} \$\{receiptReference\} • Generated/);
+      expect(funcBody).toMatch(/const bannerNote =/);
+      expect(funcBody).toMatch(/Payable at check-in/);
+      // A settled receipt says so in words instead of shouting a zero.
+      expect(funcBody).toMatch(/const isSettledReceipt = amountDueForSummary <= 0/);
+      expect(funcBody).toMatch(/isSettledReceipt \? "Fully paid" : "Amount to collect"/);
+      expect(funcBody).toMatch(/isSettledReceipt \? "No balance due" : formatAmount\(amountDueForSummary\)/);
     });
 
     it("pulls the footer up beneath the receipt content instead of pinning it to the page bottom", () => {

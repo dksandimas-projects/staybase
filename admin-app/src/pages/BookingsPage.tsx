@@ -68,6 +68,10 @@ import {
   // Per HC-02 (decision #329): the house-rules times.
   resolveHotelTimes,
   interpolateHotelTimes,
+  // The receipt prints the policy the guest booked under; this is the
+  // last-resort text for a booking with no snapshot and a hotel that
+  // never set one in Settings.
+  getLegacyCancellationPolicy,
   // Per ATR-05 (2026-11-20, `plan/features/AUDIT-TRAIL.md`): the ONE
   // shared staff-UID → display-name resolver. The drawer's discount
   // block used to print the raw UID (or the literal "Staff").
@@ -156,6 +160,7 @@ import { useTwoClickConfirm } from "../utils/useTwoClickConfirm";
 import { cn } from "../utils/cn";
 import { formatPrice } from "../utils/format";
 import { installPdfTextSanitizer } from "../utils/pdfText";
+import { renderQrPngDataUrl } from "../utils/renderQrPngDataUrl";
 import { getApiBaseUrl } from "../utils/apiBaseUrl";
 import {
   Calendar,
@@ -593,15 +598,22 @@ function drawPdfFooter(
   // the RUNTIME hotel config (the address / front-desk phone / support
   // email the admin set in Settings → Hotel Info), not the deploy-time
   // `hotel.config.ts` placeholders.
-  contact?: HotelContact
+  contact?: HotelContact,
+  // The receipt's note is a disclaimer — the line that says this is NOT
+  // the official BIR receipt — and was the smallest, palest text on the
+  // page. The registration PDF's note is only a provenance stamp, so it
+  // keeps the quiet default.
+  emphasizeNote = false
 ) {
   const pageW = 210;
   pdf.setDrawColor(...brandRgb);
   pdf.setLineWidth(0.35);
   pdf.line(15, footerY, 195, footerY);
-  pdf.setFontSize(7.5);
-  pdf.setTextColor(100, 100, 100);
+  pdf.setFontSize(emphasizeNote ? 8.2 : 7.5);
+  pdf.setTextColor(emphasizeNote ? 70 : 100, emphasizeNote ? 70 : 100, emphasizeNote ? 70 : 100);
+  if (emphasizeNote) pdf.setFont("helvetica", "bold");
   pdf.text(footerNote, pageW / 2, footerY + 5, { align: "center", charSpace: 0 });
+  if (emphasizeNote) setPdfFont(pdf, "Inter");
   pdf.setFontSize(7);
   pdf.setTextColor(150, 150, 150);
   pdf.text(
@@ -3843,6 +3855,22 @@ export function BookingsPage() {
       await registerBrandPdfFonts(pdf);
       const logoDataUrl = await getPdfBrandLogoDataUrl();
       setPdfFont(pdf, "Inter");
+
+      // The guest-facing lookup deep link. Deliberately reference-only:
+      // the email templates may add `&email=`, but a printed receipt is a
+      // physical object anyone who picks it up can scan, so the QR must
+      // not carry the credential that opens the booking. /my-booking
+      // pre-fills the reference and still asks for the email.
+      const guestSiteBase = getApiBaseUrl().replace(/\/$/, "");
+      const lookupPath = `/my-booking?${isReservationReceipt ? "reservationRef" : "ref"}=${encodeURIComponent(receiptReference)}`;
+      const lookupUrl = `${guestSiteBase}${lookupPath}`;
+      // A QR that fails to rasterise must not cost the desk its receipt.
+      let lookupQrDataUrl = "";
+      try {
+        lookupQrDataUrl = await renderQrPngDataUrl(lookupUrl, 384);
+      } catch {
+        lookupQrDataUrl = "";
+      }
       const pageW = 210;
       const marginL = 15;
       const marginR = pageW - 15;
@@ -3894,6 +3922,21 @@ export function BookingsPage() {
       // receipt never showed the room number at all. Only a genuinely
       // multi-room reservation needs the pointer.
       const isMultiRoomReceipt = isReservationReceipt && receiptBookings.length > 1;
+
+      // A real timestamp (when a payment was recorded), unlike the
+      // date-only stay dates above: this one IS resolved against the
+      // hotel's timezone, or a 7am Manila payment would print as the
+      // previous day.
+      const formatReceiptMoment = (value: unknown) => {
+        const date = toDate(value);
+        if (!date) return "—";
+        return date.toLocaleDateString(config.locale, {
+          timeZone: config.timezone || "Asia/Manila",
+          year: "numeric",
+          month: "short",
+          day: "numeric"
+        });
+      };
 
       // The live `settings/hotelConfig` times, same source the registration
       // form and the guest email use.
@@ -3986,15 +4029,26 @@ export function BookingsPage() {
         compact: true // Compact header saves 10mm of vertical height
       });
 
-      pdf.setFillColor(255, 247, 237);
+      // The banner states the one thing the reader needs from this
+      // document. On a settled booking that used to be a 12.5pt "PHP 0" —
+      // the loudest thing on the page was a zero. A settled receipt now
+      // says so in words and keeps the big number for a real balance.
+      const isSettledReceipt = amountDueForSummary <= 0;
+      const settledRgb: [number, number, number] = [34, 139, 34];
+      const bannerRgb = isSettledReceipt ? settledRgb : brandRgb;
+      if (isSettledReceipt) {
+        pdf.setFillColor(240, 250, 241);
+      } else {
+        pdf.setFillColor(255, 247, 237);
+      }
       pdf.roundedRect(marginL, y - 2, marginR - marginL, 10.5, 1.5, 1.5, "F");
       pdf.setFontSize(8.0);
-      pdf.setTextColor(...brandRgb);
-      pdf.text("Amount to collect", marginL + 5, y + 1.2, { charSpace: 0 });
+      pdf.setTextColor(...bannerRgb);
+      pdf.text(isSettledReceipt ? "Fully paid" : "Amount to collect", marginL + 5, y + 1.2, { charSpace: 0 });
       pdf.setFontSize(12.5);
       pdf.setFont("helvetica", "bold");
       pdf.text(
-        formatAmount(amountDueForSummary),
+        isSettledReceipt ? "No balance due" : formatAmount(amountDueForSummary),
         amountX,
         y + 2.2,
         { align: "right", charSpace: 0 }
@@ -4002,7 +4056,24 @@ export function BookingsPage() {
       setPdfFont(pdf, "Inter");
       pdf.setFontSize(7.5);
       pdf.setTextColor(90, 90, 90);
-      pdf.text(`${isReservationReceipt ? "Reservation" : "Booking"} ${receiptReference} • Generated ${generatedAt}`, marginL + 5, y + 6.2, { charSpace: 0 });
+      // This line used to repeat the reference and the generated
+      // timestamp, both of which the header states two centimetres above
+      // and the footer repeats again. It now says what the banner's
+      // number means instead.
+      const lastPaymentAt = selectedBookingPayments.reduce<number | null>((latest, payment) => {
+        const recorded = payment.recordedAt ? new Date(payment.recordedAt).getTime() : NaN;
+        if (!Number.isFinite(recorded)) return latest;
+        return latest === null || recorded > latest ? recorded : latest;
+      }, null);
+      const expectedMethodLabel = b.paymentMethod ? formatPaymentMethod(b.paymentMethod) : "";
+      const bannerNote = isSettledReceipt
+        ? (lastPaymentAt !== null
+            ? `Settled in full on ${formatReceiptMoment(new Date(lastPaymentAt))} — nothing to pay at check-in.`
+            : "Nothing to pay at check-in.")
+        : expectedMethodLabel
+          ? `Payable at check-in via ${expectedMethodLabel}.`
+          : "Payable at check-in.";
+      pdf.text(bannerNote, marginL + 5, y + 6.2, { charSpace: 0 });
       y += 12; // Reduced gap
 
       // ── Guest & Stay Information ──
@@ -4026,6 +4097,14 @@ export function BookingsPage() {
           label: "Check-in / out",
           value: `${receiptHotelTimes.checkInTime || "—"} / ${receiptHotelTimes.checkOutTime || "—"}`
         },
+        // A one-room reservation no longer prints a per-room heading in
+        // the pricing breakdown, so its room-level `SI-` reference would
+        // otherwise disappear from the document. The header carries the
+        // `R-`; this keeps the room's own reference, which /my-booking
+        // also accepts.
+        ...((isReservationReceipt && !isMultiRoomReceipt && b.bookingRef && b.bookingRef !== receiptReference)
+          ? [{ label: "Room ref", value: b.bookingRef }]
+          : []),
         // Per MRB-14 (2026-08-03, per decision #180): when
         // the reservation's children have diverged from the
         // header's original shared dates, the receipt adds
@@ -4099,6 +4178,9 @@ export function BookingsPage() {
       if (isReservationReceipt) {
         receiptBookings.forEach((receiptBooking, bookingIndex) => {
           const roomLabel = getReceiptRoomLabel(receiptBooking, bookingIndex);
+          // The two-space indent exists to sit the line items under a
+          // room heading. With no heading there is nothing to indent to.
+          const rowIndent = isMultiRoomReceipt ? "  " : "";
           const breakdown = receiptBooking.rateBreakdown;
           checkNewPage(12 + (
             (breakdown?.roomLines?.length || 1)
@@ -4106,13 +4188,22 @@ export function BookingsPage() {
             + (breakdown?.deductions?.length || 0)
           ) * 5);
 
-          pdf.setFontSize(9.2);
-          pdf.setTextColor(...brandRgb);
-          pdf.setFont("helvetica", "bold");
-          pdf.text(roomLabel, labelColX, y, { charSpace: 0 });
-          pdf.text(receiptBooking.bookingRef, amountX, y, { align: "right", charSpace: 0 });
-          setPdfFont(pdf, "Inter");
-          y += 4.4;
+          // A one-room reservation needs no per-room heading: "Room 1 of
+          // 1 — deluxe" above a single block, with a "Room 1 of 1 —
+          // deluxe total" repeating the same figure below it and the
+          // Reservation Total repeating it again, printed one number
+          // three times. The room's `SI-` reference moves to the Stay
+          // card so nothing is lost. Multi-room receipts keep the
+          // heading — there the grouping is the point.
+          if (isMultiRoomReceipt) {
+            pdf.setFontSize(9.2);
+            pdf.setTextColor(...brandRgb);
+            pdf.setFont("helvetica", "bold");
+            pdf.text(roomLabel, labelColX, y, { charSpace: 0 });
+            pdf.text(receiptBooking.bookingRef, amountX, y, { align: "right", charSpace: 0 });
+            setPdfFont(pdf, "Inter");
+            y += 4.4;
+          }
 
           // Per MRB-14 (2026-08-03, per decision #180):
           // when the reservation's children have diverged,
@@ -4140,30 +4231,32 @@ export function BookingsPage() {
           if (breakdown?.roomLines?.length) {
             breakdown.roomLines.forEach((line) => {
               drawAmountRow(
-                `  ${line.label}: ${line.nights} × ${formatAmount(line.nightlyRate)}`,
+                `${rowIndent}${line.label}: ${line.nights} × ${formatAmount(line.nightlyRate)}`,
                 formatAmount(line.subtotal)
               );
             });
             breakdown.addOns.forEach((line) => {
-              drawAmountRow(`  ${line.label}`, formatAmount(line.amount));
+              drawAmountRow(`${rowIndent}${line.label}`, formatAmount(line.amount));
             });
             breakdown.deductions.forEach((line) => {
-              drawAmountRow(`  ${line.label}`, `-${formatAmount(line.amount)}`, { muted: true });
+              drawAmountRow(`${rowIndent}${line.label}`, `-${formatAmount(line.amount)}`, { muted: true });
             });
           } else {
             const roomSubtotal = receiptBooking.ratePerNight * receiptBooking.numNights;
             drawAmountRow(
-              `  Room subtotal: ${receiptBooking.numNights} night${receiptBooking.numNights === 1 ? "" : "s"} × ${formatAmount(receiptBooking.ratePerNight)}`,
+              `${rowIndent}Room subtotal: ${receiptBooking.numNights} night${receiptBooking.numNights === 1 ? "" : "s"} × ${formatAmount(receiptBooking.ratePerNight)}`,
               formatAmount(roomSubtotal)
             );
           }
 
-          drawAmountRow(
-            `  ${roomLabel} total`,
-            formatAmount(receiptBooking.totalPrice),
-            { bold: true }
-          );
-          y += 1.5;
+          if (isMultiRoomReceipt) {
+            drawAmountRow(
+              `  ${roomLabel} total`,
+              formatAmount(receiptBooking.totalPrice),
+              { bold: true }
+            );
+            y += 1.5;
+          }
         });
       } else if (b.rateBreakdown?.roomLines?.length) {
         b.rateBreakdown.roomLines.forEach((line) => {
@@ -4361,14 +4454,7 @@ export function BookingsPage() {
           checkNewPage(6);
           pdf.setFontSize(9);
           pdf.setTextColor(50, 50, 50);
-          const recordedDate = pay.recordedAt
-            ? new Date(pay.recordedAt).toLocaleDateString(config.locale, {
-                timeZone: config.timezone || "Asia/Manila",
-                year: "numeric",
-                month: "short",
-                day: "numeric"
-              })
-            : "—";
+          const recordedDate = formatReceiptMoment(pay.recordedAt);
           pdf.text(recordedDate, labelColX, y, { charSpace: 0 });
           pdf.text(formatPaymentMethod(pay.method), labelColX + 42, y, { charSpace: 0 });
           pdf.setFont("helvetica", "bold");
@@ -4422,6 +4508,72 @@ export function BookingsPage() {
         y += 5;
       }
 
+      // ── Manage your booking ──
+      // The page had roughly ten centimetres of dead space above the
+      // footer. A guest who can re-open their own booking does not have
+      // to phone the front desk for it.
+      checkNewPage(36);
+      y += 3;
+      drawPdfSectionTitle(pdf, "Manage your booking", marginL, y, brandRgb);
+      y += 5;
+      const manageBlockTop = y;
+      const qrSizeMm = 22;
+      let manageTextX = labelColX;
+      if (lookupQrDataUrl) {
+        pdf.addImage(lookupQrDataUrl, "PNG", marginL, manageBlockTop - 1, qrSizeMm, qrSizeMm);
+        manageTextX = marginL + qrSizeMm + 6;
+      }
+      pdf.setFontSize(8.6);
+      pdf.setTextColor(50, 50, 50);
+      pdf.text("View your booking, request a change, or message the front desk.", manageTextX, manageBlockTop + 3, { charSpace: 0 });
+      pdf.setFontSize(7.8);
+      pdf.setTextColor(110, 110, 110);
+      pdf.text(
+        lookupQrDataUrl ? `Scan the code, or visit ${guestSiteBase.replace(/^https?:\/\//, "")}/my-booking` : `Visit ${guestSiteBase.replace(/^https?:\/\//, "")}/my-booking`,
+        manageTextX,
+        manageBlockTop + 7.4,
+        { charSpace: 0 }
+      );
+      pdf.text(`${receiptReferenceLabel}: ${receiptReference} — you will be asked for the email on this receipt.`, manageTextX, manageBlockTop + 11.2, { charSpace: 0 });
+
+      // ── Cancellation policy ──
+      // The policy the guest actually booked under, snapshotted on the
+      // booking — NOT whatever Settings says today. A receipt that
+      // quietly restates a policy changed after the fact is worse than
+      // one that quotes none.
+      const receiptCancellationPolicy = String(
+        b.cancellationPolicySnapshot?.policyText
+        || websiteContent?.cancellationPolicy
+        || getLegacyCancellationPolicy()
+      ).trim();
+      let manageTextY = manageBlockTop + 15.2;
+      if (receiptCancellationPolicy) {
+        pdf.setFontSize(7.8);
+        pdf.setTextColor(70, 70, 70);
+        pdf.setFont("helvetica", "bold");
+        pdf.text("Cancellation policy", manageTextX, manageTextY, { charSpace: 0 });
+        setPdfFont(pdf, "Inter");
+        manageTextY += 3.6;
+        pdf.setTextColor(110, 110, 110);
+        const wrappedPolicy = pdf.splitTextToSize(
+          receiptCancellationPolicy,
+          marginR - manageTextX
+        ) as string[];
+        // A hotel may write a long policy. Three lines is the budget, and
+        // a cut sentence says so rather than just stopping mid-word.
+        const policyLines = wrappedPolicy.slice(0, 3);
+        if (wrappedPolicy.length > policyLines.length) {
+          policyLines[policyLines.length - 1] = `${policyLines[policyLines.length - 1].trimEnd()}…`;
+        }
+        policyLines.forEach((line) => {
+          pdf.text(line, manageTextX, manageTextY, { charSpace: 0 });
+          manageTextY += 3.4;
+        });
+      }
+      // The QR is 22mm tall; the text column beside it may be shorter or
+      // taller, so the block ends below whichever runs longer.
+      y = Math.max(manageTextY, manageBlockTop + qrSizeMm) + 3;
+
       // ── Footer ──
       // Pull footer up dynamically, removing artificial large margins
       const footerY = y + 8;
@@ -4444,7 +4596,8 @@ export function BookingsPage() {
         brandRgb,
         footerY > 275 ? y + 8 : footerY,
         isReservationReceipt ? "Reservation Ref" : "Booking Ref",
-        hotelContact
+        hotelContact,
+        true
       );
 
       const result = openPdfOrDownload(pdf, `${receiptFileStem}-receipt.pdf`, pdfWindow);
