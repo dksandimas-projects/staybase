@@ -13,8 +13,10 @@ import { resolve } from "node:path";
 // times (header, banner sub-line, footer note, footer ref).
 //
 // Density: roughly ten centimetres of the page were blank. The space now
-// carries a /my-booking QR and the cancellation policy the guest booked
-// under.
+// carries a /my-booking QR. (A cancellation-policy block shipped with
+// this pass and was removed the same day — the receipt is a payment
+// record, and the policy lives on the booking confirmation email and
+// the site.)
 
 const bookingsPageSrc = readFileSync(
   resolve(__dirname, "../pages/BookingsPage.tsx"),
@@ -97,19 +99,8 @@ describe("receipt PDF — the dead half-page earns its keep", () => {
     expect(receiptBody).toMatch(/\} catch \{\s*\n\s*lookupQrDataUrl = "";/);
   });
 
-  it("quotes the policy the guest booked under, not today's settings", () => {
-    expect(receiptBody).toMatch(/b\.cancellationPolicySnapshot\?\.policyText/);
-    expect(receiptBody).toMatch(/\|\| websiteContent\?\.cancellationPolicy/);
-    expect(receiptBody).toMatch(/\|\| getLegacyCancellationPolicy\(\)/);
-    // The snapshot is read first — Settings is only the fallback.
-    const snapshotIdx = receiptBody.indexOf("cancellationPolicySnapshot?.policyText");
-    const settingsIdx = receiptBody.indexOf("websiteContent?.cancellationPolicy");
-    expect(snapshotIdx).toBeGreaterThan(-1);
-    expect(snapshotIdx).toBeLessThan(settingsIdx);
-  });
-
   it("ends the block below whichever column runs longer", () => {
-    expect(receiptBody).toMatch(/Math\.max\(manageTextY, manageBlockTop \+ qrSizeMm\)/);
+    expect(receiptBody).toMatch(/Math\.max\(manageBlockTop \+ 13, manageBlockTop \+ qrSizeMm\)/);
   });
 });
 

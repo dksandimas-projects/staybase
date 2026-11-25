@@ -68,10 +68,6 @@ import {
   // Per HC-02 (decision #329): the house-rules times.
   resolveHotelTimes,
   interpolateHotelTimes,
-  // The receipt prints the policy the guest booked under; this is the
-  // last-resort text for a booking with no snapshot and a hotel that
-  // never set one in Settings.
-  getLegacyCancellationPolicy,
   // Per ATR-05 (2026-11-20, `plan/features/AUDIT-TRAIL.md`): the ONE
   // shared staff-UID → display-name resolver. The drawer's discount
   // block used to print the raw UID (or the literal "Staff").
@@ -4512,7 +4508,7 @@ export function BookingsPage() {
       // The page had roughly ten centimetres of dead space above the
       // footer. A guest who can re-open their own booking does not have
       // to phone the front desk for it.
-      checkNewPage(36);
+      checkNewPage(30);
       y += 3;
       drawPdfSectionTitle(pdf, "Manage your booking", marginL, y, brandRgb);
       y += 5;
@@ -4536,43 +4532,9 @@ export function BookingsPage() {
       );
       pdf.text(`${receiptReferenceLabel}: ${receiptReference} — you will be asked for the email on this receipt.`, manageTextX, manageBlockTop + 11.2, { charSpace: 0 });
 
-      // ── Cancellation policy ──
-      // The policy the guest actually booked under, snapshotted on the
-      // booking — NOT whatever Settings says today. A receipt that
-      // quietly restates a policy changed after the fact is worse than
-      // one that quotes none.
-      const receiptCancellationPolicy = String(
-        b.cancellationPolicySnapshot?.policyText
-        || websiteContent?.cancellationPolicy
-        || getLegacyCancellationPolicy()
-      ).trim();
-      let manageTextY = manageBlockTop + 15.2;
-      if (receiptCancellationPolicy) {
-        pdf.setFontSize(7.8);
-        pdf.setTextColor(70, 70, 70);
-        pdf.setFont("helvetica", "bold");
-        pdf.text("Cancellation policy", manageTextX, manageTextY, { charSpace: 0 });
-        setPdfFont(pdf, "Inter");
-        manageTextY += 3.6;
-        pdf.setTextColor(110, 110, 110);
-        const wrappedPolicy = pdf.splitTextToSize(
-          receiptCancellationPolicy,
-          marginR - manageTextX
-        ) as string[];
-        // A hotel may write a long policy. Three lines is the budget, and
-        // a cut sentence says so rather than just stopping mid-word.
-        const policyLines = wrappedPolicy.slice(0, 3);
-        if (wrappedPolicy.length > policyLines.length) {
-          policyLines[policyLines.length - 1] = `${policyLines[policyLines.length - 1].trimEnd()}…`;
-        }
-        policyLines.forEach((line) => {
-          pdf.text(line, manageTextX, manageTextY, { charSpace: 0 });
-          manageTextY += 3.4;
-        });
-      }
-      // The QR is 22mm tall; the text column beside it may be shorter or
-      // taller, so the block ends below whichever runs longer.
-      y = Math.max(manageTextY, manageBlockTop + qrSizeMm) + 3;
+      // The block ends below whichever column runs longer: the QR is
+      // 22mm tall and the text beside it is shorter.
+      y = Math.max(manageBlockTop + 13, manageBlockTop + qrSizeMm) + 3;
 
       // ── Footer ──
       // Pull footer up dynamically, removing artificial large margins
