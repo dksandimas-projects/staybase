@@ -124,18 +124,23 @@ describe("MRB-14-04 — Receipt PDF Stay card + pricing breakdown diverge on `ac
   });
 
   it("the receipt pricing breakdown prints per-room dates inline under each room label when divergent", () => {
-    // The room allocations block prints the
-    // child's `checkIn → checkOut` (raw ISO string
-    // from the booking doc) under the room label
-    // when the header is divergent. The non-
-    // divergent path omits the line so the
-    // reservation's shared dates aren't duplicated.
+    // The room allocations block prints the child's check-in / check-out
+    // under the room label when the header is divergent. The non-
+    // divergent path omits the line so the reservation's shared dates
+    // aren't duplicated.
     expect(bookingsPageSrc).toMatch(
       /reservationActualRange\?\.isDivergent && receiptBooking\.checkIn && receiptBooking\.checkOut/
     );
+    // The separator was "→" (U+2192), which is outside WinAnsi: the
+    // standard PDF font could never draw it, so the line was corrupted
+    // into UTF-16 before the receipt sanitizer landed and silently
+    // dropped the arrow after it. An en dash is in WinAnsi. The dates
+    // also go through `formatReceiptDate` now rather than printing the
+    // raw ISO strings the rest of the receipt had stopped using.
     expect(bookingsPageSrc).toMatch(
-      /\$\{receiptBooking\.checkIn\} → \$\{receiptBooking\.checkOut\}/
+      /\$\{formatReceiptDate\(receiptBooking\.checkIn\)\} – \$\{formatReceiptDate\(receiptBooking\.checkOut\)\}/
     );
+    expect(bookingsPageSrc).not.toMatch(/receiptBooking\.checkIn\} → /);
   });
 });
 

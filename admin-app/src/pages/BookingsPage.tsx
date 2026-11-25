@@ -3870,6 +3870,35 @@ export function BookingsPage() {
         }
       };
 
+      // One date format for the whole document. The Stay card used to
+      // print the raw `2026-11-21` strings while the header and the
+      // payments table printed "Nov 21, 2026" — three formats on one page.
+      // Check-in / check-out are date-only strings, so they are formatted
+      // in UTC: resolving them against the hotel timezone would slide a
+      // stay that starts on the 21st back to the 20th for any deployment
+      // west of UTC.
+      const formatReceiptDate = (value: unknown) => {
+        const date = toDate(value);
+        if (!date) return "—";
+        return date.toLocaleDateString(config.locale, {
+          timeZone: "UTC",
+          year: "numeric",
+          month: "short",
+          day: "numeric"
+        });
+      };
+
+      // A one-room reservation is still a reservation, but "1 room —
+      // itemized below" named nothing and pointed the guest at a list four
+      // centimetres down the same page — so a single-room reservation
+      // receipt never showed the room number at all. Only a genuinely
+      // multi-room reservation needs the pointer.
+      const isMultiRoomReceipt = isReservationReceipt && receiptBookings.length > 1;
+
+      // The live `settings/hotelConfig` times, same source the registration
+      // form and the guest email use.
+      const receiptHotelTimes = resolveHotelTimes(hotelConfig, config, config.locale);
+
       const receiptFolio = getBookingFolio(b);
       const paymentsTotalForSummary = selectedBookingPayments.reduce((sum, payment) => sum + payment.amount, 0);
       const amountDueForSummary = Math.max(0, receiptFolio.grandTotal - paymentsTotalForSummary);
@@ -3878,14 +3907,25 @@ export function BookingsPage() {
       const formatAmount = (value: number) =>
         `${config.currencySymbol}${Math.round(value || 0).toLocaleString(config.locale)}`;
 
-      const formatPaymentMethod = (method?: string) =>
-        method
-          ? method
-              .split("-")
-              .filter(Boolean)
-              .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-              .join(" ")
-          : "—";
+      // Title-casing the raw key printed "Gcash" on every receipt. The
+      // hotel's own configured label carries the right casing ("GCash
+      // Transfer"), so it wins; the onsite map first (it also covers the
+      // always-available Cash tender), then the full configured list so a
+      // non-tender rail like `pay-at-hotel` still resolves. Title case is
+      // only the last resort, for a key no longer in the config at all.
+      const formatPaymentMethod = (method?: string) => {
+        const key = (method || "").trim();
+        if (!key) return "—";
+        const configuredLabel =
+          onsitePaymentMethodLabels[key]
+          || paymentMethods.find((entry) => entry.method.trim() === key)?.label;
+        if (configuredLabel) return configuredLabel;
+        return key
+          .split("-")
+          .filter(Boolean)
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(" ");
+      };
 
       const fitText = (text: string, maxWidth: number) => {
         let next = text || "—";
@@ -3976,12 +4016,16 @@ export function BookingsPage() {
       const receiptGuestCount = receiptBookings.reduce((sum, booking) => sum + (Number(booking.numGuests) || 0), 0);
       const stayRows = [
         {
-          label: isReservationReceipt ? "Rooms" : "Room",
-          value: isReservationReceipt
-            ? `${receiptBookings.length} room${receiptBookings.length === 1 ? "" : "s"} — itemized below`
+          label: isMultiRoomReceipt ? "Rooms" : "Room",
+          value: isMultiRoomReceipt
+            ? `${receiptBookings.length} rooms — itemized below`
             : `${b.roomNumber} (${b.roomType})`
         },
-        { label: "Dates", value: `${b.checkIn} to ${b.checkOut}` },
+        { label: "Dates", value: `${formatReceiptDate(b.checkIn)} – ${formatReceiptDate(b.checkOut)}` },
+        {
+          label: "Check-in / out",
+          value: `${receiptHotelTimes.checkInTime || "—"} / ${receiptHotelTimes.checkOutTime || "—"}`
+        },
         // Per MRB-14 (2026-08-03, per decision #180): when
         // the reservation's children have diverged from the
         // header's original shared dates, the receipt adds
@@ -3994,7 +4038,7 @@ export function BookingsPage() {
         ...((isReservationReceipt && b.reservationId && reservationsMap.get(b.reservationId)?.actualDateRange?.isDivergent)
           ? [{
               label: "Actual range",
-              value: `${formatShortDate(reservationsMap.get(b.reservationId)!.actualDateRange!.earliestCheckIn)} to ${formatShortDate(reservationsMap.get(b.reservationId)!.actualDateRange!.latestCheckOut)} (varies by room)`
+              value: `${formatReceiptDate(reservationsMap.get(b.reservationId)!.actualDateRange!.earliestCheckIn)} – ${formatReceiptDate(reservationsMap.get(b.reservationId)!.actualDateRange!.latestCheckOut)} (varies by room)`
             }]
           : []),
         // Per EXB-08 (2026-08-01, per decision #156):
@@ -4003,7 +4047,7 @@ export function BookingsPage() {
         // extra bed count appended when > 0. Legacy pre-CHD
         // bookings read as a single `numGuests` total.
         { label: "Stay", value: (() => {
-          if (isReservationReceipt) {
+          if (isMultiRoomReceipt) {
             const nightsLabel = `${b.numNights} night${b.numNights === 1 ? "" : "s"}`;
             return `${nightsLabel} • ${receiptGuestCount} guest${receiptGuestCount === 1 ? "" : "s"} across ${receiptBookings.length} room${receiptBookings.length === 1 ? "" : "s"}`;
           }
@@ -4022,7 +4066,7 @@ export function BookingsPage() {
         })() },
         {
           label: "Rate",
-          value: isReservationReceipt ? "See room allocations" : `${formatAmount(b.ratePerNight)} / night`
+          value: isMultiRoomReceipt ? "See room allocations" : `${formatAmount(b.ratePerNight)} / night`
         }
       ];
       // Per BR-08 (decision #238, 2026-10-14): the per-room
@@ -4084,7 +4128,11 @@ export function BookingsPage() {
           if (reservationActualRange?.isDivergent && receiptBooking.checkIn && receiptBooking.checkOut) {
             pdf.setFontSize(8.0);
             pdf.setTextColor(120, 120, 120);
-            const roomDatesLabel = `  ${receiptBooking.checkIn} → ${receiptBooking.checkOut}`;
+            // "→" (U+2192) is outside WinAnsi, so the standard PDF font
+            // could never draw it — it corrupted the line into UTF-16
+            // before the sanitizer and is dropped by it now. An en dash
+            // is in WinAnsi and reads the same.
+            const roomDatesLabel = `  ${formatReceiptDate(receiptBooking.checkIn)} – ${formatReceiptDate(receiptBooking.checkOut)}`;
             pdf.text(roomDatesLabel, labelColX, y, { charSpace: 0 });
             y += 4.0;
           }
@@ -4092,7 +4140,7 @@ export function BookingsPage() {
           if (breakdown?.roomLines?.length) {
             breakdown.roomLines.forEach((line) => {
               drawAmountRow(
-                `  ${line.label}: ${line.nights} x ${formatAmount(line.nightlyRate)}`,
+                `  ${line.label}: ${line.nights} × ${formatAmount(line.nightlyRate)}`,
                 formatAmount(line.subtotal)
               );
             });
@@ -4105,7 +4153,7 @@ export function BookingsPage() {
           } else {
             const roomSubtotal = receiptBooking.ratePerNight * receiptBooking.numNights;
             drawAmountRow(
-              `  Room subtotal: ${receiptBooking.numNights} night${receiptBooking.numNights === 1 ? "" : "s"} x ${formatAmount(receiptBooking.ratePerNight)}`,
+              `  Room subtotal: ${receiptBooking.numNights} night${receiptBooking.numNights === 1 ? "" : "s"} × ${formatAmount(receiptBooking.ratePerNight)}`,
               formatAmount(roomSubtotal)
             );
           }
@@ -4120,7 +4168,7 @@ export function BookingsPage() {
       } else if (b.rateBreakdown?.roomLines?.length) {
         b.rateBreakdown.roomLines.forEach((line) => {
           checkNewPage(6);
-          drawAmountRow(`${line.label}: ${line.nights} x ${formatAmount(line.nightlyRate)}`, formatAmount(line.subtotal));
+          drawAmountRow(`${line.label}: ${line.nights} × ${formatAmount(line.nightlyRate)}`, formatAmount(line.subtotal));
         });
         b.rateBreakdown.addOns.forEach((line) => {
           checkNewPage(6);
@@ -4133,7 +4181,7 @@ export function BookingsPage() {
       } else {
         const subtotal = b.ratePerNight * b.numNights;
         drawAmountRow(
-          `Room subtotal: ${b.numNights} night${b.numNights === 1 ? "" : "s"} x ${formatAmount(b.ratePerNight)}`,
+          `Room subtotal: ${b.numNights} night${b.numNights === 1 ? "" : "s"} × ${formatAmount(b.ratePerNight)}`,
           formatAmount(subtotal)
         );
 

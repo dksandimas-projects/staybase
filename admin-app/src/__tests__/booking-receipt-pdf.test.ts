@@ -84,9 +84,21 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
       const funcStart = bookingsPageSrc.indexOf("const printBookingReceiptPDF");
       const funcEnd = bookingsPageSrc.indexOf("const selectedBookingCheckInReadiness", funcStart);
       const funcBody = bookingsPageSrc.slice(funcStart, funcEnd);
-      expect(funcBody).toMatch(/label: isReservationReceipt \? "Rooms" : "Room"/);
+      // A one-room reservation now takes the single-room shape: it names
+      // the room instead of saying "1 room — itemized below", which left
+      // a one-room reservation receipt with no room number anywhere on it.
+      expect(funcBody).toMatch(/const isMultiRoomReceipt = isReservationReceipt && receiptBookings\.length > 1/);
+      expect(funcBody).toMatch(/label: isMultiRoomReceipt \? "Rooms" : "Room"/);
       expect(funcBody).toMatch(/: `\$\{b\.roomNumber\} \(\$\{b\.roomType\}\)`/);
-      expect(funcBody).toMatch(/\{ label:\s*["']Dates["'],\s*value:\s*`\$\{b\.checkIn\}\s*to\s*\$\{b\.checkOut\}` \}/);
+      // Dates go through the receipt's own formatter, not the raw ISO
+      // strings — the card used to print "2026-11-21 to 2026-11-22" while
+      // the header and payments table printed "Nov 21, 2026".
+      expect(funcBody).toMatch(/\{ label:\s*["']Dates["'],\s*value:\s*`\$\{formatReceiptDate\(b\.checkIn\)\} – \$\{formatReceiptDate\(b\.checkOut\)\}` \}/);
+      expect(funcBody).toMatch(/formatReceiptDate = \(value: unknown\)/);
+      // The configured check-in / check-out times are printed, not left
+      // for the guest to phone the desk about.
+      expect(funcBody).toMatch(/label:\s*["']Check-in \/ out["']/);
+      expect(funcBody).toMatch(/resolveHotelTimes\(hotelConfig, config, config\.locale\)/);
       // Per EXB-08 (2026-08-01, per decision #156): the
       // Stay line now uses a multi-line IIFE that
       // surfaces the adult/child split + extra bed
@@ -98,7 +110,7 @@ describe("BookingsPage.tsx — Booking Receipt PDF (audit S7.1, decision #82)", 
       expect(funcBody).toMatch(/numAdults/);
       expect(funcBody).toMatch(/numChildren/);
       expect(funcBody).toMatch(/extraBedCount/);
-      expect(funcBody).toMatch(/isReservationReceipt \? "See room allocations" : `\$\{formatAmount\(b\.ratePerNight\)\} \/ night`/);
+      expect(funcBody).toMatch(/isMultiRoomReceipt \? "See room allocations" : `\$\{formatAmount\(b\.ratePerNight\)\} \/ night`/);
       expect(funcBody).toMatch(/drawInfoCard\("Guest"/);
       expect(funcBody).toMatch(/drawInfoCard\("Stay"/);
     });
