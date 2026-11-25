@@ -3024,7 +3024,17 @@ export function BookingsPage() {
     if (!selectedBooking) return;
     setConfirmCheckInPending(true);
     try {
-      await updateBookingStatus(selectedBooking.id, "checked-in");
+      // Per Decision #345 (2026-11-25): `updateBookingStatus` resolves
+      // with an OBJECT on success and `null` on failure. The server
+      // refuses a check-in it does not accept, and the refusal used to
+      // close this modal anyway — the drawer then showed the booking
+      // as "checked-in" when it was not. Now the modal stays open and
+      // the booking keeps its real status when the write is refused.
+      const result = await updateBookingStatus(selectedBooking.id, "checked-in");
+      if (!result) {
+        setShowConfirmCheckIn(false);
+        return;
+      }
       setSelectedBooking(prev => prev ? { ...prev, status: "checked-in" } : null);
       setShowConfirmCheckIn(false);
     } catch (err: any) {
@@ -4529,8 +4539,9 @@ export function BookingsPage() {
       </div>
     ) : undefined;
 
-  const handleRegistrationSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleRegistrationSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!selectedBooking) return;
     const formData = new FormData(event.currentTarget);
     // Per Decision #121 (2026-07-23): capture purpose of stay (defaults
     // to Leisure) and the free-text "other" reason when applicable.
@@ -4564,8 +4575,7 @@ export function BookingsPage() {
     const priorSight = selectedBooking?.guestRegistration || {};
     const keepPriorStamp =
       idSightStatus === "sighted" && priorSight.idSightStatus === "sighted" && !!priorSight.idSightAt;
-    persistSelectedBooking({
-      guestRegistration: {
+    const guestRegistration: NonNullable<Booking["guestRegistration"]> = {
         nationality: String(formData.get("nationality") || "").trim(),
         address: String(formData.get("address") || "").trim(),
         dateOfBirth: String(formData.get("dateOfBirth") || ""),
@@ -4591,8 +4601,27 @@ export function BookingsPage() {
               ? priorSight.idSightAt || ""
               : new Date().toISOString()
             : ""
-      }
+      };
+
+    // Per Decision #345 (2026-11-25): THE SAVE MUST BE VISIBLE. The
+    // write is AWAITED, and the local state + the toast are updated
+    // ONLY when it actually landed — a failed write leaves the form
+    // open and the AdminContext error toast explains why.
+    //
+    // Why this matters now: since decision #344 the guest records are
+    // OPTIONAL, so a registration is almost never "complete" — and the
+    // card used to collapse into its read-only summary only when every
+    // field was filled. Without a toast, a successful save was
+    // invisible: the desk clicked Save and nothing appeared to happen.
+    const result = await updateBookingStatus(selectedBooking.id, selectedBooking.status, {
+      guestRegistration
     });
+    if (!result) return; // AdminContext already toasted the failure.
+    syncSelectedBooking({ guestRegistration });
+    toast.success(
+      "Registration saved",
+      "The guest records were saved to this booking."
+    );
   };
 
   const handleBreakfastSelection = (key: string, value: string) => {

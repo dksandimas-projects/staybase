@@ -3860,6 +3860,13 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
     // transitions ignore it (the field is silently
     // dropped on the wire).
     options?: { scope?: "room" | "reservation" }
+    // Per Decision #345 (2026-11-25): the promise resolves with an
+    // OBJECT on success and `null` on FAILURE. The old contract
+    // returned `null` for BOTH — a successful client-side write and a
+    // refused server write were indistinguishable, so a caller could
+    // not tell the desk "saved" from "refused" without a second
+    // channel. `emailQueued` is only present on the server-transition
+    // branches (a client-side write never sends an email).
   ): Promise<{ emailQueued?: boolean } | null> => {
     try {
       const currentBooking = bookings.find((b) => b.id === bookingId);
@@ -3875,10 +3882,12 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           // `request.auth.uid`.
           handledBy: currentUser?.uid || ""
         });
-        // No server round-trip → no `emailQueued`
-        // flag to surface. The caller can ignore
-        // the `null` return.
-        return null;
+        // Per Decision #345 (2026-11-25): the promise resolves with an
+        // OBJECT on success and `null` on failure, so a caller can tell
+        // "saved" from "failed" without a second channel. There is no
+        // server round-trip here, so there is no `emailQueued` flag to
+        // surface — the caller can ignore it.
+        return {};
       }
 
       if (status === "cancelled") {
@@ -3904,7 +3913,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         if (!res.ok || !data.success) {
           throw new Error(data.error || "Failed to cancel booking via server API.");
         }
-        return data?.data ?? null;
+        return data?.data ?? {};
       } else if (status === "confirmed") {
         const token = await auth.currentUser?.getIdToken(true);
         const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/confirm`, {
@@ -3930,7 +3939,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         // this flag through the function's return value
         // so `BookingsPage.handleConfirmBooking` can
         // pick it up without re-fetching the server.
-        return data?.data ?? null;
+        return data?.data ?? {};
       } else if (status === "payment-confirmed") {
         const token = await auth.currentUser?.getIdToken(true);
         const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/mark-payment-confirmed`, {
@@ -3945,7 +3954,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         if (!res.ok || !data.success) {
           throw new Error(data.error || "Failed to confirm payment via server API.");
         }
-        return data?.data ?? null;
+        return data?.data ?? {};
       } else if (status === "checked-out") {
         const token = await auth.currentUser?.getIdToken(true);
         const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/checkout`, {
@@ -3966,7 +3975,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
           }
           throw new Error(data.error || "Failed to checkout booking via server API.");
         }
-        return data?.data ?? null;
+        return data?.data ?? {};
       } else if (status === "checked-in") {
         const token = await auth.currentUser?.getIdToken(true);
         const res = await fetch(`${getApiBaseUrl().replace(/\/$/, "")}/api/bookings/checkin`, {
@@ -3981,7 +3990,7 @@ export function AdminProvider({ children, idleTimeoutMs }: { children: ReactNode
         if (!res.ok || !data.success) {
           throw new Error(data.error || "Failed to check in booking via server API.");
         }
-        return data?.data ?? null;
+        return data?.data ?? {};
       } else {
         throw new Error(`Unsupported client-side booking status transition: ${status}`);
       }

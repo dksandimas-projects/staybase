@@ -37,15 +37,20 @@ describe("GCR-01 — Purpose of stay in the admin guest registration form", () =
     expect(form).toMatch(/e\.g\. "wedding", "medical", "long-stay relocation"/);
   });
 
-  it("BookingRegistrationForm's isComplete check includes purposeOfStay and the Other-reason requirement", () => {
-    // The form's local "is the form complete enough to show the
-    // summary view" check must match the shared readiness gate.
+  it("BookingRegistrationForm captures purposeOfStay and the Other-reason (no completeness gate since #344)", () => {
+    // Per Decision #344 (2026-11-25) every guest record is OPTIONAL, so
+    // there is no "is the form complete" gate any more — the card
+    // collapses once a registration is CAPTURED (decision #345). The
+    // purpose + the Other-reason are still captured, which is what
+    // this guard pins.
     expect(form).toMatch(/reg\?\.purposeOfStay/);
-    expect(form).toMatch(/reg\.purposeOfStay\.trim\(\)\.toLowerCase\(\) !== "other" \|\| !!reg\?\.otherPurpose\?\.trim\(\)/);
+    // The form still offers the "Other" branch and its free-text reason.
+    expect(form).toMatch(/<option value="other">Other \(specify below\)<\/option>/);
+    expect(form).toMatch(/name="otherPurpose"/);
   });
 
   it("BookingsPage handleRegistrationSubmit captures purposeOfStay + otherPurpose", () => {
-    const submitFn = page.match(/const handleRegistrationSubmit = \(event[\s\S]*?\n\s*\};/);
+    const submitFn = page.match(/const handleRegistrationSubmit = async \(event[\s\S]*?\n  \};/);
     expect(submitFn, "expected to find handleRegistrationSubmit").not.toBeNull();
     expect(submitFn?.[0]).toMatch(/formData\.get\("purposeOfStay"\)/);
     expect(submitFn?.[0]).toMatch(/formData\.get\("otherPurpose"\)/);
@@ -60,7 +65,7 @@ describe("GCR-01 — Purpose of stay in the admin guest registration form", () =
     // made every save click throw "Unsupported field value: undefined"
     // in production. The fix spreads a conditional object in only
     // when the staff picked "Other" AND entered a reason.
-    const submitFn = page.match(/const handleRegistrationSubmit = \(event[\s\S]*?\n\s*\};/);
+    const submitFn = page.match(/const handleRegistrationSubmit = async \(event[\s\S]*?\n  \};/);
     expect(submitFn, "expected to find handleRegistrationSubmit").not.toBeNull();
     const body = submitFn?.[0] ?? "";
     // The old broken pattern must NOT be present anywhere in the function

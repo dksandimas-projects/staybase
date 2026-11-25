@@ -127,7 +127,11 @@ describe("Phase 12 — booking drawer information architecture", () => {
   });
 
   it("keeps registration PDF preview available after a completed form is submitted", () => {
-    const completedStateStart = regFormSrc.indexOf("{(isComplete || isReadOnly) && !showEdit ? (");
+    // Per Decision #345 (2026-11-25): the card's resting state is "a
+    // registration has been CAPTURED" — not "every field is filled"
+    // (decision #344 made every guest record optional, so the old
+    // trigger almost never fired and a successful save was invisible).
+    const completedStateStart = regFormSrc.indexOf("{(hasCapturedRegistration || isReadOnly) && !showEdit ? (");
     const editStateStart = regFormSrc.indexOf(") : (", completedStateStart);
     const completedState = regFormSrc.slice(completedStateStart, editStateStart);
 
@@ -139,7 +143,7 @@ describe("Phase 12 — booking drawer information architecture", () => {
   it("keeps the registration PDF available read-only after checkout", () => {
     expect(regFormSrc).toMatch(/status !== "checked-out"/);
     expect(regFormSrc).toMatch(/const isReadOnly = status === "checked-out"/);
-    expect(regFormSrc).toMatch(/\(isComplete \|\| isReadOnly\) && !showEdit/);
+    expect(regFormSrc).toMatch(/\(hasCapturedRegistration \|\| isReadOnly\) && !showEdit/);
     expect(regFormSrc).toContain("View / Download Registration PDF");
     expect(regFormSrc).toMatch(/\{!isReadOnly && \(/);
   });

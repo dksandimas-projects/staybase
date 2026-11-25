@@ -69,10 +69,16 @@ describe("#11 — desk-facing emailQueued toast (client-side wire-up)", () => {
       // `emailQueued` (the `booking-confirmed`
       // email is the most critical — the guest
       // just paid and now waits for an email).
-      // Other branches return `data?.data ?? null`
+      // Other branches return `data?.data ?? {}`
       // for consistency, but their server
       // response doesn't carry `emailQueued`
       // today.
+      //
+      // Per Decision #345 (2026-11-25): the fallback is `{}`, not
+      // `null` — the promise resolves with an OBJECT on success and
+      // `null` on failure, so a caller can tell "saved" from
+      // "refused". The `emailQueued` carrier rides on `data.data`
+      // exactly as before.
       // The function body has many nested
       // braces (template literals, fetch
       // bodies, JSON.stringify) so a naive
@@ -83,13 +89,17 @@ describe("#11 — desk-facing emailQueued toast (client-side wire-up)", () => {
       // returns a result, so the regex is
       // stable).
       expect(adminContextSrc).toMatch(
-        /status === "confirmed"\) \{[\s\S]{0,2000}?return data\?\.data \?\? null;/
+        /status === "confirmed"\) \{[\s\S]{0,2000}?return data\?\.data \?\? \{\};/
       );
     });
 
-    it("the isStatusChanging early-return surfaces `null` (no server round-trip → no emailQueued flag)", () => {
+    it("the isStatusChanging early-return surfaces an object, not `null` (no server round-trip → no emailQueued flag)", () => {
+      // Per Decision #345 (2026-11-25): the client-side write branch
+      // resolves with `{}` — an OBJECT, so "saved" is distinguishable
+      // from "failed" (the catch block). It carries no `emailQueued`
+      // flag because no server round-trip happened.
       expect(adminContextSrc).toMatch(
-        /if \(!isStatusChanging\) \{[\s\S]{0,500}?return null;/
+        /if \(!isStatusChanging\) \{[\s\S]{0,800}?return \{\};/
       );
     });
 

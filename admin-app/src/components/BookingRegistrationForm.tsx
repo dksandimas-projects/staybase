@@ -56,24 +56,18 @@ export function BookingRegistrationForm({
       ? "Photo on file — not yet sighted at the desk"
       : "Not yet sighted at the desk";
 
-  const isComplete =
-    reg?.signatureStatus === "signed" &&
-    // Per Decision #340 (2026-11-23): the ID attestation is part of
-    // THIS form now — so the form only collapses into its read-only
-    // summary once the desk has attested the physical ID too. The
-    // desk therefore always has one place to finish the check-in.
-    reg?.idSightStatus === "sighted" &&
-    reg?.nationality &&
-    reg?.dateOfBirth &&
-    reg?.gender &&
-    // Per Decision #121 (2026-07-23): the purpose of stay is captured
-    // at physical check-in. The "Other" branch carries the free-text
-    // reason — captured too, but never a blocker (decision #344).
-    reg?.purposeOfStay &&
-    reg?.idNumber &&
-    reg?.address &&
-    reg?.emergencyContact &&
-    (reg.purposeOfStay.trim().toLowerCase() !== "other" || !!reg?.otherPurpose?.trim());
+  // Per Decision #345 (2026-11-25): the card collapses into its
+  // read-only summary once the desk has SAVED a registration — NOT
+  // once every field is filled. Decision #344 made every guest record
+  // OPTIONAL, so a registration is almost never "complete" — and the
+  // old trigger left the card permanently expanded, which made a
+  // successful save invisible (the desk clicked Save and nothing
+  // appeared to happen).
+  //
+  // "A registration has been captured" is the honest resting state: the
+  // summary shows exactly what was recorded (blanks where blanks), and
+  // "Edit registration" reopens the form.
+  const hasCapturedRegistration = Object.keys(reg || {}).length > 0;
 
   return (
     <div className="space-y-3">
@@ -93,7 +87,7 @@ export function BookingRegistrationForm({
         </span>
       </div>
 
-      {(isComplete || isReadOnly) && !showEdit ? (
+      {(hasCapturedRegistration || isReadOnly) && !showEdit ? (
         <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2">
           {photoSlot ? <div className="mb-3 border-b border-gray-100 pb-3">{photoSlot}</div> : null}
           <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">

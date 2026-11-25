@@ -161,4 +161,58 @@ describe("BookingsPage check-in gate", () => {
     expect(formSrc).not.toContain("required if Purpose = Other");
     expect(formSrc).toContain("Note (optional)");
   });
+
+  // Per Decision #345 (2026-11-25): the registration SAVE must be
+  // visible. Since #344 every guest record is optional, so the old
+  // collapse trigger ("every field is filled") almost never fired and
+  // a successful save was completely silent — the desk clicked Save
+  // and nothing appeared to happen.
+  it("collapses the registration card once a registration is CAPTURED, not once every field is filled", () => {
+    const formSrc = read("admin-app/src/components/BookingRegistrationForm.tsx");
+    // The trigger is the presence of a captured registration...
+    expect(formSrc).toMatch(/hasCapturedRegistration/);
+    expect(formSrc).toMatch(/Object\.keys\(reg \|\| \{\}\)\.length > 0/);
+    expect(formSrc).toMatch(/\(hasCapturedRegistration \|\| isReadOnly\) && !showEdit/);
+    // ...and the old "everything filled" trigger is gone.
+    expect(formSrc).not.toContain("const isComplete =");
+  });
+
+  it("awaits the registration save and reports the outcome", () => {
+    const pageSrc = read("admin-app/src/pages/BookingsPage.tsx");
+    // The write is AWAITED — an unawaited write cannot be reported.
+    expect(pageSrc).toMatch(
+      /const result = await updateBookingStatus\(selectedBooking\.id, selectedBooking\.status, \{\s*guestRegistration\s*\}\);/
+    );
+    // A success toast, and the local state update happens ONLY after
+    // the write landed (so a refused write never collapses the card).
+    expect(pageSrc).toMatch(/if \(!result\) return;/);
+    expect(pageSrc).toMatch(/syncSelectedBooking\(\{ guestRegistration \}\);/);
+    expect(pageSrc).toMatch(/toast\.success\(\s*"Registration saved"/);
+  });
+
+  // The `updateBookingStatus` contract: an object on success, `null`
+  // on failure. Without it a caller cannot tell "saved" from
+  // "refused" — the desk was told a check-in had happened when the
+  // server had refused it.
+  it("makes updateBookingStatus resolve with an object on success and null on failure", () => {
+    const contextSrc = read("admin-app/src/context/AdminContext.tsx");
+    expect(contextSrc).toMatch(/return data\?\.data \?\? \{\};/);
+    expect(contextSrc).not.toMatch(/return data\?\.data \?\? null;/);
+    // The client-side write branch returns an object too (it used to
+    // return null, which was ambiguous with failure).
+    expect(contextSrc).toMatch(/handledBy: currentUser\?\.uid \|\| ""\s*\}\);\s*\n\s*\/\/[^\n]*\n(?:[^\n]*\n)*?\s*return \{\};/);
+  });
+
+  it("keeps the check-in modal open when the server refuses the check-in", () => {
+    const pageSrc = read("admin-app/src/pages/BookingsPage.tsx");
+    const handler = pageSrc.match(/const handleConfirmCheckIn = async \(\) => \{[\s\S]*?\n  \};/);
+    expect(handler).not.toBeNull();
+    expect(handler![0]).toMatch(/const result = await updateBookingStatus\(selectedBooking\.id, "checked-in"\);/);
+    expect(handler![0]).toMatch(/if \(!result\) \{/);
+    // The local status is only flipped AFTER the server accepted it.
+    const resultIndex = handler![0].indexOf("if (!result)");
+    const statusIndex = handler![0].indexOf('status: "checked-in"');
+    expect(resultIndex).toBeGreaterThan(-1);
+    expect(statusIndex).toBeGreaterThan(resultIndex);
+  });
 });
