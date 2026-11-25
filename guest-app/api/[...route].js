@@ -150550,36 +150550,38 @@ function getCheckInReadiness(input) {
   if (!CHECK_IN_ELIGIBLE_STATUSES.includes(input.status)) {
     missingItems.push("Booking status must be confirmed or payment-confirmed");
   }
+  const incompleteItems = [];
   const registration = input.guestRegistration || {};
   const idVerification = getIdVerificationState({
     registration,
     hasPhoto: hasValue(input.guestIdPhotoUrl)
   });
   if (!idVerification.sighted) {
-    missingItems.push("Guest ID sighted at the desk");
+    incompleteItems.push("Guest ID sighted at the desk");
   }
-  for (const field of REQUIRED_REGISTRATION_FIELDS) {
+  for (const field of ADVISORY_REGISTRATION_FIELDS) {
     if (!hasValue(registration[field.key])) {
-      missingItems.push(field.label);
+      incompleteItems.push(field.label);
     }
   }
   if (typeof registration.purposeOfStay === "string" && registration.purposeOfStay.trim().toLowerCase() === "other" && !hasValue(registration.otherPurpose)) {
-    missingItems.push("Purpose of stay (Other \u2014 reason required)");
+    incompleteItems.push("Purpose of stay (Other \u2014 reason not recorded)");
   }
   if (registration.signatureStatus !== "signed") {
-    missingItems.push("Guest signature marked signed");
+    incompleteItems.push("Guest signature");
   }
   return {
     ready: missingItems.length === 0,
-    missingItems
+    missingItems,
+    incompleteItems
   };
 }
-var CHECK_IN_ELIGIBLE_STATUSES, REQUIRED_REGISTRATION_FIELDS;
+var CHECK_IN_ELIGIBLE_STATUSES, ADVISORY_REGISTRATION_FIELDS;
 var init_checkin = __esm({
   "../shared/utils/checkin.ts"() {
     "use strict";
     CHECK_IN_ELIGIBLE_STATUSES = ["confirmed", "payment-confirmed"];
-    REQUIRED_REGISTRATION_FIELDS = [
+    ADVISORY_REGISTRATION_FIELDS = [
       { key: "nationality", label: "Nationality" },
       { key: "address", label: "Residential address" },
       { key: "dateOfBirth", label: "Date of birth" },

@@ -1594,6 +1594,9 @@ describe("/api/bookings/create", () => {
     // What the check-in gate requires is the desk's attestation that
     // the physical ID was sighted. Per Decision #339 the desk's note
     // is optional too — the attestation alone is the evidence.
+    // Per Decision #344 (2026-11-25) even the attestation is
+    // OPTIONAL: the gate now refuses a check-in on the booking STATUS
+    // only.
     test("POST /api/bookings/checkin: succeeds with no ID photo and no reason when the ID was sighted", async () => {
       mockBookings.push({
         id: "booking_checkin_no_id",
@@ -1614,7 +1617,10 @@ describe("/api/bookings/create", () => {
       });
     });
 
-    test("POST /api/bookings/checkin: blocks when the desk never attested the physical ID", async () => {
+    // Per Decision #344 (2026-11-25): the desk's "physical ID sighted"
+    // attestation is EVIDENCE, not a requirement. A guest can be checked
+    // in without it.
+    test("POST /api/bookings/checkin: succeeds when the desk never attested the physical ID", async () => {
       mockBookings.push({
         id: "booking_checkin_not_sighted",
         roomId: "room_101",
@@ -1630,12 +1636,11 @@ describe("/api/bookings/create", () => {
       const res = mockResponse();
       await handler(req, res);
 
-      expect(res.status).toHaveBeenCalledWith(400);
-      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-        success: false,
-        error: expect.stringContaining("Guest ID sighted at the desk")
-      }));
-      expect(updateCalls.find((c) => c.path === "bookings/booking_checkin_not_sighted")).toBeUndefined();
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(updateCalls).toContainEqual({
+        path: "bookings/booking_checkin_not_sighted",
+        data: expect.objectContaining({ status: "checked-in" })
+      });
     });
 
     test("POST /api/bookings/checkin: succeeds with NO ID photo when the ID was sighted and a reason was recorded", async () => {
@@ -1661,7 +1666,10 @@ describe("/api/bookings/create", () => {
       });
     });
 
-    test("POST /api/bookings/checkin: blocks incomplete guest registration", async () => {
+    // Per Decision #344 (2026-11-25): an incomplete guest registration
+    // no longer refuses the check-in. The blank fields are recorded as
+    // advisory items for the desk — the server never refuses on them.
+    test("POST /api/bookings/checkin: succeeds with an incomplete guest registration", async () => {
       mockBookings.push({
         id: "booking_checkin_incomplete",
         roomId: "room_101",
@@ -1678,15 +1686,33 @@ describe("/api/bookings/create", () => {
       const res = mockResponse();
       await handler(req, res);
 
-      expect(res.status).toHaveBeenCalledWith(400);
-      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-        success: false,
-        error: expect.stringContaining("Emergency contact")
-      }));
-      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-        error: expect.stringContaining("Guest signature marked signed")
-      }));
-      expect(updateCalls.find((c) => c.path === "bookings/booking_checkin_incomplete")).toBeUndefined();
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(updateCalls).toContainEqual({
+        path: "bookings/booking_checkin_incomplete",
+        data: expect.objectContaining({ status: "checked-in" })
+      });
+    });
+
+    // Per Decision #344 (2026-11-25): even a booking with NO guest
+    // registration at all can be checked in — the desk may fill the
+    // registry in later.
+    test("POST /api/bookings/checkin: succeeds with no guest registration at all", async () => {
+      mockBookings.push({
+        id: "booking_checkin_no_registration",
+        roomId: "room_101",
+        status: "confirmed",
+        guestIdPhotoUrl: null
+      });
+
+      const req = mockRequest({ bookingId: "booking_checkin_no_registration" }, "POST", "/api/bookings/checkin", { authorization: "Bearer mock_token" });
+      const res = mockResponse();
+      await handler(req, res);
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(updateCalls).toContainEqual({
+        path: "bookings/booking_checkin_no_registration",
+        data: expect.objectContaining({ status: "checked-in" })
+      });
     });
 
     test("POST /api/bookings/checkin: succeeds from confirmed when registration packet is complete", async () => {

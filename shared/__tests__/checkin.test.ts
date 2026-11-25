@@ -6,9 +6,9 @@ const completeRegistration = {
   address: "Tagbilaran City",
   dateOfBirth: "1980-01-01",
   gender: "Female",
-  // Per Decision #121 (2026-07-23): purpose of stay is required at
-  // physical check-in. Default to "Leisure" (the front-desk form
-  // opens with Leisure selected).
+  // Per Decision #121 (2026-07-23): purpose of stay defaults to
+  // "Leisure" (the front-desk form opens with Leisure selected).
+  // Per Decision #344 (2026-11-25) it is captured, not required.
   purposeOfStay: "leisure",
   idType: "Passport",
   idNumber: "P1234567",
@@ -16,7 +16,7 @@ const completeRegistration = {
   signatureStatus: "signed",
   // Per Decision #338 (2026-11-22): the guest ID PHOTO is optional.
   // The desk's attestation that the physical ID was sighted is the
-  // mandatory ID evidence.
+  // strongest ID evidence. Per Decision #344 it is optional too.
   idSightStatus: "sighted"
 };
 
@@ -26,7 +26,7 @@ describe("getCheckInReadiness", () => {
       status: "confirmed",
       guestIdPhotoUrl: "https://storage.example/guest-id.jpg",
       guestRegistration: completeRegistration
-    })).toEqual({ ready: true, missingItems: [] });
+    })).toEqual({ ready: true, missingItems: [], incompleteItems: [] });
   });
 
   test("allows payment-confirmed bookings to check in directly", () => {
@@ -68,24 +68,55 @@ describe("getCheckInReadiness", () => {
     expect(readiness.missingItems).toEqual([]);
   });
 
-  test("requires the desk attestation even when a photo is attached", () => {
-    // The photo is evidence of the ID, not proof that the desk
-    // verified it against the guest. The attestation is the mandatory
-    // item.
+  // Per Decision #344 (2026-11-25): EVERY guest record is optional.
+  // A booking with no registry at all is still ready to check in — the
+  // blanks are reported as ADVISORY items, never as blockers.
+  test("is ready when NOTHING is filled in — every guest record is optional", () => {
+    const readiness = getCheckInReadiness({
+      status: "confirmed",
+      guestIdPhotoUrl: "",
+      guestRegistration: {}
+    });
+
+    expect(readiness.ready).toBe(true);
+    expect(readiness.missingItems).toEqual([]);
+    expect(readiness.incompleteItems).toEqual([
+      "Guest ID sighted at the desk",
+      "Nationality",
+      "Residential address",
+      "Date of birth",
+      "Gender",
+      "Purpose of stay",
+      "ID type",
+      "ID number",
+      "Emergency contact",
+      "Guest signature"
+    ]);
+  });
+
+  test("a missing registration is advisory, never a hard blocker", () => {
+    // The blank registry fields land in `incompleteItems`, and
+    // `missingItems` stays empty — the server reads `missingItems`,
+    // so a blank field can never refuse a check-in.
     const readiness = getCheckInReadiness({
       status: "confirmed",
       guestIdPhotoUrl: "https://storage.example/guest-id.jpg",
       guestRegistration: {
         ...completeRegistration,
-        idSightStatus: ""
+        idSightStatus: "",
+        idNumber: "",
+        signatureStatus: "pending"
       }
     });
 
-    expect(readiness.ready).toBe(false);
-    expect(readiness.missingItems).toContain("Guest ID sighted at the desk");
+    expect(readiness.ready).toBe(true);
+    expect(readiness.missingItems).toEqual([]);
+    expect(readiness.incompleteItems).toContain("Guest ID sighted at the desk");
+    expect(readiness.incompleteItems).toContain("ID number");
+    expect(readiness.incompleteItems).toContain("Guest signature");
   });
 
-  test("reports the missing attestation, required registration fields, signature, and status", () => {
+  test("the booking STATUS is the only hard blocker", () => {
     const readiness = getCheckInReadiness({
       status: "pending",
       guestIdPhotoUrl: "",
@@ -99,19 +130,17 @@ describe("getCheckInReadiness", () => {
 
     expect(readiness.ready).toBe(false);
     expect(readiness.missingItems).toEqual([
-      "Booking status must be confirmed or payment-confirmed",
-      "Guest ID sighted at the desk",
-      "ID number",
-      "Guest signature marked signed"
+      "Booking status must be confirmed or payment-confirmed"
     ]);
+    // The advisory list still reports what was never written down.
+    expect(readiness.incompleteItems).toContain("ID number");
+    expect(readiness.incompleteItems).toContain("Guest signature");
   });
 
-  // Per Decision #121: purpose of stay is required at physical
-  // check-in. The control opens with "Leisure" selected on the
-  // admin form so the most common path doesn't need a staff action,
-  // but the readiness gate still requires an explicit value to be
-  // persisted (a blank string or missing field both fail the gate).
-  test("reports missing purpose of stay (Decision #121)", () => {
+  // Per Decision #121: purpose of stay is captured at physical
+  // check-in. Per Decision #344 it is no longer REQUIRED — a blank
+  // value is reported, not refused.
+  test("reports a missing purpose of stay as advisory (Decision #344)", () => {
     const readiness = getCheckInReadiness({
       status: "confirmed",
       guestIdPhotoUrl: "https://storage.example/guest-id.jpg",
@@ -121,11 +150,12 @@ describe("getCheckInReadiness", () => {
       }
     });
 
-    expect(readiness.ready).toBe(false);
-    expect(readiness.missingItems).toContain("Purpose of stay");
+    expect(readiness.ready).toBe(true);
+    expect(readiness.missingItems).toEqual([]);
+    expect(readiness.incompleteItems).toContain("Purpose of stay");
   });
 
-  test("'Other' purpose requires the free-text reason (otherPurpose)", () => {
+  test("'Other' purpose reports the missing reason as advisory", () => {
     const readiness = getCheckInReadiness({
       status: "confirmed",
       guestIdPhotoUrl: "https://storage.example/guest-id.jpg",
@@ -136,11 +166,12 @@ describe("getCheckInReadiness", () => {
       }
     });
 
-    expect(readiness.ready).toBe(false);
-    expect(readiness.missingItems).toContain("Purpose of stay (Other — reason required)");
+    expect(readiness.ready).toBe(true);
+    expect(readiness.missingItems).toEqual([]);
+    expect(readiness.incompleteItems).toContain("Purpose of stay (Other — reason not recorded)");
   });
 
-  test("'Other' with a reason passes the gate", () => {
+  test("'Other' with a reason is not reported as incomplete", () => {
     const readiness = getCheckInReadiness({
       status: "confirmed",
       guestIdPhotoUrl: "https://storage.example/guest-id.jpg",
@@ -152,11 +183,11 @@ describe("getCheckInReadiness", () => {
     });
 
     expect(readiness.ready).toBe(true);
-    expect(readiness.missingItems).toEqual([]);
+    expect(readiness.incompleteItems).not.toContain("Purpose of stay (Other — reason not recorded)");
   });
 
-  test("uppercase 'OTHER' is normalized and still requires the reason", () => {
-    // The form normalizes to lowercase, but the gate also handles
+  test("uppercase 'OTHER' is normalized and still reports the missing reason", () => {
+    // The form normalizes to lowercase, but the helper also handles
     // legacy data or direct writes that might keep the original case.
     const readiness = getCheckInReadiness({
       status: "confirmed",
@@ -167,8 +198,8 @@ describe("getCheckInReadiness", () => {
       }
     });
 
-    expect(readiness.ready).toBe(false);
-    expect(readiness.missingItems).toContain("Purpose of stay (Other — reason required)");
+    expect(readiness.ready).toBe(true);
+    expect(readiness.incompleteItems).toContain("Purpose of stay (Other — reason not recorded)");
   });
 });
 

@@ -16,6 +16,7 @@ describe("BookingsPage check-in gate", () => {
     expect(pageSrc).toMatch(/selectedBookingCheckInReadiness/);
     expect(pageSrc).toMatch(/<BookingCheckInReadiness/);
     expect(pageSrc).toMatch(/missingItems=\{selectedBookingCheckInReadiness\.missingItems\}/);
+    expect(pageSrc).toMatch(/incompleteItems=\{selectedBookingCheckInReadiness\.incompleteItems\}/);
     expect(pageSrc).toMatch(/disabled=\{!selectedBookingCheckInReadiness\?\.ready\}/);
     expect(workspaceSrc).toMatch(/Check-in readiness/);
     expect(workspaceSrc).toMatch(/missingItems\.map/);
@@ -27,13 +28,23 @@ describe("BookingsPage check-in gate", () => {
     expect(handlerSrc).toMatch(/readiness\.missingItems\.join/);
   });
 
-  it("requires the desk ID attestation, registration fields, signed status, and eligible status", () => {
+  // Per Decision #344 (2026-11-25): EVERY guest record that used to
+  // block a check-in is optional now. The labels still exist — they
+  // are the ADVISORY list, so the desk still sees what was never
+  // written down — but they must be pushed into `incompleteItems`,
+  // never into `missingItems` (the list the server reads when it
+  // refuses a check-in).
+  it("keeps every guest record OUT of the hard blocker list", () => {
     expect(sharedSrc).toMatch(/CHECK_IN_ELIGIBLE_STATUSES = \["confirmed", "payment-confirmed"\]/);
+
+    // The booking STATUS is the only hard blocker.
+    expect(sharedSrc).toMatch(/missingItems\.push\("Booking status must be confirmed or payment-confirmed"\)/);
+
+    // The guest records are pushed as ADVISORY items.
     for (const label of [
       // Per Decision #338 (2026-11-22): the guest ID PHOTO is optional.
-      // The mandatory ID evidence is the desk's attestation that the
-      // physical ID was sighted. Per Decision #339 the desk's note is
-      // optional too — the attestation alone is enough.
+      // Per Decision #339 the desk's note is optional too.
+      // Per Decision #344 the desk's attestation is optional as well.
       "Guest ID sighted at the desk",
       "Nationality",
       "Residential address",
@@ -42,10 +53,28 @@ describe("BookingsPage check-in gate", () => {
       "ID type",
       "ID number",
       "Emergency contact",
-      "Guest signature marked signed"
+      "Guest signature"
     ]) {
       expect(sharedSrc).toContain(label);
+      // The label must NOT be a blocker.
+      expect(sharedSrc).not.toContain(`missingItems.push("${label}")`);
     }
+
+    // The registry field loop writes to the advisory list only.
+    expect(sharedSrc).toMatch(/incompleteItems\.push\(field\.label\)/);
+    expect(sharedSrc).not.toMatch(/missingItems\.push\(field\.label\)/);
+
+    // The registry list is named as ADVISORY, not REQUIRED.
+    expect(sharedSrc).toContain("ADVISORY_REGISTRATION_FIELDS");
+    expect(sharedSrc).not.toContain("REQUIRED_REGISTRATION_FIELDS");
+  });
+
+  // Per Decision #344 (2026-11-25): the desk attestation and the
+  // signed form no longer refuse a check-in.
+  it("no longer treats a missing attestation or signature as a blocker", () => {
+    expect(sharedSrc).not.toContain('missingItems.push("Guest signature marked signed")');
+    expect(sharedSrc).not.toContain("Purpose of stay (Other — reason required)");
+    expect(sharedSrc).toContain("Purpose of stay (Other — reason not recorded)");
   });
 
   // Per Decision #338 (2026-11-22): the guest ID photo no longer
@@ -104,5 +133,32 @@ describe("BookingsPage check-in gate", () => {
     // the card. The same applies to every status outside
     // CHECK_IN_ELIGIBLE_STATUSES.
     expect(pageSrc).toMatch(/CHECK_IN_ELIGIBLE_STATUSES\.includes\(selectedBooking\.status/);
+  });
+
+  // Per Decision #344 (2026-11-25): the drawer header no longer
+  // carries a "N check-in items missing" alert — nothing about a
+  // booking's records can put it behind another task any more. The
+  // advisory list lives in the readiness card, where the form is.
+  it("drops the header's check-in-items-missing alert", () => {
+    // The chip's label was a template (`${n} check-in item(s) missing`)
+    // and the prop that fed it was `missingCheckInItems` — both gone.
+    expect(workspaceSrc).not.toMatch(/check-in item\$\{/);
+    expect(workspaceSrc).not.toMatch(/missingCheckInItems/);
+    expect(pageSrc).not.toMatch(/missingCheckInItems/);
+  });
+
+  // The advisory list still RENDERS — the desk should see what was
+  // never written down, just not as a blocker.
+  it("renders the optional records in the readiness card", () => {
+    expect(workspaceSrc).toMatch(/Optional records not filled/);
+    expect(workspaceSrc).toMatch(/incompleteItems\.map/);
+    expect(workspaceSrc).toMatch(/Ready to check in/);
+  });
+
+  // The registration form must not tell the desk a field is required.
+  it("drops the required wording from the registration form", () => {
+    const formSrc = read("admin-app/src/components/BookingRegistrationForm.tsx");
+    expect(formSrc).not.toContain("required if Purpose = Other");
+    expect(formSrc).toContain("Note (optional)");
   });
 });

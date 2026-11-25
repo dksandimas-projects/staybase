@@ -5473,8 +5473,11 @@ export function BookingsPage() {
         >
           {/* Per Decision #338 (2026-11-22): the CTA no longer says
               "Verify guest ID" — the guest ID PHOTO is optional now.
-              The gate is the desk's ID attestation + the registration
-              + the signature. */}
+              Per Decision #344 (2026-11-25) EVERY guest record is
+              optional, so the gate now refuses on the booking STATUS
+              only — and this button only renders for a `confirmed`
+              booking, which is always eligible. The CTA is
+              "Check in guest", full stop. */}
           {selectedBookingCheckInReadiness?.ready ? "Check in guest" : "Complete check-in requirements"}
           {renderActionScope("room")}
         </button>
@@ -6263,7 +6266,6 @@ export function BookingsPage() {
               // the reservation's), so Total / Paid / Balance did
               // not reconcile.
               folioTotal={selectedBookingFolio?.grandTotal ?? selectedFolioBaseTotal}
-              missingCheckInItems={selectedBookingCheckInReadiness?.missingItems ?? []}
               paymentMethodLabel={selectedBooking.paymentMethod ? getOnsitePaymentMethodLabel(selectedBooking.paymentMethod) : ""}
               // Per FOL-02 (2026-08-06, decision #198): the
               // computed reference uses the live subcollection
@@ -6294,6 +6296,7 @@ export function BookingsPage() {
               <BookingCheckInReadiness
                 ready={selectedBookingCheckInReadiness.ready}
                 missingItems={selectedBookingCheckInReadiness.missingItems}
+                incompleteItems={selectedBookingCheckInReadiness.incompleteItems}
               />
             )}
             {/* Per Decision #340 (2026-11-23): the guest ID photo

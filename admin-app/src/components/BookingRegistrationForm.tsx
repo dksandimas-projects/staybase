@@ -66,9 +66,9 @@ export function BookingRegistrationForm({
     reg?.nationality &&
     reg?.dateOfBirth &&
     reg?.gender &&
-    // Per Decision #121 (2026-07-23): purpose of stay is required at
-    // physical check-in. The "Other" branch needs the free-text reason
-    // captured too — same gate as the shared readiness check.
+    // Per Decision #121 (2026-07-23): the purpose of stay is captured
+    // at physical check-in. The "Other" branch carries the free-text
+    // reason — captured too, but never a blocker (decision #344).
     reg?.purposeOfStay &&
     reg?.idNumber &&
     reg?.address &&
@@ -242,15 +242,17 @@ export function BookingRegistrationForm({
             </label>
           </div>
           <label className="flex flex-col gap-1.5 text-[10px] font-semibold text-gray-500">
-            {/* Per Decision #121: only required when Purpose = Other.
-                Always rendered (rather than conditionally shown) so
+            {/* Per Decision #121 the reason is captured when the staff
+                picks "Other". Per Decision #344 (2026-11-25) it is
+                OPTIONAL — nothing here blocks the check-in — but it is
+                always rendered (rather than conditionally shown) so
                 the staff can pre-type a reason while the guest is
-                thinking — improves the form flow at the front desk. */}
+                thinking. It improves the form flow at the front desk. */}
             Purpose of stay — other reason
             <input
               name="otherPurpose"
               defaultValue={reg?.otherPurpose ?? ""}
-              placeholder='e.g. "wedding", "medical", "long-stay relocation" — required if Purpose = Other'
+              placeholder='e.g. "wedding", "medical", "long-stay relocation" — optional'
               className="min-h-[38px] rounded border border-gray-200 px-2 text-xs text-gray-800"
             />
           </label>

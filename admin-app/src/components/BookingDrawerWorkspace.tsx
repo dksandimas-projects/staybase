@@ -4,6 +4,7 @@ import {
   BedDouble,
   Check,
   CheckCircle2,
+  Circle,
   ClipboardCheck,
   CreditCard,
   History,
@@ -193,7 +194,6 @@ interface BookingDrawerWorkspaceHeaderProps {
    * it is not supplied.
    */
   folioTotal?: number | null;
-  missingCheckInItems: string[];
   // Per WPM-06 (2026-07-31): the header used to render the raw
   // `booking.paymentMethod` key (e.g. "gcash" instead of "GCash"). The
   // parent (BookingsPage) resolves the label via the same
@@ -253,7 +253,6 @@ export function BookingDrawerWorkspaceHeader({
   totalPaid,
   balance,
   folioTotal,
-  missingCheckInItems,
   paymentMethodLabel,
   latestPaymentReference
 }: BookingDrawerWorkspaceHeaderProps) {
@@ -261,7 +260,11 @@ export function BookingDrawerWorkspaceHeader({
   const needsEarlyCheckInReview = booking.earlyCheckIn?.status === "requested";
   const approvedEarlyCheckInTime = booking.earlyCheckIn?.confirmedTime || booking.earlyCheckIn?.requestedTime;
   const hasApprovedEarlyCheckIn = booking.earlyCheckIn?.status === "approved" && Boolean(approvedEarlyCheckInTime);
-  const needsCheckInWork = ["confirmed", "payment-confirmed"].includes(booking.status) && missingCheckInItems.length > 0;
+  // Per Decision #344 (2026-11-25) the header carries NO missing-records
+  // alert any more — the guest registry, the desk's ID attestation and
+  // the signed form are all optional, so nothing about a booking's
+  // records can put it "behind" another task. The advisory list lives
+  // in the Check-in tab's readiness card, where the form is.
   const lifecycleIndex = getLifecycleIndex(booking.status);
 
   return (
@@ -416,16 +419,10 @@ export function BookingDrawerWorkspaceHeader({
           </div>
         </div>
 
-        {(needsPaymentReview || needsEarlyCheckInReview || needsCheckInWork) && (
+        {(needsPaymentReview || needsEarlyCheckInReview) && (
           <div className="mt-4 flex flex-wrap gap-2 border-t border-gray-100 pt-3" aria-label="Booking alerts">
             {needsPaymentReview && <AlertChip label="Payment proof awaiting verification" onClick={() => onSectionChange("folio")} />}
             {needsEarlyCheckInReview && <AlertChip label="Early check-in needs a decision" onClick={() => onSectionChange("overview")} />}
-            {needsCheckInWork && (
-              <AlertChip
-                label={`${missingCheckInItems.length} check-in item${missingCheckInItems.length === 1 ? "" : "s"} missing`}
-                onClick={() => onSectionChange("check-in")}
-              />
-            )}
           </div>
         )}
 
@@ -704,9 +701,16 @@ export function BookingDrawerSectionPanel({
 interface BookingCheckInReadinessProps {
   ready: boolean;
   missingItems: string[];
+  /**
+   * The guest records that are NOT filled in. ADVISORY ONLY — per
+   * Decision #344 (2026-11-25) none of them blocks a check-in. They are
+   * listed so the desk can still see (and later complete) what was
+   * never written down, without reading as a blocker.
+   */
+  incompleteItems?: string[];
 }
 
-export function BookingCheckInReadiness({ ready, missingItems }: BookingCheckInReadinessProps) {
+export function BookingCheckInReadiness({ ready, missingItems, incompleteItems = [] }: BookingCheckInReadinessProps) {
   return (
     <div className={cn(
       "rounded-card border p-4",
@@ -716,7 +720,7 @@ export function BookingCheckInReadiness({ ready, missingItems }: BookingCheckInR
         <div>
           <p className="text-xs font-bold text-gray-950">Check-in readiness</p>
           <p className="mt-1 text-[11px] text-gray-600">
-            {ready ? "Required guest records are complete." : "Complete these items before checking in the guest."}
+            {ready ? "Ready to check in — guest records are optional." : "Complete these items before checking in the guest."}
           </p>
         </div>
         <span className={cn(
@@ -731,10 +735,7 @@ export function BookingCheckInReadiness({ ready, missingItems }: BookingCheckInR
         {ready ? (
           <div className="flex items-center gap-2 rounded-lg bg-white/80 px-3 py-2 text-[11px] font-semibold text-status-green-text">
             <Check size={14} aria-hidden="true" />
-            {/* Per Decision #338 (2026-11-22): the guest ID PHOTO is
-                optional — the item that must be satisfied is the
-                desk's attestation that the physical ID was sighted. */}
-            Guest ID verified, registration, and signature saved
+            Ready to check in
           </div>
         ) : missingItems.map((item) => (
           <div key={item} className="flex items-center gap-2 rounded-lg bg-white/80 px-3 py-2 text-[11px] font-semibold text-amber-800">
@@ -743,6 +744,27 @@ export function BookingCheckInReadiness({ ready, missingItems }: BookingCheckInR
           </div>
         ))}
       </div>
+
+      {/* Per Decision #344 (2026-11-25): the registry fields, the desk's
+          ID attestation and the signed form are all OPTIONAL now. They
+          are still reported — the desk should know what was never
+          written down — but they never block, so they never render in
+          the blocking amber style above. */}
+      {ready && incompleteItems.length > 0 && (
+        <div className="mt-3 border-t border-gray-900/10 pt-3">
+          <p className="text-[9px] font-bold uppercase tracking-wide text-gray-500">
+            Optional records not filled
+          </p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            {incompleteItems.map((item) => (
+              <div key={item} className="flex items-center gap-2 rounded-lg bg-white/70 px-3 py-2 text-[11px] font-medium text-gray-600">
+                <Circle size={10} className="shrink-0 text-gray-400" aria-hidden="true" />
+                {item}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
